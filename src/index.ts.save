@@ -1,0 +1,19 @@
+import 'dotenv/config';
+import { Client, GatewayI
+const token = process.env.DISCORD_TOKEN;
+
+if (!token) {
+  throw new Error('DISCORD_TOKEN is missing from environment variables.');
+}
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+  ],
+});
+
+client.once('ready', (readyClient) => {
+  console.log(`✅ SupportForge is online as ${readyClient.user.tag}`);
+});
+
+client.login(token)
