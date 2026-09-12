@@ -359,6 +359,15 @@ export async function handleTicketInteraction(
 
       return;
     }
+    const supportForgeCategory = findSupportForgeCategory(interaction);
+
+if (!supportForgeCategory) {
+  await sendErrorReply(
+    interaction,
+    '❌ The Support Forge category could not be found. Please run `/supportforge setup` first.',
+  );
+  return;
+}
 
     try {
       await interaction.deferReply({
@@ -528,7 +537,7 @@ export async function handleTicketInteraction(
 
             // Tickets stay directly inside
             // their configured ticket category.
-            parent: categoryId,
+            parent: supportForgeCategory.id,
 
             topic:
               `${TICKET_TOPIC_PREFIX} ` +
