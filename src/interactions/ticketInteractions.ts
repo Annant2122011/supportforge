@@ -15,20 +15,43 @@ import {
 
 import { generateTranscript } from '../services/transcriptService';
 
+const SUPPORT_FORGE_CATEGORY_NAME = 'Support Forge';
 const TRANSCRIPT_CHANNEL_NAME = '📄 support-transcripts';
 const TICKET_TOPIC_PREFIX = 'supportforge:ticket';
 
-function getTopicValue(topic: string, key: string): string | undefined {
-  const match = topic.match(new RegExp(`(?:^|\\s)${key}=([^\\s]+)`));
+function getTopicValue(
+  topic: string,
+  key: string,
+): string | undefined {
+  const match = topic.match(
+    new RegExp(`(?:^|\\s)${key}=([^\\s]+)`),
+  );
+
   return match?.[1];
 }
 
 function getSubjectFromTopic(topic: string): string {
-  const match = topic.match(/(?:^|\s)subject=(.*?)\s+number=/);
+  const match = topic.match(
+    /(?:^|\s)subject=(.*?)\s+number=/,
+  );
+
   return match?.[1] ?? 'Unknown Subject';
 }
 
-function findTranscriptChannel(interaction: ButtonInteraction | ModalSubmitInteraction) {
+function findSupportForgeCategory(
+  interaction: ButtonInteraction | ModalSubmitInteraction,
+) {
+  return interaction.guild?.channels.cache.find(
+    (channel) =>
+      channel.type === ChannelType.GuildCategory &&
+      channel.name.toLowerCase() ===
+        SUPPORT_FORGE_CATEGORY_NAME.toLowerCase(),
+  );
+}
+
+function findTranscriptChannel(
+  interaction: ButtonInteraction | ModalSubmitInteraction,
+) {
   return interaction.guild?.channels.cache.find(
     (channel) =>
       channel.type === ChannelType.GuildText &&
@@ -39,25 +62,96 @@ function findTranscriptChannel(interaction: ButtonInteraction | ModalSubmitInter
 async function getTranscriptChannel(
   interaction: ButtonInteraction | ModalSubmitInteraction,
 ) {
-  if (!interaction.guild) return null;
+  if (!interaction.guild) {
+    return null;
+  }
+
+  const supportForgeCategory =
+    findSupportForgeCategory(interaction);
+
+  if (!supportForgeCategory) {
+    throw new Error(
+      'Support Forge category could not be found.',
+    );
+  }
 
   const existing = findTranscriptChannel(interaction);
-  if (existing?.type === ChannelType.GuildText) return existing;
-
   const botMember = interaction.guild.members.me;
+
   if (!botMember) {
-    throw new Error('Could not find SupportForge bot member.');
+    throw new Error(
+      'Could not find SupportForge bot member.',
+    );
+  }
+
+  if (
+    existing &&
+    existing.type === ChannelType.GuildText
+  ) {
+    if (
+      existing.parentId !==
+      supportForgeCategory.id
+    ) {
+      try {
+        await existing.setParent(
+          supportForgeCategory.id,
+          {
+            lockPermissions: false,
+          },
+        );
+      } catch (error) {
+        console.error(
+          '❌ Failed to move transcript channel into Support Forge:',
+          error,
+        );
+      }
+    }
+
+    try {
+      await existing.permissionOverwrites.edit(
+        interaction.guild.roles.everyone.id,
+        {
+          ViewChannel: false,
+          SendMessages: false,
+          ReadMessageHistory: false,
+        },
+      );
+
+      await existing.permissionOverwrites.edit(
+        botMember.id,
+        {
+          ViewChannel: true,
+          SendMessages: true,
+          ReadMessageHistory: true,
+          AttachFiles: true,
+          EmbedLinks: true,
+        },
+      );
+    } catch (error) {
+      console.error(
+        '❌ Failed to repair transcript channel permissions:',
+        error,
+      );
+    }
+
+    return existing;
   }
 
   try {
     return await interaction.guild.channels.create({
       name: TRANSCRIPT_CHANNEL_NAME,
       type: ChannelType.GuildText,
-      topic: 'SupportForge ticket transcripts. Do not delete this channel.',
+      parent: supportForgeCategory.id,
+      topic:
+        'SupportForge ticket transcripts. Do not delete this channel.',
       permissionOverwrites: [
         {
           id: interaction.guild.roles.everyone.id,
-          deny: [PermissionFlagsBits.ViewChannel],
+          deny: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.ReadMessageHistory,
+          ],
         },
         {
           id: botMember.id,
@@ -72,145 +166,316 @@ async function getTranscriptChannel(
       ],
     });
   } catch (error: any) {
-    // Another close/setup operation may have created it between the cache
-    // lookup and create call. Refresh the cache and use that channel.
-    if (error?.code === 50013 || error?.code === 40060) throw error;
+    if (
+      error?.code === 50013 ||
+      error?.code === 40060
+    ) {
+      throw error;
+    }
 
     const raced = findTranscriptChannel(interaction);
-    if (raced?.type === ChannelType.GuildText) return raced;
+
+    if (
+      raced &&
+      raced.type === ChannelType.GuildText
+    ) {
+      return raced;
+    }
+
     throw error;
   }
 }
 
 async function sendErrorReply(
-  interaction: ButtonInteraction | ModalSubmitInteraction,
+  interaction:
+    | ButtonInteraction
+    | ModalSubmitInteraction,
   content: string,
 ) {
   try {
-    if (interaction.deferred && !interaction.replied) {
-      await interaction.editReply({ content });
-    } else if (!interaction.replied) {
-      await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+    if (
+      interaction.deferred &&
+      !interaction.replied
+    ) {
+      await interaction.editReply({
+        content,
+      });
+
+      return;
+    }
+
+    if (!interaction.replied) {
+      await interaction.reply({
+        content,
+        flags: MessageFlags.Ephemeral,
+      });
     }
   } catch (error: any) {
-    if (error?.code !== 10062) console.error('❌ Failed to send error reply:', error);
+    if (error?.code !== 10062) {
+      console.error(
+        '❌ Failed to send error reply:',
+        error,
+      );
+    }
   }
 }
 
 export async function handleTicketInteraction(
-  interaction: ButtonInteraction | ModalSubmitInteraction,
+  interaction:
+    | ButtonInteraction
+    | ModalSubmitInteraction,
 ) {
   if (!interaction.guild) {
-    await sendErrorReply(interaction, '❌ This can only be used inside a server.');
+    await sendErrorReply(
+      interaction,
+      '❌ This can only be used inside a server.',
+    );
+
     return;
   }
 
-  if (interaction.isButton() && interaction.customId.startsWith('ticket:create:')) {
-    const categoryId = interaction.customId.split(':')[2];
+  // ============================================================
+  // CREATE TICKET BUTTON
+  // ============================================================
+
+  if (
+    interaction.isButton() &&
+    interaction.customId.startsWith(
+      'ticket:create:',
+    )
+  ) {
+    const categoryId =
+      interaction.customId.split(':')[2];
+
     if (!categoryId) {
-      await sendErrorReply(interaction, '❌ Ticket category could not be found.');
+      await sendErrorReply(
+        interaction,
+        '❌ Ticket category could not be found.',
+      );
+
       return;
     }
 
-    const category = interaction.guild.channels.cache.get(categoryId);
-    if (!category || category.type !== ChannelType.GuildCategory) {
-      await sendErrorReply(interaction, '❌ This ticket category no longer exists.');
+    const category =
+      interaction.guild.channels.cache.get(
+        categoryId,
+      );
+
+    if (
+      !category ||
+      category.type !== ChannelType.GuildCategory
+    ) {
+      await sendErrorReply(
+        interaction,
+        '❌ This ticket category no longer exists.',
+      );
+
       return;
     }
 
-    const modal = new ModalBuilder()
-      .setCustomId(`ticket:modal:${categoryId}`)
-      .setTitle('Create Support Ticket');
+    const modal =
+      new ModalBuilder()
+        .setCustomId(
+          `ticket:modal:${categoryId}`,
+        )
+        .setTitle(
+          'Create Support Ticket',
+        );
 
-    const subjectInput = new TextInputBuilder()
-      .setCustomId('subject')
-      .setLabel('Subject')
-      .setPlaceholder('What do you need help with?')
-      .setStyle(TextInputStyle.Short)
-      .setRequired(true)
-      .setMaxLength(100);
+    const subjectInput =
+      new TextInputBuilder()
+        .setCustomId('subject')
+        .setLabel('Subject')
+        .setPlaceholder(
+          'What do you need help with?',
+        )
+        .setStyle(
+          TextInputStyle.Short,
+        )
+        .setRequired(true)
+        .setMaxLength(100);
 
-    const descriptionInput = new TextInputBuilder()
-      .setCustomId('description')
-      .setLabel('Describe your issue')
-      .setPlaceholder('Please provide as much detail as possible.')
-      .setStyle(TextInputStyle.Paragraph)
-      .setRequired(true)
-      .setMaxLength(1000);
+    const descriptionInput =
+      new TextInputBuilder()
+        .setCustomId('description')
+        .setLabel('Describe your issue')
+        .setPlaceholder(
+          'Please provide as much detail as possible.',
+        )
+        .setStyle(
+          TextInputStyle.Paragraph,
+        )
+        .setRequired(true)
+        .setMaxLength(1000);
 
     modal.addComponents(
-      new ActionRowBuilder<TextInputBuilder>().addComponents(subjectInput),
-      new ActionRowBuilder<TextInputBuilder>().addComponents(descriptionInput),
+      new ActionRowBuilder<TextInputBuilder>()
+        .addComponents(subjectInput),
+
+      new ActionRowBuilder<TextInputBuilder>()
+        .addComponents(descriptionInput),
     );
 
     await interaction.showModal(modal);
+
     return;
   }
 
-  if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket:modal:')) {
-    const categoryId = interaction.customId.split(':')[2];
+  // ============================================================
+  // CREATE TICKET MODAL
+  // ============================================================
+
+  if (
+    interaction.isModalSubmit() &&
+    interaction.customId.startsWith(
+      'ticket:modal:',
+    )
+  ) {
+    const categoryId =
+      interaction.customId.split(':')[2];
+
     if (!categoryId) {
-      await sendErrorReply(interaction, '❌ Ticket category could not be found.');
+      await sendErrorReply(
+        interaction,
+        '❌ Ticket category could not be found.',
+      );
+
       return;
     }
 
-    const category = interaction.guild.channels.cache.get(categoryId);
-    if (!category || category.type !== ChannelType.GuildCategory) {
-      await sendErrorReply(interaction, '❌ The SupportForge ticket category no longer exists.');
+    const category =
+      interaction.guild.channels.cache.get(
+        categoryId,
+      );
+
+    if (
+      !category ||
+      category.type !== ChannelType.GuildCategory
+    ) {
+      await sendErrorReply(
+        interaction,
+        '❌ The SupportForge ticket category no longer exists.',
+      );
+
       return;
     }
 
     try {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await interaction.deferReply({
+        flags: MessageFlags.Ephemeral,
+      });
     } catch (error: any) {
-      if (error?.code === 10062) return;
+      if (error?.code === 10062) {
+        return;
+      }
+
       throw error;
     }
 
-    const subject = interaction.fields.getTextInputValue('subject').trim();
-    const description = interaction.fields.getTextInputValue('description').trim();
+    const subject =
+      interaction.fields
+        .getTextInputValue('subject')
+        .trim();
 
-    if (!subject || !description) {
-      await interaction.editReply({ content: '❌ Subject and description cannot be empty.' });
+    const description =
+      interaction.fields
+        .getTextInputValue('description')
+        .trim();
+
+    if (
+      !subject ||
+      !description
+    ) {
+      await interaction.editReply({
+        content:
+          '❌ Subject and description cannot be empty.',
+      });
+
       return;
     }
 
-    const staffRoleOverwrite = category.permissionOverwrites.cache.find(
-      (overwrite) =>
-        overwrite.type === 0 &&
-        overwrite.id !== interaction.guild!.roles.everyone.id &&
-        overwrite.id !== interaction.client.user.id &&
-        overwrite.allow.has(PermissionFlagsBits.ViewChannel),
-    );
-    const staffRoleId = staffRoleOverwrite?.id;
+    const staffRoleOverwrite =
+      category.permissionOverwrites.cache.find(
+        (overwrite) =>
+          overwrite.type === 0 &&
+          overwrite.id !==
+            interaction.guild!.roles
+              .everyone.id &&
+          overwrite.id !==
+            interaction.client.user.id &&
+          overwrite.allow.has(
+            PermissionFlagsBits.ViewChannel,
+          ),
+      );
 
-    const existingTicket = interaction.guild.channels.cache.find(
-      (channel) =>
-        channel.parentId === categoryId &&
-        channel.type === ChannelType.GuildText &&
-        channel.topic?.startsWith(TICKET_TOPIC_PREFIX) &&
-        channel.topic?.includes('status=open') &&
-        channel.topic?.includes(`owner=${interaction.user.id}`),
-    );
+    const staffRoleId =
+      staffRoleOverwrite?.id;
+
+    // ==========================================================
+    // PREVENT MULTIPLE OPEN TICKETS
+    // ==========================================================
+
+    const existingTicket =
+      interaction.guild.channels.cache.find(
+        (channel) =>
+          channel.parentId === categoryId &&
+          channel.type ===
+            ChannelType.GuildText &&
+          channel.topic?.startsWith(
+            TICKET_TOPIC_PREFIX,
+          ) &&
+          channel.topic?.includes(
+            'status=open',
+          ) &&
+          channel.topic?.includes(
+            `owner=${interaction.user.id}`,
+          ),
+      );
 
     if (existingTicket) {
       await interaction.editReply({
-        content: `❌ You already have an open ticket in this category: ${existingTicket}`,
+        content:
+          `❌ You already have an open ticket in this category: ${existingTicket}`,
       });
+
       return;
     }
 
+    // ==========================================================
+    // GENERATE UNIQUE TICKET NUMBER
+    // ==========================================================
+
     let ticketNumber = 0;
     let ticketName = '';
+
     do {
-      ticketNumber = Math.floor(1000 + Math.random() * 9000);
-      ticketName = `ticket-${ticketNumber}`;
-    } while (interaction.guild.channels.cache.some((channel) => channel.name === ticketName));
+      ticketNumber =
+        Math.floor(
+          1000 +
+            Math.random() * 9000,
+        );
+
+      ticketName =
+        `ticket-${ticketNumber}`;
+    } while (
+      interaction.guild.channels.cache.some(
+        (channel) =>
+          channel.name === ticketName,
+      )
+    );
+
+    // ==========================================================
+    // CREATE PERMISSIONS
+    // ==========================================================
 
     const permissionOverwrites = [
       {
-        id: interaction.guild.roles.everyone.id,
-        deny: [PermissionFlagsBits.ViewChannel],
+        id:
+          interaction.guild.roles
+            .everyone.id,
+        deny: [
+          PermissionFlagsBits.ViewChannel,
+        ],
       },
       {
         id: interaction.user.id,
@@ -222,7 +487,8 @@ export async function handleTicketInteraction(
         ],
       },
       {
-        id: interaction.client.user.id,
+        id:
+          interaction.client.user.id,
         allow: [
           PermissionFlagsBits.ViewChannel,
           PermissionFlagsBits.SendMessages,
@@ -247,230 +513,589 @@ export async function handleTicketInteraction(
       });
     }
 
+    // ==========================================================
+    // CREATE TICKET CHANNEL
+    // ==========================================================
+
     let ticketChannel;
+
     try {
-      ticketChannel = await interaction.guild.channels.create({
-        name: ticketName,
-        type: ChannelType.GuildText,
-        parent: categoryId,
-        topic:
-          `${TICKET_TOPIC_PREFIX} ` +
-          `status=open ` +
-          `owner=${interaction.user.id} ` +
-          `category=${categoryId} ` +
-          `staff=${staffRoleId ?? 'none'} ` +
-          `subject=${subject.replace(/\s+/g, ' ')} ` +
-          `number=${ticketNumber}`,
-        permissionOverwrites,
-      });
+      ticketChannel =
+        await interaction.guild.channels.create(
+          {
+            name: ticketName,
+            type: ChannelType.GuildText,
+
+            // Tickets stay directly inside
+            // their configured ticket category.
+            parent: categoryId,
+
+            topic:
+              `${TICKET_TOPIC_PREFIX} ` +
+              `status=open ` +
+              `owner=${interaction.user.id} ` +
+              `category=${categoryId} ` +
+              `staff=${staffRoleId ?? 'none'} ` +
+              `subject=${subject.replace(
+                /\s+/g,
+                ' ',
+              )} ` +
+              `number=${ticketNumber}`,
+
+            permissionOverwrites,
+          },
+        );
     } catch (error) {
-      console.error('❌ Failed to create ticket channel:', error);
-      await interaction.editReply({ content: '❌ The ticket could not be created. Please try again.' });
+      console.error(
+        '❌ Failed to create ticket channel:',
+        error,
+      );
+
+      await interaction.editReply({
+        content:
+          '❌ The ticket could not be created. Please try again.',
+      });
+
       return;
     }
 
-    const ticketEmbed = new EmbedBuilder()
-      .setColor(0x5865f2)
-      .setTitle('🎫 Support Ticket')
-      .setDescription(description)
-      .addFields(
-        { name: '👤 Ticket Owner', value: `${interaction.user}` },
-        { name: '📌 Subject', value: subject },
-        { name: '📂 Category', value: category.name },
-      )
-      .setFooter({ text: `Ticket #${ticketNumber} • Created by ${interaction.user.tag}` })
-      .setTimestamp();
+    // ==========================================================
+    // TICKET EMBED
+    // ==========================================================
 
-    const closeButton = new ButtonBuilder()
-      .setCustomId('ticket:close')
-      .setLabel('Close Ticket')
-      .setEmoji('🔒')
-      .setStyle(ButtonStyle.Danger);
+    const ticketEmbed =
+      new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle('🎫 Support Ticket')
+        .setDescription(description)
+        .addFields(
+          {
+            name: '👤 Ticket Owner',
+            value: `${interaction.user}`,
+          },
+          {
+            name: '📌 Subject',
+            value: subject,
+          },
+          {
+            name: '📂 Category',
+            value: category.name,
+          },
+        )
+        .setFooter({
+          text:
+            `Ticket #${ticketNumber} • ` +
+            `Created by ${interaction.user.tag}`,
+        })
+        .setTimestamp();
+
+    // ==========================================================
+    // CLOSE BUTTON
+    // ==========================================================
+
+    const closeButton =
+      new ButtonBuilder()
+        .setCustomId('ticket:close')
+        .setLabel('Close Ticket')
+        .setEmoji('🔒')
+        .setStyle(
+          ButtonStyle.Danger,
+        );
+
+    // ==========================================================
+    // SEND INITIAL TICKET MESSAGE
+    // ==========================================================
 
     try {
-      const ticketMessage = await ticketChannel.send({
-        content: `${interaction.user} ${staffRoleId ? `<@&${staffRoleId}>` : ''}`.trim(),
-        embeds: [ticketEmbed],
-        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(closeButton)],
-      });
+      const ticketMessage =
+        await ticketChannel.send({
+          content:
+            `${interaction.user} ` +
+            `${
+              staffRoleId
+                ? `<@&${staffRoleId}>`
+                : ''
+            }`.trim(),
 
-      await ticketChannel.setTopic(`${ticketChannel.topic ?? ''} message=${ticketMessage.id}`);
+          embeds: [
+            ticketEmbed,
+          ],
+
+          components: [
+            new ActionRowBuilder<ButtonBuilder>()
+              .addComponents(
+                closeButton,
+              ),
+          ],
+        });
+
+      await ticketChannel.setTopic(
+        `${ticketChannel.topic ?? ''} ` +
+          `message=${ticketMessage.id}`,
+      );
     } catch (error) {
-      console.error('❌ Failed to initialize ticket:', error);
+      console.error(
+        '❌ Failed to initialize ticket:',
+        error,
+      );
+
       try {
-        await ticketChannel.delete('SupportForge cleanup after ticket creation failure');
+        await ticketChannel.delete(
+          'SupportForge cleanup after ticket creation failure',
+        );
       } catch (deleteError) {
-        console.error('❌ Failed to clean up ticket channel:', deleteError);
+        console.error(
+          '❌ Failed to clean up ticket channel:',
+          deleteError,
+        );
       }
-      await interaction.editReply({ content: '❌ The ticket could not be initialized. Please try again.' });
+
+      await interaction.editReply({
+        content:
+          '❌ The ticket could not be initialized. Please try again.',
+      });
+
       return;
     }
 
-    await interaction.editReply({ content: `✅ Your ticket has been created: ${ticketChannel}` });
+    await interaction.editReply({
+      content:
+        `✅ Your ticket has been created: ${ticketChannel}`,
+    });
+
     return;
   }
 
-  if (interaction.isButton() && interaction.customId === 'ticket:close') {
+  // ============================================================
+  // CLOSE TICKET BUTTON
+  // ============================================================
+
+  if (
+    interaction.isButton() &&
+    interaction.customId ===
+      'ticket:close'
+  ) {
+    // ==========================================================
+    // ACKNOWLEDGE IMMEDIATELY
+    // ==========================================================
+
     try {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await interaction.deferReply({
+        flags: MessageFlags.Ephemeral,
+      });
     } catch (error: any) {
-      if (error?.code === 10062) return;
+      if (error?.code === 10062) {
+        return;
+      }
+
       throw error;
     }
 
-    const channel = interaction.channel;
-    if (!channel || channel.type !== ChannelType.GuildText) {
-      await interaction.editReply({ content: '❌ This button can only be used inside a ticket channel.' });
-      return;
-    }
+    // ==========================================================
+    // CHANNEL CHECK
+    // ==========================================================
 
-    const topic = channel.topic ?? '';
-    if (!topic.startsWith(TICKET_TOPIC_PREFIX)) {
-      await interaction.editReply({ content: '❌ This channel is not a SupportForge ticket.' });
-      return;
-    }
+    const channel =
+      interaction.channel;
 
-    const ticketStatus = getTopicValue(topic, 'status') ?? 'open';
-    if (ticketStatus === 'closed') {
-      await interaction.editReply({ content: 'ℹ️ This ticket is already closed.' });
-      return;
-    }
-
-    const ownerId = getTopicValue(topic, 'owner');
-    const staffRoleIdRaw = getTopicValue(topic, 'staff');
-    const staffRoleId = staffRoleIdRaw && staffRoleIdRaw !== 'none' ? staffRoleIdRaw : undefined;
-    const ticketNumber = getTopicValue(topic, 'number') ?? 'Unknown';
-    const messageId = getTopicValue(topic, 'message');
-    const subject = getSubjectFromTopic(topic);
-
-    // Do not fetch the closing member from the API just to check permissions.
-    // The interaction already contains the guild member and its current roles.
-    const member = interaction.member;
-    const permissions = 'permissions' in member ? member.permissions : null;
-    const roles = 'roles' in member && 'cache' in member.roles ? member.roles.cache : null;
-
-    const isAdministrator = permissions?.has(PermissionFlagsBits.Administrator) ?? false;
-    const isStaff = !!staffRoleId && !!roles?.has(staffRoleId);
-    const isOwner = ownerId === interaction.user.id;
-
-    if (!isOwner && !isStaff && !isAdministrator) {
-      await interaction.editReply({ content: '❌ You do not have permission to close this ticket.' });
-      return;
-    }
-
-    const openedAt = channel.createdAt;
-    const closedAt = new Date();
-
-    // This is the only operation that must succeed before we tell the user
-    // the ticket is closed. Everything else is post-close housekeeping.
-    try {
-      await channel.setTopic(topic.replace('status=open', 'status=closed'));
-    } catch (error) {
-      console.error('❌ Failed to update ticket status:', error);
+    if (
+      !channel ||
+      channel.type !==
+        ChannelType.GuildText
+    ) {
       await interaction.editReply({
-        content: '❌ The ticket could not be closed because its status could not be updated.',
+        content:
+          '❌ This button can only be used inside a ticket channel.',
       });
+
       return;
     }
 
-    // The ticket is now logically closed. Reply immediately instead of making
-    // the user wait for permission edits, renaming, message fetching or a
-    // transcript upload. Humans have already waited enough for computers.
+    // ==========================================================
+    // VERIFY SUPPORTFORGE TICKET
+    // ==========================================================
+
+    const topic =
+      channel.topic ?? '';
+
+    if (
+      !topic.startsWith(
+        TICKET_TOPIC_PREFIX,
+      )
+    ) {
+      await interaction.editReply({
+        content:
+          '❌ This channel is not a SupportForge ticket.',
+      });
+
+      return;
+    }
+
+    // ==========================================================
+    // CHECK STATUS
+    // ==========================================================
+
+    const ticketStatus =
+      getTopicValue(
+        topic,
+        'status',
+      ) ?? 'open';
+
+    if (
+      ticketStatus ===
+      'closed'
+    ) {
+      await interaction.editReply({
+        content:
+          'ℹ️ This ticket is already closed.',
+      });
+
+      return;
+    }
+
+    // ==========================================================
+    // GET TICKET INFORMATION
+    // ==========================================================
+
+    const ownerId =
+      getTopicValue(
+        topic,
+        'owner',
+      );
+
+    const staffRoleIdRaw =
+      getTopicValue(
+        topic,
+        'staff',
+      );
+
+    const staffRoleId =
+      staffRoleIdRaw &&
+      staffRoleIdRaw !== 'none'
+        ? staffRoleIdRaw
+        : undefined;
+
+    const ticketNumber =
+      getTopicValue(
+        topic,
+        'number',
+      ) ?? 'Unknown';
+
+    const messageId =
+      getTopicValue(
+        topic,
+        'message',
+      );
+
+    const subject =
+      getSubjectFromTopic(
+        topic,
+      );
+
+    // Do not fetch the closing member from
+    // Discord's API just to check permissions.
+    // The interaction already contains the member.
+    const member =
+      interaction.member;
+
+    
+
+const isAdministrator =
+  member !== null &&
+  'permissions' in member &&
+  typeof member.permissions !== 'string' &&
+  member.permissions.has(PermissionFlagsBits.Administrator);
+
+const isStaff =
+  member !== null &&
+  'roles' in member &&
+  'cache' in member.roles &&
+  !!staffRoleId &&
+  member.roles.cache.has(staffRoleId);
+
+const isOwner =
+  ownerId === interaction.user.id;
+
+    if (
+      !isOwner &&
+      !isStaff &&
+      !isAdministrator
+    ) {
+      await interaction.editReply({
+        content:
+          '❌ You do not have permission to close this ticket.',
+      });
+
+      return;
+    }
+
+    // ==========================================================
+    // CLOSE TIMES
+    // ==========================================================
+
+    const openedAt =
+      channel.createdAt;
+
+    const closedAt =
+      new Date();
+
+    // ==========================================================
+    // UPDATE STATUS FIRST
+    // ==========================================================
+
+    try {
+      await channel.setTopic(
+        topic.replace(
+          'status=open',
+          'status=closed',
+        ),
+      );
+    } catch (error) {
+      console.error(
+        '❌ Failed to update ticket status:',
+        error,
+      );
+
+      await interaction.editReply({
+        content:
+          '❌ The ticket could not be closed because its status could not be updated.',
+      });
+
+      return;
+    }
+
+    // ==========================================================
+    // IMMEDIATE RESPONSE
+    // ==========================================================
+
     await interaction.editReply({
-      content: `✅ Ticket #${ticketNumber} is now closed.\n🔒 The channel is being locked and the transcript is being generated in the background.`,
+      content:
+        `✅ Ticket #${ticketNumber} is now closed.\n` +
+        `🔒 The channel is being locked and the transcript is being generated in the background.`,
     });
 
+    // ==========================================================
+    // POST-CLOSE HOUSEKEEPING
+    // ==========================================================
+
     const closeTasks = [
-      channel.permissionOverwrites.edit(
-        ownerId ?? interaction.guild.roles.everyone.id,
-        {
-          ViewChannel: true,
-          SendMessages: false,
-          AddReactions: false,
-          AttachFiles: false,
-          EmbedLinks: false,
-        },
-      ).catch((error) => console.error('❌ Failed to lock ticket owner:', error)),
+      // --------------------------------------------------------
+      // LOCK OWNER
+      // --------------------------------------------------------
+
+      ownerId
+        ? channel.permissionOverwrites
+            .edit(
+              ownerId,
+              {
+                ViewChannel: true,
+                SendMessages: false,
+                AddReactions: false,
+                AttachFiles: false,
+                EmbedLinks: false,
+              },
+            )
+            .catch(
+              (error) => {
+                console.error(
+                  '❌ Failed to lock ticket owner:',
+                  error,
+                );
+              },
+            )
+        : Promise.resolve(),
+
+      // --------------------------------------------------------
+      // LOCK STAFF
+      // --------------------------------------------------------
 
       staffRoleId
-        ? channel.permissionOverwrites.edit(staffRoleId, {
-            ViewChannel: true,
+        ? channel.permissionOverwrites
+            .edit(
+              staffRoleId,
+              {
+                ViewChannel: true,
+                SendMessages: false,
+                AddReactions: false,
+                AttachFiles: false,
+                EmbedLinks: false,
+              },
+            )
+            .catch(
+              (error) => {
+                console.error(
+                  '❌ Failed to lock staff role:',
+                  error,
+                );
+              },
+            )
+        : Promise.resolve(),
+
+      // --------------------------------------------------------
+      // LOCK @EVERYONE
+      // --------------------------------------------------------
+
+      channel.permissionOverwrites
+        .edit(
+          channel.guild.roles.everyone,
+          {
+            ViewChannel: false,
             SendMessages: false,
             AddReactions: false,
             AttachFiles: false,
             EmbedLinks: false,
-          }).catch((error) => console.error('❌ Failed to lock staff role:', error))
-        : Promise.resolve(),
+          },
+        )
+        .catch(
+          (error) => {
+            console.error(
+              '❌ Failed to lock @everyone permissions:',
+              error,
+            );
+          },
+        ),
 
-      channel.permissionOverwrites.edit(channel.guild.roles.everyone, {
-        ViewChannel: false,
-        SendMessages: false,
-        AddReactions: false,
-        AttachFiles: false,
-        EmbedLinks: false,
-      }).catch((error) => console.error('❌ Failed to lock @everyone permissions:', error)),
+      // --------------------------------------------------------
+      // RENAME
+      // --------------------------------------------------------
 
-      channel.setName(channel.name.endsWith('-closed') ? channel.name : `${channel.name}-closed`)
-        .catch((error) => console.error('❌ Failed to rename closed ticket:', error)),
+      (
+        channel.name.endsWith(
+          '-closed',
+        )
+          ? Promise.resolve(
+              channel.name,
+            )
+          : channel.setName(
+              `${channel.name}-closed`,
+            )
+      ).catch(
+        (error) => {
+          console.error(
+            '❌ Failed to rename closed ticket:',
+            error,
+          );
+        },
+      ),
+
+      // --------------------------------------------------------
+      // DISABLE ORIGINAL BUTTON
+      // --------------------------------------------------------
 
       (async () => {
         if (!messageId) {
-          console.warn(`⚠️ No original ticket message ID stored for ticket #${ticketNumber}.`);
+          console.warn(
+            `⚠️ No original ticket message ID stored for ticket #${ticketNumber}.`,
+          );
+
           return;
         }
 
         try {
-          const originalTicketMessage = await channel.messages.fetch(messageId);
-          const closedButton = new ButtonBuilder()
-            .setCustomId('ticket:closed')
-            .setLabel('Ticket Closed')
-            .setEmoji('🔒')
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(true);
+          const originalTicketMessage =
+            await channel.messages.fetch(
+              messageId,
+            );
+
+          const closedButton =
+            new ButtonBuilder()
+              .setCustomId(
+                'ticket:closed',
+              )
+              .setLabel(
+                'Ticket Closed',
+              )
+              .setEmoji('🔒')
+              .setStyle(
+                ButtonStyle.Secondary,
+              )
+              .setDisabled(true);
 
           await originalTicketMessage.edit({
-            components: [new ActionRowBuilder<ButtonBuilder>().addComponents(closedButton)],
+            components: [
+              new ActionRowBuilder<ButtonBuilder>()
+                .addComponents(
+                  closedButton,
+                ),
+            ],
           });
         } catch (error) {
-          console.error('❌ Failed to disable original ticket button:', error);
+          console.error(
+            '❌ Failed to disable original ticket button:',
+            error,
+          );
         }
       })(),
+
+      // --------------------------------------------------------
+      // CLOSED MESSAGE
+      // --------------------------------------------------------
 
       (async () => {
         try {
           await channel.send({
             embeds: [
               new EmbedBuilder()
-                .setColor(0x747f8d)
-                .setTitle('🔒 Ticket Closed')
-                .setDescription(`This ticket was closed by ${interaction.user}.`)
-                .addFields({ name: '🎫 Ticket', value: `#${ticketNumber}` })
-                .addFields({ name: '📄 Transcript', value: '⏳ Transcript is being generated...' })
+                .setColor(
+                  0x747f8d,
+                )
+                .setTitle(
+                  '🔒 Ticket Closed',
+                )
+                .setDescription(
+                  `This ticket was closed by ${interaction.user}.`,
+                )
+                .addFields({
+                  name: '🎫 Ticket',
+                  value:
+                    `#${ticketNumber}`,
+                })
+                .addFields({
+                  name: '📄 Transcript',
+                  value:
+                    '⏳ Transcript is being generated...',
+                })
                 .setTimestamp(),
             ],
           });
         } catch (error) {
-          console.error('❌ Failed to send closed message:', error);
+          console.error(
+            '❌ Failed to send closed message:',
+            error,
+          );
         }
       })(),
     ];
 
-    // Post-close housekeeping must never block the interaction lifecycle.
-    void Promise.allSettled(closeTasks).then(() => {
-      void generateAndUploadTranscript({
-        interaction,
-        channel,
-        ticketNumber,
-        subject,
-        ownerId: ownerId ?? 'Unknown',
-        openedAt,
-        closedAt,
-      });
-    });
+    // ==========================================================
+    // START BACKGROUND WORK
+    // ==========================================================
+
+    void Promise.allSettled(
+      closeTasks,
+    ).then(
+      () => {
+        void generateAndUploadTranscript({
+          interaction,
+          channel,
+          ticketNumber,
+          subject,
+          ownerId:
+            ownerId ??
+            'Unknown',
+          openedAt,
+          closedAt,
+        });
+      },
+    );
 
     return;
   }
 }
+
+// ============================================================
+// BACKGROUND TRANSCRIPT PROCESSING
+// ============================================================
 
 async function generateAndUploadTranscript({
   interaction,
@@ -482,7 +1107,12 @@ async function generateAndUploadTranscript({
   closedAt,
 }: {
   interaction: ButtonInteraction;
-  channel: Extract<typeof interaction.channel, { type: ChannelType.GuildText }>;
+  channel: Extract<
+    typeof interaction.channel,
+    {
+      type: ChannelType.GuildText;
+    }
+  >;
   ticketNumber: string;
   subject: string;
   ownerId: string;
@@ -490,60 +1120,149 @@ async function generateAndUploadTranscript({
   closedAt: Date;
 }) {
   try {
-    let ownerName = 'Unknown User';
+    // ========================================================
+    // GUILD CHECK
+    // ========================================================
 
-    try {
-      if (ownerId !== 'Unknown') {
-        const owner = await interaction.guild.members.fetch(ownerId);
-        ownerName = owner.displayName || owner.user.username;
-      }
-    } catch (error) {
-      console.warn('⚠️ Could not fetch ticket owner:', error);
-      ownerName = ownerId;
-    }
+    const guild =
+      interaction.guild;
 
-    const transcriptChannel = await getTranscriptChannel(interaction);
-    if (!transcriptChannel) {
-      await channel.send({ content: '⚠️ Ticket closed, but the transcript channel could not be found.' }).catch(() => undefined);
+    if (!guild) {
+      console.error(
+        `❌ Cannot generate transcript for ticket #${ticketNumber}: guild is unavailable.`,
+      );
+
       return;
     }
 
-    console.log(`📄 Generating transcript for ticket #${ticketNumber}...`);
+    // ========================================================
+    // OWNER NAME
+    // ========================================================
 
-    const transcript = await generateTranscript({
-      channel,
-      ticketNumber,
-      subject,
-      ownerId,
-      ownerName,
-      closedBy: interaction.user.tag,
-      openedAt,
-      closedAt,
-    });
+    let ownerName =
+      'Unknown User';
+
+    try {
+      if (
+        ownerId !==
+        'Unknown'
+      ) {
+        const owner =
+          await guild.members.fetch(
+            ownerId,
+          );
+
+        ownerName =
+          owner.displayName ||
+          owner.user.username;
+      }
+    } catch (error) {
+      console.warn(
+        '⚠️ Could not fetch ticket owner:',
+        error,
+      );
+
+      ownerName =
+        ownerId;
+    }
+
+    // ========================================================
+    // TRANSCRIPT CHANNEL
+    // ========================================================
+
+    const transcriptChannel =
+      await getTranscriptChannel(
+        interaction,
+      );
+
+    if (
+      !transcriptChannel
+    ) {
+      await channel
+        .send({
+          content:
+            '⚠️ Ticket closed, but the transcript channel could not be found.',
+        })
+        .catch(
+          () => undefined,
+        );
+
+      return;
+    }
+
+    // ========================================================
+    // GENERATE TRANSCRIPT
+    // ========================================================
+
+    console.log(
+      `📄 Generating transcript for ticket #${ticketNumber}...`,
+    );
+
+    const transcript =
+      await generateTranscript({
+        channel,
+        ticketNumber,
+        subject,
+        ownerId,
+        ownerName,
+        closedBy:
+          interaction.user.tag,
+        openedAt,
+        closedAt,
+      });
+
+    console.log(
+      `✅ Transcript generated for ticket #${ticketNumber}.`,
+    );
+
+    // ========================================================
+    // UPLOAD TRANSCRIPT
+    // ========================================================
 
     await transcriptChannel.send({
       content:
         `📄 **Ticket #${ticketNumber} Transcript**\n` +
         `**Subject:** ${subject}\n` +
-        `**Ticket Owner:** <@${ownerId !== 'Unknown' ? ownerId : '0'}>\n` +
+        `**Ticket Owner:** ${
+          ownerId !== 'Unknown'
+            ? `<@${ownerId}>`
+            : 'Unknown'
+        }\n` +
         `**Closed by:** ${interaction.user}`,
-      files: [transcript],
+
+      files: [
+        transcript,
+      ],
     });
+
+    console.log(
+      `✅ Transcript uploaded for ticket #${ticketNumber}.`,
+    );
+
+    // ========================================================
+    // CONFIRMATION
+    // ========================================================
 
     await channel.send({
-      content: `📄 Transcript for ticket #${ticketNumber} has been saved in ${transcriptChannel}.`,
+      content:
+        `📄 Transcript for ticket #${ticketNumber} has been saved in ${transcriptChannel}.`,
     });
-
-    console.log(`✅ Transcript uploaded for ticket #${ticketNumber}.`);
   } catch (error) {
-    console.error(`❌ Background transcript processing failed for ticket #${ticketNumber}:`, error);
+    console.error(
+      `❌ Background transcript processing failed for ticket #${ticketNumber}:`,
+      error,
+    );
 
     try {
       await channel.send({
-        content: `⚠️ Ticket #${ticketNumber} was closed successfully, but the transcript could not be generated or uploaded.`,
+        content:
+          `⚠️ Ticket #${ticketNumber} was closed successfully, but the transcript could not be generated or uploaded.`,
       });
     } catch (sendError) {
-      console.error('❌ Failed to send transcript failure message:', sendError);
+      console.error(
+        '❌ Failed to send transcript failure message:',
+        sendError,
+      );
     }
   }
 }

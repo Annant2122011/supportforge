@@ -12,8 +12,11 @@ import {
   type Role,
 } from 'discord.js';
 
+const SUPPORT_FORGE_CATEGORY_NAME = 'Support Forge';
 const TRANSCRIPT_CHANNEL_NAME = '📄 support-transcripts';
-const DEFAULT_TICKET_CATEGORY_NAME = 'General Support';
+const PANEL_CHANNEL_NAME = 'support-panel';
+const PANEL_TOPIC_PREFIX = 'supportforge:panel';
+const TICKET_TOPIC_PREFIX = 'supportforge:ticket';
 
 function cleanCategoryName(name: string): string {
   return name
@@ -22,14 +25,14 @@ function cleanCategoryName(name: string): string {
     .slice(0, 90);
 }
 
-function findTicketCategory(
+function findSupportForgeCategory(
   guild: Guild,
-  name: string,
-) : CategoryChannel | undefined {
+): CategoryChannel | undefined {
   return guild.channels.cache.find(
     (channel): channel is CategoryChannel =>
       channel.type === ChannelType.GuildCategory &&
-      channel.name.toLowerCase() === name.toLowerCase(),
+      channel.name.toLowerCase() ===
+        SUPPORT_FORGE_CATEGORY_NAME.toLowerCase(),
   );
 }
 
@@ -41,9 +44,24 @@ function findTranscriptChannel(guild: Guild) {
   );
 }
 
-function createTicketButton(categoryId: string) {
+function findPanelChannel(guild: Guild) {
+  return guild.channels.cache.find(
+    (channel) =>
+      channel.type === ChannelType.GuildText &&
+      (
+        channel.topic?.startsWith(PANEL_TOPIC_PREFIX) ||
+        channel.name === PANEL_CHANNEL_NAME
+      ),
+  );
+}
+
+function createTicketButton(
+  parentCategoryId: string,
+) {
   return new ButtonBuilder()
-    .setCustomId(`ticket:create:${categoryId}`)
+    .setCustomId(
+      `ticket:create:${parentCategoryId}`,
+    )
     .setLabel('Create Ticket')
     .setEmoji('🎫')
     .setStyle(ButtonStyle.Primary);
@@ -54,7 +72,9 @@ function createCategoryButton(
   label: string,
 ) {
   return new ButtonBuilder()
-    .setCustomId(`ticket:create:${categoryId}`)
+    .setCustomId(
+      `ticket:create:${categoryId}`,
+    )
     .setLabel(label.slice(0, 80))
     .setEmoji('🎫')
     .setStyle(ButtonStyle.Primary);
@@ -73,27 +93,31 @@ function createPanelEmbed(
     .setTitle('🎫 SupportForge')
     .setDescription(
       `Need help? Create a private support ticket below.\n\n` +
-        `📂 **Category:** ${categoryName}\n` +
-        `🔒 Only you and the support team will be able to see your ticket.` +
+        `📂 **Ticket type:** ${categoryName}\n` +
+        `🔒 Your ticket will only be visible to you and the support team.` +
         staffText,
     )
     .setFooter({
-      text: 'SupportForge • Support Ticket System',
+      text:
+        'SupportForge • Support Ticket System',
     })
     .setTimestamp();
 }
 
-async function ensureTranscriptChannel(guild: Guild) {
-  const existing = findTranscriptChannel(guild);
+/**
+ * Creates or fixes the main Support Forge category.
+ *
+ * The category itself is public because the panel lives inside it.
+ * Individual private channels override this permission.
+ */
+async function ensureSupportForgeCategory(
+  guild: Guild,
+): Promise<CategoryChannel> {
+  let category =
+    findSupportForgeCategory(guild);
 
-  if (
-    existing &&
-    existing.type === ChannelType.GuildText
-  ) {
-    return existing;
-  }
-
-  const botMember = guild.members.me;
+  const botMember =
+    guild.members.me;
 
   if (!botMember) {
     throw new Error(
@@ -101,9 +125,151 @@ async function ensureTranscriptChannel(guild: Guild) {
     );
   }
 
+  if (!category) {
+    category =
+      await guild.channels.create({
+        name:
+          SUPPORT_FORGE_CATEGORY_NAME,
+
+        type:
+          ChannelType.GuildCategory,
+
+        permissionOverwrites: [
+          {
+            id:
+              guild.roles.everyone.id,
+
+            allow: [
+              PermissionFlagsBits.ViewChannel,
+              PermissionFlagsBits.ReadMessageHistory,
+            ],
+
+            deny: [
+              PermissionFlagsBits.SendMessages,
+            ],
+          },
+
+          {
+            id:
+              botMember.id,
+
+            allow: [
+              PermissionFlagsBits.ViewChannel,
+              PermissionFlagsBits.SendMessages,
+              PermissionFlagsBits.ReadMessageHistory,
+              PermissionFlagsBits.ManageChannels,
+              PermissionFlagsBits.ManageMessages,
+              PermissionFlagsBits.EmbedLinks,
+              PermissionFlagsBits.AttachFiles,
+            ],
+          },
+        ],
+      });
+
+    return category;
+  }
+
+  /*
+   * Make the main category public.
+   *
+   * Private ticket/transcript channels have their own
+   * permission overwrites and therefore remain private.
+   */
+  await category.permissionOverwrites.edit(
+    guild.roles.everyone.id,
+    {
+      ViewChannel: true,
+      ReadMessageHistory: true,
+      SendMessages: false,
+    },
+  );
+
+  await category.permissionOverwrites.edit(
+    botMember.id,
+    {
+      ViewChannel: true,
+      SendMessages: true,
+      ReadMessageHistory: true,
+      ManageChannels: true,
+      ManageMessages: true,
+      EmbedLinks: true,
+      AttachFiles: true,
+    },
+  );
+
+  return category;
+}
+
+/**
+ * Creates or moves the transcript channel into Support Forge.
+ *
+ * The transcript channel remains private even though the parent
+ * category is public.
+ */
+async function ensureTranscriptChannel(
+  guild: Guild,
+  parentCategoryId: string,
+) {
+  const existing =
+    findTranscriptChannel(guild);
+
+  const botMember =
+    guild.members.me;
+
+  if (!botMember) {
+    throw new Error(
+      'Could not find SupportForge bot member.',
+    );
+  }
+
+  if (
+    existing &&
+    existing.type === ChannelType.GuildText
+  ) {
+    if (
+      existing.parentId !==
+      parentCategoryId
+    ) {
+      await existing.setParent(
+        parentCategoryId,
+        {
+          lockPermissions: false,
+        },
+      );
+    }
+
+    await existing.permissionOverwrites.edit(
+      guild.roles.everyone.id,
+      {
+        ViewChannel: false,
+        SendMessages: false,
+        ReadMessageHistory: false,
+      },
+    );
+
+    await existing.permissionOverwrites.edit(
+      botMember.id,
+      {
+        ViewChannel: true,
+        SendMessages: true,
+        ReadMessageHistory: true,
+        AttachFiles: true,
+        EmbedLinks: true,
+      },
+    );
+
+    return existing;
+  }
+
   return guild.channels.create({
-    name: TRANSCRIPT_CHANNEL_NAME,
-    type: ChannelType.GuildText,
+    name:
+      TRANSCRIPT_CHANNEL_NAME,
+
+    type:
+      ChannelType.GuildText,
+
+    parent:
+      parentCategoryId,
 
     topic:
       'SupportForge ticket transcripts. ' +
@@ -111,13 +277,20 @@ async function ensureTranscriptChannel(guild: Guild) {
 
     permissionOverwrites: [
       {
-        id: guild.roles.everyone.id,
+        id:
+          guild.roles.everyone.id,
+
         deny: [
           PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
         ],
       },
+
       {
-        id: botMember.id,
+        id:
+          botMember.id,
+
         allow: [
           PermissionFlagsBits.ViewChannel,
           PermissionFlagsBits.SendMessages,
@@ -130,42 +303,18 @@ async function ensureTranscriptChannel(guild: Guild) {
   });
 }
 
-async function createTicketCategory(
+/**
+ * Creates or moves the public support panel into Support Forge.
+ */
+async function ensurePanelChannel(
   guild: Guild,
-  categoryName: string,
-  staffRole?: Role | null,
+  parentCategoryId: string,
 ) {
-  const existing = findTicketCategory(
-    guild,
-    categoryName,
-  );
+  const existing =
+    findPanelChannel(guild);
 
- if (
-  existing &&
-  existing.type === ChannelType.GuildCategory
-) {
-  /*
-   * If the category already exists and a staff role was
-   * supplied,
-   * make sure that role has the correct access.
-   */
-  if (staffRole) {
-    await existing.permissionOverwrites.edit(
-      staffRole.id,
-      {
-        ViewChannel: true,
-        ReadMessageHistory: true,
-        SendMessages: true,
-      },
-    );
-  }
-
-  return {
-    category: existing,
-    created: false,
-  };
-}
-  const botMember = guild.members.me;
+  const botMember =
+    guild.members.me;
 
   if (!botMember) {
     throw new Error(
@@ -173,48 +322,224 @@ async function createTicketCategory(
     );
   }
 
-  const permissionOverwrites = [
-    {
-      id: guild.roles.everyone.id,
-      deny: [
-        PermissionFlagsBits.ViewChannel,
-      ],
-    },
-    {
-      id: botMember.id,
-      allow: [
-        PermissionFlagsBits.ViewChannel,
-        PermissionFlagsBits.ManageChannels,
-        PermissionFlagsBits.ManageMessages,
-        PermissionFlagsBits.ReadMessageHistory,
-        PermissionFlagsBits.SendMessages,
-        PermissionFlagsBits.EmbedLinks,
-        PermissionFlagsBits.AttachFiles,
-      ],
-    },
-  ];
+  if (
+    existing &&
+    existing.type === ChannelType.GuildText
+  ) {
+    if (
+      existing.parentId !==
+      parentCategoryId
+    ) {
+      await existing.setParent(
+        parentCategoryId,
+        {
+          lockPermissions: false,
+        },
+      );
+    }
 
-  if (staffRole) {
-    permissionOverwrites.push({
-      id: staffRole.id,
-      allow: [
-        PermissionFlagsBits.ViewChannel,
-        PermissionFlagsBits.ReadMessageHistory,
-        PermissionFlagsBits.SendMessages,
-      ],
-    });
+    await existing.permissionOverwrites.edit(
+      guild.roles.everyone.id,
+      {
+        ViewChannel: true,
+        ReadMessageHistory: true,
+        SendMessages: false,
+      },
+    );
+
+    await existing.permissionOverwrites.edit(
+      botMember.id,
+      {
+        ViewChannel: true,
+        SendMessages: true,
+        ReadMessageHistory: true,
+        EmbedLinks: true,
+      },
+    );
+
+    await existing.setTopic(
+      `${PANEL_TOPIC_PREFIX} ` +
+      `parent=${parentCategoryId}`,
+    );
+
+    return existing;
   }
 
-  const category = await guild.channels.create({
-    name: categoryName,
-    type: ChannelType.GuildCategory,
-    permissionOverwrites,
-  });
+  return guild.channels.create({
+    name:
+      PANEL_CHANNEL_NAME,
 
-  return {
-    category,
-    created: true,
-  };
+    type:
+      ChannelType.GuildText,
+
+    parent:
+      parentCategoryId,
+
+    topic:
+      `${PANEL_TOPIC_PREFIX} ` +
+      `parent=${parentCategoryId}`,
+
+    permissionOverwrites: [
+      {
+        id:
+          guild.roles.everyone.id,
+
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.ReadMessageHistory,
+        ],
+
+        deny: [
+          PermissionFlagsBits.SendMessages,
+        ],
+      },
+
+      {
+        id:
+          botMember.id,
+
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+          PermissionFlagsBits.EmbedLinks,
+        ],
+      },
+    ],
+  });
+}
+
+/**
+ * Fixes old SupportForge ticket channels by moving them
+ * into the new Support Forge category.
+ */
+async function migrateExistingTickets(
+  guild: Guild,
+  parentCategoryId: string,
+) {
+  const tickets =
+    guild.channels.cache.filter(
+      (channel) =>
+        channel.type === ChannelType.GuildText &&
+        channel.topic?.startsWith(
+          TICKET_TOPIC_PREFIX,
+        ) &&
+        channel.id !== parentCategoryId,
+    );
+
+  for (const channel of tickets.values()) {
+    if (
+      channel.parentId ===
+      parentCategoryId
+    ) {
+      continue;
+    }
+
+    try {
+      if (
+  channel.type === ChannelType.GuildText ||
+  channel.type === ChannelType.GuildAnnouncement ||
+  channel.type === ChannelType.GuildVoice ||
+  channel.type === ChannelType.GuildStageVoice
+) {
+  await channel.setParent(
+    parentCategoryId,
+    {
+      /*
+       * Keep the ticket's existing private
+       * permission overwrites.
+       */
+      lockPermissions: false,
+    },
+  );
+}
+
+      console.log(
+        `✅ Migrated ticket channel ${channel.name} into ${SUPPORT_FORGE_CATEGORY_NAME}.`,
+      );
+    } catch (error) {
+      console.error(
+        `❌ Failed to migrate ticket ${channel.name}:`,
+        error,
+      );
+    }
+  }
+}
+
+async function ensurePanelMessage(
+  panelChannel: Extract<
+    ReturnType<typeof findPanelChannel>,
+    any
+  >,
+  supportForgeCategoryId: string,
+) {
+  if (
+    !panelChannel ||
+    panelChannel.type !==
+      ChannelType.GuildText
+  ) {
+    return;
+  }
+
+  const messages =
+    await panelChannel.messages.fetch({
+      limit: 50,
+    });
+
+  const existingPanelMessage =
+    messages.find(
+      (message) =>
+        message.author.id ===
+          panelChannel.client.user.id &&
+        (
+          message.embeds.some(
+            (embed) =>
+              embed.title ===
+              '🎫 SupportForge',
+          ) ||
+          message.content.includes(
+            'SupportForge',
+          )
+        ),
+    );
+
+  const panelEmbed =
+    createPanelEmbed(
+      'General Support',
+    );
+
+  const panelButton =
+    createTicketButton(
+      supportForgeCategoryId,
+    );
+
+  const row =
+    new ActionRowBuilder<ButtonBuilder>()
+      .addComponents(
+        panelButton,
+      );
+
+  if (existingPanelMessage) {
+    await existingPanelMessage.edit({
+      embeds: [
+        panelEmbed,
+      ],
+      components: [
+        row,
+      ],
+    });
+
+    return;
+  }
+
+  await panelChannel.send({
+    embeds: [
+      panelEmbed,
+    ],
+    components: [
+      row,
+    ],
+  });
 }
 
 export const data =
@@ -242,7 +567,7 @@ export const data =
     )
 
     // ========================================================
-    // /supportforge category add
+    // Existing category command retained.
     // ========================================================
 
     .addSubcommandGroup(
@@ -301,15 +626,17 @@ export async function execute(
     return;
   }
 
-  const guild = interaction.guild;
+  const guild =
+    interaction.guild;
 
   // ==========================================================
-  // USER PERMISSION CHECK
+  // USER PERMISSIONS
   // ==========================================================
 
-  const member = await guild.members.fetch(
-    interaction.user.id,
-  );
+  const member =
+    await guild.members.fetch(
+      interaction.user.id,
+    );
 
   const isAdministrator =
     member.permissions.has(
@@ -335,10 +662,11 @@ export async function execute(
   }
 
   // ==========================================================
-  // BOT PERMISSION CHECK
+  // BOT PERMISSIONS
   // ==========================================================
 
-  const botMember = guild.members.me;
+  const botMember =
+    guild.members.me;
 
   if (!botMember) {
     await interaction.reply({
@@ -382,6 +710,7 @@ export async function execute(
         '• Manage Messages\n' +
         '• Embed Links\n' +
         '• Attach Files',
+
       ephemeral: true,
     });
 
@@ -392,7 +721,9 @@ export async function execute(
     interaction.options.getSubcommand();
 
   const subcommandGroup =
-    interaction.options.getSubcommandGroup(false);
+    interaction.options.getSubcommandGroup(
+      false,
+    );
 
   // ==========================================================
   // /supportforge setup
@@ -408,83 +739,51 @@ export async function execute(
 
     try {
       // --------------------------------------------------------
-      // TRANSCRIPT CHANNEL
+      // MAIN SUPPORT FORGE CATEGORY
+      // --------------------------------------------------------
+
+      const supportForgeCategory =
+        await ensureSupportForgeCategory(
+          guild,
+        );
+
+      // --------------------------------------------------------
+      // PRIVATE TRANSCRIPT CHANNEL
       // --------------------------------------------------------
 
       const transcriptChannel =
-        await ensureTranscriptChannel(guild);
-
-      // --------------------------------------------------------
-      // DEFAULT TICKET CATEGORY
-      //
-      // IMPORTANT:
-      // We DO NOT create a parent "SupportForge Tickets"
-      // category. Discord categories cannot contain categories.
-      //
-      // The default category itself is the ticket category.
-      // --------------------------------------------------------
-
-      const defaultCategoryResult =
-        await createTicketCategory(
+        await ensureTranscriptChannel(
           guild,
-          DEFAULT_TICKET_CATEGORY_NAME,
+          supportForgeCategory.id,
         );
 
-      const defaultCategory =
-        defaultCategoryResult.category;
-
       // --------------------------------------------------------
-      // CREATE DEFAULT PANEL
+      // PUBLIC SUPPORT PANEL
       // --------------------------------------------------------
 
-      const panelEmbed =
-        createPanelEmbed(
-          defaultCategory.name,
+      const panelChannel =
+        await ensurePanelChannel(
+          guild,
+          supportForgeCategory.id,
         );
 
-      const panelButton =
-        createTicketButton(
-          defaultCategory.id,
-        );
-
-      const panelRow =
-        new ActionRowBuilder<ButtonBuilder>()
-          .addComponents(
-            panelButton,
-          );
-
       // --------------------------------------------------------
-      // CHANNEL TYPE CHECK
+      // MOVE EXISTING TICKETS
       // --------------------------------------------------------
 
-      const commandChannel =
-        interaction.channel;
-
-      if (
-        !commandChannel ||
-        commandChannel.type !==
-          ChannelType.GuildText
-      ) {
-        await interaction.editReply({
-          content:
-            '❌ Please run `/supportforge setup` inside a normal text channel.',
-        });
-
-        return;
-      }
+      await migrateExistingTickets(
+        guild,
+        supportForgeCategory.id,
+      );
 
       // --------------------------------------------------------
-      // SEND DEFAULT PANEL
+      // CREATE / UPDATE PANEL MESSAGE
       // --------------------------------------------------------
 
-      await commandChannel.send({
-        embeds: [
-          panelEmbed,
-        ],
-        components: [
-          panelRow,
-        ],
-      });
+      await ensurePanelMessage(
+        panelChannel,
+        supportForgeCategory.id,
+      );
 
       // --------------------------------------------------------
       // FINAL RESPONSE
@@ -493,10 +792,16 @@ export async function execute(
       await interaction.editReply({
         content:
           '✅ **SupportForge setup completed!**\n\n' +
-          `${defaultCategoryResult.created ? '📂 Created' : '📂 Found'} ticket category: ${defaultCategory}\n` +
-          `📄 ${transcriptChannel} is ready for transcripts.\n` +
-          '🎫 **General Support** ticket panel has been posted in this channel.\n\n' +
-          '💡 Use `/supportforge category add` to create additional ticket categories.',
+
+          `📁 **Main category:** ${supportForgeCategory}\n` +
+
+          `🌐 **Public panel:** ${panelChannel}\n` +
+
+          `🔒 **Private transcript channel:** ${transcriptChannel}\n\n` +
+
+          '🎫 All SupportForge ticket channels are now placed inside **Support Forge**.\n' +
+
+          '🔐 Tickets and transcripts remain private through their own permission overwrites.',
       });
 
       return;
@@ -528,10 +833,6 @@ export async function execute(
       ephemeral: true,
     });
 
-    // --------------------------------------------------------
-    // CATEGORY NAME
-    // --------------------------------------------------------
-
     const rawName =
       interaction.options.getString(
         'name',
@@ -539,7 +840,9 @@ export async function execute(
       );
 
     const categoryName =
-      cleanCategoryName(rawName);
+      cleanCategoryName(
+        rawName,
+      );
 
     if (!categoryName) {
       await interaction.editReply({
@@ -550,20 +853,10 @@ export async function execute(
       return;
     }
 
-    // --------------------------------------------------------
-    // STAFF ROLE
-    // --------------------------------------------------------
-
     const staffRoleOption =
       interaction.options.getRole(
         'staff-role',
       );
-
-    /*
-     * Discord.js may return API-level role data here.
-     * Resolve it from the guild cache so the rest of the
-     * code works with an actual discord.js Role object.
-     */
 
     const staffRole =
       staffRoleOption
@@ -571,10 +864,6 @@ export async function execute(
             staffRoleOption.id,
           ) ?? null
         : null;
-
-    // --------------------------------------------------------
-    // VALIDATE STAFF ROLE
-    // --------------------------------------------------------
 
     if (
       staffRole &&
@@ -592,98 +881,127 @@ export async function execute(
       return;
     }
 
-    // --------------------------------------------------------
-    // CREATE CATEGORY
-    // --------------------------------------------------------
-
     try {
-      const result =
-        await createTicketCategory(
-          guild,
-          categoryName,
-          staffRole,
+      /*
+       * This existing command is retained for compatibility.
+       *
+       * The main/default SupportForge system is now always
+       * contained in "Support Forge".
+       */
+      let category =
+        guild.channels.cache.find(
+          (channel): channel is CategoryChannel =>
+            channel.type ===
+              ChannelType.GuildCategory &&
+            channel.name.toLowerCase() ===
+              categoryName.toLowerCase(),
         );
 
-      const category =
-        result.category;
+      if (!category) {
+        category =
+          await guild.channels.create({
+            name: categoryName,
+            type:
+              ChannelType.GuildCategory,
 
-      // ------------------------------------------------------
-      // EXISTING CATEGORY
-      // ------------------------------------------------------
+            permissionOverwrites: [
+              {
+                id:
+                  guild.roles.everyone.id,
 
-      if (!result.created) {
-        await interaction.editReply({
-          content:
-            `⚠️ A ticket category named **${categoryName}** already exists: ${category}\n\n` +
-            'No duplicate category was created.',
-        });
+                deny: [
+                  PermissionFlagsBits.ViewChannel,
+                ],
+              },
 
-        return;
+              {
+                id:
+                  guild.members.me!.id,
+
+                allow: [
+                  PermissionFlagsBits.ViewChannel,
+                  PermissionFlagsBits.SendMessages,
+                  PermissionFlagsBits.ReadMessageHistory,
+                  PermissionFlagsBits.ManageChannels,
+                  PermissionFlagsBits.ManageMessages,
+                  PermissionFlagsBits.EmbedLinks,
+                  PermissionFlagsBits.AttachFiles,
+                ],
+              },
+
+              ...(staffRole
+                ? [
+                    {
+                      id:
+                        staffRole.id,
+
+                      allow: [
+                        PermissionFlagsBits.ViewChannel,
+                        PermissionFlagsBits.SendMessages,
+                        PermissionFlagsBits.ReadMessageHistory,
+                      ],
+                    },
+                  ]
+                : []),
+            ],
+          });
+      } else if (staffRole) {
+        await category.permissionOverwrites.edit(
+          staffRole.id,
+          {
+            ViewChannel: true,
+            SendMessages: true,
+            ReadMessageHistory: true,
+          },
+        );
       }
 
-      // ------------------------------------------------------
-      // CREATE PANEL
-      // ------------------------------------------------------
+      const supportForgeCategory =
+        await ensureSupportForgeCategory(
+          guild,
+        );
 
       const commandChannel =
         interaction.channel;
 
       if (
-        !commandChannel ||
-        commandChannel.type !==
+        commandChannel &&
+        commandChannel.type ===
           ChannelType.GuildText
       ) {
-        await interaction.editReply({
-          content:
-            `✅ Category ${category} was created.\n\n` +
-            '⚠️ However, I could not post its panel because this command was not run inside a normal text channel.',
-        });
-
-        return;
-      }
-
-      const embed =
-        createPanelEmbed(
-          category.name,
-          staffRole,
-        );
-
-      const button =
-        createCategoryButton(
-          category.id,
-          category.name,
-        );
-
-      const row =
-        new ActionRowBuilder<ButtonBuilder>()
-          .addComponents(
-            button,
+        const embed =
+          createPanelEmbed(
+            category.name,
+            staffRole,
           );
 
-      await commandChannel.send({
-        embeds: [
-          embed,
-        ],
-        components: [
-          row,
-        ],
-      });
+        const button =
+          createCategoryButton(
+            supportForgeCategory.id,
+            category.name,
+          );
 
-      // ------------------------------------------------------
-      // FINAL RESPONSE
-      // ------------------------------------------------------
+        const row =
+          new ActionRowBuilder<ButtonBuilder>()
+            .addComponents(
+              button,
+            );
+
+        await commandChannel.send({
+          embeds: [
+            embed,
+          ],
+          components: [
+            row,
+          ],
+        });
+      }
 
       await interaction.editReply({
         content:
-          `✅ **Ticket category created successfully!**\n\n` +
-          `📂 **Category:** ${category}\n` +
-          `🆔 **Category ID:** \`${category.id}\`\n` +
-          (
-            staffRole
-              ? `👥 **Staff role:** ${staffRole}\n`
-              : '👥 **Staff role:** None\n'
-          ) +
-          '🎫 A ticket panel has also been posted here.',
+          `✅ Ticket category **${category.name}** is ready.\n\n` +
+          `📁 The main SupportForge container remains ${supportForgeCategory}.\n` +
+          '🎫 A ticket panel has been posted using the Support Forge container.',
       });
 
       return;
