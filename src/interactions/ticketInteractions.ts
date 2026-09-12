@@ -31,7 +31,9 @@ function getTopicValue(
   return match?.[1];
 }
 
-function getSubjectFromTopic(topic: string): string {
+function getSubjectFromTopic(
+  topic: string,
+): string {
   const match = topic.match(
     /(?:^|\s)subject=(.*?)\s+number=/,
   );
@@ -40,7 +42,9 @@ function getSubjectFromTopic(topic: string): string {
 }
 
 function findSupportForgeCategory(
-  interaction: ButtonInteraction | ModalSubmitInteraction,
+  interaction:
+    | ButtonInteraction
+    | ModalSubmitInteraction,
 ) {
   return interaction.guild?.channels.cache.find(
     (channel) =>
@@ -51,7 +55,9 @@ function findSupportForgeCategory(
 }
 
 function findTranscriptChannel(
-  interaction: ButtonInteraction | ModalSubmitInteraction,
+  interaction:
+    | ButtonInteraction
+    | ModalSubmitInteraction,
 ) {
   return interaction.guild?.channels.cache.find(
     (channel) =>
@@ -61,7 +67,9 @@ function findTranscriptChannel(
 }
 
 async function getTranscriptChannel(
-  interaction: ButtonInteraction | ModalSubmitInteraction,
+  interaction:
+    | ButtonInteraction
+    | ModalSubmitInteraction,
 ) {
   if (!interaction.guild) {
     return null;
@@ -76,8 +84,11 @@ async function getTranscriptChannel(
     );
   }
 
-  const existing = findTranscriptChannel(interaction);
-  const botMember = interaction.guild.members.me;
+  const existing =
+    findTranscriptChannel(interaction);
+
+  const botMember =
+    interaction.guild.members.me;
 
   if (!botMember) {
     throw new Error(
@@ -139,40 +150,44 @@ async function getTranscriptChannel(
   }
 
   try {
-    return await interaction.guild.channels.create({
-      name: TRANSCRIPT_CHANNEL_NAME,
+    return await interaction.guild.channels.create(
+      {
+        name: TRANSCRIPT_CHANNEL_NAME,
 
-      type: ChannelType.GuildText,
+        type: ChannelType.GuildText,
 
-      parent: supportForgeCategory.id,
+        parent: supportForgeCategory.id,
 
-      topic:
-        'SupportForge ticket transcripts. Do not delete this channel.',
+        topic:
+          'SupportForge ticket transcripts. Do not delete this channel.',
 
-      permissionOverwrites: [
-        {
-          id: interaction.guild.roles.everyone.id,
+        permissionOverwrites: [
+          {
+            id:
+              interaction.guild.roles
+                .everyone.id,
 
-          deny: [
-            PermissionFlagsBits.ViewChannel,
-            PermissionFlagsBits.SendMessages,
-            PermissionFlagsBits.ReadMessageHistory,
-          ],
-        },
+            deny: [
+              PermissionFlagsBits.ViewChannel,
+              PermissionFlagsBits.SendMessages,
+              PermissionFlagsBits.ReadMessageHistory,
+            ],
+          },
 
-        {
-          id: botMember.id,
+          {
+            id: botMember.id,
 
-          allow: [
-            PermissionFlagsBits.ViewChannel,
-            PermissionFlagsBits.SendMessages,
-            PermissionFlagsBits.ReadMessageHistory,
-            PermissionFlagsBits.AttachFiles,
-            PermissionFlagsBits.EmbedLinks,
-          ],
-        },
-      ],
-    });
+            allow: [
+              PermissionFlagsBits.ViewChannel,
+              PermissionFlagsBits.SendMessages,
+              PermissionFlagsBits.ReadMessageHistory,
+              PermissionFlagsBits.AttachFiles,
+              PermissionFlagsBits.EmbedLinks,
+            ],
+          },
+        ],
+      },
+    );
   } catch (error: any) {
     if (
       error?.code === 50013 ||
@@ -181,9 +196,10 @@ async function getTranscriptChannel(
       throw error;
     }
 
-    const raced = findTranscriptChannel(
-      interaction,
-    );
+    const raced =
+      findTranscriptChannel(
+        interaction,
+      );
 
     if (
       raced &&
@@ -321,13 +337,19 @@ export async function handleTicketInteraction(
 
     modal.addComponents(
       new ActionRowBuilder<TextInputBuilder>()
-        .addComponents(subjectInput),
+        .addComponents(
+          subjectInput,
+        ),
 
       new ActionRowBuilder<TextInputBuilder>()
-        .addComponents(descriptionInput),
+        .addComponents(
+          descriptionInput,
+        ),
     );
 
-    await interaction.showModal(modal);
+    await interaction.showModal(
+      modal,
+    );
 
     return;
   }
@@ -393,7 +415,8 @@ export async function handleTicketInteraction(
 
     try {
       await interaction.deferReply({
-        flags: MessageFlags.Ephemeral,
+        flags:
+          MessageFlags.Ephemeral,
       });
     } catch (error: any) {
       if (error?.code === 10062) {
@@ -405,12 +428,16 @@ export async function handleTicketInteraction(
 
     const subject =
       interaction.fields
-        .getTextInputValue('subject')
+        .getTextInputValue(
+          'subject',
+        )
         .trim();
 
     const description =
       interaction.fields
-        .getTextInputValue('description')
+        .getTextInputValue(
+          'description',
+        )
         .trim();
 
     if (
@@ -784,20 +811,13 @@ export async function handleTicketInteraction(
     interaction.customId ===
       'ticket:close'
   ) {
-    // ==========================================================
-    // ACKNOWLEDGE BUTTON INTERACTION
-    // ==========================================================
-
     try {
       await interaction.deferReply({
         flags:
           MessageFlags.Ephemeral,
       });
     } catch (error: any) {
-      if (
-        error?.code ===
-        10062
-      ) {
+      if (error?.code === 10062) {
         return;
       }
 
@@ -959,16 +979,22 @@ export async function handleTicketInteraction(
       new Date();
 
     // ==========================================================
-    // IMMEDIATELY LOCK TICKET MESSAGING
+    // IMMEDIATELY LOCK THE TICKET
     // ==========================================================
     //
-    // This is intentionally BEFORE the success response and
-    // BEFORE any background housekeeping.
+    // These permission operations happen BEFORE the close
+    // confirmation is sent.
+    //
+    // This means the normal owner/staff accounts lose the
+    // ability to send messages before Discord is told that
+    // the close operation has completed.
+    //
+    // The bot itself remains able to send messages.
     //
 
     try {
       // --------------------------------------------------------
-      // LOCK TICKET OWNER
+      // LOCK OWNER
       // --------------------------------------------------------
 
       if (ownerId) {
@@ -985,7 +1011,7 @@ export async function handleTicketInteraction(
       }
 
       // --------------------------------------------------------
-      // LOCK STAFF
+      // LOCK STAFF ROLE
       // --------------------------------------------------------
 
       if (staffRoleId) {
@@ -1020,11 +1046,14 @@ export async function handleTicketInteraction(
       // MARK TICKET CLOSED
       // --------------------------------------------------------
 
-      await channel.setTopic(
+      const closedTopic =
         topic.replace(
           'status=open',
           'status=closed',
-        ),
+        );
+
+      await channel.setTopic(
+        closedTopic,
       );
     } catch (error) {
       console.error(
@@ -1041,7 +1070,7 @@ export async function handleTicketInteraction(
     }
 
     // ==========================================================
-    // CONFIRM CLOSED + LOCKED
+    // CLOSE CONFIRMATION
     // ==========================================================
 
     await interaction.editReply({
@@ -1054,13 +1083,15 @@ export async function handleTicketInteraction(
     // BACKGROUND CLOSE TASKS
     // ==========================================================
     //
-    // Permission locking is NOT performed here.
-    // It has already been completed above.
+    // IMPORTANT:
+    // Permission locking is NOT here.
+    //
+    // Permissions were already locked above.
     //
 
     const closeTasks = [
       // --------------------------------------------------------
-      // RENAME
+      // RENAME TICKET
       // --------------------------------------------------------
 
       (
@@ -1117,14 +1148,16 @@ export async function handleTicketInteraction(
                 true,
               );
 
-          await originalTicketMessage.edit({
-            components: [
-              new ActionRowBuilder<ButtonBuilder>()
-                .addComponents(
-                  closedButton,
-                ),
-            ],
-          });
+          await originalTicketMessage.edit(
+            {
+              components: [
+                new ActionRowBuilder<ButtonBuilder>()
+                  .addComponents(
+                    closedButton,
+                  ),
+              ],
+            },
+          );
         } catch (error) {
           console.error(
             '❌ Failed to disable original ticket button:',
@@ -1176,26 +1209,24 @@ export async function handleTicketInteraction(
     ];
 
     // ==========================================================
-    // START BACKGROUND WORK
+    // START BACKGROUND TASKS
     // ==========================================================
 
     void Promise.allSettled(
       closeTasks,
-    ).then(
-      () => {
-        void generateAndUploadTranscript({
-          interaction,
-          channel,
-          ticketNumber,
-          subject,
-          ownerId:
-            ownerId ??
-            'Unknown',
-          openedAt,
-          closedAt,
-        });
-      },
-    );
+    ).then(() => {
+      void generateAndUploadTranscript({
+        interaction,
+        channel,
+        ticketNumber,
+        subject,
+        ownerId:
+          ownerId ??
+          'Unknown',
+        openedAt,
+        closedAt,
+      });
+    });
 
     return;
   }
@@ -1289,9 +1320,7 @@ async function generateAndUploadTranscript({
         interaction,
       );
 
-    if (
-      !transcriptChannel
-    ) {
+    if (!transcriptChannel) {
       await channel
         .send({
           content:
