@@ -1,3 +1,4 @@
+
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -140,21 +141,28 @@ async function getTranscriptChannel(
   try {
     return await interaction.guild.channels.create({
       name: TRANSCRIPT_CHANNEL_NAME,
+
       type: ChannelType.GuildText,
+
       parent: supportForgeCategory.id,
+
       topic:
         'SupportForge ticket transcripts. Do not delete this channel.',
+
       permissionOverwrites: [
         {
           id: interaction.guild.roles.everyone.id,
+
           deny: [
             PermissionFlagsBits.ViewChannel,
             PermissionFlagsBits.SendMessages,
             PermissionFlagsBits.ReadMessageHistory,
           ],
         },
+
         {
           id: botMember.id,
+
           allow: [
             PermissionFlagsBits.ViewChannel,
             PermissionFlagsBits.SendMessages,
@@ -173,7 +181,9 @@ async function getTranscriptChannel(
       throw error;
     }
 
-    const raced = findTranscriptChannel(interaction);
+    const raced = findTranscriptChannel(
+      interaction,
+    );
 
     if (
       raced &&
@@ -263,7 +273,8 @@ export async function handleTicketInteraction(
 
     if (
       !category ||
-      category.type !== ChannelType.GuildCategory
+      category.type !==
+        ChannelType.GuildCategory
     ) {
       await sendErrorReply(
         interaction,
@@ -350,7 +361,8 @@ export async function handleTicketInteraction(
 
     if (
       !category ||
-      category.type !== ChannelType.GuildCategory
+      category.type !==
+        ChannelType.GuildCategory
     ) {
       await sendErrorReply(
         interaction,
@@ -359,15 +371,25 @@ export async function handleTicketInteraction(
 
       return;
     }
-    const supportForgeCategory = findSupportForgeCategory(interaction);
 
-if (!supportForgeCategory) {
-  await sendErrorReply(
-    interaction,
-    '❌ The Support Forge category could not be found. Please run `/supportforge setup` first.',
-  );
-  return;
-}
+    // ----------------------------------------------------------
+    // THE DISCORD CATEGORY IS THE LOGICAL TICKET CATEGORY.
+    // THE ACTUAL TICKET CHANNEL ALWAYS LIVES UNDER SUPPORT FORGE.
+    // ----------------------------------------------------------
+
+    const supportForgeCategory =
+      findSupportForgeCategory(
+        interaction,
+      );
+
+    if (!supportForgeCategory) {
+      await sendErrorReply(
+        interaction,
+        '❌ The Support Forge category could not be found. Please run `/supportforge setup` first.',
+      );
+
+      return;
+    }
 
     try {
       await interaction.deferReply({
@@ -403,6 +425,10 @@ if (!supportForgeCategory) {
       return;
     }
 
+    // ==========================================================
+    // GET STAFF ROLE FROM LOGICAL CATEGORY
+    // ==========================================================
+
     const staffRoleOverwrite =
       category.permissionOverwrites.cache.find(
         (overwrite) =>
@@ -426,19 +452,58 @@ if (!supportForgeCategory) {
 
     const existingTicket =
       interaction.guild.channels.cache.find(
-        (channel) =>
-          channel.parentId === categoryId &&
-          channel.type ===
-            ChannelType.GuildText &&
-          channel.topic?.startsWith(
-            TICKET_TOPIC_PREFIX,
-          ) &&
-          channel.topic?.includes(
-            'status=open',
-          ) &&
-          channel.topic?.includes(
-            `owner=${interaction.user.id}`,
-          ),
+        (channel) => {
+          if (
+            channel.type !==
+            ChannelType.GuildText
+          ) {
+            return false;
+          }
+
+          if (
+            channel.parentId !==
+            supportForgeCategory.id
+          ) {
+            return false;
+          }
+
+          const topic =
+            channel.topic ?? '';
+
+          if (
+            !topic.startsWith(
+              TICKET_TOPIC_PREFIX,
+            )
+          ) {
+            return false;
+          }
+
+          if (
+            !topic.includes(
+              'status=open',
+            )
+          ) {
+            return false;
+          }
+
+          if (
+            !topic.includes(
+              `owner=${interaction.user.id}`,
+            )
+          ) {
+            return false;
+          }
+
+          if (
+            !topic.includes(
+              `category=${categoryId}`,
+            )
+          ) {
+            return false;
+          }
+
+          return true;
+        },
       );
 
     if (existingTicket) {
@@ -461,7 +526,8 @@ if (!supportForgeCategory) {
       ticketNumber =
         Math.floor(
           1000 +
-            Math.random() * 9000,
+            Math.random() *
+              9000,
         );
 
       ticketName =
@@ -469,7 +535,8 @@ if (!supportForgeCategory) {
     } while (
       interaction.guild.channels.cache.some(
         (channel) =>
-          channel.name === ticketName,
+          channel.name ===
+          ticketName,
       )
     );
 
@@ -482,12 +549,16 @@ if (!supportForgeCategory) {
         id:
           interaction.guild.roles
             .everyone.id,
+
         deny: [
           PermissionFlagsBits.ViewChannel,
         ],
       },
+
       {
-        id: interaction.user.id,
+        id:
+          interaction.user.id,
+
         allow: [
           PermissionFlagsBits.ViewChannel,
           PermissionFlagsBits.SendMessages,
@@ -495,9 +566,11 @@ if (!supportForgeCategory) {
           PermissionFlagsBits.AttachFiles,
         ],
       },
+
       {
         id:
           interaction.client.user.id,
+
         allow: [
           PermissionFlagsBits.ViewChannel,
           PermissionFlagsBits.SendMessages,
@@ -513,6 +586,7 @@ if (!supportForgeCategory) {
     if (staffRoleId) {
       permissionOverwrites.push({
         id: staffRoleId,
+
         allow: [
           PermissionFlagsBits.ViewChannel,
           PermissionFlagsBits.SendMessages,
@@ -532,12 +606,14 @@ if (!supportForgeCategory) {
       ticketChannel =
         await interaction.guild.channels.create(
           {
-            name: ticketName,
-            type: ChannelType.GuildText,
+            name:
+              ticketName,
 
-            // Tickets stay directly inside
-            // their configured ticket category.
-            parent: supportForgeCategory.id,
+            type:
+              ChannelType.GuildText,
+
+            parent:
+              supportForgeCategory.id,
 
             topic:
               `${TICKET_TOPIC_PREFIX} ` +
@@ -575,27 +651,47 @@ if (!supportForgeCategory) {
     const ticketEmbed =
       new EmbedBuilder()
         .setColor(0x5865f2)
-        .setTitle('🎫 Support Ticket')
-        .setDescription(description)
+
+        .setTitle(
+          '🎫 Support Ticket',
+        )
+
+        .setDescription(
+          description,
+        )
+
         .addFields(
           {
-            name: '👤 Ticket Owner',
-            value: `${interaction.user}`,
+            name:
+              '👤 Ticket Owner',
+
+            value:
+              `${interaction.user}`,
           },
+
           {
-            name: '📌 Subject',
-            value: subject,
+            name:
+              '📌 Subject',
+
+            value:
+              subject,
           },
+
           {
-            name: '📂 Category',
-            value: category.name,
+            name:
+              '📂 Category',
+
+            value:
+              category.name,
           },
         )
+
         .setFooter({
           text:
             `Ticket #${ticketNumber} • ` +
             `Created by ${interaction.user.tag}`,
         })
+
         .setTimestamp();
 
     // ==========================================================
@@ -604,8 +700,12 @@ if (!supportForgeCategory) {
 
     const closeButton =
       new ButtonBuilder()
-        .setCustomId('ticket:close')
-        .setLabel('Close Ticket')
+        .setCustomId(
+          'ticket:close',
+        )
+        .setLabel(
+          'Close Ticket',
+        )
         .setEmoji('🔒')
         .setStyle(
           ButtonStyle.Danger,
@@ -685,15 +785,19 @@ if (!supportForgeCategory) {
       'ticket:close'
   ) {
     // ==========================================================
-    // ACKNOWLEDGE IMMEDIATELY
+    // ACKNOWLEDGE BUTTON INTERACTION
     // ==========================================================
 
     try {
       await interaction.deferReply({
-        flags: MessageFlags.Ephemeral,
+        flags:
+          MessageFlags.Ephemeral,
       });
     } catch (error: any) {
-      if (error?.code === 10062) {
+      if (
+        error?.code ===
+        10062
+      ) {
         return;
       }
 
@@ -780,7 +884,8 @@ if (!supportForgeCategory) {
 
     const staffRoleId =
       staffRoleIdRaw &&
-      staffRoleIdRaw !== 'none'
+      staffRoleIdRaw !==
+        'none'
         ? staffRoleIdRaw
         : undefined;
 
@@ -801,29 +906,34 @@ if (!supportForgeCategory) {
         topic,
       );
 
-    // Do not fetch the closing member from
-    // Discord's API just to check permissions.
-    // The interaction already contains the member.
+    // ==========================================================
+    // PERMISSION CHECK
+    // ==========================================================
+
     const member =
       interaction.member;
 
-    
+    const isAdministrator =
+      member !== null &&
+      'permissions' in member &&
+      typeof member.permissions !==
+        'string' &&
+      member.permissions.has(
+        PermissionFlagsBits.Administrator,
+      );
 
-const isAdministrator =
-  member !== null &&
-  'permissions' in member &&
-  typeof member.permissions !== 'string' &&
-  member.permissions.has(PermissionFlagsBits.Administrator);
+    const isStaff =
+      member !== null &&
+      'roles' in member &&
+      'cache' in member.roles &&
+      !!staffRoleId &&
+      member.roles.cache.has(
+        staffRoleId,
+      );
 
-const isStaff =
-  member !== null &&
-  'roles' in member &&
-  'cache' in member.roles &&
-  !!staffRoleId &&
-  member.roles.cache.has(staffRoleId);
-
-const isOwner =
-  ownerId === interaction.user.id;
+    const isOwner =
+      ownerId ===
+      interaction.user.id;
 
     if (
       !isOwner &&
@@ -849,10 +959,67 @@ const isOwner =
       new Date();
 
     // ==========================================================
-    // UPDATE STATUS FIRST
+    // IMMEDIATELY LOCK TICKET MESSAGING
     // ==========================================================
+    //
+    // This is intentionally BEFORE the success response and
+    // BEFORE any background housekeeping.
+    //
 
     try {
+      // --------------------------------------------------------
+      // LOCK TICKET OWNER
+      // --------------------------------------------------------
+
+      if (ownerId) {
+        await channel.permissionOverwrites.edit(
+          ownerId,
+          {
+            ViewChannel: true,
+            SendMessages: false,
+            AddReactions: false,
+            AttachFiles: false,
+            EmbedLinks: false,
+          },
+        );
+      }
+
+      // --------------------------------------------------------
+      // LOCK STAFF
+      // --------------------------------------------------------
+
+      if (staffRoleId) {
+        await channel.permissionOverwrites.edit(
+          staffRoleId,
+          {
+            ViewChannel: true,
+            SendMessages: false,
+            AddReactions: false,
+            AttachFiles: false,
+            EmbedLinks: false,
+          },
+        );
+      }
+
+      // --------------------------------------------------------
+      // LOCK @EVERYONE
+      // --------------------------------------------------------
+
+      await channel.permissionOverwrites.edit(
+        channel.guild.roles.everyone,
+        {
+          ViewChannel: false,
+          SendMessages: false,
+          AddReactions: false,
+          AttachFiles: false,
+          EmbedLinks: false,
+        },
+      );
+
+      // --------------------------------------------------------
+      // MARK TICKET CLOSED
+      // --------------------------------------------------------
+
       await channel.setTopic(
         topic.replace(
           'status=open',
@@ -861,109 +1028,37 @@ const isOwner =
       );
     } catch (error) {
       console.error(
-        '❌ Failed to update ticket status:',
+        '❌ Failed to lock ticket:',
         error,
       );
 
       await interaction.editReply({
         content:
-          '❌ The ticket could not be closed because its status could not be updated.',
+          '❌ The ticket could not be closed because its permissions could not be locked.',
       });
 
       return;
     }
 
     // ==========================================================
-    // IMMEDIATE RESPONSE
+    // CONFIRM CLOSED + LOCKED
     // ==========================================================
 
     await interaction.editReply({
       content:
-        `✅ Ticket #${ticketNumber} is now closed.\n` +
-        `🔒 The channel is being locked and the transcript is being generated in the background.`,
+        `✅ Ticket #${ticketNumber} is now closed and locked.\n` +
+        `🔒 No further messages can be sent in this ticket.`,
     });
 
     // ==========================================================
-    // POST-CLOSE HOUSEKEEPING
+    // BACKGROUND CLOSE TASKS
     // ==========================================================
+    //
+    // Permission locking is NOT performed here.
+    // It has already been completed above.
+    //
 
     const closeTasks = [
-      // --------------------------------------------------------
-      // LOCK OWNER
-      // --------------------------------------------------------
-
-      ownerId
-        ? channel.permissionOverwrites
-            .edit(
-              ownerId,
-              {
-                ViewChannel: true,
-                SendMessages: false,
-                AddReactions: false,
-                AttachFiles: false,
-                EmbedLinks: false,
-              },
-            )
-            .catch(
-              (error) => {
-                console.error(
-                  '❌ Failed to lock ticket owner:',
-                  error,
-                );
-              },
-            )
-        : Promise.resolve(),
-
-      // --------------------------------------------------------
-      // LOCK STAFF
-      // --------------------------------------------------------
-
-      staffRoleId
-        ? channel.permissionOverwrites
-            .edit(
-              staffRoleId,
-              {
-                ViewChannel: true,
-                SendMessages: false,
-                AddReactions: false,
-                AttachFiles: false,
-                EmbedLinks: false,
-              },
-            )
-            .catch(
-              (error) => {
-                console.error(
-                  '❌ Failed to lock staff role:',
-                  error,
-                );
-              },
-            )
-        : Promise.resolve(),
-
-      // --------------------------------------------------------
-      // LOCK @EVERYONE
-      // --------------------------------------------------------
-
-      channel.permissionOverwrites
-        .edit(
-          channel.guild.roles.everyone,
-          {
-            ViewChannel: false,
-            SendMessages: false,
-            AddReactions: false,
-            AttachFiles: false,
-            EmbedLinks: false,
-          },
-        )
-        .catch(
-          (error) => {
-            console.error(
-              '❌ Failed to lock @everyone permissions:',
-              error,
-            );
-          },
-        ),
-
       // --------------------------------------------------------
       // RENAME
       // --------------------------------------------------------
@@ -988,7 +1083,7 @@ const isOwner =
       ),
 
       // --------------------------------------------------------
-      // DISABLE ORIGINAL BUTTON
+      // DISABLE ORIGINAL CLOSE BUTTON
       // --------------------------------------------------------
 
       (async () => {
@@ -1018,7 +1113,9 @@ const isOwner =
               .setStyle(
                 ButtonStyle.Secondary,
               )
-              .setDisabled(true);
+              .setDisabled(
+                true,
+              );
 
           await originalTicketMessage.edit({
             components: [
@@ -1037,7 +1134,7 @@ const isOwner =
       })(),
 
       // --------------------------------------------------------
-      // CLOSED MESSAGE
+      // SEND CLOSED MESSAGE
       // --------------------------------------------------------
 
       (async () => {
@@ -1055,12 +1152,14 @@ const isOwner =
                   `This ticket was closed by ${interaction.user}.`,
                 )
                 .addFields({
-                  name: '🎫 Ticket',
+                  name:
+                    '🎫 Ticket',
                   value:
                     `#${ticketNumber}`,
                 })
                 .addFields({
-                  name: '📄 Transcript',
+                  name:
+                    '📄 Transcript',
                   value:
                     '⏳ Transcript is being generated...',
                 })
@@ -1116,16 +1215,22 @@ async function generateAndUploadTranscript({
   closedAt,
 }: {
   interaction: ButtonInteraction;
+
   channel: Extract<
     typeof interaction.channel,
     {
       type: ChannelType.GuildText;
     }
   >;
+
   ticketNumber: string;
+
   subject: string;
+
   ownerId: string;
+
   openedAt: Date;
+
   closedAt: Date;
 }) {
   try {
@@ -1193,7 +1298,8 @@ async function generateAndUploadTranscript({
             '⚠️ Ticket closed, but the transcript channel could not be found.',
         })
         .catch(
-          () => undefined,
+          () =>
+            undefined,
         );
 
       return;
