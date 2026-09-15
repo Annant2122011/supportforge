@@ -15,10 +15,50 @@ import {
 } from 'discord.js';
 
 import { generateTranscript } from '../services/transcriptService';
+import { isPremiumOrHigher } from '../services/tierService';
+import { logTicketEvent } from '../services/auditLogService';
 
 const SUPPORT_FORGE_CATEGORY_NAME = 'Support Forge';
 const TRANSCRIPT_CHANNEL_NAME = '📄 support-transcripts';
 const TICKET_TOPIC_PREFIX = 'supportforge:ticket';
+
+// ----------------------------------------------------------------
+// TICKET CREATION COOLDOWN (anti-abuse, Free tier)
+// ----------------------------------------------------------------
+//
+// In-memory only — resets on restart, and is per-process rather
+// than per-guild. Good enough to block rapid-fire clicking; a real
+// deployment would track this per-guild in a database.
+//
+
+const TICKET_CREATION_COOLDOWN_MS = 60_000;
+const lastTicketCreationAttempt = new Map<string, number>();
+
+function getTicketCreationCooldownRemaining(
+  userId: string,
+): number {
+  const lastAttempt =
+    lastTicketCreationAttempt.get(userId);
+
+  if (!lastAttempt) {
+    return 0;
+  }
+
+  const elapsed = Date.now() - lastAttempt;
+  const remaining =
+    TICKET_CREATION_COOLDOWN_MS - elapsed;
+
+  return remaining > 0
+    ? Math.ceil(remaining / 1000)
+    : 0;
+}
+
+function markTicketCreationAttempt(
+  userId: string,
+): void {
+  lastTicketCreationAttempt.set(userId, Date.now());
+}
+
 
 type TicketStatus =
   | 'open'
@@ -420,6 +460,33 @@ export async function handleTicketInteraction(
       return;
     }
 
+    // ----------------------------------------------------------
+    // ANTI-ABUSE: CREATION COOLDOWN (free-tier protection)
+    // ----------------------------------------------------------
+    //
+    // In-memory only — resets on restart. Good enough to stop a
+    // user rapid-clicking "Create Ticket"; a real deployment
+    // would track this per-guild in a database instead.
+    //
+
+    const cooldownRemaining =
+      getTicketCreationCooldownRemaining(
+        interaction.user.id,
+      );
+
+    if (cooldownRemaining > 0) {
+      await sendErrorReply(
+        interaction,
+        `⏳ Please wait ${cooldownRemaining}s before creating another ticket.`,
+      );
+
+      return;
+    }
+
+    markTicketCreationAttempt(
+      interaction.user.id,
+    );
+
     const modal =
       new ModalBuilder()
         .setCustomId(
@@ -774,6 +841,7 @@ export async function handleTicketInteraction(
               `owner=${interaction.user.id} ` +
               `category=${categoryId} ` +
               `staff=${staffRoleId ?? 'none'} ` +
+              `priority=normal ` +
               `subject=${subject.replace(
                 /\s+/g,
                 ' ',
@@ -904,6 +972,15 @@ export async function handleTicketInteraction(
       content:
         `✅ Your ticket has been created: ${ticketChannel}`,
     });
+
+    if (isPremiumOrHigher(interaction.guild.id)) {
+      void logTicketEvent(interaction.guild, {
+        ticketNumber: `${ticketNumber}`,
+        event: `Ticket created by ${interaction.user}`,
+        detail: `Subject: ${subject}`,
+        parentCategoryId: supportForgeCategory.id,
+      });
+    }
 
     return;
   }
@@ -1183,11 +1260,51 @@ export async function handleTicketInteraction(
     //
 
     try {
+      const botMember =
+        interaction.guild.members.me;
+
+      if (!botMember) {
+        throw new Error(
+          'SupportForge bot member could not be resolved.',
+        );
+      }
+
+      // --------------------------------------------------------
+      // VERIFY THE BOT CAN ACTUALLY LOCK THIS CHANNEL
+      // --------------------------------------------------------
+
+      const botChannelPermissions =
+        channel.permissionsFor(botMember);
+
+      if (
+        !botChannelPermissions?.has(
+          PermissionFlagsBits.ManageChannels,
+        )
+      ) {
+        console.error(
+          `❌ Missing Manage Channels in ticket #${ticketNumber}; cannot lock permissions.`,
+        );
+
+        throw new Error(
+          'SupportForge does not have Manage Channels permission in this ticket channel.',
+        );
+      }
+
       // --------------------------------------------------------
       // LOCK OWNER
       // --------------------------------------------------------
+      //
+      // Skipped for the guild owner: they bypass channel
+      // permission overwrites entirely, so editing their
+      // overwrite here would have no effect (and is best
+      // avoided rather than attempted pointlessly).
+      //
 
-      if (ownerId) {
+      const isGuildOwner =
+        !!ownerId &&
+        ownerId === interaction.guild.ownerId;
+
+      if (ownerId && !isGuildOwner) {
         await channel.permissionOverwrites.edit(
           ownerId,
           {
@@ -1209,6 +1326,7 @@ export async function handleTicketInteraction(
           staffRoleId,
           {
             ViewChannel: true,
+            ReadMessageHistory: true,
             SendMessages: false,
             AddReactions: false,
             AttachFiles: false,
@@ -1269,6 +1387,14 @@ export async function handleTicketInteraction(
         `🔒 No further messages can be sent in this ticket.\n` +
         `📄 Transcript saved to ${transcriptChannelMention}.`,
     });
+
+    if (isPremiumOrHigher(interaction.guild.id)) {
+      void logTicketEvent(interaction.guild, {
+        ticketNumber,
+        event: `Ticket closed by ${interaction.user}`,
+        detail: `Transcript: ${transcriptChannelMention}`,
+      });
+    }
 
     // ==========================================================
     // BACKGROUND CLOSE TASKS (cosmetic — transcript is already
@@ -1518,6 +1644,14 @@ async function handleStatusChangeButton(
     return;
   }
 
+  if (!interaction.guild) {
+    await interaction.editReply({
+      content: '❌ This can only be used inside a server.',
+    });
+
+    return;
+  }
+
   const topic = channel.topic ?? '';
 
   if (!topic.startsWith(TICKET_TOPIC_PREFIX)) {
@@ -1661,6 +1795,13 @@ async function handleStatusChangeButton(
   await interaction.editReply({
     content: options.successMessage(interaction, ticketNumber),
   });
+
+  if (isPremiumOrHigher(interaction.guild.id)) {
+    void logTicketEvent(interaction.guild, {
+      ticketNumber,
+      event: `Status → ${options.newStatus} (by ${interaction.user})`,
+    });
+  }
 
   void Promise.allSettled([
     updateTicketMessageButtons(

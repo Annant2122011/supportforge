@@ -6,7 +6,6 @@ import {
   MessageFlags,
 } from 'discord.js';
 
-import { setupCommand } from './commands/setup';
 import { execute as executeSupportForge } from './commands/supportforge';
 import { handleTicketInteraction } from './interactions/ticketInteractions';
 
@@ -43,17 +42,6 @@ client.on(
       if (
         interaction.isChatInputCommand()
       ) {
-        if (
-          interaction.commandName ===
-          'setup'
-        ) {
-          await setupCommand.execute(
-            interaction,
-          );
-
-          return;
-        }
-
         if (
           interaction.commandName ===
           'supportforge'

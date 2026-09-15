@@ -12,11 +12,63 @@ import {
   type Role,
 } from 'discord.js';
 
+import {
+  getGuildTier,
+  isPremiumOrHigher,
+  isProTier,
+  premiumRequiredMessage,
+  setGuildTier,
+  tierLabel,
+} from '../services/tierService';
+
+import { logTicketEvent } from '../services/auditLogService';
+
 const SUPPORT_FORGE_CATEGORY_NAME = 'Support Forge';
 const TRANSCRIPT_CHANNEL_NAME = '📄 support-transcripts';
 const PANEL_CHANNEL_NAME = 'support-panel';
 const PANEL_TOPIC_PREFIX = 'supportforge:panel';
 const TICKET_TOPIC_PREFIX = 'supportforge:ticket';
+
+const TICKET_PRIORITIES = [
+  'low',
+  'normal',
+  'high',
+  'urgent',
+  'critical',
+] as const;
+
+type TicketPriority = (typeof TICKET_PRIORITIES)[number];
+
+const PRIORITY_EMOJI: Record<TicketPriority, string> = {
+  low: '🟢',
+  normal: '⚪',
+  high: '🟠',
+  urgent: '🔴',
+  critical: '🟣',
+};
+
+function getTopicField(
+  topic: string,
+  key: string,
+): string | undefined {
+  const match = topic.match(
+    new RegExp(`(?:^|\\s)${key}=([^\\s]+)`),
+  );
+
+  return match?.[1];
+}
+
+function setTopicField(
+  topic: string,
+  key: string,
+  value: string,
+): string {
+  const pattern = new RegExp(`(?:^|\\s)${key}=[^\\s]+`);
+
+  return pattern.test(topic)
+    ? topic.replace(pattern, ` ${key}=${value}`)
+    : `${topic} ${key}=${value}`;
+}
 
 function cleanCategoryName(name: string): string {
   return name
@@ -34,6 +86,73 @@ function findSupportForgeCategory(
       channel.name.toLowerCase() ===
         SUPPORT_FORGE_CATEGORY_NAME.toLowerCase(),
   );
+}
+
+/**
+ * A "logical" category is a department (General Support, Billing,
+ * etc.) — distinct from the physical "Support Forge" container that
+ * every ticket channel actually lives under. The logical category
+ * carries the department's staff-role permission overwrite; the
+ * physical container just keeps all ticket channels grouped together
+ * in the channel list.
+ */
+function findLogicalCategory(
+  guild: Guild,
+  name: string,
+): CategoryChannel | undefined {
+  return guild.channels.cache.find(
+    (channel): channel is CategoryChannel =>
+      channel.type === ChannelType.GuildCategory &&
+      channel.name.toLowerCase() === name.toLowerCase(),
+  );
+}
+
+const DEFAULT_DEPARTMENT_NAME = 'General Support';
+
+/**
+ * Ensures a default logical department exists so the main panel's
+ * ticket button has somewhere to look up a staff role from, distinct
+ * from the physical Support Forge container.
+ */
+async function ensureDefaultLogicalCategory(
+  guild: Guild,
+): Promise<CategoryChannel> {
+  const existing = findLogicalCategory(
+    guild,
+    DEFAULT_DEPARTMENT_NAME,
+  );
+
+  if (existing) {
+    return existing;
+  }
+
+  const botMember = guild.members.me;
+
+  if (!botMember) {
+    throw new Error(
+      'Could not find SupportForge bot member.',
+    );
+  }
+
+  return guild.channels.create({
+    name: DEFAULT_DEPARTMENT_NAME,
+    type: ChannelType.GuildCategory,
+
+    permissionOverwrites: [
+      {
+        id: guild.roles.everyone.id,
+        deny: [PermissionFlagsBits.ViewChannel],
+      },
+      {
+        id: botMember.id,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+        ],
+      },
+    ],
+  });
 }
 
 function findTranscriptChannel(guild: Guild) {
@@ -466,79 +585,102 @@ async function migrateExistingTickets(
   }
 }
 
+async function findExistingPanelMessage(
+  panelChannel: Extract<
+    ReturnType<typeof findPanelChannel>,
+    any
+  >,
+) {
+  if (
+    !panelChannel ||
+    panelChannel.type !== ChannelType.GuildText
+  ) {
+    return undefined;
+  }
+
+  const messages = await panelChannel.messages.fetch({
+    limit: 50,
+  });
+
+  return messages.find(
+    (message) =>
+      message.author.id ===
+        panelChannel.client.user.id &&
+      (message.embeds.some(
+        (embed) => embed.title === '🎫 SupportForge',
+      ) ||
+        message.content.includes('SupportForge')),
+  );
+}
+
 async function ensurePanelMessage(
   panelChannel: Extract<
     ReturnType<typeof findPanelChannel>,
     any
   >,
-  supportForgeCategoryId: string,
+  category: CategoryChannel,
 ) {
   if (
     !panelChannel ||
-    panelChannel.type !==
-      ChannelType.GuildText
+    panelChannel.type !== ChannelType.GuildText
   ) {
     return;
   }
 
-  const messages =
-    await panelChannel.messages.fetch({
-      limit: 50,
-    });
-
   const existingPanelMessage =
-    messages.find(
-      (message) =>
-        message.author.id ===
-          panelChannel.client.user.id &&
-        (
-          message.embeds.some(
-            (embed) =>
-              embed.title ===
-              '🎫 SupportForge',
-          ) ||
-          message.content.includes(
-            'SupportForge',
-          )
-        ),
-    );
+    await findExistingPanelMessage(panelChannel);
 
-  const panelEmbed =
-    createPanelEmbed(
-      'General Support',
-    );
+  const panelEmbed = createPanelEmbed(category.name);
+  const panelButton = createTicketButton(category.id);
 
-  const panelButton =
-    createTicketButton(
-      supportForgeCategoryId,
-    );
-
-  const row =
-    new ActionRowBuilder<ButtonBuilder>()
-      .addComponents(
-        panelButton,
-      );
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    panelButton,
+  );
 
   if (existingPanelMessage) {
     await existingPanelMessage.edit({
-      embeds: [
-        panelEmbed,
-      ],
-      components: [
-        row,
-      ],
+      embeds: [panelEmbed],
+      components: [row],
     });
 
     return;
   }
 
   await panelChannel.send({
-    embeds: [
-      panelEmbed,
-    ],
-    components: [
-      row,
-    ],
+    embeds: [panelEmbed],
+    components: [row],
+  });
+}
+
+/**
+ * Posts a dedicated panel message for one department into the
+ * shared panel channel, alongside the main panel message.
+ */
+async function sendCategoryPanel(
+  panelChannel: Extract<
+    ReturnType<typeof findPanelChannel>,
+    any
+  >,
+  category: CategoryChannel,
+  staffRole?: Role | null,
+) {
+  if (
+    !panelChannel ||
+    panelChannel.type !== ChannelType.GuildText
+  ) {
+    return;
+  }
+
+  const embed = createPanelEmbed(category.name, staffRole);
+  const button = createCategoryButton(category.id, category.name);
+
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    button,
+  );
+
+  await panelChannel.send({
+    embeds: [embed],
+    components: [row],
   });
 }
 
@@ -605,6 +747,147 @@ export const data =
                         'Role that should handle tickets in this category',
                       )
                       .setRequired(false),
+                ),
+          ),
+    )
+
+    // ========================================================
+    // /supportforge premium (demo tier switch)
+    // ========================================================
+
+    .addSubcommandGroup(
+      (group) =>
+        group
+          .setName('premium')
+          .setDescription(
+            'Preview SupportForge Premium/Pro features (demo — no billing)',
+          )
+
+          .addSubcommand(
+            (subcommand) =>
+              subcommand
+                .setName('status')
+                .setDescription(
+                  "Show this server's current SupportForge tier",
+                ),
+          )
+
+          .addSubcommand(
+            (subcommand) =>
+              subcommand
+                .setName('toggle-demo')
+                .setDescription(
+                  'Cycle this server between Free / Premium (Demo) / Pro (Demo)',
+                ),
+          ),
+    )
+
+    // ========================================================
+    // /supportforge ticket (used inside a ticket channel)
+    // ========================================================
+
+    .addSubcommandGroup(
+      (group) =>
+        group
+          .setName('ticket')
+          .setDescription(
+            'Ticket tools — run inside a ticket channel',
+          )
+
+          .addSubcommand(
+            (subcommand) =>
+              subcommand
+                .setName('priority')
+                .setDescription(
+                  'Set this ticket\'s priority (Premium)',
+                )
+
+                .addStringOption(
+                  (option) =>
+                    option
+                      .setName('level')
+                      .setDescription(
+                        'Priority level',
+                      )
+                      .setRequired(true)
+                      .addChoices(
+                        ...TICKET_PRIORITIES.map(
+                          (level) => ({
+                            name: level,
+                            value: level,
+                          }),
+                        ),
+                      ),
+                ),
+          )
+
+          .addSubcommand(
+            (subcommand) =>
+              subcommand
+                .setName('tag')
+                .setDescription(
+                  'Add a tag to this ticket (Premium)',
+                )
+
+                .addStringOption(
+                  (option) =>
+                    option
+                      .setName('name')
+                      .setDescription('Tag name')
+                      .setRequired(true)
+                      .setMaxLength(30),
+                ),
+          )
+
+          .addSubcommand(
+            (subcommand) =>
+              subcommand
+                .setName('note')
+                .setDescription(
+                  'Add an internal staff-only note to this ticket (Premium)',
+                )
+
+                .addStringOption(
+                  (option) =>
+                    option
+                      .setName('text')
+                      .setDescription('Note content')
+                      .setRequired(true)
+                      .setMaxLength(500),
+                ),
+          )
+
+          .addSubcommand(
+            (subcommand) =>
+              subcommand
+                .setName('add-user')
+                .setDescription(
+                  'Give another user access to this ticket',
+                )
+
+                .addUserOption(
+                  (option) =>
+                    option
+                      .setName('user')
+                      .setDescription('User to add')
+                      .setRequired(true),
+                ),
+          )
+
+          .addSubcommand(
+            (subcommand) =>
+              subcommand
+                .setName('remove-user')
+                .setDescription(
+                  'Remove a previously added user from this ticket',
+                )
+
+                .addUserOption(
+                  (option) =>
+                    option
+                      .setName('user')
+                      .setDescription('User to remove')
+                      .setRequired(true),
                 ),
           ),
     );
@@ -768,6 +1051,15 @@ export async function execute(
         );
 
       // --------------------------------------------------------
+      // DEFAULT DEPARTMENT
+      // --------------------------------------------------------
+
+      const defaultCategory =
+        await ensureDefaultLogicalCategory(
+          guild,
+        );
+
+      // --------------------------------------------------------
       // MOVE EXISTING TICKETS
       // --------------------------------------------------------
 
@@ -782,7 +1074,7 @@ export async function execute(
 
       await ensurePanelMessage(
         panelChannel,
-        supportForgeCategory.id,
+        defaultCategory,
       );
 
       // --------------------------------------------------------
@@ -799,9 +1091,13 @@ export async function execute(
 
           `🔒 **Private transcript channel:** ${transcriptChannel}\n\n` +
 
+          `📂 **Default department:** ${defaultCategory}\n\n` +
+
           '🎫 All SupportForge ticket channels are now placed inside **Support Forge**.\n' +
 
-          '🔐 Tickets and transcripts remain private through their own permission overwrites.',
+          '🔐 Tickets and transcripts remain private through their own permission overwrites.\n\n' +
+
+          'Use `/supportforge category add` to create more departments — each gets its own panel button and can have its own staff role.',
       });
 
       return;
@@ -853,6 +1149,18 @@ export async function execute(
       return;
     }
 
+    if (
+      categoryName.toLowerCase() ===
+      SUPPORT_FORGE_CATEGORY_NAME.toLowerCase()
+    ) {
+      await interaction.editReply({
+        content:
+          '❌ That name is reserved for the main SupportForge container.',
+      });
+
+      return;
+    }
+
     const staffRoleOption =
       interaction.options.getRole(
         'staff-role',
@@ -883,18 +1191,15 @@ export async function execute(
 
     try {
       /*
-       * This existing command is retained for compatibility.
-       *
-       * The main/default SupportForge system is now always
-       * contained in "Support Forge".
+       * The main/default SupportForge container is always
+       * "Support Forge"; this creates (or reuses) a separate
+       * logical department category and posts its ticket button
+       * into the shared panel channel.
        */
       let category =
-        guild.channels.cache.find(
-          (channel): channel is CategoryChannel =>
-            channel.type ===
-              ChannelType.GuildCategory &&
-            channel.name.toLowerCase() ===
-              categoryName.toLowerCase(),
+        findLogicalCategory(
+          guild,
+          categoryName,
         );
 
       if (!category) {
@@ -961,47 +1266,28 @@ export async function execute(
           guild,
         );
 
-      const commandChannel =
-        interaction.channel;
+      const panelChannel =
+        await ensurePanelChannel(
+          guild,
+          supportForgeCategory.id,
+        );
 
-      if (
-        commandChannel &&
-        commandChannel.type ===
-          ChannelType.GuildText
-      ) {
-        const embed =
-          createPanelEmbed(
-            category.name,
-            staffRole,
-          );
-
-        const button =
-          createCategoryButton(
-            supportForgeCategory.id,
-            category.name,
-          );
-
-        const row =
-          new ActionRowBuilder<ButtonBuilder>()
-            .addComponents(
-              button,
-            );
-
-        await commandChannel.send({
-          embeds: [
-            embed,
-          ],
-          components: [
-            row,
-          ],
-        });
-      }
+      await sendCategoryPanel(
+        panelChannel,
+        category,
+        staffRole,
+      );
 
       await interaction.editReply({
         content:
-          `✅ Ticket category **${category.name}** is ready.\n\n` +
+          `✅ Ticket department **${category.name}** is ready.\n\n` +
           `📁 The main SupportForge container remains ${supportForgeCategory}.\n` +
-          '🎫 A ticket panel has been posted using the Support Forge container.',
+          `🌐 A ticket panel button for this department has been posted in ${panelChannel}.` +
+          (
+            staffRole
+              ? `\n👥 Staff role: ${staffRole}`
+              : ''
+          ),
       });
 
       return;
@@ -1015,6 +1301,361 @@ export async function execute(
         content:
           '❌ The ticket category could not be created.\n\n' +
           'Make sure the bot has **Manage Channels** permission.',
+      });
+
+      return;
+    }
+  }
+
+  // ==========================================================
+  // /supportforge premium status
+  // ==========================================================
+
+  if (
+    subcommandGroup === 'premium' &&
+    subcommand === 'status'
+  ) {
+    await interaction.deferReply({
+      ephemeral: true,
+    });
+
+    const tier = getGuildTier(guild.id);
+
+    await interaction.editReply({
+      content:
+        `📦 **Current tier:** ${tierLabel(tier)}\n\n` +
+        (tier === 'free'
+          ? 'Premium unlocks ticket priority levels, tags, ' +
+            'internal staff notes, and the audit log channel.\n' +
+            'Pro additionally unlocks everything Premium has ' +
+            '(the demo does not currently differentiate Pro-only features ' +
+            'beyond Premium — this is a placeholder tier for future work).\n\n' +
+            'Run `/supportforge premium toggle-demo` to preview them ' +
+            '— this is a demo switch, not a real purchase.'
+          : '✅ Premium features are unlocked on this server (demo mode, no billing involved).'),
+    });
+
+    return;
+  }
+
+  // ==========================================================
+  // /supportforge premium toggle-demo
+  // ==========================================================
+
+  if (
+    subcommandGroup === 'premium' &&
+    subcommand === 'toggle-demo'
+  ) {
+    await interaction.deferReply({
+      ephemeral: true,
+    });
+
+    const currentTier = getGuildTier(guild.id);
+
+    const nextTier =
+      currentTier === 'free'
+        ? 'premium-demo'
+        : currentTier === 'premium-demo'
+          ? 'pro-demo'
+          : 'free';
+
+    setGuildTier(guild.id, nextTier);
+
+    await interaction.editReply({
+      content:
+        `🔁 Tier changed: **${tierLabel(currentTier)}** → **${tierLabel(nextTier)}**.\n\n` +
+        '⚠️ This is a demo switch with no real billing behind it — ' +
+        'it exists purely so you can preview what Premium/Pro would unlock.',
+    });
+
+    return;
+  }
+
+  // ==========================================================
+  // /supportforge ticket ... (run inside a ticket channel)
+  // ==========================================================
+
+  if (subcommandGroup === 'ticket') {
+    await interaction.deferReply({
+      ephemeral: true,
+    });
+
+    const channel = interaction.channel;
+
+    if (!channel || channel.type !== ChannelType.GuildText) {
+      await interaction.editReply({
+        content:
+          '❌ This command can only be used inside a ticket channel.',
+      });
+
+      return;
+    }
+
+    const topic = channel.topic ?? '';
+
+    if (!topic.startsWith(TICKET_TOPIC_PREFIX)) {
+      await interaction.editReply({
+        content: '❌ This channel is not a SupportForge ticket.',
+      });
+
+      return;
+    }
+
+    const ticketNumber =
+      getTopicField(topic, 'number') ?? 'Unknown';
+    const staffRoleId = getTopicField(topic, 'staff');
+    const ownerId = getTopicField(topic, 'owner');
+
+    const isTicketStaff =
+      isAdministrator ||
+      (!!staffRoleId &&
+        member.roles.cache.has(staffRoleId));
+
+    // ----------------------------------------------------------
+    // /supportforge ticket add-user / remove-user (Free)
+    // ----------------------------------------------------------
+
+    if (
+      subcommand === 'add-user' ||
+      subcommand === 'remove-user'
+    ) {
+      if (!isTicketStaff) {
+        await interaction.editReply({
+          content:
+            '❌ Only support staff or administrators can manage ticket access.',
+        });
+
+        return;
+      }
+
+      const targetUser = interaction.options.getUser(
+        'user',
+        true,
+      );
+
+      try {
+        if (subcommand === 'add-user') {
+          await channel.permissionOverwrites.edit(
+            targetUser.id,
+            {
+              ViewChannel: true,
+              SendMessages: true,
+              ReadMessageHistory: true,
+              AttachFiles: true,
+            },
+          );
+
+          await channel.send({
+            content: `➕ ${targetUser} was added to this ticket by ${interaction.user}.`,
+          });
+
+          await interaction.editReply({
+            content: `✅ Added ${targetUser} to ticket #${ticketNumber}.`,
+          });
+        } else {
+          if (targetUser.id === ownerId) {
+            await interaction.editReply({
+              content:
+                '❌ You cannot remove the ticket owner from their own ticket.',
+            });
+
+            return;
+          }
+
+          await channel.permissionOverwrites.delete(
+            targetUser.id,
+          );
+
+          await channel.send({
+            content: `➖ ${targetUser} was removed from this ticket by ${interaction.user}.`,
+          });
+
+          await interaction.editReply({
+            content: `✅ Removed ${targetUser} from ticket #${ticketNumber}.`,
+          });
+        }
+      } catch (error) {
+        console.error(
+          `❌ Failed to update ticket access for ticket #${ticketNumber}:`,
+          error,
+        );
+
+        await interaction.editReply({
+          content: '❌ Could not update ticket access.',
+        });
+      }
+
+      return;
+    }
+
+    // ----------------------------------------------------------
+    // Everything below is Premium-gated
+    // ----------------------------------------------------------
+
+    if (!isPremiumOrHigher(guild.id)) {
+      await interaction.editReply({
+        content: premiumRequiredMessage('premium-demo'),
+      });
+
+      return;
+    }
+
+    if (!isTicketStaff) {
+      await interaction.editReply({
+        content:
+          '❌ Only support staff or administrators can do that.',
+      });
+
+      return;
+    }
+
+    // ----------------------------------------------------------
+    // /supportforge ticket priority
+    // ----------------------------------------------------------
+
+    if (subcommand === 'priority') {
+      const level = interaction.options.getString(
+        'level',
+        true,
+      ) as TicketPriority;
+
+      try {
+        const newTopic = setTopicField(
+          topic,
+          'priority',
+          level,
+        );
+
+        await channel.setTopic(newTopic);
+
+        const emoji = PRIORITY_EMOJI[level];
+        const baseName = channel.name.replace(
+          /^[🟢⚪🟠🔴🟣]\s*/u,
+          '',
+        );
+
+        if (level === 'normal') {
+          await channel.setName(baseName);
+        } else {
+          await channel.setName(`${emoji}${baseName}`);
+        }
+
+        await channel.send({
+          content: `${emoji} Priority set to **${level}** by ${interaction.user}.`,
+        });
+
+        await interaction.editReply({
+          content: `✅ Ticket #${ticketNumber} priority set to **${level}**.`,
+        });
+
+        void logTicketEvent(guild, {
+          ticketNumber,
+          event: `Priority → ${level} (by ${interaction.user})`,
+        });
+      } catch (error) {
+        console.error(
+          `❌ Failed to set priority for ticket #${ticketNumber}:`,
+          error,
+        );
+
+        await interaction.editReply({
+          content: '❌ Could not set the ticket priority.',
+        });
+      }
+
+      return;
+    }
+
+    // ----------------------------------------------------------
+    // /supportforge ticket tag
+    // ----------------------------------------------------------
+
+    if (subcommand === 'tag') {
+      const rawTag = interaction.options
+        .getString('name', true)
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '-')
+        .slice(0, 30);
+
+      if (!rawTag) {
+        await interaction.editReply({
+          content: '❌ Tag name cannot be empty.',
+        });
+
+        return;
+      }
+
+      try {
+        const existingTags = (
+          getTopicField(topic, 'tags') ?? ''
+        )
+          .split(',')
+          .filter(Boolean);
+
+        if (existingTags.includes(rawTag)) {
+          await interaction.editReply({
+            content: `ℹ️ Ticket #${ticketNumber} already has the tag \`${rawTag}\`.`,
+          });
+
+          return;
+        }
+
+        const newTags = [...existingTags, rawTag].join(',');
+        const newTopic = setTopicField(
+          topic,
+          'tags',
+          newTags,
+        );
+
+        await channel.setTopic(newTopic);
+
+        await channel.send({
+          content: `🏷️ Tag \`${rawTag}\` added by ${interaction.user}.`,
+        });
+
+        await interaction.editReply({
+          content: `✅ Added tag \`${rawTag}\` to ticket #${ticketNumber}.`,
+        });
+
+        void logTicketEvent(guild, {
+          ticketNumber,
+          event: `Tag added: ${rawTag} (by ${interaction.user})`,
+        });
+      } catch (error) {
+        console.error(
+          `❌ Failed to add tag to ticket #${ticketNumber}:`,
+          error,
+        );
+
+        await interaction.editReply({
+          content: '❌ Could not add the tag.',
+        });
+      }
+
+      return;
+    }
+
+    // ----------------------------------------------------------
+    // /supportforge ticket note (internal — staff-only visibility)
+    // ----------------------------------------------------------
+
+    if (subcommand === 'note') {
+      const text = interaction.options.getString(
+        'text',
+        true,
+      );
+
+      void logTicketEvent(guild, {
+        ticketNumber,
+        event: `🔒 Internal note by ${interaction.user}`,
+        detail: text,
+      });
+
+      await interaction.editReply({
+        content:
+          `✅ Internal note recorded for ticket #${ticketNumber}.\n` +
+          '🔒 This is only visible to staff in the audit log channel — the ticket owner cannot see it.',
       });
 
       return;
