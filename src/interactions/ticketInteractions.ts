@@ -1,7 +1,5 @@
 import {
   ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   ChannelType,
   EmbedBuilder,
   MessageFlags,
@@ -21,23 +19,40 @@ import {
 } from '../services/configService';
 
 import { generateTranscript } from '../services/transcriptService';
-import { logTicketEvent } from '../services/auditLogService';
 
-const PREFIX = 'supportforge:ticket';
+import {
+  getOrCreateAuditChannel,
+  logTicketEvent,
+} from '../services/auditLogService';
 
-type TicketStatus =
-  | 'open'
-  | 'claimed'
-  | 'pending'
-  | 'closed'
-  | 'reopened'
-  | 'archived';
+import {
+  TICKET_PREFIX,
+  getField,
+  getTicketStatus,
+  isTicketTopic,
+  removeField,
+  setField,
+  type TicketStatus,
+} from '../services/ticketStateService';
 
-/* -------------------------------------------------------------------------- */
-/*                              RUNTIME LOCKS                                 */
-/* -------------------------------------------------------------------------- */
+import {
+  buildTicketPanelComponents,
+  buildTicketPanelEmbed,
+  isPanelButton,
+  queueTicketChannelRename,
+} from '../services/ticketPanelService';
 
+/**
+ * Prevents multiple state-changing operations from running against
+ * the same ticket simultaneously.
+ */
 const ticketActionLocks = new Set<string>();
+
+/**
+ * Prevents two ticket creation requests from the same user/department
+ * from racing each other.
+ */
+const ticketCreationLocks = new Set<string>();
 
 interface RuntimeTicketState {
   topic: string;
@@ -45,227 +60,49 @@ interface RuntimeTicketState {
   updatedAt: number;
 }
 
-const ticketRuntimeCache = new Map<
-  string,
-  RuntimeTicketState
->();
+const ticketRuntimeCache = new Map<string, RuntimeTicketState>();
 
-const topicWriteQueues = new Map<
-  string,
-  Promise<void>
->();
+const ACTIVE_TICKET_STATUSES: readonly TicketStatus[] = [
+  'open',
+  'claimed',
+  'pending',
+  'reopened',
+];
 
-/* -------------------------------------------------------------------------- */
-/*                         CHANNEL RENAME QUEUE                              */
-/* -------------------------------------------------------------------------- */
+const TERMINAL_TICKET_STATUSES: readonly TicketStatus[] = [
+  'closed',
+  'archived',
+];
 
-/*
- * Channel names must ultimately be changed through Discord's channel PATCH
- * endpoint. The earlier direct-fetch approach bypassed discord.js's REST
- * manager and could make Discord's rate-limit bucket worse.
+function isActiveTicketStatus(status: TicketStatus): boolean {
+  return ACTIVE_TICKET_STATUSES.includes(status);
+}
+
+function isTerminalTicketStatus(status: TicketStatus): boolean {
+  return TERMINAL_TICKET_STATUSES.includes(status);
+}
+
+/**
+ * Reads the actual Discord channel topic first.
  *
- * SupportForge now has exactly one rename queue per channel. Every rename is
- * sent through discord.js, so its REST manager owns the rate-limit handling.
- * We also avoid polling Discord and never create/delete a replacement
- * channel, which preserves the ticket's messages, channel ID and history.
+ * The cache is only used when it still matches Discord's current topic.
+ * This prevents stale state from surviving manual/topic changes.
  */
+function getRuntimeTicketState(channel: TextChannel): RuntimeTicketState {
+  const actualTopic = channel.topic ?? '';
+  const cached = ticketRuntimeCache.get(channel.id);
 
-const channelRenameQueues = new Map<
-  string,
-  Promise<void>
->();
-
-function queueChannelRename(
-  channel: TextChannel,
-  newName: string,
-  reason: string
-): Promise<void> {
-  const previous =
-    channelRenameQueues.get(
-      channel.id
-    ) ?? Promise.resolve();
-
-  const next = previous
-    .catch(() => undefined)
-    .then(async () => {
-      if (
-        channel.name === newName
-      ) {
-        console.log(
-          `ℹ️ Channel #${channel.id} is already named ${newName}.`
-        );
-        return;
-      }
-
-      console.log(
-        `🔄 Queued channel rename: #${channel.id} ${channel.name} → ${newName}`
-      );
-
-      console.time(
-        `CHANNEL_RENAME_${channel.id}`
-      );
-
-      try {
-        await channel.setName(
-          newName,
-          reason
-        );
-
-        console.log(
-          `✅ Channel #${channel.id} renamed to ${channel.name}.`
-        );
-      } catch (error) {
-        console.error(
-          `❌ Channel rename failed for #${channel.id}:`,
-          error
-        );
-        throw error;
-      } finally {
-        console.timeEnd(
-          `CHANNEL_RENAME_${channel.id}`
-        );
-      }
-    });
-
-  channelRenameQueues.set(
-    channel.id,
-    next
-  );
-
-  void next.finally(() => {
-    if (
-      channelRenameQueues.get(
-        channel.id
-      ) === next
-    ) {
-      channelRenameQueues.delete(
-        channel.id
-      );
-    }
-  });
-
-  return next;
-}
-
-/* -------------------------------------------------------------------------- */
-/*                               TOPIC HELPERS                                */
-/* -------------------------------------------------------------------------- */
-
-function getField(
-  topic: string,
-  key: string
-): string | undefined {
-  const escapedKey = key.replace(
-    /[.*+?^${}()|[\]\\]/g,
-    '\\$&'
-  );
-
-  const match = topic.match(
-    new RegExp(
-      `(?:^|\\s)${escapedKey}=([^\\s]*)`
-    )
-  );
-
-  return match?.[1] || undefined;
-}
-
-function setField(
-  topic: string,
-  key: string,
-  value: string
-): string {
-  const token = `${key}=`;
-
-  const parts = topic
-    .trim()
-    .split(/\s+/);
-
-  const index = parts.findIndex(
-    (part) =>
-      part.startsWith(token)
-  );
-
-  if (index >= 0) {
-    parts[index] =
-      `${token}${value}`;
-  } else {
-    parts.push(
-      `${token}${value}`
-    );
-  }
-
-  return parts.join(' ');
-}
-
-function isValidTicketStatus(
-  value: string | undefined
-): value is TicketStatus {
-  return (
-    value === 'open' ||
-    value === 'claimed' ||
-    value === 'pending' ||
-    value === 'closed' ||
-    value === 'reopened' ||
-    value === 'archived'
-  );
-}
-
-function getStatusFromTopic(
-  topic: string
-): TicketStatus {
-  const value =
-    getField(
-      topic,
-      'status'
-    );
-
-  if (
-    isValidTicketStatus(
-      value
-    )
-  ) {
-    return value;
-  }
-
-  /*
-   * Backwards compatibility for old tickets
-   * which did not contain a status field.
-   */
-  return 'open';
-}
-
-/* -------------------------------------------------------------------------- */
-/*                           RUNTIME STATE CACHE                              */
-/* -------------------------------------------------------------------------- */
-
-function getRuntimeTicketState(
-  channel: TextChannel
-): RuntimeTicketState {
-  const cached =
-    ticketRuntimeCache.get(
-      channel.id
-    );
-
-  if (cached) {
+  if (cached && cached.topic === actualTopic) {
     return cached;
   }
 
-  const topic =
-    channel.topic ?? '';
-
   const state: RuntimeTicketState = {
-    topic,
-    status:
-      getStatusFromTopic(
-        topic
-      ),
+    topic: actualTopic,
+    status: getTicketStatus(actualTopic),
     updatedAt: Date.now(),
   };
 
-  ticketRuntimeCache.set(
-    channel.id,
-    state
-  );
+  ticketRuntimeCache.set(channel.id, state);
 
   return state;
 }
@@ -273,352 +110,60 @@ function getRuntimeTicketState(
 function updateRuntimeTicketState(
   channel: TextChannel,
   topic: string,
-  status: TicketStatus
-): RuntimeTicketState {
-  const state: RuntimeTicketState = {
+  status: TicketStatus,
+): void {
+  ticketRuntimeCache.set(channel.id, {
     topic,
     status,
     updatedAt: Date.now(),
-  };
-
-  ticketRuntimeCache.set(
-    channel.id,
-    state
-  );
-
-  return state;
+  });
 }
 
-function clearRuntimeTicketState(
-  channelId: string
-): void {
-  ticketRuntimeCache.delete(
-    channelId
-  );
+function clearRuntimeTicketState(channelId: string): void {
+  ticketRuntimeCache.delete(channelId);
 }
 
-/* -------------------------------------------------------------------------- */
-/*                         BACKGROUND TOPIC QUEUE                             */
-/* -------------------------------------------------------------------------- */
-
-function queueTopicUpdate(
-  channel: TextChannel,
-  topic: string
-): void {
-  const previous =
-    topicWriteQueues.get(
-      channel.id
-    ) ?? Promise.resolve();
-
-  const next = previous
-    .catch(() => undefined)
-    .then(async () => {
-      console.time(
-        `TOPIC_WRITE_${channel.id}`
-      );
-
-      try {
-        await channel.setTopic(
-          topic
-        );
-
-        console.timeEnd(
-          `TOPIC_WRITE_${channel.id}`
-        );
-
-        console.log(
-          `✅ Background topic update completed for ticket #${
-            getField(
-              topic,
-              'number'
-            ) ?? 'Unknown'
-          }`
-        );
-      } catch (error) {
-        console.timeEnd(
-          `TOPIC_WRITE_${channel.id}`
-        );
-
-        console.error(
-          `❌ Background topic update failed for ticket #${
-            getField(
-              topic,
-              'number'
-            ) ?? 'Unknown'
-          }:`,
-          error
-        );
-      }
-    });
-
-  topicWriteQueues.set(
-    channel.id,
-    next
-  );
-
-  void next.then(
-    () => {
-      if (
-        topicWriteQueues.get(
-          channel.id
-        ) === next
-      ) {
-        topicWriteQueues.delete(
-          channel.id
-        );
-      }
-    },
-    () => {
-      if (
-        topicWriteQueues.get(
-          channel.id
-        ) === next
-      ) {
-        topicWriteQueues.delete(
-          channel.id
-        );
-      }
-    }
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/*                                  BUTTONS                                   */
-/* -------------------------------------------------------------------------- */
-
-function buildButtons(
-  status: TicketStatus
-): ActionRowBuilder<ButtonBuilder> {
-  const claim =
-    new ButtonBuilder()
-      .setCustomId(
-        'ticket:claim'
-      )
-      .setLabel('Claim')
-      .setEmoji('🙋')
-      .setStyle(
-        ButtonStyle.Success
-      );
-
-  const unclaim =
-    new ButtonBuilder()
-      .setCustomId(
-        'ticket:unclaim'
-      )
-      .setLabel('Unclaim')
-      .setEmoji('↩️')
-      .setStyle(
-        ButtonStyle.Secondary
-      );
-
-  const pending =
-    new ButtonBuilder()
-      .setCustomId(
-        'ticket:pending'
-      )
-      .setLabel('Pending')
-      .setEmoji('⏳')
-      .setStyle(
-        ButtonStyle.Secondary
-      );
-
-  const resume =
-    new ButtonBuilder()
-      .setCustomId(
-        'ticket:resume'
-      )
-      .setLabel('Resume')
-      .setEmoji('▶️')
-      .setStyle(
-        ButtonStyle.Success
-      );
-
-  const close =
-    new ButtonBuilder()
-      .setCustomId(
-        'ticket:close'
-      )
-      .setLabel('Close')
-      .setEmoji('🔒')
-      .setStyle(
-        ButtonStyle.Danger
-      );
-
-  const reopen =
-    new ButtonBuilder()
-      .setCustomId(
-        'ticket:reopen'
-      )
-      .setLabel('Reopen')
-      .setEmoji('🔓')
-      .setStyle(
-        ButtonStyle.Success
-      );
-
-  const archive =
-    new ButtonBuilder()
-      .setCustomId(
-        'ticket:archive'
-      )
-      .setLabel('Archive')
-      .setEmoji('🗄️')
-      .setStyle(
-        ButtonStyle.Secondary
-      );
-
-  const archived =
-    new ButtonBuilder()
-      .setCustomId(
-        'ticket:archived'
-      )
-      .setLabel('Archived')
-      .setEmoji('🗄️')
-      .setStyle(
-        ButtonStyle.Secondary
-      )
-      .setDisabled(true);
-
-  switch (status) {
-    case 'open':
-    case 'reopened':
-      return new ActionRowBuilder<ButtonBuilder>()
-        .addComponents(
-          claim,
-          pending,
-          close
-        );
-
-    case 'claimed':
-      return new ActionRowBuilder<ButtonBuilder>()
-        .addComponents(
-          unclaim,
-          pending,
-          close
-        );
-
-    case 'pending':
-      return new ActionRowBuilder<ButtonBuilder>()
-        .addComponents(
-          resume,
-          close
-        );
-
-    case 'closed':
-      return new ActionRowBuilder<ButtonBuilder>()
-        .addComponents(
-          reopen,
-          archive
-        );
-
-    case 'archived':
-      return new ActionRowBuilder<ButtonBuilder>()
-        .addComponents(
-          archived
-        );
-
-    default:
-      return new ActionRowBuilder<ButtonBuilder>()
-        .addComponents(
-          claim,
-          pending,
-          close
-        );
-  }
-}
-
-/* -------------------------------------------------------------------------- */
-/*                              GENERAL HELPERS                               */
-/* -------------------------------------------------------------------------- */
-
+/**
+ * Discord interaction permission helper.
+ */
 function isAdmin(
-  interaction:
-    | ButtonInteraction
-    | ModalSubmitInteraction
+  interaction: ButtonInteraction | ModalSubmitInteraction,
 ): boolean {
   return Boolean(
-    interaction.memberPermissions?.has(
-      PermissionFlagsBits.Administrator
-    )
+    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator),
   );
 }
 
-async function replyError(
-  interaction:
-    | ButtonInteraction
-    | ModalSubmitInteraction,
-  content: string
-): Promise<void> {
-  if (
-    interaction.deferred &&
-    !interaction.replied
-  ) {
-    await interaction.editReply(
-      content
-    );
-    return;
-  }
-
-  if (!interaction.replied) {
-    await interaction.reply({
-      content,
-      flags:
-        MessageFlags.Ephemeral,
-    });
-  }
-}
-
+/**
+ * Gets ticket owner/staff information and determines whether the
+ * current user is configured staff or an administrator.
+ */
 function getStaffContext(
-  interaction:
-    | ButtonInteraction
-    | ModalSubmitInteraction,
-  topic: string
+  interaction: ButtonInteraction | ModalSubmitInteraction,
+  topic: string,
 ) {
-  const ownerId =
-    getField(
-      topic,
-      'owner'
-    );
+  const ownerId = getField(topic, 'owner');
 
-  const staffRoleId =
-    getField(
-      topic,
-      'staff'
-    );
+  const rawStaffRole = getField(topic, 'staff');
 
   const staffRole =
-    staffRoleId &&
-    staffRoleId !== 'none'
-      ? staffRoleId
+    rawStaffRole && rawStaffRole !== 'none'
+      ? rawStaffRole
       : null;
 
   let isStaff = false;
 
   if (
     staffRole &&
-    interaction.member
+    interaction.member &&
+    'roles' in interaction.member
   ) {
-    const member =
-      interaction.member;
+    const roles = interaction.member.roles;
 
-    if ('roles' in member) {
-      const roles =
-        member.roles;
-
-      if (
-        Array.isArray(
-          roles
-        )
-      ) {
-        isStaff =
-          roles.includes(
-            staffRole
-          );
-      } else {
-        isStaff =
-          roles.cache.has(
-            staffRole
-          );
-      }
+    if (Array.isArray(roles)) {
+      isStaff = roles.includes(staffRole);
+    } else {
+      isStaff = roles.cache.has(staffRole);
     }
   }
 
@@ -626,320 +171,119 @@ function getStaffContext(
     ownerId,
     staffRole,
     isStaff,
+    authorized: isStaff || isAdmin(interaction),
   };
 }
 
+/**
+ * Safe interaction error response.
+ */
+async function replyError(
+  interaction: ButtonInteraction | ModalSubmitInteraction,
+  content: string,
+): Promise<void> {
+  if (interaction.deferred && !interaction.replied) {
+    await interaction.editReply(content);
+    return;
+  }
+
+  if (!interaction.replied && !interaction.deferred) {
+    await interaction.reply({
+      content,
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+}
+
+function decodeSubject(raw: string | undefined): string {
+  if (!raw) {
+    return 'Unknown subject';
+  }
+
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function parseUserId(value: string): string | null {
+  const mentionMatch = value.match(/^<@!?([0-9]+)>$/);
+  if (mentionMatch) {
+    return mentionMatch[1];
+  }
+
+  const idMatch = value.match(/^([0-9]{15,25})$/);
+  return idMatch?.[1] ?? null;
+}
+
+/**
+ * Fetches and updates the ticket's primary control-panel message.
+ *
+ * A missing panel message should not crash the whole ticket operation.
+ * The caller can still continue with the state transition.
+ */
 async function updateMainMessage(
   channel: TextChannel,
-  messageId:
-    | string
-    | undefined,
-  status: TicketStatus
+  messageId: string | undefined,
+  status: TicketStatus,
+  topicOverride?: string,
 ): Promise<void> {
   if (!messageId) {
-    console.warn(
-      `⚠️ No ticket message ID found for #${channel.name}.`
-    );
-
     return;
   }
 
-  /*
-   * Try cache first.
-   *
-   * This is intentionally kept here because a message fetch
-   * can introduce another REST request and therefore another
-   * opportunity to encounter Discord API rate limits.
-   */
-  let message =
-    channel.messages.cache.get(
-      messageId
-    );
+  const config = await getGuildConfig(channel.guild.id);
+  const topic = topicOverride ?? channel.topic ?? '';
 
-  if (!message) {
-    console.log(
-      `📨 Ticket message ${messageId} not found in cache for #${channel.name}; fetching...`
-    );
+  try {
+    const message =
+      channel.messages.cache.get(messageId) ??
+      (await channel.messages.fetch(messageId));
 
-    message =
-      await channel.messages.fetch(
-        messageId
-      );
-  }
-
-  await message.edit({
-    components: [
-      buildButtons(
-        status
-      ),
-    ],
-  });
-}
-
-function emojiForStatus(
-  status: TicketStatus
-): string {
-  return {
-    open: '🟢',
-    claimed: '🙋',
-    pending: '⏳',
-    closed: '🔒',
-    reopened: '🔓',
-    archived: '🗄️',
-  }[status];
-}
-
-function capitalize(
-  value: string
-): string {
-  return (
-    value.charAt(0).toUpperCase() +
-    value.slice(1)
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/*                              TICKET CREATION                               */
-/* -------------------------------------------------------------------------- */
-
-async function createTicket(
-  interaction: ModalSubmitInteraction,
-  departmentId: string
-): Promise<void> {
-  const guild =
-    interaction.guild!;
-
-  const config =
-    await getGuildConfig(
-      guild.id
-    );
-
-  const department =
-    config.departments[
-      departmentId
-    ];
-
-  if (!department) {
-    await replyError(
-      interaction,
-      '❌ This ticket department no longer exists.'
-    );
-    return;
-  }
-
-  const supportCategoryId =
-    config.supportCategoryId;
-
-  if (!supportCategoryId) {
-    await replyError(
-      interaction,
-      '❌ SupportForge is not configured. Run `/supportforge setup` first.'
-    );
-    return;
-  }
-
-  const supportCategory =
-    guild.channels.cache.get(
-      supportCategoryId
-    );
-
-  if (
-    !supportCategory ||
-    supportCategory.type !==
-      ChannelType.GuildCategory
-  ) {
-    await replyError(
-      interaction,
-      '❌ The Support Forge category is missing. Run `/supportforge setup` to repair it.'
-    );
-    return;
-  }
-
-  /* ---------------------------------------------------------------------- */
-  /*                    ACTIVE TICKET DETECTION                             */
-  /* ---------------------------------------------------------------------- */
-
-  const existing =
-    guild.channels.cache.find(
-      (channel) => {
-        if (
-          channel.type !==
-            ChannelType.GuildText ||
-          channel.parentId !==
-            supportCategoryId
-        ) {
-          return false;
-        }
-
-        const topic =
-          channel.topic ?? '';
-
-        if (
-          !topic.startsWith(
-            PREFIX
-          )
-        ) {
-          return false;
-        }
-
-        if (
-          getField(
-            topic,
-            'owner'
-          ) !==
-          interaction.user.id
-        ) {
-          return false;
-        }
-
-        if (
-          getField(
-            topic,
-            'department'
-          ) !==
-          departmentId
-        ) {
-          return false;
-        }
-
-        const runtimeState =
-          ticketRuntimeCache.get(
-            channel.id
-          );
-
-        const status =
-          runtimeState?.status ??
-          getStatusFromTopic(
-            topic
-          );
-
-        const activeStatuses:
-          TicketStatus[] = [
-            'open',
-            'claimed',
-            'pending',
-            'reopened',
-          ];
-
-        const isActive =
-          activeStatuses.includes(
-            status
-          );
-
-        console.log(
-          `🔎 Ticket creation check | #${
-            getField(
-              topic,
-              'number'
-            ) ?? 'Unknown'
-          } | status=${status} | active=${isActive}`
-        );
-
-        return isActive;
-      }
-    );
-
-  if (existing) {
-    await replyError(
-      interaction,
-      `❌ You already have an active **${department.name}** ticket: ${existing}`
-    );
-
-    return;
-  }
-
-  /* ---------------------------------------------------------------------- */
-  /*                              FORM DATA                                 */
-  /* ---------------------------------------------------------------------- */
-
-  const subject =
-    interaction.fields
-      .getTextInputValue(
-        'subject'
-      )
-      .trim();
-
-  const description =
-    interaction.fields
-      .getTextInputValue(
-        'description'
-      )
-      .trim();
-
-  if (
-    !subject ||
-    !description
-  ) {
-    await replyError(
-      interaction,
-      '❌ Subject and description are required.'
-    );
-
-    return;
-  }
-
-  /* ---------------------------------------------------------------------- */
-  /*                           TICKET NUMBER                                */
-  /* ---------------------------------------------------------------------- */
-
-  const ticketNumber =
-    await allocateTicketNumber(
-      guild.id
-    );
-
-  /* ---------------------------------------------------------------------- */
-  /*                                TOPIC                                   */
-  /* ---------------------------------------------------------------------- */
-
-  const topic = [
-    PREFIX,
-    'v=1',
-    'status=open',
-    `owner=${interaction.user.id}`,
-    `department=${departmentId}`,
-    `staff=${
-      department.staffRoleId ??
-      'none'
-    }`,
-    'priority=normal',
-    'tags=',
-    'users=',
-    'claimedBy=',
-    `subject=${encodeURIComponent(
-      subject.replace(
-        /\s+/g,
-        ' '
-      )
-    )}`,
-    `number=${ticketNumber}`,
-  ].join(' ');
-
-  /* ---------------------------------------------------------------------- */
-  /*                            PERMISSIONS                                 */
-  /* ---------------------------------------------------------------------- */
-
-  const permissions = [
-    {
-      id:
-        guild.roles.everyone.id,
-      deny: [
-        PermissionFlagsBits.ViewChannel,
+    await message.edit({
+      embeds: [
+        buildTicketPanelEmbed(
+          channel.guild,
+          channel.name,
+          topic,
+          config,
+        ),
       ],
-    },
+      components: buildTicketPanelComponents(status),
+    });
+  } catch (error) {
+    console.error(
+      `❌ Failed to update ticket panel for #${getField(topic, 'number') ?? 'Unknown'}:`,
+      error,
+    );
+  }
+}
+
+/**
+ * Builds permissions for an active ticket.
+ *
+ * Discord.js accepts these objects directly as OverwriteResolvable
+ * values, so no PermissionOverwriteData type is required.
+ */
+function buildOpenOverwrites(
+  channelOwnerId: string,
+  staffRoleId: string | undefined,
+  users: string[],
+  botId: string,
+  everyoneId: string,
+) {
+  const overwrites = [
     {
-      id:
-        interaction.user.id,
-      allow: [
+      id: everyoneId,
+      deny: [
         PermissionFlagsBits.ViewChannel,
         PermissionFlagsBits.SendMessages,
         PermissionFlagsBits.ReadMessageHistory,
-        PermissionFlagsBits.AttachFiles,
-        PermissionFlagsBits.EmbedLinks,
       ],
     },
     {
-      id:
-        interaction.client.user.id,
+      id: botId,
       allow: [
         PermissionFlagsBits.ViewChannel,
         PermissionFlagsBits.SendMessages,
@@ -952,379 +296,570 @@ async function createTicket(
     },
   ];
 
-  if (
-    department.staffRoleId
-  ) {
-    permissions.push({
-      id:
-        department.staffRoleId,
+  const allow = [
+    PermissionFlagsBits.ViewChannel,
+    PermissionFlagsBits.SendMessages,
+    PermissionFlagsBits.ReadMessageHistory,
+    PermissionFlagsBits.AttachFiles,
+    PermissionFlagsBits.EmbedLinks,
+  ];
+
+  const ids = new Set<string>([
+    channelOwnerId,
+    ...(staffRoleId ? [staffRoleId] : []),
+    ...users,
+  ]);
+
+  for (const id of ids) {
+    if (!id || id === everyoneId || id === botId) {
+      continue;
+    }
+
+    overwrites.push({
+      id,
+      allow,
+    });
+  }
+
+  return overwrites;
+}
+
+/**
+ * Builds permissions for closed/archived tickets.
+ *
+ * Closed:
+ * - owner/users can view
+ * - owner/users cannot send
+ * - staff can view
+ * - everyone cannot view
+ *
+ * Archived:
+ * - owner/users lose access
+ * - staff retain read-only access
+ */
+function buildClosedOverwrites(
+  channelOwnerId: string | undefined,
+  staffRoleId: string | null,
+  users: string[],
+  botId: string,
+  everyoneId: string,
+  archived: boolean,
+) {
+  const overwrites = [
+    {
+      id: everyoneId,
+      deny: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+      ],
+    },
+    {
+      id: botId,
       allow: [
         PermissionFlagsBits.ViewChannel,
         PermissionFlagsBits.SendMessages,
         PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.ManageChannels,
+        PermissionFlagsBits.ManageMessages,
         PermissionFlagsBits.AttachFiles,
         PermissionFlagsBits.EmbedLinks,
       ],
-    });
-  }
+    },
+  ];
 
-  /* ---------------------------------------------------------------------- */
-  /*                           CREATE CHANNEL                               */
-  /* ---------------------------------------------------------------------- */
+  const readOnly = [
+    PermissionFlagsBits.ViewChannel,
+    PermissionFlagsBits.ReadMessageHistory,
+  ];
 
-  const ticketChannel =
-    await guild.channels.create({
-      name:
-        `ticket-${ticketNumber}`,
-      type:
-        ChannelType.GuildText,
-      parent:
-        supportCategoryId,
-      topic,
-      permissionOverwrites:
-        permissions,
-    });
+  const ids = new Set<string>([
+    ...(channelOwnerId ? [channelOwnerId] : []),
+    ...(staffRoleId ? [staffRoleId] : []),
+    ...users,
+  ]);
 
-  /* ---------------------------------------------------------------------- */
-  /*                               EMBED                                    */
-  /* ---------------------------------------------------------------------- */
+  for (const id of ids) {
+    if (!id || id === everyoneId || id === botId) {
+      continue;
+    }
 
-  const embed =
-    new EmbedBuilder()
-      .setTitle(
-        `🎫 Support Ticket #${ticketNumber}`
-      )
-      .setDescription(
-        description
-      )
-      .addFields(
-        {
-          name:
-            '👤 Owner',
-          value:
-            `${interaction.user}`,
-          inline: true,
-        },
-        {
-          name:
-            '📂 Department',
-          value:
-            department.name,
-          inline: true,
-        },
-        {
-          name:
-            '📌 Subject',
-          value:
-            subject,
-        },
-        {
-          name:
-            '📊 Status',
-          value:
-            'Open',
-          inline: true,
-        },
-        {
-          name:
-            '⚡ Priority',
-          value:
-            'Normal',
-          inline: true,
-        }
-      )
-      .setFooter({
-        text:
-          'SupportForge',
-      })
-      .setTimestamp();
-
-  try {
-    const message =
-      await ticketChannel.send({
-        content:
-          department.staffRoleId
-            ? `${interaction.user} <@&${department.staffRoleId}>`
-            : `${interaction.user}`,
-        embeds: [
-          embed,
-        ],
-        components: [
-          buildButtons(
-            'open'
-          ),
+    if (archived && id !== staffRoleId) {
+      overwrites.push({
+        id,
+        allow: [],
+        deny: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
         ],
       });
 
-    const finalTopic =
-      `${topic} message=${message.id}`;
-
-    await ticketChannel.setTopic(
-      finalTopic
-    );
-
-    updateRuntimeTicketState(
-      ticketChannel,
-      finalTopic,
-      'open'
-    );
-
-    await interaction.editReply(
-      `✅ Ticket created: ${ticketChannel}`
-    );
-
-    if (
-      isPremiumOrHigher(
-        config.tier
-      )
-    ) {
-      void logTicketEvent(
-        guild,
-        supportCategoryId,
-        {
-          ticketNumber:
-            `${ticketNumber}`,
-          event:
-            'Ticket created',
-          actor:
-            interaction.user.tag,
-          detail:
-            `Department: ${department.name}\nSubject: ${subject}`,
-        }
-      ).catch(
-        (error) => {
-          console.error(
-            `⚠️ Failed to write creation audit log for #${ticketNumber}:`,
-            error
-          );
-        }
-      );
+      continue;
     }
-  } catch (error) {
-    await ticketChannel
-      .delete(
-        'SupportForge cleanup after ticket initialization failure'
-      )
-      .catch(
-        () => undefined
-      );
 
-    throw error;
+    overwrites.push({
+      id,
+      allow: readOnly,
+      deny: [PermissionFlagsBits.SendMessages],
+    });
   }
+
+  return overwrites;
 }
 
-/* -------------------------------------------------------------------------- */
-/*                         PERMISSION RESTORATION                             */
-/* -------------------------------------------------------------------------- */
-
+/**
+ * Restores normal ticket permissions after reopening.
+ */
 async function restoreTicketPermissions(
-  interaction: ButtonInteraction,
   channel: TextChannel,
-  topic: string
+  topic: string,
 ): Promise<void> {
-  const ownerId =
-    getField(
-      topic,
-      'owner'
-    );
+  const bot = channel.guild.members.me;
 
-  const staffRoleId =
-    getField(
-      topic,
-      'staff'
-    );
-
-  const users =
-    (
-      getField(
-        topic,
-        'users'
-      ) ?? ''
-    )
-      .split(',')
-      .filter(Boolean);
-
-  const operations:
-    Promise<unknown>[] = [];
-
-  if (
-    ownerId &&
-    ownerId !==
-      interaction.guild!.ownerId
-  ) {
-    operations.push(
-      channel.permissionOverwrites.edit(
-        ownerId,
-        {
-          ViewChannel: true,
-          SendMessages: true,
-          ReadMessageHistory: true,
-          AttachFiles: true,
-          EmbedLinks: true,
-        }
-      )
-    );
+  if (!bot) {
+    throw new Error('Bot member unavailable.');
   }
 
-  if (
-    staffRoleId &&
-    staffRoleId !== 'none'
-  ) {
-    operations.push(
-      channel.permissionOverwrites.edit(
-        staffRoleId,
-        {
-          ViewChannel: true,
-          SendMessages: true,
-          ReadMessageHistory: true,
-          AttachFiles: true,
-          EmbedLinks: true,
-        }
-      )
-    );
+  const ownerId = getField(topic, 'owner');
+
+  if (!ownerId) {
+    throw new Error('Ticket owner is missing.');
   }
 
-  for (
-    const userId of users
-  ) {
-    operations.push(
-      channel.permissionOverwrites.edit(
-        userId,
-        {
-          ViewChannel: true,
-          SendMessages: true,
-          ReadMessageHistory: true,
-          AttachFiles: true,
-          EmbedLinks: true,
-        }
-      )
-    );
-  }
+  const staffRoleId = getField(topic, 'staff');
 
-  await Promise.all(
-    operations
+  const users = (getField(topic, 'users') ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+
+  await channel.permissionOverwrites.set(
+    buildOpenOverwrites(
+      ownerId,
+      staffRoleId && staffRoleId !== 'none'
+        ? staffRoleId
+        : undefined,
+      users,
+      bot.id,
+      channel.guild.roles.everyone.id,
+    ),
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/*                            STATUS TRANSITIONS                              */
-/* -------------------------------------------------------------------------- */
+/**
+ * Locks a ticket in one permission-overwrite operation.
+ *
+ * This intentionally uses .set() instead of multiple .edit() calls.
+ */
+async function lockTicketPermissions(
+  channel: TextChannel,
+  topic: string,
+  archived = false,
+): Promise<void> {
+  const bot = channel.guild.members.me;
 
+  if (!bot) {
+    throw new Error('Bot member unavailable.');
+  }
+
+  const botPermissions = channel.permissionsFor(bot);
+
+  if (
+    !botPermissions?.has(
+      PermissionFlagsBits.ManageChannels,
+    )
+  ) {
+    throw new Error(
+      'SupportForge is missing Manage Channels permission.',
+    );
+  }
+
+  const ownerId = getField(topic, 'owner');
+
+  const staffRoleId = getField(topic, 'staff');
+
+  const users = (getField(topic, 'users') ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+
+  await channel.permissionOverwrites.set(
+    buildClosedOverwrites(
+      ownerId,
+      staffRoleId && staffRoleId !== 'none'
+        ? staffRoleId
+        : null,
+      users,
+      bot.id,
+      channel.guild.roles.everyone.id,
+      archived,
+    ),
+  );
+}
+
+/**
+ * Creates a new ticket.
+ */
+async function createTicket(
+  interaction: ModalSubmitInteraction,
+  departmentId: string,
+): Promise<void> {
+  const guild = interaction.guild!;
+
+  const creationLockKey =
+    `${guild.id}:${interaction.user.id}:${departmentId}`;
+
+  if (ticketCreationLocks.has(creationLockKey)) {
+    await replyError(
+      interaction,
+      '⏳ Your ticket request is already being processed.',
+    );
+    return;
+  }
+
+  ticketCreationLocks.add(creationLockKey);
+
+  try {
+    const config = await getGuildConfig(guild.id);
+
+    const department =
+      config.departments[departmentId];
+
+    if (!department) {
+      await replyError(
+        interaction,
+        '❌ This ticket department no longer exists.',
+      );
+      return;
+    }
+
+    const supportCategoryId =
+      config.supportCategoryId;
+
+    if (!supportCategoryId) {
+      await replyError(
+        interaction,
+        '❌ SupportForge is not configured. Run `/supportforge setup` first.',
+      );
+      return;
+    }
+
+    const supportCategory =
+      guild.channels.cache.get(supportCategoryId);
+
+    if (
+      !supportCategory ||
+      supportCategory.type !== ChannelType.GuildCategory
+    ) {
+      await replyError(
+        interaction,
+        '❌ The SupportForge category is missing. Run `/supportforge setup` to repair it.',
+      );
+      return;
+    }
+
+    /**
+     * Only active tickets block creation.
+     *
+     * Closed and archived tickets deliberately do NOT block a new ticket.
+     */
+    const existing = guild.channels.cache.find(
+      (channel) => {
+        if (
+          channel.type !== ChannelType.GuildText ||
+          channel.parentId !== supportCategoryId
+        ) {
+          return false;
+        }
+
+        const topic = channel.topic ?? '';
+
+        if (!isTicketTopic(topic)) {
+          return false;
+        }
+
+        if (
+          getField(topic, 'owner') !==
+          interaction.user.id
+        ) {
+          return false;
+        }
+
+        if (
+          getField(topic, 'department') !==
+          departmentId
+        ) {
+          return false;
+        }
+
+        const status =
+          getRuntimeTicketState(channel).status;
+
+        return isActiveTicketStatus(status);
+      },
+    );
+
+    if (existing) {
+      await replyError(
+        interaction,
+        `❌ You already have an active **${department.name}** ticket: ${existing}`,
+      );
+      return;
+    }
+
+    const subject =
+      interaction.fields
+        .getTextInputValue('subject')
+        .trim();
+
+    const description =
+      interaction.fields
+        .getTextInputValue('description')
+        .trim();
+
+    if (!subject || !description) {
+      await replyError(
+        interaction,
+        '❌ Subject and description are required.',
+      );
+      return;
+    }
+
+    const ticketNumber =
+      await allocateTicketNumber(guild.id);
+
+    const openedAt =
+      new Date().toISOString();
+
+    const topic = [
+      TICKET_PREFIX,
+      'v=2',
+      'status=open',
+      `owner=${interaction.user.id}`,
+      `department=${departmentId}`,
+      `staff=${department.staffRoleId ?? 'none'}`,
+      'priority=normal',
+      'tags=',
+      'users=',
+      'claimed_by=',
+      `subject=${encodeURIComponent(
+        subject.replace(/\s+/g, ' '),
+      )}`,
+      `number=${ticketNumber}`,
+      `opened_at=${openedAt}`,
+      `description=${encodeURIComponent(
+        description.replace(/\s+/g, ' '),
+      )}`,
+    ].join(' ');
+
+    const botId =
+      interaction.client.user!.id;
+
+    const permissions =
+      buildOpenOverwrites(
+        interaction.user.id,
+        department.staffRoleId ?? undefined,
+        [],
+        botId,
+        guild.roles.everyone.id,
+      );
+
+    const ticketChannel =
+      await guild.channels.create({
+        name: `ticket-${ticketNumber}`,
+        type: ChannelType.GuildText,
+        parent: supportCategoryId,
+        topic,
+        permissionOverwrites: permissions,
+      });
+
+    try {
+      const message =
+        await ticketChannel.send({
+          content: department.staffRoleId
+            ? `${interaction.user} <@&${department.staffRoleId}>`
+            : `${interaction.user}`,
+          embeds: [
+            buildTicketPanelEmbed(
+              guild,
+              ticketChannel.name,
+              topic,
+              config,
+            ),
+          ],
+          components:
+            buildTicketPanelComponents('open'),
+        });
+
+      const finalTopic =
+        setField(
+          topic,
+          'message',
+          message.id,
+        );
+
+      await ticketChannel.setTopic(
+        finalTopic,
+      );
+
+      updateRuntimeTicketState(
+        ticketChannel,
+        finalTopic,
+        'open',
+      );
+
+      await message.edit({
+        embeds: [
+          buildTicketPanelEmbed(
+            guild,
+            ticketChannel.name,
+            finalTopic,
+            config,
+          ),
+        ],
+        components:
+          buildTicketPanelComponents('open'),
+      });
+
+      /**
+       * The description is already stored in the topic.
+       * Send it visibly as the first ticket message as well.
+       */
+      await ticketChannel.send({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle('📝 Issue Description')
+            .setDescription(description)
+            .setFooter({
+              text: `Ticket #${ticketNumber}`,
+            })
+            .setTimestamp(),
+        ],
+      });
+
+      await interaction.editReply(
+        `✅ Ticket created: ${ticketChannel}`,
+      );
+
+      if (
+        isPremiumOrHigher(config.tier)
+      ) {
+        void logTicketEvent(
+          guild,
+          supportCategoryId,
+          {
+            ticketNumber:
+              `${ticketNumber}`,
+            event:
+              'Ticket created',
+            actor:
+              interaction.user.tag,
+            detail:
+              `Department: ${department.name}\nSubject: ${subject}`,
+          },
+        );
+      }
+    } catch (error) {
+      await ticketChannel
+        .delete(
+          'SupportForge cleanup after ticket initialization failure',
+        )
+        .catch(() => undefined);
+
+      throw error;
+    }
+  } finally {
+    ticketCreationLocks.delete(
+      creationLockKey,
+    );
+  }
+}
+
+/**
+ * Performs a normal lifecycle transition.
+ */
 async function transition(
   interaction: ButtonInteraction,
   newStatus: TicketStatus,
-  allowed: TicketStatus[],
-  successMessage: string
+  allowed: readonly TicketStatus[],
+  successMessage: string,
 ): Promise<void> {
-  const channel =
-    interaction.channel;
+  const channel = interaction.channel;
 
   if (
     !channel ||
-    channel.type !==
-      ChannelType.GuildText
+    channel.type !== ChannelType.GuildText
   ) {
-    await interaction.reply({
-      content:
-        '❌ This action can only be used inside a ticket channel.',
-      flags:
-        MessageFlags.Ephemeral,
-    });
-
+    await replyError(
+      interaction,
+      '❌ This action can only be used inside a ticket channel.',
+    );
     return;
   }
 
   if (
-    ticketActionLocks.has(
-      channel.id
-    )
+    ticketActionLocks.has(channel.id)
   ) {
-    await interaction.reply({
-      content:
-        '⏳ Another ticket action is currently being processed. Please wait a moment.',
-      flags:
-        MessageFlags.Ephemeral,
-    });
-
+    await replyError(
+      interaction,
+      '⏳ Another ticket action is currently being processed. Please wait a moment.',
+    );
     return;
   }
 
-  ticketActionLocks.add(
-    channel.id
-  );
+  ticketActionLocks.add(channel.id);
 
   try {
     await interaction.deferReply({
-      flags:
-        MessageFlags.Ephemeral,
+      flags: MessageFlags.Ephemeral,
     });
 
-    const runtimeState =
-      getRuntimeTicketState(
-        channel
-      );
+    /**
+     * Re-read current Discord topic state.
+     * This is important because another process/manual change may
+     * have modified the topic since the previous interaction.
+     */
+    const state =
+      getRuntimeTicketState(channel);
 
-    const topic =
-      runtimeState.topic;
+    const topic = state.topic;
 
-    if (
-      !topic.startsWith(
-        PREFIX
-      )
-    ) {
+    if (!isTicketTopic(topic)) {
       await interaction.editReply(
-        '❌ This channel is not a SupportForge ticket.'
+        '❌ This channel is not a SupportForge ticket.',
       );
-
       return;
     }
 
     const currentStatus =
-      runtimeState.status;
+      getTicketStatus(topic);
 
-    const ticketNumber =
-      getField(
+    if (currentStatus !== state.status) {
+      updateRuntimeTicketState(
+        channel,
         topic,
-        'number'
-      ) ?? 'Unknown';
-
-    console.log(
-      `🔄 Ticket transition: #${
-        getField(
-          topic,
-          'number'
-        ) ?? 'Unknown'
-      } | ${currentStatus} → ${newStatus}`
-    );
-
-    if (
-      !allowed.includes(
-        currentStatus
-      )
-    ) {
-      await interaction.editReply(
-        `❌ This action is not available while the ticket is **${capitalize(
-          currentStatus
-        )}**.`
+        currentStatus,
       );
+    }
 
+    if (!allowed.includes(currentStatus)) {
+      await interaction.editReply(
+        `❌ This action is not available while the ticket is **${capitalize(currentStatus)}**.`,
+      );
       return;
     }
 
     const context =
       getStaffContext(
         interaction,
-        topic
+        topic,
       );
 
-    if (
-      !context.isStaff &&
-      !isAdmin(interaction)
-    ) {
+    if (!context.authorized) {
       await interaction.editReply(
-        '❌ Only configured staff or administrators can change ticket status.'
+        '❌ Only configured staff or administrators can change ticket status.',
       );
-
       return;
     }
 
@@ -1332,456 +867,348 @@ async function transition(
       setField(
         topic,
         'status',
-        newStatus
+        newStatus,
       );
 
-    if (
-      newStatus ===
-      'claimed'
-    ) {
+    if (newStatus === 'claimed') {
       newTopic =
         setField(
           newTopic,
-          'claimedBy',
-          interaction.user.id
+          'claimed_by',
+          interaction.user.id,
+        );
+
+      newTopic =
+        setField(
+          newTopic,
+          'claimed_at',
+          new Date().toISOString(),
+        );
+
+      newTopic =
+        removeField(
+          newTopic,
+          'pending_since',
         );
     }
 
-    if (
-      newStatus ===
-        'open' ||
-      newStatus ===
-        'reopened'
-    ) {
+    if (newStatus === 'open') {
+      newTopic =
+        removeField(
+          newTopic,
+          'claimed_by',
+        );
+
+      newTopic =
+        removeField(
+          newTopic,
+          'claimed_at',
+        );
+
+      newTopic =
+        removeField(
+          newTopic,
+          'pending_since',
+        );
+    }
+
+    if (newStatus === 'pending') {
       newTopic =
         setField(
           newTopic,
-          'claimedBy',
-          ''
+          'pending_since',
+          new Date().toISOString(),
+        );
+
+      newTopic =
+        removeField(
+          newTopic,
+          'claimed_by',
+        );
+
+      newTopic =
+        removeField(
+          newTopic,
+          'claimed_at',
         );
     }
+
+    if (newStatus === 'reopened') {
+      newTopic =
+        setField(
+          newTopic,
+          'reopened_at',
+          new Date().toISOString(),
+        );
+
+      newTopic =
+        removeField(
+          newTopic,
+          'closed_at',
+        );
+
+      newTopic =
+        removeField(
+          newTopic,
+          'claimed_by',
+        );
+
+      newTopic =
+        removeField(
+          newTopic,
+          'claimed_at',
+        );
+
+      newTopic =
+        removeField(
+          newTopic,
+          'pending_since',
+        );
+
+      await restoreTicketPermissions(
+        channel,
+        topic,
+      );
+
+      if (
+        channel.name.endsWith(
+          '-closed',
+        )
+      ) {
+        const reopenedName =
+          channel.name.slice(
+            0,
+            -7,
+          );
+
+        await queueTicketChannelRename(
+          channel,
+          reopenedName,
+          `SupportForge reopen for ticket #${
+            getField(topic, 'number') ??
+            'Unknown'
+          }`,
+        );
+      }
+    }
+
+    if (newStatus === 'archived') {
+      newTopic =
+        setField(
+          newTopic,
+          'archived_at',
+          new Date().toISOString(),
+        );
+
+      await lockTicketPermissions(
+        channel,
+        topic,
+        true,
+      );
+    }
+
+    await channel.setTopic(
+      newTopic,
+    );
 
     updateRuntimeTicketState(
       channel,
       newTopic,
-      newStatus
+      newStatus,
     );
-
-    queueTopicUpdate(
-      channel,
-      newTopic
-    );
-
-    /* ------------------------------------------------------------------ */
-    /*                          REOPEN                                    */
-    /* ------------------------------------------------------------------ */
-
-    if (
-      newStatus ===
-      'reopened'
-    ) {
-      await restoreTicketPermissions(
-        interaction,
-        channel,
-        topic
-      );
-
-      const actualChannelName =
-        channel.name;
-
-      if (
-        actualChannelName.endsWith(
-          '-closed'
-        )
-      ) {
-        const reopenedName =
-          actualChannelName.slice(
-            0,
-            -7
-          );
-
-        await queueChannelRename(
-          channel,
-          reopenedName,
-          `SupportForge reopen for ticket #${ticketNumber}`
-        );
-
-        console.log(
-          `✅ Reopened ticket #${ticketNumber} renamed from ${actualChannelName} to ${reopenedName}.`
-        );
-      }
-    }
-
-    /* ------------------------------------------------------------------ */
-    /*                          ARCHIVE                                   */
-    /* ------------------------------------------------------------------ */
-
-    if (
-      newStatus ===
-      'archived'
-    ) {
-      const operations:
-        Promise<unknown>[] = [];
-
-      if (
-        context.ownerId
-      ) {
-        operations.push(
-          channel.permissionOverwrites.edit(
-            context.ownerId,
-            {
-              ViewChannel: false,
-              SendMessages: false,
-            }
-          )
-        );
-      }
-
-      const users =
-        (
-          getField(
-            topic,
-            'users'
-          ) ?? ''
-        )
-          .split(',')
-          .filter(Boolean);
-
-      for (
-        const userId of users
-      ) {
-        operations.push(
-          channel.permissionOverwrites.edit(
-            userId,
-            {
-              ViewChannel: false,
-              SendMessages: false,
-            }
-          )
-        );
-      }
-
-      if (
-        context.staffRole
-      ) {
-        operations.push(
-          channel.permissionOverwrites.edit(
-            context.staffRole,
-            {
-              ViewChannel: true,
-              ReadMessageHistory: true,
-              SendMessages: false,
-            }
-          )
-        );
-      }
-
-      await Promise.all(
-        operations
-      );
-    }
 
     const messageId =
       getField(
-        topic,
-        'message'
+        newTopic,
+        'message',
       );
 
-    await Promise.all([
-      updateMainMessage(
-        channel,
-        messageId,
-        newStatus
-      ),
-
-      channel.send({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle(
-              `${emojiForStatus(
-                newStatus
-              )} Ticket ${capitalize(
-                newStatus
-              )}`
-            )
-            .setDescription(
-              `${interaction.user} changed the ticket status to **${capitalize(
-                newStatus
-              )}**.`
-            )
-            .setTimestamp(),
-        ],
-      }),
-    ]);
-
-    void getGuildConfig(
-      interaction.guild!.id
-    )
-      .then(
-        (config) => {
-          if (
-            isPremiumOrHigher(
-              config.tier
-            ) &&
-            config.supportCategoryId
-          ) {
-            void logTicketEvent(
-              interaction.guild!,
-              config.supportCategoryId,
-              {
-                ticketNumber:
-                  getField(
-                    topic,
-                    'number'
-                  ) ??
-                  'Unknown',
-                event:
-                  `Status → ${newStatus}`,
-                actor:
-                  interaction.user.tag,
-              }
-            ).catch(
-              (error) => {
-                console.error(
-                  `⚠️ Failed to write status audit log for #${
-                    getField(
-                      topic,
-                      'number'
-                    ) ?? 'Unknown'
-                  }:`,
-                  error
-                );
-              }
-            );
-          }
-        }
-      )
-      .catch(
-        (error) => {
-          console.error(
-            '⚠️ Failed to load config for status audit:',
-            error
-          );
-        }
-      );
-
-    await interaction.editReply(
-      `✅ ${successMessage}`
+    await updateMainMessage(
+      channel,
+      messageId,
+      newStatus,
+      newTopic,
     );
 
-    console.log(
-      `✅ Ticket #${
-        getField(
-          topic,
-          'number'
-        ) ?? 'Unknown'
-      } successfully changed to ${newStatus}.`
+    await channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle(
+            `${emojiForStatus(
+              newStatus,
+            )} Ticket ${capitalize(
+              newStatus,
+            )}`,
+          )
+          .setDescription(
+            `${interaction.user} changed the ticket status to **${capitalize(
+              newStatus,
+            )}**.`,
+          )
+          .setTimestamp(),
+      ],
+    });
+
+    const config =
+      await getGuildConfig(
+        interaction.guild!.id,
+      );
+
+    if (
+      isPremiumOrHigher(
+        config.tier,
+      ) &&
+      config.supportCategoryId
+    ) {
+      void logTicketEvent(
+        interaction.guild!,
+        config.supportCategoryId,
+        {
+          ticketNumber:
+            getField(
+              topic,
+              'number',
+            ) ?? 'Unknown',
+          event:
+            `Status → ${newStatus}`,
+          actor:
+            interaction.user.tag,
+        },
+      );
+    }
+
+    await interaction.editReply(
+      `✅ ${successMessage}`,
     );
   } catch (error) {
     console.error(
       `❌ Ticket transition failed: ${newStatus}`,
-      error
+      error,
     );
 
     clearRuntimeTicketState(
-      channel.id
+      channel.id,
     );
 
     await interaction
       .editReply(
-        '❌ The ticket status could not be changed. Check the bot console.'
+        '❌ The ticket status could not be changed. Check the bot console.',
       )
-      .catch(
-        () => undefined
-      );
+      .catch(() => undefined);
   } finally {
     ticketActionLocks.delete(
-      channel.id
+      channel.id,
     );
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/*                              CLOSE TICKET                                  */
-/* -------------------------------------------------------------------------- */
-
+/**
+ * Closes a ticket:
+ *
+ * 1. Generate transcript
+ * 2. Upload transcript
+ * 3. Lock permissions in one operation
+ * 4. Mark topic as closed
+ * 5. Update panel
+ * 6. Announce closure
+ * 7. Audit
+ * 8. Rename channel
+ */
 async function closeTicket(
-  interaction: ButtonInteraction
+  interaction: ButtonInteraction,
 ): Promise<void> {
-  const channel =
-    interaction.channel;
-
-  /* ---------------------------------------------------------------------- */
-  /*                         BASIC VALIDATION                               */
-  /* ---------------------------------------------------------------------- */
+  const channel = interaction.channel;
 
   if (
     !channel ||
-    channel.type !==
-      ChannelType.GuildText
+    channel.type !== ChannelType.GuildText
   ) {
-    await interaction.reply({
-      content:
-        '❌ This action can only be used inside a ticket channel.',
-      flags:
-        MessageFlags.Ephemeral,
-    });
-
+    await replyError(
+      interaction,
+      '❌ This action can only be used inside a ticket channel.',
+    );
     return;
   }
-
-  /* ---------------------------------------------------------------------- */
-  /*                         ACTION LOCK                                    */
-  /* ---------------------------------------------------------------------- */
 
   if (
-    ticketActionLocks.has(
-      channel.id
-    )
+    ticketActionLocks.has(channel.id)
   ) {
-    await interaction.reply({
-      content:
-        '⏳ Another ticket action is currently being processed. Please wait a moment.',
-      flags:
-        MessageFlags.Ephemeral,
-    });
-
+    await replyError(
+      interaction,
+      '⏳ Another ticket action is currently being processed. Please wait a moment.',
+    );
     return;
   }
 
-  ticketActionLocks.add(
-    channel.id
-  );
-
-  console.time(
-    `CLOSE_TOTAL_${channel.id}`
-  );
+  ticketActionLocks.add(channel.id);
 
   try {
-    /* ------------------------------------------------------------------ */
-    /*                     ACKNOWLEDGE IMMEDIATELY                         */
-    /* ------------------------------------------------------------------ */
-
     await interaction.deferReply({
-      flags:
-        MessageFlags.Ephemeral,
+      flags: MessageFlags.Ephemeral,
     });
 
-    console.log(
-      `🟡 Close interaction deferred for channel #${channel.name}`
-    );
+    const state =
+      getRuntimeTicketState(channel);
 
-    /* ------------------------------------------------------------------ */
-    /*                     GET CURRENT TICKET STATE                       */
-    /* ------------------------------------------------------------------ */
+    const topic = state.topic;
 
-    const runtimeState =
-      getRuntimeTicketState(
-        channel
+    if (!isTicketTopic(topic)) {
+      await interaction.editReply(
+        '❌ This is not a SupportForge ticket.',
       );
+      return;
+    }
 
-    const topic =
-      runtimeState.topic;
-
+    /**
+     * Closed and archived tickets cannot be closed again.
+     */
     if (
-      !topic.startsWith(
-        PREFIX
+      isTerminalTicketStatus(
+        state.status,
       )
     ) {
       await interaction.editReply(
-        '❌ This is not a SupportForge ticket.'
+        'ℹ️ This ticket is already closed or archived.',
       );
-
       return;
     }
-
-    const currentStatus =
-      runtimeState.status;
-
-    const ticketNumber =
-      getField(
-        topic,
-        'number'
-      ) ?? 'Unknown';
-
-    console.log(
-      `🔒 Close requested for #${ticketNumber} | current status=${currentStatus}`
-    );
-
-    /* ------------------------------------------------------------------ */
-    /*                     STATUS VALIDATION                              */
-    /* ------------------------------------------------------------------ */
-
-    if (
-      currentStatus ===
-        'closed' ||
-      currentStatus ===
-        'archived'
-    ) {
-      await interaction.editReply(
-        'ℹ️ This ticket is already closed or archived.'
-      );
-
-      return;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /*                     AUTHORIZATION                                  */
-    /* ------------------------------------------------------------------ */
 
     const context =
       getStaffContext(
         interaction,
-        topic
+        topic,
       );
 
     const isOwner =
       context.ownerId ===
       interaction.user.id;
 
-    const authorized =
-      isOwner ||
-      context.isStaff ||
-      isAdmin(interaction);
-
-    if (!authorized) {
+    if (
+      !isOwner &&
+      !context.authorized
+    ) {
       await interaction.editReply(
-        '❌ Only the ticket owner, configured staff, or an administrator can close this ticket.'
+        '❌ Only the ticket owner, configured staff, or an administrator can close this ticket.',
       );
-
       return;
     }
-
-    /* ------------------------------------------------------------------ */
-    /*                     LOAD CONFIG                                    */
-    /* ------------------------------------------------------------------ */
 
     const config =
       await getGuildConfig(
-        interaction.guild!.id
+        interaction.guild!.id,
       );
 
-    if (
-      !config.supportCategoryId
-    ) {
+    if (!config.supportCategoryId) {
       await interaction.editReply(
-        '❌ SupportForge configuration is missing.'
+        '❌ SupportForge configuration is missing.',
       );
-
       return;
     }
 
-    /* ------------------------------------------------------------------ */
-    /*                     TRANSCRIPT CHANNEL                             */
-    /* ------------------------------------------------------------------ */
-
-    const transcriptChannelId =
-      config.transcriptChannelId;
-
     const transcriptChannel =
-      transcriptChannelId
+      config.transcriptChannelId
         ? interaction.guild!.channels.cache.get(
-            transcriptChannelId
+            config.transcriptChannelId,
           )
         : null;
 
@@ -1791,65 +1218,34 @@ async function closeTicket(
         ChannelType.GuildText
     ) {
       await interaction.editReply(
-        '❌ The transcript channel is missing. Run `/supportforge setup` to repair SupportForge.'
+        '❌ The transcript channel is missing. Run `/supportforge setup` to repair SupportForge.',
       );
-
       return;
     }
 
-    /* ------------------------------------------------------------------ */
-    /*                     TICKET METADATA                                */
-    /* ------------------------------------------------------------------ */
-
-    const rawSubject =
+    const ticketNumber =
       getField(
         topic,
-        'subject'
-      );
-
-    let subject =
-      rawSubject ??
-      'Unknown Subject';
-
-    try {
-      if (rawSubject) {
-        subject =
-          decodeURIComponent(
-            rawSubject
-          );
-      }
-    } catch {
-      subject =
-        rawSubject ??
-        'Unknown Subject';
-    }
+        'number',
+      ) ?? 'Unknown';
 
     const ownerId =
       context.ownerId ??
       'Unknown';
 
-    /*
-     * FIX:
-     *
-     * The original ticket message ID is stored in the
-     * ticket topic as:
-     *
-     * message=<discord-message-id>
-     *
-     * The final close operation needs this ID to update
-     * the ticket buttons.
-     */
+    const subject =
+      decodeSubject(
+        getField(
+          topic,
+          'subject',
+        ),
+      );
+
     const messageId =
       getField(
         topic,
-        'message'
+        'message',
       );
-
-    if (!messageId) {
-      console.warn(
-        `⚠️ Ticket #${ticketNumber} has no stored message ID. Button update will be skipped.`
-      );
-    }
 
     const openedAt =
       channel.createdAt;
@@ -1857,28 +1253,17 @@ async function closeTicket(
     const closedAt =
       new Date();
 
-    /* ------------------------------------------------------------------ */
-    /*                     OWNER NAME                                    */
-    /* ------------------------------------------------------------------ */
-
     let ownerName =
       ownerId;
 
-    const cachedOwner =
-      interaction.guild!.members.cache.get(
-        ownerId
-      );
-
-    if (cachedOwner) {
-      ownerName =
-        cachedOwner.displayName;
-    } else if (
-      ownerId !== 'Unknown'
-    ) {
+    if (ownerId !== 'Unknown') {
       try {
         const owner =
+          interaction.guild!.members.cache.get(
+            ownerId,
+          ) ??
           await interaction.guild!.members.fetch(
-            ownerId
+            ownerId,
           );
 
         ownerName =
@@ -1889,16 +1274,8 @@ async function closeTicket(
       }
     }
 
-    /* ------------------------------------------------------------------ */
-    /*                     GENERATE TRANSCRIPT                            */
-    /* ------------------------------------------------------------------ */
-
-    console.log(
-      `📄 Generating transcript for ticket #${ticketNumber}...`
-    );
-
     console.time(
-      `CLOSE_TRANSCRIPT_${channel.id}`
+      `CLOSE_TRANSCRIPT_${channel.id}`,
     );
 
     let transcript;
@@ -1916,642 +1293,891 @@ async function closeTicket(
           openedAt,
           closedAt,
         });
-    } catch (error) {
-      console.error(
-        `❌ Transcript generation failed for #${ticketNumber}:`,
-        error
-      );
-
+    } finally {
       console.timeEnd(
-        `CLOSE_TRANSCRIPT_${channel.id}`
+        `CLOSE_TRANSCRIPT_${channel.id}`,
       );
-
-      await interaction
-        .editReply(
-          '❌ The ticket was not closed because its transcript could not be generated.'
-        )
-        .catch(
-          (replyError) => {
-            console.error(
-              '❌ Failed to send transcript error response:',
-              replyError
-            );
-          }
-        );
-
-      return;
     }
 
-    console.timeEnd(
-      `CLOSE_TRANSCRIPT_${channel.id}`
+    /**
+     * Upload transcript before modifying the ticket.
+     *
+     * If transcript upload fails, the ticket remains active instead
+     * of being silently converted into a closed ticket without a transcript.
+     */
+    await transcriptChannel.send({
+      content:
+        `📄 **Ticket #${ticketNumber} Transcript**\n` +
+        `**Subject:** ${subject}\n` +
+        `**Owner:** <@${ownerId}>\n` +
+        `**Closed by:** ${interaction.user}`,
+      files: [transcript],
+    });
+
+    /**
+     * One permission-overwrite PATCH.
+     */
+    await lockTicketPermissions(
+      channel,
+      topic,
+      false,
     );
 
-    /* ------------------------------------------------------------------ */
-    /*                     UPLOAD TRANSCRIPT                              */
-    /* ------------------------------------------------------------------ */
-
-    console.log(
-      `📤 Uploading transcript for ticket #${ticketNumber}...`
-    );
-
-    console.time(
-      `CLOSE_UPLOAD_${channel.id}`
-    );
-
-    try {
-      await transcriptChannel.send({
-        content:
-          `📄 **Ticket #${ticketNumber} Transcript**\n` +
-          `**Subject:** ${subject}\n` +
-          `**Owner:** <@${ownerId}>\n` +
-          `**Closed by:** ${interaction.user}`,
-        files: [
-          transcript,
-        ],
-      });
-    } catch (error) {
-      console.error(
-        `❌ Transcript upload failed for #${ticketNumber}:`,
-        error
-      );
-
-      console.timeEnd(
-        `CLOSE_UPLOAD_${channel.id}`
-      );
-
-      await interaction
-        .editReply(
-          '❌ The transcript could not be uploaded, so the ticket was not closed.'
-        )
-        .catch(
-          (replyError) => {
-            console.error(
-              '❌ Failed to send transcript upload error response:',
-              replyError
-            );
-          }
-        );
-
-      return;
-    }
-
-    console.timeEnd(
-      `CLOSE_UPLOAD_${channel.id}`
-    );
-
-    /* ------------------------------------------------------------------ */
-    /*                     LOCK PERMISSIONS                               */
-    /* ------------------------------------------------------------------ */
-
-    console.log(
-      `🔒 Locking ticket #${ticketNumber}...`
-    );
-
-    console.time(
-      `CLOSE_PERMISSIONS_${channel.id}`
-    );
-
-    try {
-      const bot =
-        interaction.guild!.members.me;
-
-      if (!bot) {
-        throw new Error(
-          'Bot member unavailable.'
-        );
-      }
-
-      const botPermissions =
-        channel.permissionsFor(
-          bot
-        );
-
-      if (
-        !botPermissions?.has(
-          PermissionFlagsBits.ManageChannels
-        )
-      ) {
-        throw new Error(
-          'SupportForge is missing Manage Channels permission.'
-        );
-      }
-
-      const operations:
-        Promise<unknown>[] = [];
-
-      if (
-        ownerId !==
-          'Unknown' &&
-        ownerId !==
-          interaction.guild!.ownerId
-      ) {
-        operations.push(
-          channel.permissionOverwrites.edit(
-            ownerId,
-            {
-              ViewChannel: true,
-              SendMessages: false,
-              AddReactions: false,
-              AttachFiles: false,
-              EmbedLinks: false,
-              ReadMessageHistory: true,
-            }
-          )
-        );
-      }
-
-      if (
-        context.staffRole
-      ) {
-        operations.push(
-          channel.permissionOverwrites.edit(
-            context.staffRole,
-            {
-              ViewChannel: true,
-              SendMessages: false,
-              AddReactions: false,
-              AttachFiles: false,
-              EmbedLinks: false,
-              ReadMessageHistory: true,
-            }
-          )
-        );
-      }
-
-      const users =
-        (
-          getField(
-            topic,
-            'users'
-          ) ?? ''
-        )
-          .split(',')
-          .map(
-            (userId) =>
-              userId.trim()
-          )
-          .filter(Boolean);
-
-      for (
-        const userId of users
-      ) {
-        if (
-          userId === ownerId
-        ) {
-          continue;
-        }
-
-        operations.push(
-          channel.permissionOverwrites.edit(
-            userId,
-            {
-              ViewChannel: true,
-              SendMessages: false,
-              AddReactions: false,
-              AttachFiles: false,
-              EmbedLinks: false,
-              ReadMessageHistory: true,
-            }
-          )
-        );
-      }
-
-      operations.push(
-        channel.permissionOverwrites.edit(
-          interaction.guild!.roles.everyone.id,
-          {
-            ViewChannel: false,
-            SendMessages: false,
-            ReadMessageHistory: false,
-          }
-        )
-      );
-
-      await Promise.all(
-        operations
-      );
-    } catch (error) {
-      console.error(
-        `❌ Ticket permission lock failed for #${ticketNumber}:`,
-        error
-      );
-
-      console.timeEnd(
-        `CLOSE_PERMISSIONS_${channel.id}`
-      );
-
-      await interaction
-        .editReply(
-          '❌ The transcript was saved, but the ticket could not be locked. Check the bot permissions.'
-        )
-        .catch(
-          (replyError) => {
-            console.error(
-              '❌ Failed to send permission error response:',
-              replyError
-            );
-          }
-        );
-
-      return;
-    }
-
-    console.timeEnd(
-      `CLOSE_PERMISSIONS_${channel.id}`
-    );
-
-    /* ------------------------------------------------------------------ */
-    /*                     MARK AS CLOSED                                 */
-    /* ------------------------------------------------------------------ */
-
-    const closedTopic =
+    let closedTopic =
       setField(
         topic,
         'status',
-        'closed'
+        'closed',
       );
+
+    closedTopic =
+      setField(
+        closedTopic,
+        'closed_at',
+        closedAt.toISOString(),
+      );
+
+    await channel.setTopic(
+      closedTopic,
+    );
 
     updateRuntimeTicketState(
       channel,
       closedTopic,
-      'closed'
+      'closed',
     );
 
-    console.log(
-      `📝 Queueing closed topic update for #${ticketNumber}...`
+    await interaction.editReply(
+      `✅ Ticket #${ticketNumber} is closed and locked. Transcript saved to ${transcriptChannel}.`,
     );
 
-    queueTopicUpdate(
-      channel,
-      closedTopic
-    );
-
-    /* ------------------------------------------------------------------ */
-    /*                  COMPLETE ORIGINAL INTERACTION                    */
-    /* ------------------------------------------------------------------ */
-
-    console.log(
-      `🟢 ABOUT TO EDIT CLOSE REPLY #${ticketNumber}`
-    );
-
-    console.time(
-      `CLOSE_INTERACTION_REPLY_${channel.id}`
-    );
-
-    try {
-      await interaction.editReply(
-        `✅ Ticket #${ticketNumber} is closed and locked. Transcript saved to ${transcriptChannel}.`
-      );
-
-      console.log(
-        `🟢 CLOSE REPLY EDITED #${ticketNumber}`
-      );
-    } catch (replyError) {
-      console.error(
-        `❌ FAILED TO EDIT CLOSE REPLY #${ticketNumber}:`,
-        replyError
-      );
-    }
-
-    console.timeEnd(
-      `CLOSE_INTERACTION_REPLY_${channel.id}`
-    );
-
-    /* ------------------------------------------------------------------ */
-    /*                     CLOSE AUDIT + RENAME                           */
-    /* ------------------------------------------------------------------ */
-
-    /*
-     * The rename no longer depends on the audit promise, transcript promise,
-     * or discord.js's REST queue.  The transcript is already complete and
-     * the ticket is already marked closed at this point, so we can perform
-     * the rename immediately through Discord's HTTP API.
+    /**
+     * Non-critical post-close operations run independently.
+     *
+     * A failed rename or panel update should not make the user wait
+     * for the ticket closure itself.
      */
     const auditPromise =
-      (async () => {
-        if (
-          isPremiumOrHigher(
-            config.tier
+      isPremiumOrHigher(
+        config.tier,
+      ) &&
+      config.supportCategoryId
+        ? logTicketEvent(
+            interaction.guild!,
+            config.supportCategoryId,
+            {
+              ticketNumber,
+              event:
+                'Ticket closed',
+              actor:
+                interaction.user.tag,
+            },
           )
-        ) {
-          try {
-            console.time(
-              `CLOSE_AUDIT_${channel.id}`
-            );
-
-            await logTicketEvent(
-              interaction.guild!,
-              config.supportCategoryId!,
-              {
-                ticketNumber,
-                event:
-                  'Ticket closed',
-                actor:
-                  interaction.user.tag,
-              }
-            );
-
-            console.timeEnd(
-              `CLOSE_AUDIT_${channel.id}`
-            );
-
-            console.log(
-              `📝 ✅ Close audit recorded for #${ticketNumber}`
-            );
-          } catch (error) {
-            console.error(
-              `📝 ❌ Failed to write close audit log for #${ticketNumber}:`,
-              error
-            );
-          }
-        } else {
-          console.log(
-            `📝 Audit skipped for #${ticketNumber} because the current tier does not include audit logging.`
-          );
-        }
-      })();
-
-    const renamePromise =
-      (async () => {
-        console.time(
-          `CLOSE_RENAME_${channel.id}`
-        );
-
-        try {
-          if (
-            channel.name.endsWith(
-              '-closed'
-            )
-          ) {
-            console.log(
-              `ℹ️ Channel #${ticketNumber} is already named ${channel.name}.`
-            );
-            return;
-          }
-
-          const latestRuntimeState =
-            ticketRuntimeCache.get(
-              channel.id
-            );
-
-          const latestStatus =
-            latestRuntimeState?.status ??
-            getStatusFromTopic(
-              channel.topic ?? ''
-            );
-
-          if (
-            latestStatus !==
-            'closed'
-          ) {
-            console.log(
-              `🛑 Skipping channel rename for #${ticketNumber} because the ticket is now ${latestStatus}.`
-            );
-            return;
-          }
-
-          const newName =
-            `${channel.name}-closed`;
-
-          await queueChannelRename(
-            channel,
-            newName,
-            `SupportForge close for ticket #${ticketNumber}`
-          );
-
-          console.log(
-            `✅ Close rename completed for #${ticketNumber}.`
-          );
-        } catch (error) {
-          console.error(
-            `❌ Close rename failed for #${ticketNumber}:`,
-            error
-          );
-          throw error;
-        } finally {
-          console.timeEnd(
-            `CLOSE_RENAME_${channel.id}`
-          );
-        }
-      })();
-
-    /* ------------------------------------------------------------------ */
-    /*                     BUTTON UPDATE                                  */
-    /* ------------------------------------------------------------------ */
+        : Promise.resolve();
 
     const buttonPromise =
-      (async () => {
-        console.time(
-          `CLOSE_BUTTONS_${channel.id}`
-        );
-
-        try {
-          await updateMainMessage(
-            channel,
-            messageId,
-            'closed'
-          );
-
-          console.log(
-            `✅ Ticket buttons updated for #${ticketNumber}`
-          );
-        } catch (error) {
-          console.error(
-            `❌ Ticket button update failed for #${ticketNumber}:`,
-            error
-          );
-
-          throw error;
-        } finally {
-          console.timeEnd(
-            `CLOSE_BUTTONS_${channel.id}`
-          );
-        }
-      })();
-
-    /* ------------------------------------------------------------------ */
-    /*                     CLOSE ANNOUNCEMENT                             */
-    /* ------------------------------------------------------------------ */
+      updateMainMessage(
+        channel,
+        messageId,
+        'closed',
+        closedTopic,
+      );
 
     const closeMessagePromise =
-      (async () => {
-        console.time(
-          `CLOSE_MESSAGE_${channel.id}`
-        );
+      channel.send({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle(
+              '🔒 Ticket Closed',
+            )
+            .setDescription(
+              `This ticket was closed by ${interaction.user}.\n\n📄 Transcript saved to ${transcriptChannel}.`,
+            )
+            .setTimestamp(),
+        ],
+      });
 
-        try {
-          await channel.send({
-            embeds: [
-              new EmbedBuilder()
-                .setTitle(
-                  '🔒 Ticket Closed'
-                )
-                .setDescription(
-                  `This ticket was closed by ${interaction.user}.\n\n` +
-                  `📄 Transcript saved to ${transcriptChannel}.`
-                )
-                .setTimestamp(),
-            ],
-          });
+    const renamePromise =
+      queueTicketChannelRename(
+        channel,
+        channel.name.endsWith(
+          '-closed',
+        )
+          ? channel.name
+          : `${channel.name}-closed`,
+        `SupportForge close for ticket #${ticketNumber}`,
+      );
 
-          console.log(
-            `✅ Close announcement sent for #${ticketNumber}`
-          );
-        } catch (error) {
-          console.error(
-            `❌ Close announcement failed for #${ticketNumber}:`,
-            error
-          );
-
-          throw error;
-        } finally {
-          console.timeEnd(
-            `CLOSE_MESSAGE_${channel.id}`
-          );
-        }
-      })();
-
-    /*
-     * None of these background operations is allowed to hold up the close
-     * interaction.  The direct rename has its own timeout and retry policy.
-     */
     void Promise.allSettled([
       auditPromise,
-      renamePromise,
       buttonPromise,
       closeMessagePromise,
-    ]).then(
-      (results) => {
-        console.timeEnd(
-          `CLOSE_FINALIZE_${channel.id}`
-        );
+      renamePromise,
+    ]).then((results) => {
+      results.forEach(
+        (result, index) => {
+          if (
+            result.status ===
+            'rejected'
+          ) {
+            const labels = [
+              'audit',
+              'buttons',
+              'announcement',
+              'rename',
+            ];
 
-        const labels = [
-          'audit',
-          'rename',
-          'buttons',
-          'announcement',
-        ];
-
-        results.forEach(
-          (result, index) => {
-            if (
-              result.status ===
-              'rejected'
-            ) {
-              console.error(
-                `❌ Background close ${labels[index]} failed for #${ticketNumber}:`,
-                result.reason
-              );
-            }
+            console.error(
+              `❌ Background close ${labels[index]} failed for #${ticketNumber}:`,
+              result.reason,
+            );
           }
-        );
-
-        console.log(
-          `✅ Background close operations settled for #${ticketNumber}`
-        );
-      }
-    );
-
-    /* ------------------------------------------------------------------ */
-    /*                     SUCCESS                                       */
-    /* ------------------------------------------------------------------ */
-
-    console.log(
-      `✅ Ticket #${ticketNumber} successfully closed.`
-    );
+        },
+      );
+    });
   } catch (error) {
     console.error(
-      `❌ Ticket close operation failed for #${
-        getField(
-          channel.topic ?? '',
-          'number'
-        ) ?? 'Unknown'
-      }:`,
-      error
+      '❌ Ticket close operation failed:',
+      error,
     );
 
     clearRuntimeTicketState(
-      channel.id
+      channel.id,
     );
 
-    if (
-      interaction.deferred &&
-      !interaction.replied
-    ) {
-      await interaction
-        .editReply(
-          '❌ The ticket could not be closed. Check the bot console for details.'
-        )
-        .catch(
-          () => undefined
-        );
-    }
+    await interaction
+      .editReply(
+        '❌ The ticket could not be closed. Check the bot console for details.',
+      )
+      .catch(() => undefined);
   } finally {
     ticketActionLocks.delete(
-      channel.id
-    );
-
-    console.timeEnd(
-      `CLOSE_TOTAL_${channel.id}`
+      channel.id,
     );
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/*                         MAIN INTERACTION HANDLER                           */
-/* -------------------------------------------------------------------------- */
-
-export async function handleTicketInteraction(
-  interaction:
-    | ButtonInteraction
-    | ModalSubmitInteraction
+/**
+ * Handles buttons belonging to the newer ticket control panel.
+ */
+async function handlePanelButton(
+  interaction: ButtonInteraction,
 ): Promise<void> {
-  console.log(
-    `🟡 INTERACTION RECEIVED | type=${
-      interaction.type
-    } | customId=${
-      'customId' in interaction
-        ? interaction.customId
-        : 'none'
-    } | user=${interaction.user.tag}`
-  );
+  const channel =
+    interaction.channel;
 
-  /* ---------------------------------------------------------------------- */
-  /*                              GUILD CHECK                               */
-  /* ---------------------------------------------------------------------- */
-
-  if (!interaction.guild) {
+  if (
+    !channel ||
+    channel.type !== ChannelType.GuildText
+  ) {
     await replyError(
       interaction,
-      '❌ This feature is only available inside a server.'
+      '❌ This action can only be used inside a ticket channel.',
+    );
+    return;
+  }
+
+  const state =
+    getRuntimeTicketState(channel);
+
+  if (
+    !isTicketTopic(
+      state.topic,
+    )
+  ) {
+    await replyError(
+      interaction,
+      '❌ This channel is not a SupportForge ticket.',
+    );
+    return;
+  }
+
+  const context =
+    getStaffContext(
+      interaction,
+      state.topic,
+    );
+
+  if (!context.authorized) {
+    await replyError(
+      interaction,
+      '❌ Only configured staff or administrators can use ticket management controls.',
+    );
+    return;
+  }
+
+  const action =
+    interaction.customId.split(':')[2];
+
+  const config =
+    await getGuildConfig(
+      interaction.guild!.id,
+    );
+
+  if (
+    ['priority', 'tag', 'note'].includes(
+      action,
+    ) &&
+    !isPremiumOrHigher(
+      config.tier,
+    )
+  ) {
+    await interaction.reply({
+      content:
+        '🔒 This feature is available in Premium/Pro demo mode. Run `/supportforge premium toggle-demo` as an administrator to preview it.',
+      flags: MessageFlags.Ephemeral,
+    });
+
+    return;
+  }
+
+  if (action === 'add-user') {
+    const modal =
+      new ModalBuilder()
+        .setCustomId(
+          'ticket:panel-modal:add-user',
+        )
+        .setTitle(
+          'Add User to Ticket',
+        );
+
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>()
+        .addComponents(
+          new TextInputBuilder()
+            .setCustomId('user')
+            .setLabel(
+              'User ID or @mention',
+            )
+            .setStyle(
+              TextInputStyle.Short,
+            )
+            .setRequired(true)
+            .setMaxLength(30),
+        ),
+    );
+
+    await interaction.showModal(
+      modal,
     );
 
     return;
   }
 
-  /* ---------------------------------------------------------------------- */
-  /*                              CREATE BUTTON                             */
-  /* ---------------------------------------------------------------------- */
+  if (action === 'priority') {
+    const modal =
+      new ModalBuilder()
+        .setCustomId(
+          'ticket:panel-modal:priority',
+        )
+        .setTitle(
+          'Set Ticket Priority',
+        );
 
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>()
+        .addComponents(
+          new TextInputBuilder()
+            .setCustomId('level')
+            .setLabel(
+              'low / normal / high / urgent / critical',
+            )
+            .setStyle(
+              TextInputStyle.Short,
+            )
+            .setRequired(true)
+            .setMaxLength(10),
+        ),
+    );
+
+    await interaction.showModal(
+      modal,
+    );
+
+    return;
+  }
+
+  if (action === 'tag') {
+    const modal =
+      new ModalBuilder()
+        .setCustomId(
+          'ticket:panel-modal:tag',
+        )
+        .setTitle(
+          'Add Ticket Tag',
+        );
+
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>()
+        .addComponents(
+          new TextInputBuilder()
+            .setCustomId('name')
+            .setLabel('Tag name')
+            .setStyle(
+              TextInputStyle.Short,
+            )
+            .setRequired(true)
+            .setMaxLength(30),
+        ),
+    );
+
+    await interaction.showModal(
+      modal,
+    );
+
+    return;
+  }
+
+  if (action === 'note') {
+    const modal =
+      new ModalBuilder()
+        .setCustomId(
+          'ticket:panel-modal:note',
+        )
+        .setTitle(
+          'Add Internal Note',
+        );
+
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>()
+        .addComponents(
+          new TextInputBuilder()
+            .setCustomId('text')
+            .setLabel(
+              'Internal staff note',
+            )
+            .setStyle(
+              TextInputStyle.Paragraph,
+            )
+            .setRequired(true)
+            .setMaxLength(500),
+        ),
+    );
+
+    await interaction.showModal(
+      modal,
+    );
+
+    return;
+  }
+
+  if (action === 'history') {
+    await interaction.deferReply({
+      flags: MessageFlags.Ephemeral,
+    });
+
+    const auditId =
+      config.auditChannelId;
+
+    const audit =
+      auditId
+        ? interaction.guild!.channels.cache.get(
+            auditId,
+          )
+        : null;
+
+    if (
+      !audit ||
+      audit.type !==
+        ChannelType.GuildText
+    ) {
+      await interaction.editReply(
+        'ℹ️ No audit history exists for this ticket yet.',
+      );
+
+      return;
+    }
+
+    const ticketNumber =
+      getField(
+        state.topic,
+        'number',
+      ) ?? 'Unknown';
+
+    const messages =
+      await audit.messages.fetch({
+        limit: 50,
+      });
+
+    const matching =
+      messages
+        .filter((message) =>
+          message.embeds.some(
+            (embed) =>
+              embed.description?.includes(
+                `Ticket #${ticketNumber}`,
+              ),
+          ),
+        )
+        .first(10);
+
+    const lines =
+      matching.length
+        ? matching
+            .map(
+              (message) =>
+                `${message.createdAt.toLocaleString(
+                  'en-IN',
+                )} • ${
+                  message.embeds[0]
+                    ?.description ??
+                  'Event'
+                }`,
+            )
+            .join('\n')
+        : 'No recent audit events found.';
+
+    await interaction.editReply(
+      `📜 **Recent history for ticket #${ticketNumber}**\n\n${lines}`,
+    );
+  }
+}
+
+/**
+ * Handles modal submissions originating from the control panel.
+ */
+async function handlePanelModal(
+  interaction: ModalSubmitInteraction,
+): Promise<void> {
+  const channel =
+    interaction.channel;
+
+  if (
+    !channel ||
+    channel.type !== ChannelType.GuildText
+  ) {
+    await replyError(
+      interaction,
+      '❌ This action can only be used inside a ticket channel.',
+    );
+    return;
+  }
+
+  const state =
+    getRuntimeTicketState(channel);
+
+  if (
+    !isTicketTopic(
+      state.topic,
+    )
+  ) {
+    await replyError(
+      interaction,
+      '❌ This channel is not a SupportForge ticket.',
+    );
+    return;
+  }
+
+  const context =
+    getStaffContext(
+      interaction,
+      state.topic,
+    );
+
+  if (!context.authorized) {
+    await replyError(
+      interaction,
+      '❌ Only configured staff or administrators can use ticket management controls.',
+    );
+    return;
+  }
+
+  const config =
+    await getGuildConfig(
+      interaction.guild!.id,
+    );
+
+  const action =
+    interaction.customId.split(':')[2];
+
+  if (
+    ['priority', 'tag', 'note'].includes(
+      action,
+    ) &&
+    !isPremiumOrHigher(
+      config.tier,
+    )
+  ) {
+    await replyError(
+      interaction,
+      '🔒 This feature is available in Premium/Pro demo mode.',
+    );
+
+    return;
+  }
+
+  await interaction.deferReply({
+    flags: MessageFlags.Ephemeral,
+  });
+
+  /**
+   * Do not allow management changes to an archived ticket.
+   */
+  if (
+    state.status === 'archived'
+  ) {
+    await interaction.editReply(
+      '❌ Archived tickets cannot be modified.',
+    );
+
+    return;
+  }
+
+  if (action === 'add-user') {
+    const raw =
+      interaction.fields
+        .getTextInputValue(
+          'user',
+        )
+        .trim();
+
+    const userId =
+      parseUserId(raw);
+
+    if (!userId) {
+      await interaction.editReply(
+        '❌ Enter a valid Discord user ID or @mention.',
+      );
+
+      return;
+    }
+
+    const currentUsers =
+      new Set(
+        (
+          getField(
+            state.topic,
+            'users',
+          ) ?? ''
+        )
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+      );
+
+    currentUsers.add(
+      userId,
+    );
+
+    await channel.permissionOverwrites.edit(
+      userId,
+      {
+        ViewChannel: true,
+        SendMessages:
+          state.status !== 'closed',
+        ReadMessageHistory: true,
+        AttachFiles: true,
+        EmbedLinks: true,
+      },
+    );
+
+    let topic =
+      setField(
+        state.topic,
+        'users',
+        [...currentUsers].join(','),
+      );
+
+    await channel.setTopic(
+      topic,
+    );
+
+    updateRuntimeTicketState(
+      channel,
+      topic,
+      getTicketStatus(topic),
+    );
+
+    await updateMainMessage(
+      channel,
+      getField(
+        topic,
+        'message',
+      ),
+      getTicketStatus(topic),
+      topic,
+    );
+
+    await channel.send(
+      `➕ <@${userId}> was added by ${interaction.user}.`,
+    );
+
+    await interaction.editReply(
+      `✅ <@${userId}> now has access to ticket #${
+        getField(
+          topic,
+          'number',
+        ) ?? 'Unknown'
+      }.`,
+    );
+
+    return;
+  }
+
+  if (action === 'priority') {
+    const level =
+      interaction.fields
+        .getTextInputValue(
+          'level',
+        )
+        .trim()
+        .toLowerCase();
+
+    const priorities =
+      new Set([
+        'low',
+        'normal',
+        'high',
+        'urgent',
+        'critical',
+      ]);
+
+    if (!priorities.has(level)) {
+      await interaction.editReply(
+        '❌ Invalid priority. Use low, normal, high, urgent, or critical.',
+      );
+
+      return;
+    }
+
+    const topic =
+      setField(
+        state.topic,
+        'priority',
+        level,
+      );
+
+    await channel.setTopic(
+      topic,
+    );
+
+    updateRuntimeTicketState(
+      channel,
+      topic,
+      getTicketStatus(topic),
+    );
+
+    await updateMainMessage(
+      channel,
+      getField(
+        topic,
+        'message',
+      ),
+      getTicketStatus(topic),
+      topic,
+    );
+
+    const baseName =
+      channel.name.replace(
+        /^[🟢⚪🟠🔴🟣]\s*/u,
+        '',
+      );
+
+    const emoji =
+      ({
+        low: '🟢',
+        normal: '',
+        high: '🟠',
+        urgent: '🔴',
+        critical: '🟣',
+      } as Record<
+        string,
+        string
+      >)[level];
+
+    await queueTicketChannelRename(
+      channel,
+      level === 'normal'
+        ? baseName
+        : `${emoji}${baseName}`,
+      `SupportForge priority changed to ${level}`,
+    );
+
+    await interaction.editReply(
+      `✅ Ticket #${
+        getField(
+          topic,
+          'number',
+        ) ?? 'Unknown'
+      } priority is now **${level}**.`,
+    );
+
+    return;
+  }
+
+  if (action === 'tag') {
+    const value =
+      interaction.fields
+        .getTextInputValue(
+          'name',
+        )
+        .trim()
+        .toLowerCase()
+        .replace(
+          /\s+/g,
+          '-',
+        );
+
+    if (!value) {
+      await interaction.editReply(
+        '❌ Tag cannot be empty.',
+      );
+
+      return;
+    }
+
+    const tags =
+      new Set(
+        (
+          getField(
+            state.topic,
+            'tags',
+          ) ?? ''
+        )
+          .split(',')
+          .map((tag) => tag.trim())
+          .filter(Boolean),
+      );
+
+    if (tags.has(value)) {
+      await interaction.editReply(
+        `ℹ️ Tag \`${value}\` is already on this ticket.`,
+      );
+
+      return;
+    }
+
+    tags.add(value);
+
+    const topic =
+      setField(
+        state.topic,
+        'tags',
+        [...tags].join(','),
+      );
+
+    await channel.setTopic(
+      topic,
+    );
+
+    updateRuntimeTicketState(
+      channel,
+      topic,
+      getTicketStatus(topic),
+    );
+
+    await updateMainMessage(
+      channel,
+      getField(
+        topic,
+        'message',
+      ),
+      getTicketStatus(topic),
+      topic,
+    );
+
+    await channel.send(
+      `🏷️ Tag \`${value}\` added by ${interaction.user}.`,
+    );
+
+    await interaction.editReply(
+      `✅ Added tag \`${value}\`.`,
+    );
+
+    return;
+  }
+
+  if (action === 'note') {
+    if (!config.supportCategoryId) {
+      await interaction.editReply(
+        '❌ SupportForge category configuration is missing.',
+      );
+
+      return;
+    }
+
+    const text =
+      interaction.fields
+        .getTextInputValue(
+          'text',
+        )
+        .trim();
+
+    const audit =
+      await getOrCreateAuditChannel(
+        interaction.guild!,
+        config.supportCategoryId,
+      );
+
+    await audit.send({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle(
+            `🔒 Internal note • Ticket #${
+              getField(
+                state.topic,
+                'number',
+              ) ?? 'Unknown'
+            }`,
+          )
+          .setDescription(
+            text,
+          )
+          .setFooter({
+            text: `Added by ${interaction.user.tag}`,
+          })
+          .setTimestamp(),
+      ],
+    });
+
+    await interaction.editReply(
+      '✅ Internal note recorded in the staff-only audit log.',
+    );
+
+    return;
+  }
+
+  await interaction.editReply(
+    '❌ Unsupported ticket panel action.',
+  );
+}
+
+/**
+ * Main ticket interaction router.
+ */
+export async function handleTicketInteraction(
+  interaction:
+    | ButtonInteraction
+    | ModalSubmitInteraction,
+): Promise<void> {
+  if (!interaction.guild) {
+    await replyError(
+      interaction,
+      '❌ This feature is only available inside a server.',
+    );
+
+    return;
+  }
+
+  /**
+   * Ticket creation button.
+   */
   if (
     interaction.isButton() &&
     interaction.customId.startsWith(
-      'ticket:create:'
+      'ticket:create:',
     )
   ) {
     const departmentId =
-      interaction.customId.split(
-        ':'
-      )[2];
+      interaction.customId.split(':')[2];
 
     const modal =
       new ModalBuilder()
         .setCustomId(
-          `ticket:modal:${departmentId}`
+          `ticket:modal:${departmentId}`,
         )
         .setTitle(
-          'Create Support Ticket'
+          'Create Support Ticket',
         );
 
     modal.addComponents(
@@ -2559,106 +2185,117 @@ export async function handleTicketInteraction(
         .addComponents(
           new TextInputBuilder()
             .setCustomId(
-              'subject'
+              'subject',
             )
             .setLabel(
-              'Subject'
+              'Subject',
             )
             .setStyle(
-              TextInputStyle.Short
+              TextInputStyle.Short,
             )
-            .setRequired(
-              true
-            )
-            .setMaxLength(
-              100
-            )
+            .setRequired(true)
+            .setMaxLength(100),
         ),
 
       new ActionRowBuilder<TextInputBuilder>()
         .addComponents(
           new TextInputBuilder()
             .setCustomId(
-              'description'
+              'description',
             )
             .setLabel(
-              'Describe the issue'
+              'Describe the issue',
             )
             .setStyle(
-              TextInputStyle.Paragraph
+              TextInputStyle.Paragraph,
             )
-            .setRequired(
-              true
-            )
-            .setMaxLength(
-              1500
-            )
-        )
+            .setRequired(true)
+            .setMaxLength(1500),
+        ),
     );
 
     await interaction.showModal(
-      modal
+      modal,
     );
 
     return;
   }
 
-  /* ---------------------------------------------------------------------- */
-  /*                              CREATE MODAL                              */
-  /* ---------------------------------------------------------------------- */
-
+  /**
+   * Ticket creation modal.
+   */
   if (
     interaction.isModalSubmit() &&
     interaction.customId.startsWith(
-      'ticket:modal:'
+      'ticket:modal:',
     )
   ) {
     await interaction.deferReply({
-      flags:
-        MessageFlags.Ephemeral,
+      flags: MessageFlags.Ephemeral,
     });
 
     try {
       await createTicket(
         interaction,
-        interaction.customId.split(
-          ':'
-        )[2]
+        interaction.customId.split(':')[2],
       );
     } catch (error) {
       console.error(
         '❌ Ticket creation failed:',
-        error
+        error,
       );
 
-      await interaction.editReply(
-        '❌ The ticket could not be created. Check the bot permissions and console.'
-      );
+      await interaction
+        .editReply(
+          '❌ The ticket could not be created. Check the bot permissions and console.',
+        )
+        .catch(() => undefined);
     }
 
     return;
   }
 
-  /* ---------------------------------------------------------------------- */
-  /*                            BUTTON CHECK                                */
-  /* ---------------------------------------------------------------------- */
-
+  /**
+   * New control-panel buttons.
+   */
   if (
-    !interaction.isButton()
+    interaction.isButton() &&
+    isPanelButton(interaction)
   ) {
+    await handlePanelButton(
+      interaction,
+    );
+
     return;
   }
 
-  /* ---------------------------------------------------------------------- */
-  /*                              TICKET ACTIONS                            */
-  /* ---------------------------------------------------------------------- */
-
-  switch (
-    interaction.customId
+  /**
+   * New control-panel modals.
+   */
+  if (
+    interaction.isModalSubmit() &&
+    interaction.customId.startsWith(
+      'ticket:panel-modal:',
+    )
   ) {
+    await handlePanelModal(
+      interaction,
+    );
+
+    return;
+  }
+
+  if (!interaction.isButton()) {
+    return;
+  }
+
+  /**
+   * Legacy/core lifecycle buttons.
+   */
+  switch (interaction.customId) {
     case 'ticket:close':
       await closeTicket(
-        interaction
+        interaction,
       );
       return;
 
@@ -2666,21 +2303,18 @@ export async function handleTicketInteraction(
       await transition(
         interaction,
         'claimed',
-        [
-          'open',
-          'reopened',
-        ],
+        ['open', 'reopened'],
         `Ticket #${
           getField(
             interaction.channel &&
               interaction.channel.type ===
                 ChannelType.GuildText
-              ? interaction.channel
-                  .topic ?? ''
+              ? interaction.channel.topic ??
+                ''
               : '',
-            'number'
+            'number',
           ) ?? 'Unknown'
-        } has been claimed.`
+        } has been claimed.`,
       );
       return;
 
@@ -2689,7 +2323,7 @@ export async function handleTicketInteraction(
         interaction,
         'open',
         ['claimed'],
-        'The ticket has been returned to the open queue.'
+        'The ticket has been returned to the open queue.',
       );
       return;
 
@@ -2702,16 +2336,16 @@ export async function handleTicketInteraction(
           'claimed',
           'reopened',
         ],
-        'The ticket is now pending.'
+        'The ticket is now pending.',
       );
       return;
 
     case 'ticket:resume':
       await transition(
         interaction,
-        'claimed',
+        'open',
         ['pending'],
-        'The ticket is active again and marked as claimed.'
+        'The ticket has been resumed and is now open.',
       );
       return;
 
@@ -2720,7 +2354,7 @@ export async function handleTicketInteraction(
         interaction,
         'reopened',
         ['closed'],
-        'The ticket has been reopened.'
+        'The ticket has been reopened.',
       );
       return;
 
@@ -2729,11 +2363,44 @@ export async function handleTicketInteraction(
         interaction,
         'archived',
         ['closed'],
-        'The ticket has been archived.'
+        'The ticket has been archived.',
       );
       return;
 
     default:
       return;
   }
+}
+
+/**
+ * Status → display emoji.
+ */
+function emojiForStatus(
+  status: TicketStatus,
+): string {
+  const emojis: Record<
+    TicketStatus,
+    string
+  > = {
+    open: '🟢',
+    claimed: '🙋',
+    pending: '⏳',
+    closed: '🔒',
+    reopened: '🔓',
+    archived: '🗄️',
+  };
+
+  return emojis[status];
+}
+
+/**
+ * Capitalizes a status for human-readable messages.
+ */
+function capitalize(
+  value: string,
+): string {
+  return (
+    value.charAt(0).toUpperCase() +
+    value.slice(1)
+  );
 }
