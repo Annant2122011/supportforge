@@ -1,14 +1,19 @@
 import {
   AttachmentBuilder,
+  type Embed,
   type Message,
   type TextChannel,
 } from 'discord.js';
 
-const MAX_MESSAGES = 1000;
-const FETCH_BATCH_SIZE = 100;
+const MAX_MESSAGES = 10000;
+const PAGE_SIZE = 100;
+
+/* -------------------------------------------------------------------------- */
+/*                              HTML UTILITIES                                */
+/* -------------------------------------------------------------------------- */
 
 function escapeHtml(value: string): string {
-  return String(value)
+  return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -17,72 +22,507 @@ function escapeHtml(value: string): string {
 }
 
 function formatDate(date: Date): string {
-  return date.toLocaleString('en-IN', {
-    dateStyle: 'medium',
-    timeStyle: 'medium',
-  });
+  return escapeHtml(
+    date.toLocaleString('en-IN', {
+      dateStyle: 'medium',
+      timeStyle: 'medium',
+    }),
+  );
 }
 
-/**
- * Fetch messages in chronological order.
- *
- * Discord returns messages newest-first.
- * We paginate backwards using the oldest message ID
- * from the previous batch.
- *
- * The function is deliberately limited to MAX_MESSAGES
- * so a giant ticket cannot make transcript generation
- * run indefinitely.
- */
-async function fetchAllMessages(
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return 'Unknown size';
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB'];
+
+  let value = bytes;
+  let index = 0;
+
+  while (
+    value >= 1024 &&
+    index < units.length - 1
+  ) {
+    value /= 1024;
+    index++;
+  }
+
+  return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function formatContent(content: string): string {
+  return escapeHtml(content)
+    .replace(/\r?\n/g, '<br>');
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              AUTHOR HELPERS                                */
+/* -------------------------------------------------------------------------- */
+
+function getAuthorName(
+  message: Message,
+): string {
+  return (
+    message.member?.displayName ??
+    message.author.globalName ??
+    message.author.username
+  );
+}
+
+function getAvatarUrl(
+  message: Message,
+): string {
+  return (
+    message.author.displayAvatarURL({
+      extension: 'png',
+      size: 128,
+    }) ??
+    ''
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              EMBED RENDERING                               */
+/* -------------------------------------------------------------------------- */
+
+function renderEmbed(
+  embed: Embed,
+): string {
+  const parts: string[] = [];
+
+  if (embed.title) {
+    const title = embed.url
+      ? `<a href="${escapeHtml(
+          embed.url,
+        )}" target="_blank" rel="noopener noreferrer">${escapeHtml(
+          embed.title,
+        )}</a>`
+      : escapeHtml(embed.title);
+
+    parts.push(
+      `<div class="embed-title">${title}</div>`,
+    );
+  }
+
+  if (embed.description) {
+    parts.push(
+      `<div class="embed-description">${formatContent(
+        embed.description,
+      )}</div>`,
+    );
+  }
+
+  if (embed.fields?.length) {
+    parts.push(
+      `<div class="embed-fields">${embed.fields
+        .map(
+          (field) => `
+            <div class="embed-field">
+              <div class="embed-field-name">
+                ${escapeHtml(field.name)}
+              </div>
+              <div class="embed-field-value">
+                ${formatContent(field.value)}
+              </div>
+            </div>
+          `,
+        )
+        .join('')}</div>`,
+    );
+  }
+
+  if (embed.image?.url) {
+    parts.push(`
+      <div class="embed-image">
+        <img
+          src="${escapeHtml(embed.image.url)}"
+          alt="Embedded image"
+          loading="lazy"
+        />
+      </div>
+    `);
+  }
+
+  if (embed.thumbnail?.url) {
+    parts.push(`
+      <div class="embed-thumbnail">
+        <img
+          src="${escapeHtml(embed.thumbnail.url)}"
+          alt="Embed thumbnail"
+          loading="lazy"
+        />
+      </div>
+    `);
+  }
+
+  if (embed.footer?.text) {
+    parts.push(`
+      <div class="embed-footer">
+        ${escapeHtml(embed.footer.text)}
+      </div>
+    `);
+  }
+
+  if (!parts.length) {
+    return '';
+  }
+
+  return `
+    <div class="discord-embed">
+      ${parts.join('\n')}
+    </div>
+  `;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                           ATTACHMENT RENDERING                             */
+/* -------------------------------------------------------------------------- */
+
+function renderAttachments(
+  message: Message,
+): string {
+  if (!message.attachments.size) {
+    return '';
+  }
+
+  return `
+    <div class="attachments">
+      ${Array.from(
+        message.attachments.values(),
+      )
+        .map((attachment) => {
+          const name =
+            attachment.name ??
+            'Attachment';
+
+          const size = formatBytes(
+            attachment.size,
+          );
+
+          const isImage =
+            attachment.contentType?.startsWith(
+              'image/',
+            ) ?? false;
+
+          if (isImage) {
+            return `
+              <div class="attachment image-attachment">
+                <a
+                  href="${escapeHtml(
+                    attachment.url,
+                  )}"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <img
+                    src="${escapeHtml(
+                      attachment.url,
+                    )}"
+                    alt="${escapeHtml(name)}"
+                    loading="lazy"
+                  />
+                </a>
+
+                <div class="attachment-info">
+                  📎
+                  <a
+                    href="${escapeHtml(
+                      attachment.url,
+                    )}"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    ${escapeHtml(name)}
+                  </a>
+
+                  <span>${escapeHtml(size)}</span>
+                </div>
+              </div>
+            `;
+          }
+
+          return `
+            <div class="attachment">
+              <span class="attachment-icon">📎</span>
+
+              <a
+                href="${escapeHtml(
+                  attachment.url,
+                )}"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                ${escapeHtml(name)}
+              </a>
+
+              <span class="attachment-size">
+                ${escapeHtml(size)}
+              </span>
+            </div>
+          `;
+        })
+        .join('')}
+    </div>
+  `;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                             STICKER RENDERING                              */
+/* -------------------------------------------------------------------------- */
+
+function renderStickers(
+  message: Message,
+): string {
+  if (!message.stickers.size) {
+    return '';
+  }
+
+  return `
+    <div class="stickers">
+      ${Array.from(
+        message.stickers.values(),
+      )
+        .map(
+          (sticker) => `
+            <div class="sticker">
+              <span>🎟️</span>
+              ${escapeHtml(
+                sticker.name,
+              )}
+            </div>
+          `,
+        )
+        .join('')}
+    </div>
+  `;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              REPLY RENDERING                               */
+/* -------------------------------------------------------------------------- */
+
+function renderReference(
+  message: Message,
+): string {
+  const reference =
+    message.reference;
+
+  if (!reference?.messageId) {
+    return '';
+  }
+
+  return `
+    <div class="reply-reference">
+      ↪️ Reply / reference to message
+      <code>${escapeHtml(
+        reference.messageId,
+      )}</code>
+    </div>
+  `;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              MESSAGE LINKS                                */
+/* -------------------------------------------------------------------------- */
+
+function renderMessageLink(
+  message: Message,
+): string {
+  return `
+    <a
+      class="message-link"
+      href="${escapeHtml(
+        message.url,
+      )}"
+      target="_blank"
+      rel="noopener noreferrer"
+      title="Open message in Discord"
+    >
+      #
+    </a>
+  `;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              MESSAGE BODY                                  */
+/* -------------------------------------------------------------------------- */
+
+function renderMessage(
+  message: Message,
+): string {
+  const author =
+    escapeHtml(
+      getAuthorName(message),
+    );
+
+  const avatar =
+    escapeHtml(
+      getAvatarUrl(message),
+    );
+
+  const timestamp =
+    formatDate(
+      message.createdAt,
+    );
+
+  const content =
+    formatContent(
+      message.content || '',
+    );
+
+  const edited =
+    message.editedTimestamp
+      ? `<span class="edited">(edited)</span>`
+      : '';
+
+  const botBadge =
+    message.author.bot
+      ? `<span class="bot-badge">BOT</span>`
+      : '';
+
+  const systemBadge =
+    message.system
+      ? `<span class="system-badge">SYSTEM</span>`
+      : '';
+
+  const reference =
+    renderReference(
+      message,
+    );
+
+  const attachments =
+    renderAttachments(
+      message,
+    );
+
+  const embeds =
+    message.embeds
+      .map(renderEmbed)
+      .join('');
+
+  const stickers =
+    renderStickers(
+      message,
+    );
+
+  const messageLink =
+    renderMessageLink(
+      message,
+    );
+
+  const contentBlock =
+    content
+      ? `
+        <div class="message-content">
+          ${content}
+          ${edited}
+        </div>
+      `
+      : '';
+
+  return `
+    <article
+      class="message"
+      id="message-${escapeHtml(
+        message.id,
+      )}"
+    >
+
+      <img
+        class="avatar"
+        src="${avatar}"
+        alt="${author}"
+        loading="lazy"
+      />
+
+      <div class="message-main">
+
+        <div class="message-header">
+
+          <strong class="author">
+            ${author}
+          </strong>
+
+          ${botBadge}
+          ${systemBadge}
+
+          <span class="timestamp">
+            ${timestamp}
+          </span>
+
+          ${messageLink}
+
+        </div>
+
+        ${reference}
+
+        ${contentBlock}
+
+        ${attachments}
+
+        ${embeds}
+
+        ${stickers}
+
+      </div>
+
+    </article>
+  `;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                         MESSAGE FETCHING                                   */
+/* -------------------------------------------------------------------------- */
+
+async function fetchMessages(
   channel: TextChannel,
 ): Promise<{
   messages: Message[];
   limited: boolean;
 }> {
-  const messages: Message[] = [];
+  const result: Message[] = [];
 
-  let before: string | undefined;
+  let before:
+    | string
+    | undefined;
 
-  while (messages.length < MAX_MESSAGES) {
+  let page = 0;
+
+  while (
+    result.length <
+    MAX_MESSAGES
+  ) {
+    page++;
+
     const remaining =
-      MAX_MESSAGES - messages.length;
+      MAX_MESSAGES -
+      result.length;
 
     const limit = Math.min(
-      FETCH_BATCH_SIZE,
+      PAGE_SIZE,
       remaining,
     );
 
-    let batch;
-
-    try {
-      batch = await channel.messages.fetch({
+    const batch =
+      await channel.messages.fetch({
         limit,
         ...(before
           ? { before }
           : {}),
       });
-    } catch (error) {
-      console.error(
-        `❌ Failed to fetch transcript messages from #${channel.name}:`,
-        error,
-      );
-
-      throw new Error(
-        'Discord message history could not be fetched.',
-      );
-    }
 
     if (batch.size === 0) {
       break;
     }
 
-    messages.push(
+    result.push(
       ...batch.values(),
     );
 
     if (
-      batch.size < FETCH_BATCH_SIZE
+      batch.size <
+      PAGE_SIZE
     ) {
       break;
     }
@@ -94,762 +534,728 @@ async function fetchAllMessages(
       break;
     }
 
-    before = oldest.id;
+    before =
+      oldest.id;
+
+    /*
+     * Avoid accidentally looping forever if Discord returns
+     * an unexpected duplicate page.
+     */
+    if (
+      result.length >=
+      2 * PAGE_SIZE
+    ) {
+      const ids =
+        new Set(
+          result.map(
+            (message) =>
+              message.id,
+          ),
+        );
+
+      if (
+        ids.size !==
+        result.length
+      ) {
+        console.warn(
+          '⚠️ Duplicate message IDs detected while generating transcript.',
+        );
+
+        break;
+      }
+    }
+
+    /*
+     * This gives the console useful progress on large tickets.
+     */
+    if (
+      page % 10 ===
+      0
+    ) {
+      console.log(
+        `📚 Transcript fetch progress: ${result.length}/${MAX_MESSAGES}`,
+      );
+    }
   }
 
-  messages.sort(
+  /*
+   * Discord returns newest → oldest.
+   * Transcripts should be oldest → newest.
+   */
+  result.sort(
     (a, b) =>
       a.createdTimestamp -
       b.createdTimestamp,
   );
 
   return {
-    messages,
+    messages: result,
     limited:
-      messages.length >=
+      result.length >=
       MAX_MESSAGES,
   };
 }
 
-/**
- * Safely renders one Discord message.
- *
- * A malformed/unusual message should never cause
- * the entire transcript generation process to fail.
- */
-function renderMessage(
-  message: Message,
-): string {
-  const authorName =
-    escapeHtml(
-      message.member?.displayName ??
-        message.author.username,
-    );
-
-  const username =
-    escapeHtml(
-      message.author.username,
-    );
-
-  const avatarUrl =
-    escapeHtml(
-      message.author.displayAvatarURL({
-        extension: 'png',
-        size: 128,
-      }),
-    );
-
-  const timestamp =
-    formatDate(
-      message.createdAt,
-    );
-
-  const content =
-    message.content
-      ? escapeHtml(
-          message.content,
-        ).replace(
-          /\r?\n/g,
-          '<br>',
-        )
-      : '';
-
-  const attachments =
-    Array.from(
-      message.attachments.values(),
-    )
-      .map(
-        (attachment) => {
-          const attachmentName =
-            escapeHtml(
-              attachment.name ??
-                'Attachment',
-            );
-
-          const attachmentUrl =
-            escapeHtml(
-              attachment.url,
-            );
-
-          return `
-            <div class="attachment">
-              <span class="attachment-icon">📎</span>
-
-              <a
-                href="${attachmentUrl}"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                ${attachmentName}
-              </a>
-            </div>
-          `;
-        },
-      )
-      .join('');
-
-  const embeds =
-    message.embeds
-      .map((embed) => {
-        const title =
-          embed.title
-            ? `
-                <div class="embed-title">
-                  ${escapeHtml(
-                    embed.title,
-                  )}
-                </div>
-              `
-            : '';
-
-        const description =
-          embed.description
-            ? `
-                <div class="embed-description">
-                  ${escapeHtml(
-                    embed.description,
-                  ).replace(
-                    /\r?\n/g,
-                    '<br>',
-                  )}
-                </div>
-              `
-            : '';
-
-        return `
-          <div class="embed">
-            ${title}
-            ${description}
-          </div>
-        `;
-      })
-      .join('');
-
-  const stickers =
-    message.stickers.size > 0
-      ? `
-          <div class="stickers">
-            🎨 Sticker:
-            ${escapeHtml(
-              Array.from(
-                message.stickers.values(),
-              )
-                .map(
-                  (sticker) =>
-                    sticker.name,
-                )
-                .join(', '),
-            )}
-          </div>
-        `
-      : '';
-
-  return `
-    <div class="message">
-      <img
-        class="avatar"
-        src="${avatarUrl}"
-        alt=""
-        loading="lazy"
-      />
-
-      <div class="message-body">
-
-        <div class="message-header">
-
-          <span class="author">
-            ${authorName}
-          </span>
-
-          <span class="username">
-            @${username}
-          </span>
-
-          <span class="timestamp">
-            ${escapeHtml(timestamp)}
-          </span>
-
-        </div>
-
-        ${
-          content
-            ? `
-                <div class="content">
-                  ${content}
-                </div>
-              `
-            : ''
-        }
-
-        ${attachments}
-
-        ${embeds}
-
-        ${stickers}
-
-      </div>
-    </div>
-  `;
-}
-
-/**
- * Renders a message safely.
- *
- * If one message somehow fails to render, the transcript
- * continues instead of failing completely.
- */
-function safelyRenderMessage(
-  message: Message,
-): string {
-  try {
-    return renderMessage(
-      message,
-    );
-  } catch (error) {
-    console.error(
-      `⚠️ Failed to render message ${message.id}:`,
-      error,
-    );
-
-    return `
-      <div class="message">
-        <div class="message-body">
-          <div class="message-header">
-            <span class="author">
-              Unable to render message
-            </span>
-          </div>
-
-          <div class="content">
-            ⚠️ This message could not be rendered.
-          </div>
-        </div>
-      </div>
-    `;
-  }
-}
-
-export interface TranscriptOptions {
-  channel: TextChannel;
-
-  ticketNumber: string;
-
-  subject: string;
-
-  ownerId: string;
-
-  ownerName: string;
-
-  closedBy: string;
-
-  openedAt: Date;
-
-  closedAt: Date;
-}
+/* -------------------------------------------------------------------------- */
+/*                            MAIN TRANSCRIPT                                 */
+/* -------------------------------------------------------------------------- */
 
 export async function generateTranscript(
-  options: TranscriptOptions,
+  options: {
+    channel: TextChannel;
+    ticketNumber: string;
+    subject: string;
+    ownerId: string;
+    ownerName: string;
+    closedBy: string;
+    openedAt: Date;
+    closedAt: Date;
+  },
 ): Promise<AttachmentBuilder> {
   console.log(
-    `📄 Starting transcript generation for ticket #${options.ticketNumber}...`,
+    `📄 Transcript generation started for ticket #${options.ticketNumber}`,
+  );
+
+  console.time(
+    `TRANSCRIPT_TOTAL_${options.ticketNumber}`,
   );
 
   const {
-    messages: fetchedMessages,
+    messages,
     limited,
-  } = await fetchAllMessages(
-    options.channel,
-  );
-
-  /**
-   * Only include messages that existed at or before
-   * the exact moment the ticket was closed.
-   *
-   * This prevents:
-   *
-   * - post-close admin messages
-   * - transcript confirmation messages
-   * - other bot messages sent after closing
-   *
-   * from appearing in the actual conversation transcript.
-   */
-  const messages =
-    fetchedMessages.filter(
-      (message) =>
-        message.createdTimestamp <=
-        options.closedAt.getTime(),
+  } =
+    await fetchMessages(
+      options.channel,
     );
 
   console.log(
-    `📄 Fetched ${fetchedMessages.length} messages; ` +
-      `including ${messages.length} messages in ticket #${options.ticketNumber}.`,
+    `📚 Transcript collected ${messages.length} messages for ticket #${options.ticketNumber}`,
   );
 
-  if (limited) {
-    console.warn(
-      `⚠️ Transcript for ticket #${options.ticketNumber} reached the ${MAX_MESSAGES}-message safety limit.`,
-    );
-  }
-
-  const renderedMessages =
+  const body =
     messages
       .map(
-        safelyRenderMessage,
+        renderMessage,
       )
       .join('\n');
 
-  const messageCountText =
-    limited
-      ? `${messages.length} (most recent ${MAX_MESSAGES})`
-      : `${messages.length}`;
-
-  const messageContent =
-    renderedMessages ||
-    `
-      <div class="empty">
-        No messages were found in this ticket.
-      </div>
-    `;
-
-  const limitNotice =
+  const warning =
     limited
       ? `
-        <div class="limit-warning">
-          ⚠️ This transcript is limited to the
-          most recent ${MAX_MESSAGES} messages.
+        <div class="warning">
+          ⚠️ This transcript reached the
+          ${MAX_MESSAGES.toLocaleString()}
+          message safety limit.
+          Older messages may not be included.
         </div>
       `
       : '';
 
-  const html = `<!DOCTYPE html>
+  const html = `<!doctype html>
 <html lang="en">
 <head>
 
-  <meta charset="UTF-8">
+<meta charset="utf-8">
 
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0"
-  >
+<meta
+  name="viewport"
+  content="width=device-width, initial-scale=1"
+/>
 
-  <meta
-    name="robots"
-    content="noindex,nofollow"
-  >
+<meta
+  name="description"
+  content="SupportForge ticket transcript #${escapeHtml(
+    options.ticketNumber,
+  )}"
+/>
 
-  <title>
-    SupportForge Ticket #${escapeHtml(
-      options.ticketNumber,
-    )}
-  </title>
+<title>
+  SupportForge Ticket #${escapeHtml(
+    options.ticketNumber,
+  )}
+</title>
 
-  <style>
+<style>
 
-    * {
-      box-sizing: border-box;
-    }
+:root {
+  color-scheme: light;
+  --background: #f5f7fb;
+  --surface: #ffffff;
+  --surface-soft: #f7f8fa;
+  --border: #e5e7eb;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --accent: #5865f2;
+  --accent-soft: #eef0ff;
+  --warning: #fff3cd;
+  --warning-border: #f0c36d;
+}
 
-    body {
-      margin: 0;
-      padding: 0;
-      background: #f4f5f7;
-      color: #202225;
-      font-family:
-        Arial,
-        Helvetica,
-        sans-serif;
-    }
+* {
+  box-sizing: border-box;
+}
 
-    .container {
-      width: 100%;
-      max-width: 1000px;
-      margin: 40px auto;
-      padding: 0 20px;
-    }
+html {
+  scroll-behavior: smooth;
+}
 
-    .header {
-      background: #ffffff;
-      border-radius: 12px;
-      padding: 28px;
-      margin-bottom: 20px;
-      box-shadow:
-        0 2px 8px rgba(
-          0,
-          0,
-          0,
-          0.08
-        );
-    }
+body {
+  margin: 0;
+  padding: 24px;
+  background: var(--background);
+  color: var(--text);
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Arial,
+    sans-serif;
+  line-height: 1.5;
+}
 
-    .header h1 {
-      margin: 0 0 8px;
-      font-size: 28px;
-      line-height: 1.25;
-    }
+.container {
+  width: min(1100px, 100%);
+  margin: 0 auto;
+  background: var(--surface);
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow:
+    0 10px 40px rgba(0, 0, 0, 0.08);
+}
 
-    .subtitle {
-      color: #666;
-      margin-bottom: 20px;
-    }
+.header {
+  padding: 28px;
+  background:
+    linear-gradient(
+      135deg,
+      #5865f2,
+      #4752c4
+    );
+  color: white;
+}
 
-    .metadata {
-      display: grid;
-      grid-template-columns:
-        repeat(
-          auto-fit,
-          minmax(
-            220px,
-            1fr
-          )
-        );
-      gap: 12px;
-    }
+.header h1 {
+  margin: 0 0 8px;
+  font-size: 28px;
+}
 
-    .metadata-item {
-      background: #f7f7f8;
-      border-radius: 8px;
-      padding: 12px;
-    }
+.header-subtitle {
+  opacity: 0.9;
+}
 
-    .metadata-label {
-      font-size: 11px;
-      text-transform: uppercase;
-      color: #777;
-      margin-bottom: 4px;
-      font-weight: bold;
-      letter-spacing: 0.04em;
-    }
+.summary {
+  padding: 24px;
+  display: grid;
+  grid-template-columns:
+    repeat(
+      auto-fit,
+      minmax(220px, 1fr)
+    );
+  gap: 12px;
+}
 
-    .metadata-value {
-      font-size: 14px;
-      word-break: break-word;
-    }
+.card {
+  padding: 16px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
 
-    .transcript {
-      background: #ffffff;
-      border-radius: 12px;
-      padding: 20px;
-      box-shadow:
-        0 2px 8px rgba(
-          0,
-          0,
-          0,
-          0.08
-        );
-    }
+.card-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 5px;
+}
 
-    .limit-warning {
-      background: #fff3cd;
-      border: 1px solid #ffe69c;
-      border-radius: 8px;
-      padding: 12px;
-      margin-bottom: 16px;
-      color: #664d03;
-      font-size: 14px;
-    }
+.card-value {
+  font-size: 14px;
+  word-break: break-word;
+}
 
-    .message {
-      display: flex;
-      gap: 12px;
-      padding: 14px 8px;
-      border-bottom:
-        1px solid #eeeeee;
-    }
+.warning {
+  margin:
+    0 24px
+    20px;
+  padding: 14px 16px;
+  background: var(--warning);
+  border:
+    1px solid
+    var(--warning-border);
+  border-radius: 12px;
+}
 
-    .message:last-child {
-      border-bottom: none;
-    }
+.messages {
+  padding: 8px 24px 30px;
+}
 
-    .avatar {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      flex-shrink: 0;
-      object-fit: cover;
-      background: #ddd;
-    }
+.message {
+  display: flex;
+  gap: 12px;
+  padding: 15px 0;
+  border-bottom:
+    1px solid
+    var(--border);
+}
 
-    .message-body {
-      min-width: 0;
-      flex: 1;
-    }
+.message:last-child {
+  border-bottom: 0;
+}
 
-    .message-header {
-      display: flex;
-      align-items: baseline;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-bottom: 5px;
-    }
+.avatar {
+  width: 42px;
+  height: 42px;
+  min-width: 42px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #ddd;
+}
 
-    .author {
-      font-weight: bold;
-    }
+.message-main {
+  min-width: 0;
+  flex: 1;
+}
 
-    .username {
-      color: #777;
-      font-size: 13px;
-    }
+.message-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
 
-    .timestamp {
-      color: #999;
-      font-size: 12px;
-    }
+.author {
+  font-size: 15px;
+}
 
-    .content {
-      line-height: 1.5;
-      word-break: break-word;
-      overflow-wrap: anywhere;
-    }
+.timestamp {
+  color: var(--muted);
+  font-size: 12px;
+}
 
-    .attachment {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      margin-top: 8px;
-      padding: 8px 10px;
-      background: #f4f5f7;
-      border-radius: 6px;
-      font-size: 14px;
-      word-break: break-word;
-    }
+.edited {
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: 5px;
+}
 
-    .attachment-icon {
-      flex-shrink: 0;
-    }
+.bot-badge,
+.system-badge {
+  display: inline-block;
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 800;
+  color: white;
+  background: var(--accent);
+}
 
-    .attachment a {
-      color: #5865f2;
-      text-decoration: none;
-    }
+.system-badge {
+  background: #777;
+}
 
-    .attachment a:hover {
-      text-decoration: underline;
-    }
+.message-link {
+  margin-left: auto;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 16px;
+}
 
-    .embed {
-      margin-top: 8px;
-      padding: 10px 12px;
-      border-left: 4px solid #5865f2;
-      background: #f4f5f7;
-      border-radius: 4px;
-    }
+.message-link:hover {
+  color: var(--accent);
+}
 
-    .embed-title {
-      font-weight: bold;
-      margin-bottom: 4px;
-    }
+.message-content {
+  margin-top: 5px;
+  white-space: normal;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
 
-    .embed-description {
-      line-height: 1.5;
-      word-break: break-word;
-      overflow-wrap: anywhere;
-    }
+.reply-reference {
+  margin-top: 7px;
+  padding:
+    6px 9px;
+  border-left:
+    3px solid
+    var(--accent);
+  background:
+    var(--accent-soft);
+  color: var(--muted);
+  font-size: 12px;
+  border-radius: 4px;
+}
 
-    .stickers {
-      margin-top: 8px;
-      padding: 8px 10px;
-      background: #f4f5f7;
-      border-radius: 6px;
-      font-size: 14px;
-    }
+.attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
 
-    .empty {
-      text-align: center;
-      color: #777;
-      padding: 40px;
-    }
+.attachment {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border:
+    1px solid
+    var(--border);
+  border-radius: 8px;
+  background:
+    var(--surface-soft);
+}
 
-    .footer {
-      text-align: center;
-      color: #888;
-      font-size: 12px;
-      margin-top: 20px;
-      padding-bottom: 20px;
-    }
+.attachment a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
 
-    @media (max-width: 600px) {
+.attachment a:hover {
+  text-decoration: underline;
+}
 
-      .container {
-        margin: 20px auto;
-        padding: 0 10px;
-      }
+.attachment-size {
+  color: var(--muted);
+  font-size: 11px;
+}
 
-      .header {
-        padding: 20px;
-      }
+.image-attachment {
+  display: block;
+}
 
-      .header h1 {
-        font-size: 22px;
-      }
+.image-attachment img {
+  display: block;
+  max-width: min(600px, 100%);
+  max-height: 500px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  object-fit: contain;
+}
 
-      .transcript {
-        padding: 10px;
-      }
+.attachment-info {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
 
-      .message {
-        padding: 12px 4px;
-      }
+.discord-embed {
+  max-width: 650px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-left:
+    4px solid
+    var(--accent);
+  border-radius: 6px;
+  background:
+    #f7f8fb;
+}
 
-      .avatar {
-        width: 36px;
-        height: 36px;
-      }
+.embed-title {
+  font-weight: 700;
+  margin-bottom: 5px;
+}
 
-    }
+.embed-title a {
+  color: var(--accent);
+  text-decoration: none;
+}
 
-  </style>
+.embed-description {
+  margin-top: 4px;
+}
+
+.embed-fields {
+  display: grid;
+  grid-template-columns:
+    repeat(
+      auto-fit,
+      minmax(180px, 1fr)
+    );
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.embed-field {
+  padding: 8px;
+  background: white;
+  border-radius: 6px;
+}
+
+.embed-field-name {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 3px;
+}
+
+.embed-field-value {
+  font-size: 13px;
+  color: #444;
+}
+
+.embed-image img {
+  max-width: 100%;
+  max-height: 500px;
+  margin-top: 10px;
+  border-radius: 8px;
+}
+
+.embed-thumbnail img {
+  max-width: 160px;
+  max-height: 160px;
+  margin-top: 10px;
+  border-radius: 8px;
+}
+
+.embed-footer {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top:
+    1px solid
+    var(--border);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.stickers {
+  margin-top: 10px;
+}
+
+.sticker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border:
+    1px solid
+    var(--border);
+  border-radius: 8px;
+  background:
+    var(--surface-soft);
+  font-size: 13px;
+}
+
+.footer {
+  padding: 20px 24px;
+  border-top:
+    1px solid
+    var(--border);
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+code {
+  padding:
+    2px 4px;
+  background:
+    #e5e7eb;
+  border-radius: 4px;
+  font-family:
+    Consolas,
+    Monaco,
+    monospace;
+  font-size: 11px;
+}
+
+@media (
+  max-width: 650px
+) {
+
+  body {
+    padding: 0;
+  }
+
+  .container {
+    border-radius: 0;
+  }
+
+  .header {
+    padding: 22px;
+  }
+
+  .summary {
+    padding: 16px;
+  }
+
+  .messages {
+    padding:
+      8px
+      16px
+      24px;
+  }
+
+  .message {
+    gap: 8px;
+  }
+
+  .avatar {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+  }
+
+}
+
+</style>
 
 </head>
 
 <body>
 
-  <div class="container">
+<div class="container">
 
-    <div class="header">
+  <header class="header">
 
-      <h1>
-        🎫 SupportForge Ticket #${escapeHtml(
-          options.ticketNumber,
+    <h1>
+      🎫 SupportForge Ticket #${escapeHtml(
+        options.ticketNumber,
+      )}
+    </h1>
+
+    <div class="header-subtitle">
+      Complete support conversation transcript
+    </div>
+
+  </header>
+
+  <section class="summary">
+
+    <div class="card">
+      <div class="card-label">
+        Subject
+      </div>
+
+      <div class="card-value">
+        ${escapeHtml(
+          options.subject,
         )}
-      </h1>
+      </div>
+    </div>
 
-      <div class="subtitle">
-        Ticket Transcript
+    <div class="card">
+      <div class="card-label">
+        Owner
       </div>
 
-      <div class="metadata">
+      <div class="card-value">
+        ${escapeHtml(
+          options.ownerName,
+        )}
+        <br>
+        <small>
+          ${escapeHtml(
+            options.ownerId,
+          )}
+        </small>
+      </div>
+    </div>
 
-        <div class="metadata-item">
-
-          <div class="metadata-label">
-            Subject
-          </div>
-
-          <div class="metadata-value">
-            ${escapeHtml(
-              options.subject,
-            )}
-          </div>
-
-        </div>
-
-        <div class="metadata-item">
-
-          <div class="metadata-label">
-            Ticket Owner
-          </div>
-
-          <div class="metadata-value">
-            ${escapeHtml(
-              options.ownerName,
-            )}
-            <br>
-            <small>
-              ${escapeHtml(
-                options.ownerId,
-              )}
-            </small>
-          </div>
-
-        </div>
-
-        <div class="metadata-item">
-
-          <div class="metadata-label">
-            Opened
-          </div>
-
-          <div class="metadata-value">
-            ${escapeHtml(
-              formatDate(
-                options.openedAt,
-              ),
-            )}
-          </div>
-
-        </div>
-
-        <div class="metadata-item">
-
-          <div class="metadata-label">
-            Closed
-          </div>
-
-          <div class="metadata-value">
-            ${escapeHtml(
-              formatDate(
-                options.closedAt,
-              ),
-            )}
-          </div>
-
-        </div>
-
-        <div class="metadata-item">
-
-          <div class="metadata-label">
-            Closed By
-          </div>
-
-          <div class="metadata-value">
-            ${escapeHtml(
-              options.closedBy,
-            )}
-          </div>
-
-        </div>
-
-        <div class="metadata-item">
-
-          <div class="metadata-label">
-            Messages
-          </div>
-
-          <div class="metadata-value">
-            ${escapeHtml(
-              messageCountText,
-            )}
-          </div>
-
-        </div>
-
+    <div class="card">
+      <div class="card-label">
+        Opened
       </div>
 
+      <div class="card-value">
+        ${formatDate(
+          options.openedAt,
+        )}
+      </div>
     </div>
 
-    <div class="transcript">
+    <div class="card">
+      <div class="card-label">
+        Closed
+      </div>
 
-      ${limitNotice}
-
-      ${messageContent}
-
+      <div class="card-value">
+        ${formatDate(
+          options.closedAt,
+        )}
+        <br>
+        by ${escapeHtml(
+          options.closedBy,
+        )}
+      </div>
     </div>
 
-    <div class="footer">
-      Generated by SupportForge
+    <div class="card">
+      <div class="card-label">
+        Messages
+      </div>
+
+      <div class="card-value">
+        ${messages.length.toLocaleString()}
+        ${
+          limited
+            ? '+'
+            : ''
+        }
+      </div>
     </div>
 
-  </div>
+    <div class="card">
+      <div class="card-label">
+        Generated
+      </div>
+
+      <div class="card-value">
+        ${formatDate(
+          new Date(),
+        )}
+      </div>
+    </div>
+
+  </section>
+
+  ${warning}
+
+  <main class="messages">
+
+    ${
+      body ||
+      '<p>No messages were found in this ticket.</p>'
+    }
+
+  </main>
+
+  <footer class="footer">
+    Generated by
+    <strong>
+      SupportForge
+    </strong>
+    · Advanced Discord Support System
+  </footer>
+
+</div>
 
 </body>
 </html>`;
 
-  const buffer =
-    Buffer.from(
-      html,
-      'utf-8',
+  const attachment =
+    new AttachmentBuilder(
+      Buffer.from(
+        html,
+        'utf8',
+      ),
+      {
+        name:
+          `ticket-${options.ticketNumber}-transcript.html`,
+      },
     );
 
-  console.log(
-    `✅ Transcript generated for ticket #${options.ticketNumber} (${buffer.length} bytes).`,
+  console.timeEnd(
+    `TRANSCRIPT_TOTAL_${options.ticketNumber}`,
   );
 
-  return new AttachmentBuilder(
-    buffer,
-    {
-      name:
-        `ticket-${options.ticketNumber}-transcript.html`,
-    },
+  console.log(
+    `✅ Transcript generated for ticket #${options.ticketNumber} (${messages.length} messages)`
   );
+
+  return attachment;
 }

@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "guilds": {
+    "1548658959563497502": {
+      "supportCategoryId": "1549335802725531708",
+      "panelChannelId": "1549337598822973440",
+      "panelMessageId": "1549337611129065594",
+      "transcriptChannelId": "1549337591386738731",
+      "auditChannelId": "1549342999987625984",
+      "tier": "premium-demo",
+      "nextTicketNumber": 1016,
+      "departments": {
+        "d20efbf8": {
+          "id": "d20efbf8",
+          "name": "General Support",
+          "staffRoleId": null,
+          "createdAt": "2026-09-15T08:34:30.312Z"
+        }
+      }
+    }
+  }
+}
