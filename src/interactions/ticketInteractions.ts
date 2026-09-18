@@ -1,7 +1,5 @@
 import {
   ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   ChannelType,
   EmbedBuilder,
   MessageFlags,
@@ -23,7 +21,6 @@ import {
 import { generateTranscript } from '../services/transcriptService';
 
 import {
-  getOrCreateAuditChannel,
   logTicketEvent,
 } from '../services/auditLogService';
 
@@ -67,7 +64,16 @@ const TERMINAL_TICKET_STATUSES: readonly TicketStatus[] = [
 /* Runtime state                                                              */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Prevents two state-changing operations from modifying the same ticket
+ * simultaneously.
+ */
 const ticketActionLocks = new Set<string>();
+
+/**
+ * Prevents duplicate ticket creation requests from the same user for the
+ * same department.
+ */
 const ticketCreationLocks = new Set<string>();
 
 interface RuntimeTicketState {
@@ -76,25 +82,22 @@ interface RuntimeTicketState {
   updatedAt: number;
 }
 
-const ticketRuntimeCache = new Map<
-  string,
-  RuntimeTicketState
->();
+const ticketRuntimeCache = new Map<string, RuntimeTicketState>();
+
+/* -------------------------------------------------------------------------- */
+/* Status helpers                                                             */
+/* -------------------------------------------------------------------------- */
 
 function isActiveTicketStatus(
   status: TicketStatus,
 ): boolean {
-  return ACTIVE_TICKET_STATUSES.includes(
-    status,
-  );
+  return ACTIVE_TICKET_STATUSES.includes(status);
 }
 
 function isTerminalTicketStatus(
   status: TicketStatus,
 ): boolean {
-  return TERMINAL_TICKET_STATUSES.includes(
-    status,
-  );
+  return TERMINAL_TICKET_STATUSES.includes(status);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -139,14 +142,15 @@ async function withTimeout<T>(
 function getRuntimeTicketState(
   channel: TextChannel,
 ): RuntimeTicketState {
-  const topic =
-    channel.topic ?? '';
+  const topic = channel.topic ?? '';
 
-  const cached =
-    ticketRuntimeCache.get(
-      channel.id,
-    );
+  const cached = ticketRuntimeCache.get(
+    channel.id,
+  );
 
+  /*
+   * If the topic has not changed, the cached state is authoritative.
+   */
   if (
     cached &&
     cached.topic === topic
@@ -254,16 +258,28 @@ function getStaffContext(
     }
   }
 
+  const admin =
+    isAdmin(
+      interaction,
+    );
+
   return {
     ownerId,
     staffRole,
     isStaff,
+    isAdmin: admin,
     authorized:
       isStaff ||
-      isAdmin(interaction),
+      admin,
   };
 }
 
+/**
+ * Safely acknowledge a reply/error.
+ *
+ * This function deliberately does not attempt a second acknowledgement.
+ * Discord interactions can only be acknowledged once.
+ */
 async function replyError(
   interaction:
     | ButtonInteraction
@@ -296,6 +312,35 @@ async function replyError(
       '❌ Failed to send interaction error:',
       error,
     );
+  }
+}
+
+async function safeDeferReply(
+  interaction:
+    | ButtonInteraction
+    | ModalSubmitInteraction,
+): Promise<boolean> {
+  if (
+    interaction.deferred ||
+    interaction.replied
+  ) {
+    return true;
+  }
+
+  try {
+    await interaction.deferReply({
+      flags:
+        MessageFlags.Ephemeral,
+    });
+
+    return true;
+  } catch (error) {
+    console.error(
+      '❌ Failed to acknowledge interaction:',
+      error,
+    );
+
+    return false;
   }
 }
 
@@ -336,9 +381,26 @@ function parseUserId(
 }
 
 /* -------------------------------------------------------------------------- */
-/* Ticket panel                                                              */
+/* Ticket panel                                                               */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Refreshes the original ticket panel.
+ *
+ * IMPORTANT:
+ * We do NOT temporarily disable the panel here.
+ *
+ * The previous implementation could do:
+ *
+ *   state update
+ *   -> disabled panel edit
+ *   -> active panel edit
+ *
+ * in different asynchronous operations. If Discord completed the disabled
+ * edit last, the buttons stayed disabled permanently.
+ *
+ * The panel is now rendered only from the committed ticket state.
+ */
 async function updateMainMessage(
   channel: TextChannel,
   messageId: string | undefined,
@@ -371,6 +433,28 @@ async function updateMainMessage(
         'Ticket panel fetch',
       );
 
+    /*
+     * Before editing, verify that the topic still represents the state
+     * that this update was created for.
+     *
+     * This prevents an older asynchronous panel refresh from overwriting
+     * a newer ticket state.
+     */
+    const currentTopic =
+      channel.topic ?? '';
+
+    const currentStatus =
+      getTicketStatus(
+        currentTopic,
+      );
+
+    if (
+      currentTopic !== topic ||
+      currentStatus !== status
+    ) {
+      return;
+    }
+
     await withTimeout(
       message.edit({
         embeds: [
@@ -395,200 +479,6 @@ async function updateMainMessage(
       error,
     );
   }
-}
-
-/**
- * Disable the panel while a state-changing operation is running.
- *
- * We deliberately rebuild the panel from the ticket state instead of
- * inspecting TopLevelComponent internals. This avoids the discord.js
- * v14 component typing problem from the previous implementation.
- */
-async function lockTicketButtons(
-  channel: TextChannel,
-  messageId: string | undefined,
-): Promise<void> {
-  if (!messageId) {
-    return;
-  }
-
-  try {
-    const message =
-      channel.messages.cache.get(
-        messageId,
-      ) ??
-      await withTimeout(
-        channel.messages.fetch(
-          messageId,
-        ),
-        5_000,
-        'Ticket panel fetch',
-      );
-
-    const disabledRows =
-      buildDisabledRows(
-        message.components,
-      );
-
-    await withTimeout(
-      message.edit({
-        components:
-          disabledRows,
-      }),
-      5_000,
-      'Ticket button lock',
-    );
-  } catch (error) {
-    console.error(
-      '⚠️ Failed to lock ticket buttons:',
-      error,
-    );
-  }
-}
-
-/**
- * Discord.js exposes components as TopLevelComponent objects.
- * Instead of reading row.components and fighting the type system,
- * rebuild a simple disabled version from the component IDs.
- */
-function buildDisabledRows(
-  components: readonly unknown[],
-): ActionRowBuilder<ButtonBuilder>[] {
-  const rows: ActionRowBuilder<ButtonBuilder>[] =
-    [];
-
-  for (const row of components) {
-    const rawRow =
-      row as {
-        components?: readonly unknown[];
-      };
-
-    if (
-      !Array.isArray(
-        rawRow.components,
-      )
-    ) {
-      continue;
-    }
-
-    const buttons: ButtonBuilder[] =
-      [];
-
-    for (const rawComponent of
-      rawRow.components) {
-      const component =
-        rawComponent as {
-          type?: number;
-          customId?: string;
-          label?: string | null;
-          style?: number;
-          emoji?: {
-            name?: string | null;
-            id?: string | null;
-            animated?: boolean;
-          } | null;
-          url?: string | null;
-          disabled?: boolean;
-        };
-
-      /*
-       * Discord component type 2 = Button.
-       */
-      if (
-        component.type !== 2 ||
-        !component.customId
-      ) {
-        continue;
-      }
-
-      const button =
-        new ButtonBuilder()
-          .setCustomId(
-            component.customId,
-          )
-          .setDisabled(true);
-
-      if (
-        component.label
-      ) {
-        button.setLabel(
-          component.label,
-        );
-      }
-
-      if (
-        typeof component.style ===
-        'number'
-      ) {
-        switch (
-          component.style
-        ) {
-          case ButtonStyle.Primary:
-            button.setStyle(
-              ButtonStyle.Primary,
-            );
-            break;
-
-          case ButtonStyle.Secondary:
-            button.setStyle(
-              ButtonStyle.Secondary,
-            );
-            break;
-
-          case ButtonStyle.Success:
-            button.setStyle(
-              ButtonStyle.Success,
-            );
-            break;
-
-          case ButtonStyle.Danger:
-            button.setStyle(
-              ButtonStyle.Danger,
-            );
-            break;
-
-          case ButtonStyle.Link:
-            /*
-             * Link buttons do not have custom IDs and therefore
-             * are not expected in the SupportForge ticket panel.
-             */
-            continue;
-
-          default:
-            button.setStyle(
-              ButtonStyle.Secondary,
-            );
-        }
-      } else {
-        button.setStyle(
-          ButtonStyle.Secondary,
-        );
-      }
-
-      if (
-        component.emoji?.name
-      ) {
-        button.setEmoji(
-          component.emoji.name,
-        );
-      }
-
-      buttons.push(
-        button,
-      );
-    }
-
-    if (buttons.length) {
-      rows.push(
-        new ActionRowBuilder<ButtonBuilder>()
-          .addComponents(
-            buttons,
-          ),
-      );
-    }
-  }
-
-  return rows;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -900,8 +790,24 @@ async function createTicket(
   interaction: ModalSubmitInteraction,
   departmentId: string,
 ): Promise<void> {
+  if (
+    !(await safeDeferReply(
+      interaction,
+    ))
+  ) {
+    return;
+  }
+
+  if (!interaction.guild) {
+    await replyError(
+      interaction,
+      '❌ This action must be used inside a server.',
+    );
+    return;
+  }
+
   const guild =
-    interaction.guild!;
+    interaction.guild;
 
   const lockKey =
     `${guild.id}:${interaction.user.id}:${departmentId}`;
@@ -978,9 +884,8 @@ async function createTicket(
     }
 
     /*
-     * Only ACTIVE tickets block a new ticket.
-     *
-     * CLOSED and ARCHIVED tickets do not block creation.
+     * Only active tickets block creation.
+     * Closed and archived tickets do not.
      */
     const existing =
       guild.channels.cache.find(
@@ -1025,13 +930,10 @@ async function createTicket(
             return false;
           }
 
-          const status =
+          return isActiveTicketStatus(
             getTicketStatus(
               topic,
-            );
-
-          return isActiveTicketStatus(
-            status,
+            ),
           );
         },
       );
@@ -1178,9 +1080,6 @@ async function createTicket(
           'Ticket panel creation',
         );
 
-      /*
-       * "message" is the field used by ticketPanelService.
-       */
       const finalTopic =
         setField(
           topic,
@@ -1247,39 +1146,38 @@ async function createTicket(
       });
 
       /*
-       * Audit is deliberately non-blocking.
+       * Audit logging never blocks ticket creation.
        */
       if (
         isPremiumOrHigher(
           config.tier,
         )
       ) {
-        void Promise.resolve()
-          .then(async () => {
-            try {
-              await logTicketEvent(
-                guild,
-                categoryId,
-                {
-                  ticketNumber:
-                    String(
-                      number,
-                    ),
-                  event:
-                    'ticket_created',
-                  actor:
-                    interaction.user.tag,
-                  detail:
-                    `Ticket created in department ${department.name}.`,
-                },
-              );
-            } catch (error) {
-              console.error(
-                '⚠️ Ticket creation audit failed:',
-                error,
-              );
-            }
-          });
+        void (async () => {
+          try {
+            await logTicketEvent(
+              guild,
+              categoryId,
+              {
+                ticketNumber:
+                  String(
+                    number,
+                  ),
+                event:
+                  'ticket_created',
+                actor:
+                  interaction.user.tag,
+                detail:
+                  `Ticket created in department ${department.name}.`,
+              },
+            );
+          } catch (error) {
+            console.error(
+              '⚠️ Ticket creation audit failed:',
+              error,
+            );
+          }
+        })();
       }
     } catch (error) {
       if (ticketChannel) {
@@ -1360,22 +1258,38 @@ async function transition(
     lockKey,
   );
 
-  await interaction.deferReply({
-    flags:
-      MessageFlags.Ephemeral,
-  });
+  if (
+    !(await safeDeferReply(
+      interaction,
+    ))
+  ) {
+    ticketActionLocks.delete(
+      lockKey,
+    );
+    return;
+  }
 
   try {
+    /*
+     * Always read the latest channel topic before changing state.
+     * This prevents stale runtime data from becoming authoritative.
+     */
+    const latestTopic =
+      channel.topic ?? '';
+
     const state =
       getRuntimeTicketState(
         channel,
       );
 
     const oldTopic =
+      latestTopic ||
       state.topic;
 
     const oldStatus =
-      state.status;
+      getTicketStatus(
+        oldTopic,
+      );
 
     if (
       !isTicketTopic(
@@ -1388,11 +1302,26 @@ async function transition(
     }
 
     /*
-     * A closed ticket can only be reopened.
-     * An archived ticket cannot be transitioned by this path.
+     * No-op protection.
      */
     if (
-      oldStatus === 'archived'
+      oldStatus ===
+      newStatus
+    ) {
+      await interaction.editReply(
+        `ℹ️ This ticket is already **${capitalize(
+          newStatus,
+        )}**.`,
+      );
+      return;
+    }
+
+    /*
+     * Archived tickets are terminal.
+     */
+    if (
+      oldStatus ===
+      'archived'
     ) {
       await interaction.editReply(
         '❌ This ticket is archived and cannot be changed.',
@@ -1400,9 +1329,14 @@ async function transition(
       return;
     }
 
+    /*
+     * A closed ticket can only be reopened.
+     */
     if (
-      oldStatus === 'closed' &&
-      newStatus !== 'reopened'
+      oldStatus ===
+        'closed' &&
+      newStatus !==
+        'reopened'
     ) {
       await interaction.editReply(
         '❌ This ticket is closed. Reopen it before changing its status.',
@@ -1416,6 +1350,9 @@ async function transition(
         oldTopic,
       );
 
+    /*
+     * Staff/admin-only transitions.
+     */
     if (
       (
         newStatus ===
@@ -1435,8 +1372,13 @@ async function transition(
       return;
     }
 
+    /*
+     * Owner may resume their pending ticket.
+     * Staff/admin may also do it.
+     */
     if (
-      newStatus === 'open' &&
+      newStatus ===
+        'open' &&
       !staff.authorized &&
       staff.ownerId !==
         interaction.user.id
@@ -1444,6 +1386,37 @@ async function transition(
       await interaction.editReply(
         '❌ You are not authorized to resume this ticket.',
       );
+      return;
+    }
+
+    /*
+     * Prevent staff from silently stealing an existing claim.
+     */
+    if (
+      newStatus ===
+        'claimed' &&
+      oldStatus ===
+        'claimed'
+    ) {
+      const claimedBy =
+        getField(
+          oldTopic,
+          'claimed_by',
+        );
+
+      if (
+        claimedBy ===
+        interaction.user.id
+      ) {
+        await interaction.editReply(
+          'ℹ️ You already have this ticket claimed.',
+        );
+      } else {
+        await interaction.editReply(
+          `❌ This ticket is already claimed by <@${claimedBy ?? 'unknown'}>.`,
+        );
+      }
+
       return;
     }
 
@@ -1458,14 +1431,10 @@ async function transition(
       );
 
     /*
-     * Visual lock. This is best-effort and does not block the state
-     * transition if Discord happens to be slow.
+     * Build the complete new topic in memory first.
+     *
+     * Nothing is written to Discord until the transition is valid.
      */
-    void lockTicketButtons(
-      channel,
-      messageId,
-    );
-
     let newTopic =
       oldTopic;
 
@@ -1583,7 +1552,7 @@ async function transition(
         );
 
       /*
-       * Restore access before committing the reopened state.
+       * Restore access before committing reopened state.
        */
       await restoreTicketPermissions(
         channel,
@@ -1616,6 +1585,9 @@ async function transition(
         newStatus,
       );
 
+    /*
+     * The topic is the source of truth.
+     */
     await withTimeout(
       channel.setTopic(
         newTopic,
@@ -1624,6 +1596,9 @@ async function transition(
       'Ticket status update',
     );
 
+    /*
+     * Only now update the runtime cache.
+     */
     updateRuntimeTicketState(
       channel,
       newTopic,
@@ -1661,7 +1636,10 @@ async function transition(
     }
 
     /*
-     * Panel refresh is non-critical.
+     * Refresh the panel only AFTER the new topic is committed.
+     *
+     * updateMainMessage() itself verifies that the channel topic still
+     * matches this exact state, preventing stale asynchronous edits.
      */
     void updateMainMessage(
       channel,
@@ -1804,22 +1782,37 @@ async function closeTicket(
     lockKey,
   );
 
-  await interaction.deferReply({
-    flags:
-      MessageFlags.Ephemeral,
-  });
+  if (
+    !(await safeDeferReply(
+      interaction,
+    ))
+  ) {
+    ticketActionLocks.delete(
+      lockKey,
+    );
+    return;
+  }
 
   try {
+    /*
+     * Always use the latest topic.
+     */
+    const latestTopic =
+      channel.topic ?? '';
+
     const state =
       getRuntimeTicketState(
         channel,
       );
 
     const topic =
+      latestTopic ||
       state.topic;
 
     const status =
-      state.status;
+      getTicketStatus(
+        topic,
+      );
 
     if (
       !isTicketTopic(
@@ -1832,12 +1825,11 @@ async function closeTicket(
     }
 
     /*
-     * This is intentionally topic-based.
-     * Permission overwrites are NOT used to decide whether a ticket
-     * is already closed.
+     * Topic state is the source of truth.
      */
     if (
-      status === 'closed'
+      status ===
+      'closed'
     ) {
       await interaction.editReply(
         '❌ This ticket is already closed.',
@@ -1846,7 +1838,8 @@ async function closeTicket(
     }
 
     if (
-      status === 'archived'
+      status ===
+      'archived'
     ) {
       await interaction.editReply(
         '❌ This ticket is archived.',
@@ -1883,11 +1876,6 @@ async function closeTicket(
         topic,
         'panel_message',
       );
-
-    void lockTicketButtons(
-      channel,
-      messageId,
-    );
 
     const config =
       await withTimeout(
@@ -1952,12 +1940,19 @@ async function closeTicket(
         'opened_at',
       );
 
-    const openedAt =
+    const parsedOpenedAt =
       openedAtRaw
         ? new Date(
             openedAtRaw,
           )
         : new Date();
+
+    const openedAt =
+      Number.isNaN(
+        parsedOpenedAt.getTime(),
+      )
+        ? new Date()
+        : parsedOpenedAt;
 
     const closedAt =
       new Date();
@@ -1972,8 +1967,16 @@ async function closeTicket(
       `<@${ownerId}>`;
 
     /*
-     * Transcript is generated BEFORE changing status to closed.
+     * IMPORTANT:
+     *
+     * 1. Generate transcript.
+     * 2. Upload transcript.
+     * 3. Lock permissions.
+     * 4. Set status=closed.
+     *
+     * The ticket is NOT considered closed until the transcript exists.
      */
+
     const transcript =
       await withTimeout(
         generateTranscript({
@@ -1991,10 +1994,6 @@ async function closeTicket(
         'Transcript generation',
       );
 
-    /*
-     * AttachmentBuilder must be passed directly.
-     * It must NOT be wrapped inside { attachment: transcript }.
-     */
     await withTimeout(
       transcriptChannel.send({
         content:
@@ -2008,8 +2007,8 @@ async function closeTicket(
     );
 
     /*
-     * Only after the transcript has successfully uploaded do we lock
-     * the ticket and commit status=closed.
+     * Transcript successfully uploaded.
+     * Now lock the ticket.
      */
     await lockTicketPermissions(
       channel,
@@ -2047,7 +2046,7 @@ async function closeTicket(
     );
 
     /*
-     * Background panel refresh.
+     * Panel update happens only after the state is committed.
      */
     void updateMainMessage(
       channel,
@@ -2246,7 +2245,7 @@ async function handlePanelButton(
   }
 
   /*
-   * These are the actual IDs produced by ticketPanelService.
+   * Ticket panel tool buttons.
    */
   if (
     id ===
@@ -2413,9 +2412,16 @@ async function handlePanelButton(
       );
     }
 
-    await interaction.showModal(
-      modal,
-    );
+    try {
+      await interaction.showModal(
+        modal,
+      );
+    } catch (error) {
+      console.error(
+        '❌ Failed to show ticket panel modal:',
+        error,
+      );
+    }
   }
 }
 
@@ -2486,10 +2492,13 @@ async function handlePanelModal(
     return;
   }
 
-  await interaction.deferReply({
-    flags:
-      MessageFlags.Ephemeral,
-  });
+  if (
+    !(await safeDeferReply(
+      interaction,
+    ))
+  ) {
+    return;
+  }
 
   try {
     let newTopic =
@@ -2497,6 +2506,10 @@ async function handlePanelModal(
 
     const id =
       interaction.customId;
+
+    /* ---------------------------------------------------------------------- */
+    /* Add user                                                               */
+    /* ---------------------------------------------------------------------- */
 
     if (
       id ===
@@ -2590,6 +2603,10 @@ async function handlePanelModal(
       return;
     }
 
+    /* ---------------------------------------------------------------------- */
+    /* Priority                                                               */
+    /* ---------------------------------------------------------------------- */
+
     if (
       id ===
       'ticket:panel-modal:priority'
@@ -2658,6 +2675,10 @@ async function handlePanelModal(
 
       return;
     }
+
+    /* ---------------------------------------------------------------------- */
+    /* Tag                                                                    */
+    /* ---------------------------------------------------------------------- */
 
     if (
       id ===
@@ -2736,6 +2757,10 @@ async function handlePanelModal(
 
       return;
     }
+
+    /* ---------------------------------------------------------------------- */
+    /* Internal note                                                          */
+    /* ---------------------------------------------------------------------- */
 
     if (
       id ===
@@ -2877,14 +2902,9 @@ export async function handleTicketInteraction(
       interaction.isModalSubmit()
     ) {
       /*
-       * Ticket creation modal.
+       * Ticket creation modal:
        *
-       * Expected custom ID:
        * ticket:modal:<departmentId>
-       *
-       * We also support:
-       * ticket:modal
-       * if the department field exists.
        */
       if (
         interaction.customId ===
@@ -2901,8 +2921,8 @@ export async function handleTicketInteraction(
               );
         } catch {
           /*
-           * The existing modal may encode the department
-           * in its custom ID instead.
+           * Some existing modal configurations encode the department
+           * in the custom ID instead.
            */
         }
 

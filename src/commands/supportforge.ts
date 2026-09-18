@@ -26,6 +26,9 @@ import {
 } from '../services/configService';
 
 import { getOrCreateAuditChannel } from '../services/auditLogService';
+import {
+  executeTicketCommand,
+} from '../interactions/ticketCommandTools';
 
 const SUPPORT_CATEGORY_NAME = 'Support Forge';
 const PANEL_CHANNEL_NAME = 'support-panel';
@@ -1036,18 +1039,9 @@ export async function execute(
     // ─────────────────────────────────────────────
 
     if (group === 'ticket') {
-      const {
-        executeTicketCommand,
-      } = await import(
-        '../interactions/ticketCommandTools'
-      );
-
-      await executeTicketCommand(
-        interaction,
-      );
-
-      return;
-    }
+  await executeTicketCommand(interaction);
+  return;
+}
 
     await interaction.reply({
       content:
