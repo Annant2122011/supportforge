@@ -77,25 +77,52 @@ async function runChannelMutation<T>(
   operation: string,
   action: () => Promise<T>,
 ): Promise<T> {
-  const previous = ticketMutationQueues.get(channel.id) ?? Promise.resolve();
+  const previous =
+    ticketMutationQueues.get(channel.id) ??
+    Promise.resolve();
 
   let release!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
 
-  const current = previous.then(() => gate);
-  ticketMutationQueues.set(channel.id, current);
+  const gate =
+    new Promise<void>((resolve) => {
+      release = resolve;
+    });
 
+  const current =
+    previous.then(() => gate);
+
+  ticketMutationQueues.set(
+    channel.id,
+    current,
+  );
+
+  /*
+   * Wait for the previous mutation, but never let a broken Discord REST
+   * request hold the entire ticket queue hostage forever.
+   */
   await previous;
 
   try {
-    console.log(`🔧 Ticket mutation: ${operation} [${channel.id}]`);
-    return await action();
+    console.log(
+      `🔧 Ticket mutation: ${operation} [${channel.id}]`,
+    );
+
+    return await withTimeout(
+      action(),
+      DISCORD_OPERATION_TIMEOUT_MS,
+      operation,
+    );
   } finally {
     release();
-    if (ticketMutationQueues.get(channel.id) === current) {
-      ticketMutationQueues.delete(channel.id);
+
+    if (
+      ticketMutationQueues.get(
+        channel.id,
+      ) === current
+    ) {
+      ticketMutationQueues.delete(
+        channel.id,
+      );
     }
   }
 }
@@ -136,10 +163,33 @@ function isTerminalTicketStatus(
 
 async function withTimeout<T>(
   promise: Promise<T>,
-  _timeoutMs: number,
-  _operation: string,
+  timeoutMs: number,
+  operation: string,
 ): Promise<T> {
-  return promise;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const timeout = new Promise<never>(
+    (_, reject) => {
+      timer = setTimeout(() => {
+        reject(
+          new Error(
+            `${operation} timed out after ${timeoutMs}ms.`,
+          ),
+        );
+      }, timeoutMs);
+    },
+  );
+
+  try {
+    return await Promise.race([
+      promise,
+      timeout,
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 /* -------------------------------------------------------------------------- */
