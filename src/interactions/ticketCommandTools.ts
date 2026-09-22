@@ -117,6 +117,14 @@ async function getTicketContext(
       topic,
       'claimed_by',
     ),
+    assignedAt: getField(
+      topic,
+      'assigned_at',
+    ),
+    previousAssignee: getField(
+      topic,
+      'previous_assignee',
+    ),
     status: getTicketStatus(topic),
   };
 }
@@ -279,9 +287,20 @@ export async function executeTicketCommand(
         new Date().toISOString(),
       );
 
+      topic = setField(
+        topic,
+        'assigned_at',
+        new Date().toISOString(),
+      );
+
       topic = removeField(
         topic,
         'pending_since',
+      );
+
+      topic = removeField(
+        topic,
+        'previous_assignee',
       );
 
       await saveTopic(
@@ -345,6 +364,16 @@ export async function executeTicketCommand(
         'claimed_at',
       );
 
+      topic = removeField(
+        topic,
+        'assigned_at',
+      );
+
+      topic = removeField(
+        topic,
+        'previous_assignee',
+      );
+
       await saveTopic(
         context,
         topic,
@@ -362,6 +391,174 @@ export async function executeTicketCommand(
 
       await interaction.editReply(
         `✅ Ticket #${context.ticketNumber} is now **open**.`,
+      );
+
+      return;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Reassign                                                           */
+    /* ------------------------------------------------------------------ */
+
+    if (subcommand === 'reassign') {
+      if (
+        context.status === 'closed' ||
+        context.status === 'archived'
+      ) {
+        await interaction.editReply(
+          `❌ Ticket #${context.ticketNumber} is **${context.status}** and cannot be reassigned.`,
+        );
+
+        return;
+      }
+
+      if (context.status === 'pending') {
+        await interaction.editReply(
+          `⏳ Ticket #${context.ticketNumber} is currently **pending**. Resume it before reassigning.`,
+        );
+
+        return;
+      }
+
+      const target =
+        interaction.options.getUser(
+          'staff',
+          true,
+        );
+
+      const targetMember =
+        await context.guild.members.fetch(
+          target.id,
+        );
+
+      const staffRoleId = getField(
+        context.topic,
+        'staff',
+      );
+
+      if (
+        !staffRoleId ||
+        staffRoleId === 'none'
+      ) {
+        await interaction.editReply(
+          '❌ This ticket does not have a configured staff role, so it cannot be safely reassigned.',
+        );
+
+        return;
+      }
+
+      if (
+        !targetMember.roles.cache.has(
+          staffRoleId,
+        )
+      ) {
+        await interaction.editReply(
+          `❌ ${target} is not a member of this ticket department's staff role.`,
+        );
+
+        return;
+      }
+
+      if (
+        context.claimedBy ===
+        target.id
+      ) {
+        await interaction.editReply(
+          `ℹ️ Ticket #${context.ticketNumber} is already assigned to ${target}.`,
+        );
+
+        return;
+      }
+
+      const previousAssignee =
+        context.claimedBy;
+
+      const now =
+        new Date().toISOString();
+
+      let topic = setField(
+        context.topic,
+        'status',
+        'claimed',
+      );
+
+      topic = setField(
+        topic,
+        'claimed_by',
+        target.id,
+      );
+
+      topic = setField(
+        topic,
+        'claimed_at',
+        now,
+      );
+
+      topic = setField(
+        topic,
+        'assigned_at',
+        now,
+      );
+
+      if (previousAssignee) {
+        topic = setField(
+          topic,
+          'previous_assignee',
+          previousAssignee,
+        );
+      } else {
+        topic = removeField(
+          topic,
+          'previous_assignee',
+        );
+      }
+
+      topic = removeField(
+        topic,
+        'pending_since',
+      );
+
+      await saveTopic(
+        context,
+        topic,
+      );
+
+      const reason =
+        interaction.options
+          .getString(
+            'reason',
+          )
+          ?.trim();
+
+      const previousText =
+        previousAssignee
+          ? `<@${previousAssignee}>`
+          : 'unassigned';
+
+      const reasonText =
+        reason
+          ? `\n📝 Reason: ${reason}`
+          : '';
+
+      await context.channel.send(
+        `🔄 Ticket #${context.ticketNumber} was reassigned from ${previousText} to ${target} by ${interaction.user}.${reasonText}`,
+      );
+
+      await audit(
+        interaction,
+        context,
+        `Ticket reassigned from ${
+          previousAssignee
+            ? `<@${previousAssignee}>`
+            : 'unassigned'
+        } to ${target.tag}`,
+        reason
+          ? `Reason: ${reason}`
+          : undefined,
+      );
+
+      await interaction.editReply(
+        `✅ Ticket #${context.ticketNumber} has been reassigned to ${target}.`,
       );
 
       return;

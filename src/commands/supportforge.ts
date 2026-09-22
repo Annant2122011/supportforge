@@ -16,7 +16,6 @@ import {
 import {
   getGuildConfig,
   getTier,
-  isPremiumOrHigher,
   newDepartmentId,
   setTier,
   tierLabel,
@@ -25,10 +24,7 @@ import {
   type SupportForgeTier,
 } from '../services/configService';
 
-import { getOrCreateAuditChannel } from '../services/auditLogService';
-import {
-  executeTicketCommand,
-} from '../interactions/ticketCommandTools';
+import { executeTicketCommand } from '../interactions/ticketCommandTools';
 
 const SUPPORT_CATEGORY_NAME = 'Support Forge';
 const PANEL_CHANNEL_NAME = 'support-panel';
@@ -37,10 +33,16 @@ const TRANSCRIPT_NAME = '📄 support-transcripts';
 const TRANSCRIPT_TOPIC = 'supportforge:transcript';
 const TICKET_PREFIX = 'supportforge:ticket';
 
-function isAdminLike(interaction: ChatInputCommandInteraction): boolean {
+function isAdminLike(
+  interaction: ChatInputCommandInteraction,
+): boolean {
   return Boolean(
-    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
-      interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild),
+    interaction.memberPermissions?.has(
+      PermissionFlagsBits.Administrator,
+    ) ||
+      interaction.memberPermissions?.has(
+        PermissionFlagsBits.ManageGuild,
+      ),
   );
 }
 
@@ -61,7 +63,10 @@ function buildPanelEmbed(
 ): EmbedBuilder {
   const lines = departments.length
     ? departments
-        .map((department) => `🎫 **${department.name}**`)
+        .map(
+          (department) =>
+            `🎫 **${department.name}**`,
+        )
         .join('\n')
     : 'No ticket departments configured.';
 
@@ -73,7 +78,9 @@ function buildPanelEmbed(
         `${lines}\n\n` +
         `🔒 Tickets are visible only to the ticket owner, assigned support staff, and administrators.`,
     )
-    .setFooter({ text: 'SupportForge • Professional Ticket System' })
+    .setFooter({
+      text: 'SupportForge • Professional Ticket System',
+    })
     .setTimestamp();
 }
 
@@ -81,14 +88,22 @@ async function ensureContainer(guild: Guild) {
   const saved = await getGuildConfig(guild.id);
 
   const bot = guild.members.me;
+
   if (!bot) {
-    throw new Error('SupportForge bot member could not be resolved.');
+    throw new Error(
+      'SupportForge bot member could not be resolved.',
+    );
   }
 
   if (saved.supportCategoryId) {
-    const channel = guild.channels.cache.get(saved.supportCategoryId);
+    const channel = guild.channels.cache.get(
+      saved.supportCategoryId,
+    );
 
-    if (channel?.type === ChannelType.GuildCategory) {
+    if (
+      channel?.type ===
+      ChannelType.GuildCategory
+    ) {
       return channel;
     }
   }
@@ -96,7 +111,8 @@ async function ensureContainer(guild: Guild) {
   const existing = guild.channels.cache.find(
     (channel) =>
       channel.type === ChannelType.GuildCategory &&
-      channel.name.toLowerCase() === SUPPORT_CATEGORY_NAME.toLowerCase(),
+      channel.name.toLowerCase() ===
+        SUPPORT_CATEGORY_NAME.toLowerCase(),
   );
 
   const category =
@@ -112,7 +128,9 @@ async function ensureContainer(guild: Guild) {
                 PermissionFlagsBits.ViewChannel,
                 PermissionFlagsBits.ReadMessageHistory,
               ],
-              deny: [PermissionFlagsBits.SendMessages],
+              deny: [
+                PermissionFlagsBits.SendMessages,
+              ],
             },
             {
               id: bot.id,
@@ -129,19 +147,26 @@ async function ensureContainer(guild: Guild) {
           ],
         });
 
-  await category.permissionOverwrites.edit(bot.id, {
-    ViewChannel: true,
-    SendMessages: true,
-    ReadMessageHistory: true,
-    ManageChannels: true,
-    ManageMessages: true,
-    EmbedLinks: true,
-    AttachFiles: true,
-  });
+  await category.permissionOverwrites.edit(
+    bot.id,
+    {
+      ViewChannel: true,
+      SendMessages: true,
+      ReadMessageHistory: true,
+      ManageChannels: true,
+      ManageMessages: true,
+      EmbedLinks: true,
+      AttachFiles: true,
+    },
+  );
 
-  await updateGuildConfig(guild.id, (config) => {
-    config.supportCategoryId = category.id;
-  });
+  await updateGuildConfig(
+    guild.id,
+    (config) => {
+      config.supportCategoryId =
+        category.id;
+    },
+  );
 
   return category;
 }
@@ -150,17 +175,25 @@ async function ensureTranscriptChannel(
   guild: Guild,
   parentId: string,
 ): Promise<TextChannel> {
-  const config = await getGuildConfig(guild.id);
+  const config =
+    await getGuildConfig(guild.id);
 
   const bot = guild.members.me;
+
   if (!bot) {
-    throw new Error('SupportForge bot member could not be resolved.');
+    throw new Error(
+      'SupportForge bot member could not be resolved.',
+    );
   }
 
   if (config.transcriptChannelId) {
-    const saved = guild.channels.cache.get(config.transcriptChannelId);
+    const saved = guild.channels.cache.get(
+      config.transcriptChannelId,
+    );
 
-    if (saved?.type === ChannelType.GuildText) {
+    if (
+      saved?.type === ChannelType.GuildText
+    ) {
       return saved;
     }
   }
@@ -168,10 +201,14 @@ async function ensureTranscriptChannel(
   const existing = guild.channels.cache.find(
     (channel) =>
       channel.type === ChannelType.GuildText &&
-      channel.topic?.startsWith(TRANSCRIPT_TOPIC),
+      channel.topic?.startsWith(
+        TRANSCRIPT_TOPIC,
+      ),
   );
 
-  if (existing?.type === ChannelType.GuildText) {
+  if (
+    existing?.type === ChannelType.GuildText
+  ) {
     if (existing.parentId !== parentId) {
       await existing.setParent(parentId, {
         lockPermissions: false,
@@ -187,51 +224,63 @@ async function ensureTranscriptChannel(
       },
     );
 
-    await existing.permissionOverwrites.edit(bot.id, {
-      ViewChannel: true,
-      SendMessages: true,
-      ReadMessageHistory: true,
-      AttachFiles: true,
-      EmbedLinks: true,
-    });
+    await existing.permissionOverwrites.edit(
+      bot.id,
+      {
+        ViewChannel: true,
+        SendMessages: true,
+        ReadMessageHistory: true,
+        AttachFiles: true,
+        EmbedLinks: true,
+      },
+    );
 
-    await updateGuildConfig(guild.id, (current) => {
-      current.transcriptChannelId = existing.id;
-    });
+    await updateGuildConfig(
+      guild.id,
+      (current) => {
+        current.transcriptChannelId =
+          existing.id;
+      },
+    );
 
     return existing;
   }
 
-  const channel = await guild.channels.create({
-    name: TRANSCRIPT_NAME,
-    type: ChannelType.GuildText,
-    parent: parentId,
-    topic: `${TRANSCRIPT_TOPIC} guild=${guild.id}`,
-    permissionOverwrites: [
-      {
-        id: guild.roles.everyone.id,
-        deny: [
-          PermissionFlagsBits.ViewChannel,
-          PermissionFlagsBits.SendMessages,
-          PermissionFlagsBits.ReadMessageHistory,
-        ],
-      },
-      {
-        id: bot.id,
-        allow: [
-          PermissionFlagsBits.ViewChannel,
-          PermissionFlagsBits.SendMessages,
-          PermissionFlagsBits.ReadMessageHistory,
-          PermissionFlagsBits.AttachFiles,
-          PermissionFlagsBits.EmbedLinks,
-        ],
-      },
-    ],
-  });
+  const channel =
+    await guild.channels.create({
+      name: TRANSCRIPT_NAME,
+      type: ChannelType.GuildText,
+      parent: parentId,
+      topic: `${TRANSCRIPT_TOPIC} guild=${guild.id}`,
+      permissionOverwrites: [
+        {
+          id: guild.roles.everyone.id,
+          deny: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.ReadMessageHistory,
+          ],
+        },
+        {
+          id: bot.id,
+          allow: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.ReadMessageHistory,
+            PermissionFlagsBits.AttachFiles,
+            PermissionFlagsBits.EmbedLinks,
+          ],
+        },
+      ],
+    });
 
-  await updateGuildConfig(guild.id, (current) => {
-    current.transcriptChannelId = channel.id;
-  });
+  await updateGuildConfig(
+    guild.id,
+    (current) => {
+      current.transcriptChannelId =
+        channel.id;
+    },
+  );
 
   return channel;
 }
@@ -240,17 +289,25 @@ async function ensurePanelChannel(
   guild: Guild,
   parentId: string,
 ): Promise<TextChannel> {
-  const config = await getGuildConfig(guild.id);
+  const config =
+    await getGuildConfig(guild.id);
 
   const bot = guild.members.me;
+
   if (!bot) {
-    throw new Error('SupportForge bot member could not be resolved.');
+    throw new Error(
+      'SupportForge bot member could not be resolved.',
+    );
   }
 
   if (config.panelChannelId) {
-    const saved = guild.channels.cache.get(config.panelChannelId);
+    const saved = guild.channels.cache.get(
+      config.panelChannelId,
+    );
 
-    if (saved?.type === ChannelType.GuildText) {
+    if (
+      saved?.type === ChannelType.GuildText
+    ) {
       return saved;
     }
   }
@@ -258,11 +315,15 @@ async function ensurePanelChannel(
   const existing = guild.channels.cache.find(
     (channel) =>
       channel.type === ChannelType.GuildText &&
-      (channel.topic?.startsWith(PANEL_TOPIC) ||
+      (channel.topic?.startsWith(
+        PANEL_TOPIC,
+      ) ||
         channel.name === PANEL_CHANNEL_NAME),
   );
 
-  if (existing?.type === ChannelType.GuildText) {
+  if (
+    existing?.type === ChannelType.GuildText
+  ) {
     if (existing.parentId !== parentId) {
       await existing.setParent(parentId, {
         lockPermissions: false,
@@ -278,83 +339,111 @@ async function ensurePanelChannel(
       },
     );
 
-    await existing.permissionOverwrites.edit(bot.id, {
-      ViewChannel: true,
-      SendMessages: true,
-      ReadMessageHistory: true,
-      EmbedLinks: true,
-    });
+    await existing.permissionOverwrites.edit(
+      bot.id,
+      {
+        ViewChannel: true,
+        SendMessages: true,
+        ReadMessageHistory: true,
+        EmbedLinks: true,
+      },
+    );
 
     await existing.setTopic(
       `${PANEL_TOPIC} guild=${guild.id}`,
     );
 
-    await updateGuildConfig(guild.id, (current) => {
-      current.panelChannelId = existing.id;
-    });
+    await updateGuildConfig(
+      guild.id,
+      (current) => {
+        current.panelChannelId =
+          existing.id;
+      },
+    );
 
     return existing;
   }
 
-  const channel = await guild.channels.create({
-    name: PANEL_CHANNEL_NAME,
-    type: ChannelType.GuildText,
-    parent: parentId,
-    topic: `${PANEL_TOPIC} guild=${guild.id}`,
-    permissionOverwrites: [
-      {
-        id: guild.roles.everyone.id,
-        allow: [
-          PermissionFlagsBits.ViewChannel,
-          PermissionFlagsBits.ReadMessageHistory,
-        ],
-        deny: [PermissionFlagsBits.SendMessages],
-      },
-      {
-        id: bot.id,
-        allow: [
-          PermissionFlagsBits.ViewChannel,
-          PermissionFlagsBits.SendMessages,
-          PermissionFlagsBits.ReadMessageHistory,
-          PermissionFlagsBits.EmbedLinks,
-        ],
-      },
-    ],
-  });
+  const channel =
+    await guild.channels.create({
+      name: PANEL_CHANNEL_NAME,
+      type: ChannelType.GuildText,
+      parent: parentId,
+      topic: `${PANEL_TOPIC} guild=${guild.id}`,
+      permissionOverwrites: [
+        {
+          id: guild.roles.everyone.id,
+          allow: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.ReadMessageHistory,
+          ],
+          deny: [
+            PermissionFlagsBits.SendMessages,
+          ],
+        },
+        {
+          id: bot.id,
+          allow: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.ReadMessageHistory,
+            PermissionFlagsBits.EmbedLinks,
+          ],
+        },
+      ],
+    });
 
-  await updateGuildConfig(guild.id, (current) => {
-    current.panelChannelId = channel.id;
-  });
+  await updateGuildConfig(
+    guild.id,
+    (current) => {
+      current.panelChannelId =
+        channel.id;
+    },
+  );
 
   return channel;
 }
 
-async function syncPanel(guild: Guild): Promise<void> {
-  const config = await getGuildConfig(guild.id);
+async function syncPanel(
+  guild: Guild,
+): Promise<void> {
+  const config =
+    await getGuildConfig(guild.id);
 
-  const parent = await ensureContainer(guild);
-  const panel = await ensurePanelChannel(
-    guild,
-    parent.id,
-  );
+  const parent =
+    await ensureContainer(guild);
+
+  const panel =
+    await ensurePanelChannel(
+      guild,
+      parent.id,
+    );
 
   const departments = Object.values(
     config.departments,
-  ).sort((a, b) => a.name.localeCompare(b.name));
+  ).sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
 
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  const rows: ActionRowBuilder<ButtonBuilder>[] =
+    [];
 
-  for (let i = 0; i < departments.length; i += 5) {
-    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      departments
-        .slice(i, i + 5)
-        .map((department) =>
-          categoryButton(
-            department.id,
-            department.name,
+  for (
+    let i = 0;
+    i < departments.length;
+    i += 5
+  ) {
+    const row =
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        departments
+          .slice(i, i + 5)
+          .map((department) =>
+            categoryButton(
+              department.id,
+              department.name,
+            ),
           ),
-        ),
-    );
+      );
 
     rows.push(row);
   }
@@ -364,18 +453,22 @@ async function syncPanel(guild: Guild): Promise<void> {
     departments,
   );
 
-  let message = config.panelMessageId
-    ? await panel.messages
-        .fetch(config.panelMessageId)
-        .catch(() => null)
-    : null;
+  let message =
+    config.panelMessageId
+      ? await panel.messages
+          .fetch(config.panelMessageId)
+          .catch(() => null)
+      : null;
 
   if (!message) {
     const existingBotMessage = (
-      await panel.messages.fetch({ limit: 50 })
+      await panel.messages.fetch({
+        limit: 50,
+      })
     ).find(
       (candidate) =>
-        candidate.author.id === guild.client.user?.id &&
+        candidate.author.id ===
+          guild.client.user?.id &&
         candidate.embeds.some(
           (embed) =>
             embed.title ===
@@ -383,7 +476,8 @@ async function syncPanel(guild: Guild): Promise<void> {
         ),
     );
 
-    message = existingBotMessage ?? null;
+    message =
+      existingBotMessage ?? null;
   }
 
   if (message) {
@@ -398,272 +492,312 @@ async function syncPanel(guild: Guild): Promise<void> {
     });
   }
 
-  await updateGuildConfig(guild.id, (current) => {
-    current.panelChannelId = panel.id;
-    current.panelMessageId = message.id;
-  });
+  await updateGuildConfig(
+    guild.id,
+    (current) => {
+      current.panelChannelId =
+        panel.id;
+      current.panelMessageId =
+        message.id;
+    },
+  );
 }
 
-export const data = new SlashCommandBuilder()
-  .setName('supportforge')
-  .setDescription('Manage SupportForge and support tickets')
-  .setDMPermission(false)
+export const data =
+  new SlashCommandBuilder()
+    .setName('supportforge')
+    .setDescription(
+      'Manage SupportForge and support tickets',
+    )
+    .setDMPermission(false)
 
-  // ─────────────────────────────────────────────
-  // SETUP
-  // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────
+    // SETUP
+    // ─────────────────────────────────────────────
 
-  .addSubcommand((subcommand) =>
-    subcommand
-      .setName('setup')
-      .setDescription(
-        'Create or repair the SupportForge system',
-      ),
-  )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('setup')
+        .setDescription(
+          'Create or repair the SupportForge system',
+        ),
+    )
 
-  // ─────────────────────────────────────────────
-  // CATEGORY MANAGEMENT
-  // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────
+    // CATEGORY MANAGEMENT
+    // ─────────────────────────────────────────────
 
-  .addSubcommandGroup((group) =>
-    group
-      .setName('category')
-      .setDescription('Manage ticket departments')
+    .addSubcommandGroup((group) =>
+      group
+        .setName('category')
+        .setDescription(
+          'Manage ticket departments',
+        )
 
-      .addSubcommand((subcommand) =>
-        subcommand
-          .setName('add')
-          .setDescription('Add a ticket department')
-          .addStringOption((option) =>
-            option
-              .setName('name')
-              .setDescription(
-                'Department name',
-              )
-              .setRequired(true)
-              .setMaxLength(80),
-          )
-          .addRoleOption((option) =>
-            option
-              .setName('staff-role')
-              .setDescription(
-                'Role that handles this department',
-              )
-              .setRequired(false),
-          ),
-      )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('add')
+            .setDescription(
+              'Add a ticket department',
+            )
+            .addStringOption((option) =>
+              option
+                .setName('name')
+                .setDescription(
+                  'Department name',
+                )
+                .setRequired(true)
+                .setMaxLength(80),
+            )
+            .addRoleOption((option) =>
+              option
+                .setName('staff-role')
+                .setDescription(
+                  'Role that handles this department',
+                )
+                .setRequired(false),
+            ),
+        )
 
-      .addSubcommand((subcommand) =>
-        subcommand
-          .setName('list')
-          .setDescription(
-            'List configured ticket departments',
-          ),
-      )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('list')
+            .setDescription(
+              'List configured ticket departments',
+            ),
+        )
 
-      .addSubcommand((subcommand) =>
-        subcommand
-          .setName('remove')
-          .setDescription(
-            'Remove a ticket department',
-          )
-          .addStringOption((option) =>
-            option
-              .setName('name')
-              .setDescription(
-                'Department name',
-              )
-              .setRequired(true)
-              .setMaxLength(80),
-          ),
-      ),
-  )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('remove')
+            .setDescription(
+              'Remove a ticket department',
+            )
+            .addStringOption((option) =>
+              option
+                .setName('name')
+                .setDescription(
+                  'Department name',
+                )
+                .setRequired(true)
+                .setMaxLength(80),
+            ),
+        ),
+    )
 
-  // ─────────────────────────────────────────────
-  // PREMIUM
-  // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────
+    // PREMIUM
+    // ─────────────────────────────────────────────
 
-  .addSubcommandGroup((group) =>
-    group
-      .setName('premium')
-      .setDescription('Preview paid features')
+    .addSubcommandGroup((group) =>
+      group
+        .setName('premium')
+        .setDescription(
+          'Preview paid features',
+        )
 
-      .addSubcommand((subcommand) =>
-        subcommand
-          .setName('status')
-          .setDescription(
-            'Show the current tier',
-          ),
-      )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('status')
+            .setDescription(
+              'Show the current tier',
+            ),
+        )
 
-      .addSubcommand((subcommand) =>
-        subcommand
-          .setName('toggle-demo')
-          .setDescription(
-            'Cycle Free → Premium Demo → Pro Demo → Free',
-          ),
-      ),
-  )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('toggle-demo')
+            .setDescription(
+              'Cycle Free → Premium Demo → Pro Demo → Free',
+            ),
+        ),
+    )
 
-  // ─────────────────────────────────────────────
-  // TICKET MANAGEMENT
-  // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────
+    // TICKET MANAGEMENT
+    // ─────────────────────────────────────────────
 
-  .addSubcommandGroup((group) =>
-    group
-      .setName('ticket')
-      .setDescription(
-        'Tools for the current ticket',
-      )
+    .addSubcommandGroup((group) =>
+      group
+        .setName('ticket')
+        .setDescription(
+          'Tools for the current ticket',
+        )
 
-      // PRIORITY
-      .addSubcommand((subcommand) =>
-        subcommand
-          .setName('priority')
-          .setDescription(
-            'Set ticket priority',
-          )
-          .addStringOption((option) =>
-            option
-              .setName('level')
-              .setDescription(
-                'Priority',
-              )
-              .setRequired(true)
-              .addChoices(
-                {
-                  name: 'Low',
-                  value: 'low',
-                },
-                {
-                  name: 'Normal',
-                  value: 'normal',
-                },
-                {
-                  name: 'High',
-                  value: 'high',
-                },
-                {
-                  name: 'Urgent',
-                  value: 'urgent',
-                },
-                {
-                  name: 'Critical',
-                  value: 'critical',
-                },
-              ),
-          ),
-      )
+        // PRIORITY
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('priority')
+            .setDescription(
+              'Set ticket priority',
+            )
+            .addStringOption((option) =>
+              option
+                .setName('level')
+                .setDescription(
+                  'Priority',
+                )
+                .setRequired(true)
+                .addChoices(
+                  {
+                    name: 'Low',
+                    value: 'low',
+                  },
+                  {
+                    name: 'Normal',
+                    value: 'normal',
+                  },
+                  {
+                    name: 'High',
+                    value: 'high',
+                  },
+                  {
+                    name: 'Urgent',
+                    value: 'urgent',
+                  },
+                  {
+                    name: 'Critical',
+                    value: 'critical',
+                  },
+                ),
+            ),
+        )
 
-      // TAG
-      .addSubcommand((subcommand) =>
-        subcommand
-          .setName('tag')
-          .setDescription(
-            'Add a ticket tag',
-          )
-          .addStringOption((option) =>
-            option
-              .setName('name')
-              .setDescription('Tag')
-              .setRequired(true)
-              .setMaxLength(30),
-          ),
-      )
+        // TAG
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('tag')
+            .setDescription(
+              'Add a ticket tag',
+            )
+            .addStringOption((option) =>
+              option
+                .setName('name')
+                .setDescription('Tag')
+                .setRequired(true)
+                .setMaxLength(30),
+            ),
+        )
 
-      // INTERNAL NOTE
-      .addSubcommand((subcommand) =>
-        subcommand
-          .setName('note')
-          .setDescription(
-            'Add an internal staff note',
-          )
-          .addStringOption((option) =>
-            option
-              .setName('text')
-              .setDescription(
-                'Internal note',
-              )
-              .setRequired(true)
-              .setMaxLength(500),
-          ),
-      )
+        // INTERNAL NOTE
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('note')
+            .setDescription(
+              'Add an internal staff note',
+            )
+            .addStringOption((option) =>
+              option
+                .setName('text')
+                .setDescription(
+                  'Internal note',
+                )
+                .setRequired(true)
+                .setMaxLength(500),
+            ),
+        )
 
-      // HISTORY
-      .addSubcommand((subcommand) =>
-        subcommand
-          .setName('history')
-          .setDescription(
-            'Show recent ticket events',
-          ),
-      )
+        // HISTORY
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('history')
+            .setDescription(
+              'Show recent ticket events',
+            ),
+        )
 
-      // ADD USER
-      .addSubcommand((subcommand) =>
-        subcommand
-          .setName('add-user')
-          .setDescription(
-            'Give a user access to this ticket',
-          )
-          .addUserOption((option) =>
-            option
-              .setName('user')
-              .setDescription('User')
-              .setRequired(true),
-          ),
-      )
+        // ADD USER
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('add-user')
+            .setDescription(
+              'Give a user access to this ticket',
+            )
+            .addUserOption((option) =>
+              option
+                .setName('user')
+                .setDescription('User')
+                .setRequired(true),
+            ),
+        )
 
-      // REMOVE USER
-      .addSubcommand((subcommand) =>
-        subcommand
-          .setName('remove-user')
-          .setDescription(
-            'Remove a user from this ticket',
-          )
-          .addUserOption((option) =>
-            option
-              .setName('user')
-              .setDescription('User')
-              .setRequired(true),
-          ),
-      )
+        // REMOVE USER
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('remove-user')
+            .setDescription(
+              'Remove a user from this ticket',
+            )
+            .addUserOption((option) =>
+              option
+                .setName('user')
+                .setDescription('User')
+                .setRequired(true),
+            ),
+        )
 
-      // CLAIM
-      .addSubcommand((subcommand) =>
-        subcommand
-          .setName('claim')
-          .setDescription(
-            'Claim this ticket for yourself',
-          ),
-      )
+        // CLAIM
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('claim')
+            .setDescription(
+              'Claim this ticket for yourself',
+            ),
+        )
 
-      // UNCLAIM
-      .addSubcommand((subcommand) =>
-        subcommand
-          .setName('unclaim')
-          .setDescription(
-            'Release your claim on this ticket',
-          ),
-      )
+        // UNCLAIM
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('unclaim')
+            .setDescription(
+              'Release your claim on this ticket',
+            ),
+        )
 
-      // PENDING
-      .addSubcommand((subcommand) =>
-        subcommand
-          .setName('pending')
-          .setDescription(
-            'Mark this ticket as waiting for a response',
-          ),
-      )
+        // REASSIGN
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('reassign')
+            .setDescription(
+              'Reassign this ticket to another staff member',
+            )
+            .addUserOption((option) =>
+              option
+                .setName('staff')
+                .setDescription(
+                  'The staff member who should receive the ticket',
+                )
+                .setRequired(true),
+            )
+            .addStringOption((option) =>
+              option
+                .setName('reason')
+                .setDescription(
+                  'Optional reason for the reassignment',
+                )
+                .setRequired(false)
+                .setMaxLength(500),
+            ),
+        )
 
-      // RESUME
-      .addSubcommand((subcommand) =>
-        subcommand
-          .setName('resume')
-          .setDescription(
-            'Move a pending ticket back to open',
-          ),
-      ),
-  );
+        // PENDING
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('pending')
+            .setDescription(
+              'Mark this ticket as waiting for a response',
+            ),
+        )
+
+        // RESUME
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('resume')
+            .setDescription(
+              'Move a pending ticket back to open',
+            ),
+        ),
+    );
 
 export async function execute(
   interaction: ChatInputCommandInteraction,
@@ -708,7 +842,10 @@ export async function execute(
     // SETUP
     // ─────────────────────────────────────────────
 
-    if (!group && subcommand === 'setup') {
+    if (
+      !group &&
+      subcommand === 'setup'
+    ) {
       await interaction.deferReply({
         flags: MessageFlags.Ephemeral,
       });
@@ -730,10 +867,12 @@ export async function execute(
         await getGuildConfig(guild.id);
 
       if (
-        Object.keys(config.departments)
-          .length === 0
+        Object.keys(
+          config.departments,
+        ).length === 0
       ) {
-        const id = newDepartmentId();
+        const id =
+          newDepartmentId();
 
         await updateGuildConfig(
           guild.id,
@@ -749,7 +888,9 @@ export async function execute(
         );
 
         config =
-          await getGuildConfig(guild.id);
+          await getGuildConfig(
+            guild.id,
+          );
       }
 
       await syncPanel(guild);
@@ -757,7 +898,9 @@ export async function execute(
       await interaction.editReply(
         `✅ **SupportForge setup complete.**\n\n` +
           `📁 Container: ${supportCategory}\n` +
-          `📋 Departments: **${Object.keys(config.departments).length}**\n` +
+          `📋 Departments: **${Object.keys(
+            config.departments,
+          ).length}**\n` +
           `🎫 Panel has been created/repaired and is ready.`,
       );
 
@@ -776,10 +919,11 @@ export async function execute(
         flags: MessageFlags.Ephemeral,
       });
 
-      const name = interaction.options
-        .getString('name', true)
-        .trim()
-        .replace(/\s+/g, ' ');
+      const name =
+        interaction.options
+          .getString('name', true)
+          .trim()
+          .replace(/\s+/g, ' ');
 
       const role =
         interaction.options.getRole(
@@ -795,7 +939,9 @@ export async function execute(
       }
 
       const config =
-        await getGuildConfig(guild.id);
+        await getGuildConfig(
+          guild.id,
+        );
 
       if (
         Object.values(
@@ -816,7 +962,8 @@ export async function execute(
       if (
         role &&
         (role.managed ||
-          role.id === guild.roles.everyone.id)
+          role.id ===
+            guild.roles.everyone.id)
       ) {
         await interaction.editReply(
           '❌ Choose a normal server role, not @everyone or a managed integration role.',
@@ -825,7 +972,8 @@ export async function execute(
         return;
       }
 
-      const id = newDepartmentId();
+      const id =
+        newDepartmentId();
 
       await updateGuildConfig(
         guild.id,
@@ -833,7 +981,8 @@ export async function execute(
           current.departments[id] = {
             id,
             name,
-            staffRoleId: role?.id ?? null,
+            staffRoleId:
+              role?.id ?? null,
             createdAt:
               new Date().toISOString(),
           };
@@ -841,7 +990,9 @@ export async function execute(
       );
 
       const supportCategory =
-        await ensureContainer(guild);
+        await ensureContainer(
+          guild,
+        );
 
       await ensurePanelChannel(
         guild,
@@ -852,7 +1003,9 @@ export async function execute(
 
       await interaction.editReply(
         `✅ Department **${name}** created${
-          role ? ` for ${role}` : ''
+          role
+            ? ` for ${role}`
+            : ''
         }.`,
       );
 
@@ -872,26 +1025,34 @@ export async function execute(
       });
 
       const config =
-        await getGuildConfig(guild.id);
+        await getGuildConfig(
+          guild.id,
+        );
 
-      const departments = Object.values(
-        config.departments,
-      ).sort((a, b) =>
-        a.name.localeCompare(b.name),
-      );
+      const departments =
+        Object.values(
+          config.departments,
+        ).sort((a, b) =>
+          a.name.localeCompare(
+            b.name,
+          ),
+        );
 
-      const lines = departments.length
-        ? departments
-            .map(
-              (department) =>
-                `• **${department.name}** — staff: ${
-                  department.staffRoleId
-                    ? `<@&${department.staffRoleId}>`
-                    : 'Administrators only'
-                }`,
-            )
-            .join('\n')
-        : 'No departments configured.';
+      const lines =
+        departments.length
+          ? departments
+              .map(
+                (department) =>
+                  `• **${
+                    department.name
+                  }** — staff: ${
+                    department.staffRoleId
+                      ? `<@&${department.staffRoleId}>`
+                      : 'Administrators only'
+                  }`,
+              )
+              .join('\n')
+          : 'No departments configured.';
 
       await interaction.editReply(
         `📂 **SupportForge departments**\n\n${lines}`,
@@ -912,20 +1073,25 @@ export async function execute(
         flags: MessageFlags.Ephemeral,
       });
 
-      const name = interaction.options
-        .getString('name', true)
-        .trim()
-        .toLowerCase();
+      const name =
+        interaction.options
+          .getString('name', true)
+          .trim()
+          .toLowerCase();
 
       const config =
-        await getGuildConfig(guild.id);
+        await getGuildConfig(
+          guild.id,
+        );
 
-      const department = Object.values(
-        config.departments,
-      ).find(
-        (item) =>
-          item.name.toLowerCase() === name,
-      );
+      const department =
+        Object.values(
+          config.departments,
+        ).find(
+          (item) =>
+            item.name.toLowerCase() ===
+            name,
+        );
 
       if (!department) {
         await interaction.editReply(
@@ -954,7 +1120,9 @@ export async function execute(
             ),
         );
 
-      if (activeTickets.size > 0) {
+      if (
+        activeTickets.size > 0
+      ) {
         await interaction.editReply(
           `❌ Cannot remove **${department.name}** while it has **${activeTickets.size}** active ticket(s).`,
         );
@@ -1017,17 +1185,23 @@ export async function execute(
       const next: SupportForgeTier =
         current === 'free'
           ? 'premium-demo'
-          : current === 'premium-demo'
+          : current ===
+              'premium-demo'
             ? 'pro-demo'
             : 'free';
 
-      await setTier(guild.id, next);
+      await setTier(
+        guild.id,
+        next,
+      );
 
       await interaction.reply({
         content:
           `🔁 Tier changed: **${tierLabel(
             current,
-          )}** → **${tierLabel(next)}**.`,
+          )}** → **${tierLabel(
+            next,
+          )}**.`,
         flags: MessageFlags.Ephemeral,
       });
 
@@ -1039,9 +1213,12 @@ export async function execute(
     // ─────────────────────────────────────────────
 
     if (group === 'ticket') {
-  await executeTicketCommand(interaction);
-  return;
-}
+      await executeTicketCommand(
+        interaction,
+      );
+
+      return;
+    }
 
     await interaction.reply({
       content:
@@ -1061,7 +1238,9 @@ export async function execute(
       await interaction.editReply(
         '❌ Something went wrong while processing that command. Check the bot console for details.',
       );
-    } else if (!interaction.replied) {
+    } else if (
+      !interaction.replied
+    ) {
       await interaction.reply({
         content:
           '❌ Something went wrong while processing that command.',
@@ -1078,4 +1257,3 @@ export {
   ensureContainer,
   ensureTranscriptChannel,
 };
-
