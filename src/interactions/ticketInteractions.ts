@@ -70,6 +70,36 @@ const TERMINAL_TICKET_STATUSES: readonly TicketStatus[] = [
  */
 const ticketActionLocks = new Set<string>();
 
+const ticketMutationQueues = new Map<string, Promise<void>>();
+
+async function runChannelMutation<T>(
+  channel: TextChannel,
+  operation: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  const previous = ticketMutationQueues.get(channel.id) ?? Promise.resolve();
+
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  const current = previous.then(() => gate);
+  ticketMutationQueues.set(channel.id, current);
+
+  await previous;
+
+  try {
+    console.log(`🔧 Ticket mutation: ${operation} [${channel.id}]`);
+    return await action();
+  } finally {
+    release();
+    if (ticketMutationQueues.get(channel.id) === current) {
+      ticketMutationQueues.delete(channel.id);
+    }
+  }
+}
+
 /**
  * Prevents duplicate ticket creation requests from the same user for the
  * same department.
@@ -106,33 +136,10 @@ function isTerminalTicketStatus(
 
 async function withTimeout<T>(
   promise: Promise<T>,
-  timeoutMs: number,
-  operation: string,
+  _timeoutMs: number,
+  _operation: string,
 ): Promise<T> {
-  let timeoutHandle: NodeJS.Timeout | undefined;
-
-  const timeoutPromise = new Promise<never>(
-    (_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        reject(
-          new Error(
-            `${operation} timed out after ${timeoutMs}ms.`,
-          ),
-        );
-      }, timeoutMs);
-    },
-  );
-
-  try {
-    return await Promise.race([
-      promise,
-      timeoutPromise,
-    ]);
-  } finally {
-    if (timeoutHandle) {
-      clearTimeout(timeoutHandle);
-    }
-  }
+  return promise;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -662,6 +669,13 @@ async function restoreTicketPermissions(
       'owner',
     );
 
+  const permissions = channel.permissionsFor(bot);
+  if (!permissions?.has(PermissionFlagsBits.ManageChannels)) {
+    throw new Error(
+      'SupportForge is missing Manage Channels permission in this ticket.',
+    );
+  }
+
   if (!ownerId) {
     throw new Error(
       'Ticket owner is missing.',
@@ -687,22 +701,21 @@ async function restoreTicketPermissions(
       )
       .filter(Boolean);
 
-  await withTimeout(
-    channel.permissionOverwrites.set(
+  await runChannelMutation(
+    channel,
+    'restore ticket permissions',
+    () => channel.permissionOverwrites.set(
       buildOpenOverwrites(
         ownerId,
-        staffRoleId &&
-        staffRoleId !== 'none'
+        staffRoleId && staffRoleId !== 'none'
           ? staffRoleId
           : undefined,
         users,
         bot.id,
-        channel.guild.roles
-          .everyone.id,
+        channel.guild.roles.everyone.id,
       ),
+      'SupportForge: reopen ticket',
     ),
-    DISCORD_OPERATION_TIMEOUT_MS,
-    'Restore ticket permissions',
   );
 }
 
@@ -760,25 +773,22 @@ async function lockTicketPermissions(
       )
       .filter(Boolean);
 
-  await withTimeout(
-    channel.permissionOverwrites.set(
+  await runChannelMutation(
+    channel,
+    archived ? 'archive ticket permissions' : 'close ticket permissions',
+    () => channel.permissionOverwrites.set(
       buildClosedOverwrites(
         ownerId,
-        staffRoleId &&
-        staffRoleId !== 'none'
+        staffRoleId && staffRoleId !== 'none'
           ? staffRoleId
           : null,
         users,
         bot.id,
-        channel.guild.roles
-          .everyone.id,
+        channel.guild.roles.everyone.id,
         archived,
       ),
+      archived ? 'SupportForge: archive ticket' : 'SupportForge: close ticket',
     ),
-    DISCORD_OPERATION_TIMEOUT_MS,
-    archived
-      ? 'Archive ticket permissions'
-      : 'Close ticket permissions',
   );
 }
 
@@ -1224,6 +1234,10 @@ async function transition(
   interaction: ButtonInteraction,
   newStatus: TicketStatus,
 ): Promise<void> {
+  if (!(await safeDeferReply(interaction))) {
+    return;
+  }
+
   if (
     !interaction.guild ||
     interaction.channel?.type !==
@@ -1257,17 +1271,6 @@ async function transition(
   ticketActionLocks.add(
     lockKey,
   );
-
-  if (
-    !(await safeDeferReply(
-      interaction,
-    ))
-  ) {
-    ticketActionLocks.delete(
-      lockKey,
-    );
-    return;
-  }
 
   try {
     /*
@@ -1588,12 +1591,13 @@ async function transition(
     /*
      * The topic is the source of truth.
      */
-    await withTimeout(
-      channel.setTopic(
+    await runChannelMutation(
+      channel,
+      `status ${oldStatus} -> ${newStatus}`,
+      () => channel.setTopic(
         newTopic,
+        `SupportForge: status ${oldStatus} -> ${newStatus}`,
       ),
-      DISCORD_OPERATION_TIMEOUT_MS,
-      'Ticket status update',
     );
 
     /*
@@ -1641,7 +1645,7 @@ async function transition(
      * updateMainMessage() itself verifies that the channel topic still
      * matches this exact state, preventing stale asynchronous edits.
      */
-    void updateMainMessage(
+    await updateMainMessage(
       channel,
       messageId,
       newStatus,
@@ -1748,6 +1752,10 @@ async function transition(
 async function closeTicket(
   interaction: ButtonInteraction,
 ): Promise<void> {
+  if (!(await safeDeferReply(interaction))) {
+    return;
+  }
+
   if (
     !interaction.guild ||
     interaction.channel?.type !==
@@ -2027,12 +2035,13 @@ async function closeTicket(
         closedAt.toISOString(),
       );
 
-    await withTimeout(
-      channel.setTopic(
+    await runChannelMutation(
+      channel,
+      'set closed ticket topic',
+      () => channel.setTopic(
         closedTopic,
+        `SupportForge: close ticket #${ticketNumber}`,
       ),
-      DISCORD_OPERATION_TIMEOUT_MS,
-      'Closed ticket topic update',
     );
 
     updateRuntimeTicketState(
@@ -2561,6 +2570,10 @@ async function handlePanelButton(
 async function handlePanelModal(
   interaction: ModalSubmitInteraction,
 ): Promise<void> {
+  if (!(await safeDeferReply(interaction))) {
+    return;
+  }
+
   if (
     !interaction.guild ||
     interaction.channel?.type !==
@@ -2618,14 +2631,6 @@ async function handlePanelModal(
       interaction,
       '❌ Only configured staff or administrators can modify ticket details.',
     );
-    return;
-  }
-
-  if (
-    !(await safeDeferReply(
-      interaction,
-    ))
-  ) {
     return;
   }
 
@@ -2754,6 +2759,7 @@ async function handlePanelModal(
           'normal',
           'high',
           'urgent',
+          'critical',
         ]);
 
       if (
@@ -2762,7 +2768,7 @@ async function handlePanelModal(
         )
       ) {
         await interaction.editReply(
-          '❌ Priority must be `low`, `normal`, `high`, or `urgent`.',
+          '❌ Priority must be `low`, `normal`, `high`, `urgent`, or `critical`.',
         );
         return;
       }
@@ -2774,12 +2780,13 @@ async function handlePanelModal(
           priority,
         );
 
-      await withTimeout(
-        channel.setTopic(
-          newTopic,
-        ),
-        DISCORD_OPERATION_TIMEOUT_MS,
+      await runChannelMutation(
+        channel,
         'Priority update',
+        () => channel.setTopic(
+          newTopic,
+          `SupportForge: priority update`,
+        ),
       );
 
       updateRuntimeTicketState(
@@ -2856,12 +2863,13 @@ async function handlePanelModal(
           tags.join(','),
         );
 
-      await withTimeout(
-        channel.setTopic(
-          newTopic,
-        ),
-        DISCORD_OPERATION_TIMEOUT_MS,
+      await runChannelMutation(
+        channel,
         'Tag update',
+        () => channel.setTopic(
+          newTopic,
+          `SupportForge: tag update`,
+        ),
       );
 
       updateRuntimeTicketState(
