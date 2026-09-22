@@ -2148,6 +2148,135 @@ async function closeTicket(
 }
 
 /* -------------------------------------------------------------------------- */
+/* Ticket creation modal                                                      */
+/* -------------------------------------------------------------------------- */
+
+async function showTicketCreationModal(
+  interaction: ButtonInteraction,
+  departmentId: string,
+): Promise<void> {
+  if (!interaction.guild) {
+    await replyError(
+      interaction,
+      '❌ This action can only be used inside a server.',
+    );
+    return;
+  }
+
+  try {
+    const config =
+      await withTimeout(
+        getGuildConfig(
+          interaction.guild.id,
+        ),
+        DISCORD_OPERATION_TIMEOUT_MS,
+        'Guild configuration load',
+      );
+
+    const department =
+      config.departments[
+        departmentId
+      ];
+
+    if (!department) {
+      await replyError(
+        interaction,
+        '❌ This ticket department no longer exists. Please refresh the support panel.',
+      );
+      return;
+    }
+
+    const modal =
+      new ModalBuilder()
+        .setCustomId(
+          `ticket:modal:${departmentId}`,
+        )
+        .setTitle(
+          `${department.name} Support`,
+        );
+
+    const subjectInput =
+      new TextInputBuilder()
+        .setCustomId(
+          'subject',
+        )
+        .setLabel(
+          'What do you need help with?',
+        )
+        .setPlaceholder(
+          'Briefly describe your issue',
+        )
+        .setStyle(
+          TextInputStyle.Short,
+        )
+        .setRequired(
+          true,
+        )
+        .setMaxLength(
+          100,
+        );
+
+    const descriptionInput =
+      new TextInputBuilder()
+        .setCustomId(
+          'description',
+        )
+        .setLabel(
+          'Describe your issue',
+        )
+        .setPlaceholder(
+          'Give us the details we need to help you...',
+        )
+        .setStyle(
+          TextInputStyle.Paragraph,
+        )
+        .setRequired(
+          true,
+        )
+        .setMaxLength(
+          1000,
+        );
+
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>()
+        .addComponents(
+          subjectInput,
+        ),
+
+      new ActionRowBuilder<TextInputBuilder>()
+        .addComponents(
+          descriptionInput,
+        ),
+    );
+
+    /*
+     * IMPORTANT:
+     *
+     * showModal() itself acknowledges the button interaction.
+     * We must NOT deferReply(), reply(), or editReply() afterwards.
+     */
+    await interaction.showModal(
+      modal,
+    );
+  } catch (error) {
+    console.error(
+      '❌ Failed to show ticket creation modal:',
+      error,
+    );
+
+    /*
+     * If showModal() failed before acknowledging the interaction,
+     * replyError() can still safely acknowledge it. If Discord already
+     * acknowledged it, replyError() will simply do nothing.
+     */
+    await replyError(
+      interaction,
+      '❌ SupportForge could not open the ticket creation form. Please try again.',
+    );
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /* Panel button handlers                                                      */
 /* -------------------------------------------------------------------------- */
 
@@ -2855,6 +2984,44 @@ export async function handleTicketInteraction(
       interaction.isButton()
     ) {
       /*
+       * Department ticket creation buttons.
+       *
+       * supportforge.ts creates these as:
+       *
+       *   ticket:create:<departmentId>
+       *
+       * A button interaction MUST be acknowledged.
+       * The acknowledgement here is showModal().
+       */
+      if (
+        interaction.customId.startsWith(
+          'ticket:create:',
+        )
+      ) {
+        const departmentId =
+          interaction.customId.slice(
+            'ticket:create:'.length,
+          );
+
+        if (
+          !departmentId
+        ) {
+          await replyError(
+            interaction,
+            '❌ Ticket department could not be determined.',
+          );
+          return;
+        }
+
+        await showTicketCreationModal(
+          interaction,
+          departmentId,
+        );
+
+        return;
+      }
+
+      /*
        * Lifecycle buttons.
        */
       if (
@@ -2894,6 +3061,20 @@ export async function handleTicketInteraction(
         );
         return;
       }
+
+      /*
+       * Unknown button.
+       *
+       * Do not silently leave the interaction unacknowledged.
+       */
+      console.warn(
+        `⚠️ Unhandled SupportForge button: ${interaction.customId}`,
+      );
+
+      await replyError(
+        interaction,
+        '❌ This SupportForge button is no longer available. Please refresh the panel.',
+      );
 
       return;
     }
@@ -2976,6 +3157,20 @@ export async function handleTicketInteraction(
         );
         return;
       }
+
+      /*
+       * Unknown modal.
+       */
+      console.warn(
+        `⚠️ Unhandled SupportForge modal: ${interaction.customId}`,
+      );
+
+      await replyError(
+        interaction,
+        '❌ This SupportForge form is no longer available. Please try again.',
+      );
+
+      return;
     }
   } catch (error) {
     console.error(
