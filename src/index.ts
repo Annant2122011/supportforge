@@ -23,6 +23,10 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
   ],
+  rest: {
+    timeout: 15_000,
+    retries: 3,
+  },
 });
 
 client.once('ready', (readyClient) => {
