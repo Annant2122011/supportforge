@@ -25,6 +25,7 @@ import {
 } from '../services/configService';
 
 import { executeTicketCommand } from '../interactions/ticketCommandTools';
+import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
 
 const SUPPORT_CATEGORY_NAME = 'Support Forge';
 const PANEL_CHANNEL_NAME = 'support-panel';
@@ -1101,24 +1102,25 @@ export async function execute(
         return;
       }
 
-      const activeTickets =
-        guild.channels.cache.filter(
-          (channel) =>
-            channel.type ===
-              ChannelType.GuildText &&
-            channel.topic?.startsWith(
-              TICKET_PREFIX,
-            ) &&
-            channel.topic.includes(
-              `department=${department.id}`,
-            ) &&
-            !channel.topic.includes(
-              'status=closed',
-            ) &&
-            !channel.topic.includes(
-              'status=archived',
-            ),
-        );
+      const activeTickets: TextChannel[] = [];
+
+      for (const channel of guild.channels.cache.values()) {
+        if (
+          channel.type !== ChannelType.GuildText ||
+          !channel.topic?.startsWith(TICKET_PREFIX) ||
+          getField(channel.topic, 'department') !== department.id
+        ) {
+          continue;
+        }
+
+        const status =
+          (await getPersistedTicketStatus(channel.id)) ??
+          getTicketStatus(channel.topic);
+
+        if (isActiveTicketStatus(status)) {
+          activeTickets.push(channel);
+        }
+      }
 
       if (
         activeTickets.size > 0
