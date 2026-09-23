@@ -115,10 +115,13 @@ export function buildTicketPanelComponents(status: TicketStatus): ActionRowBuild
   if (status !== 'archived') {
     if (status === 'closed') {
       /*
-       * A closed ticket has exactly two allowed actions:
-       * Reopen or Archive. No management tools are exposed.
+       * Closed tickets allow lifecycle controls plus read-only history.
+       * History does not permit messages or other ticket mutations.
        */
-      return [lifecycle];
+      tools.addComponents(
+        new ButtonBuilder().setCustomId('ticket:panel:history').setLabel('History').setEmoji('📜').setStyle(ButtonStyle.Secondary),
+      );
+      return [lifecycle, tools];
     }
 
     tools.addComponents(
