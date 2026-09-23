@@ -723,6 +723,14 @@ export const data =
             ),
         )
 
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('panel')
+            .setDescription(
+              'Open manual controls for the ticket panel',
+            ),
+        )
+
         // ADD USER
         .addSubcommand((subcommand) =>
           subcommand
