@@ -22,7 +22,6 @@ import { generateTranscript } from '../services/transcriptService';
 
 import {
   setChannelPermissionOverwrite,
-  setChannelPermissionOverwrites,
   setChannelTopic,
   setChannelTopicAndPermissionOverwrites,
 } from '../services/discordChannelService';
@@ -705,82 +704,6 @@ function buildClosedOverwrites(
   }
 
   return overwrites;
-}
-
-async function restoreTicketPermissions(
-  channel: TextChannel,
-  topic: string,
-): Promise<void> {
-  const bot =
-    channel.guild.members.me;
-
-  if (!bot) {
-    throw new Error(
-      'Bot member unavailable.',
-    );
-  }
-
-  const ownerId =
-    getField(
-      topic,
-      'owner',
-    );
-
-  const permissions = channel.permissionsFor(bot);
-  if (!permissions?.has(PermissionFlagsBits.ManageChannels)) {
-    throw new Error(
-      'SupportForge is missing Manage Channels permission in this ticket.',
-    );
-  }
-
-  if (!ownerId) {
-    throw new Error(
-      'Ticket owner is missing.',
-    );
-  }
-
-  const staffRoleId =
-    getField(
-      topic,
-      'staff',
-    );
-
-  const users =
-    (
-      getField(
-        topic,
-        'users',
-      ) ?? ''
-    )
-      .split(',')
-      .map((id) =>
-        id.trim(),
-      )
-      .filter(Boolean);
-
-  await runChannelMutation(
-    channel,
-    'restore ticket permissions',
-    () => setChannelPermissionOverwrites(
-      channel.id,
-      buildOpenOverwrites(
-        ownerId,
-        staffRoleId && staffRoleId !== 'none'
-          ? staffRoleId
-          : undefined,
-        users,
-        bot.id,
-        channel.guild.roles.everyone.id,
-      ),
-      new Set<string>([
-        channel.guild.roles.everyone.id,
-        ...(staffRoleId && staffRoleId !== 'none'
-          ? [staffRoleId]
-          : []),
-      ]),
-      'SupportForge: reopen ticket',
-    ),
-  );
 }
 
 async function lockTicketPermissions(
