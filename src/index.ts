@@ -3,6 +3,7 @@ import 'dotenv/config';
 import {
   ChannelType,
   Client,
+  EmbedBuilder,
   GatewayIntentBits,
   MessageFlags,
 } from 'discord.js';
@@ -86,13 +87,20 @@ client.on('messageCreate', async (message) => {
     );
 
     try {
-      await message.author.send(
-        'This is not an error. The ticket is closed, so you cannot send any messages.',
-      );
-    } catch (dmError) {
+      await message.channel.send({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle('🤖 SupportForge')
+            .setDescription(
+              'This is not an error. The ticket is closed, so you cannot send any messages.',
+            )
+            .setTimestamp(),
+        ],
+      });
+    } catch (notificationError) {
       console.warn(
-        `⚠️ Could not send closed-ticket notice to ${message.author.tag}:`,
-        dmError,
+        `⚠️ Could not send closed-ticket notification in ${message.channel.id}:`,
+        notificationError,
       );
     }
   } catch (error) {
