@@ -2,6 +2,8 @@ import 'dotenv/config';
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 const DISCORD_CHANNEL_TIMEOUT_MS = 15_000;
+const MAX_AUTOMATIC_RETRY_DELAY_MS = 5_000;
+const MAX_RATE_LIMIT_RETRIES = 1;
 
 type PermissionValue = bigint | number | string;
 
@@ -18,20 +20,14 @@ interface DiscordPermissionOverwritePayload {
   deny: string;
 }
 
-interface DiscordChannelPatchBody {
-  topic?: string;
-  permission_overwrites?: DiscordPermissionOverwritePayload[];
+interface DiscordRateLimitBody {
+  message?: string;
+  retry_after?: number;
+  global?: boolean;
 }
 
-function permissionValueToString(
-  value: PermissionValue | undefined,
-): string {
-  if (value === undefined) {
-    return '0';
-  }
-
-  return String(value);
-}
+const channelRateLimitUntil = new Map<string, number>();
+let globalRateLimitUntil = 0;
 
 function permissionListToBitfield(
   values: PermissionValue[] | undefined,
@@ -49,138 +45,208 @@ function permissionListToBitfield(
   return result.toString();
 }
 
-async function discordChannelRequest<T = unknown>(
+function getRemainingCooldown(until: number): number {
+  return Math.max(0, until - Date.now());
+}
+
+function rememberRateLimit(
+  channelId: string,
+  retryAfterMs: number,
+  isGlobal: boolean,
+): void {
+  const until = Date.now() + retryAfterMs;
+
+  if (isGlobal) {
+    globalRateLimitUntil = Math.max(globalRateLimitUntil, until);
+    return;
+  }
+
+  channelRateLimitUntil.set(
+    channelId,
+    Math.max(channelRateLimitUntil.get(channelId) ?? 0, until),
+  );
+}
+
+function getRateLimitCooldown(channelId: string): number {
+  return Math.max(
+    getRemainingCooldown(globalRateLimitUntil),
+    getRemainingCooldown(channelRateLimitUntil.get(channelId) ?? 0),
+  );
+}
+
+function parseRetryAfter(
+  text: string,
+  response: Response,
+): {
+  retryAfterMs: number;
+  global: boolean;
+} {
+  let body: DiscordRateLimitBody = {};
+
+  try {
+    body = JSON.parse(text) as DiscordRateLimitBody;
+  } catch {
+    // Fall back to the standard HTTP header if the body is not JSON.
+  }
+
+  const headerRetryAfter = response.headers.get('retry-after');
+
+  const retryAfterSeconds =
+    typeof body.retry_after === 'number'
+      ? body.retry_after
+      : headerRetryAfter
+        ? Number(headerRetryAfter)
+        : 0;
+
+  const retryAfterMs =
+    Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+      ? Math.ceil(retryAfterSeconds * 1000)
+      : 1000;
+
+  return {
+    retryAfterMs,
+    global: body.global === true,
+  };
+}
+
+function createRateLimitError(
+  operation: string,
+  retryAfterMs: number,
+  global: boolean,
+): Error {
+  const seconds = Math.ceil(retryAfterMs / 1000);
+  const scope = global ? 'global' : 'this Discord channel/resource';
+
+  return new Error(
+    `Discord rate limit active for ${scope}. ${operation} cannot be retried automatically for another ${seconds}s.`,
+  );
+}
+
+async function waitForCooldown(
+  channelId: string,
+  operation: string,
+): Promise<void> {
+  const cooldownMs = getRateLimitCooldown(channelId);
+
+  if (cooldownMs <= 0) {
+    return;
+  }
+
+  if (cooldownMs > MAX_AUTOMATIC_RETRY_DELAY_MS) {
+    throw createRateLimitError(
+      operation,
+      cooldownMs,
+      getRemainingCooldown(globalRateLimitUntil) >= cooldownMs,
+    );
+  }
+
+  console.log(
+    `⏳ Discord rate limit: waiting ${cooldownMs}ms before ${operation}`,
+  );
+
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, cooldownMs);
+  });
+}
+
+async function discordRequest<T = unknown>(
   channelId: string,
   method: 'PATCH' | 'PUT',
+  path: string,
   body: Record<string, unknown>,
   operation: string,
 ): Promise<T> {
   const token = process.env.DISCORD_TOKEN;
 
   if (!token) {
-    throw new Error(
-      'DISCORD_TOKEN is missing from environment.',
-    );
+    throw new Error('DISCORD_TOKEN is missing from environment.');
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(
-    () => controller.abort(),
-    DISCORD_CHANNEL_TIMEOUT_MS,
-  );
+  for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt += 1) {
+    await waitForCooldown(channelId, operation);
 
-  try {
-    console.log(
-      `🌐 Discord native REST: ${method} /channels/${channelId} (${operation})`,
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(),
+      DISCORD_CHANNEL_TIMEOUT_MS,
     );
 
-    const response = await fetch(
-      `${DISCORD_API_BASE}/channels/${channelId}`,
-      {
-        method,
-        headers: {
-          Authorization: `Bot ${token}`,
-          'Content-Type': 'application/json',
+    try {
+      console.log(
+        `🌐 Discord native REST: ${method} ${path} (${operation})`,
+      );
+
+      const response = await fetch(
+        `${DISCORD_API_BASE}${path}`,
+        {
+          method,
+          headers: {
+            Authorization: `Bot ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
         },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      },
-    );
-
-    const text = await response.text();
-
-    if (!response.ok) {
-      throw new Error(
-        `Discord ${method} ${operation} failed with HTTP ${response.status}: ${text}`,
       );
-    }
 
-    if (!text) {
-      return undefined as T;
-    }
+      const text = await response.text();
 
-    return JSON.parse(text) as T;
-  } catch (error) {
-    if (
-      error instanceof DOMException &&
-      error.name === 'AbortError'
-    ) {
-      throw new Error(
-        `Discord ${method} ${operation} timed out after ${DISCORD_CHANNEL_TIMEOUT_MS}ms.`,
-      );
-    }
+      if (response.status === 429) {
+        const { retryAfterMs, global } = parseRetryAfter(
+          text,
+          response,
+        );
 
-    throw error;
-  } finally {
-    clearTimeout(timer);
+        rememberRateLimit(channelId, retryAfterMs, global);
+
+        console.warn(
+          `⚠️ Discord rate limit: ${operation}; retry_after=${Math.ceil(retryAfterMs / 1000)}s; global=${global}`,
+        );
+
+        if (
+          attempt < MAX_RATE_LIMIT_RETRIES &&
+          retryAfterMs <= MAX_AUTOMATIC_RETRY_DELAY_MS
+        ) {
+          continue;
+        }
+
+        throw createRateLimitError(
+          operation,
+          retryAfterMs,
+          global,
+        );
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          `Discord ${method} ${operation} failed with HTTP ${response.status}: ${text}`,
+        );
+      }
+
+      if (!text) {
+        return undefined as T;
+      }
+
+      return JSON.parse(text) as T;
+    } catch (error) {
+      if (
+        error instanceof DOMException &&
+        error.name === 'AbortError'
+      ) {
+        throw new Error(
+          `Discord ${method} ${operation} timed out after ${DISCORD_CHANNEL_TIMEOUT_MS}ms.`,
+        );
+      }
+
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
-}
 
-async function discordPermissionRequest(
-  channelId: string,
-  overwriteId: string,
-  type: 0 | 1,
-  allow: PermissionValue[] | undefined,
-  deny: PermissionValue[] | undefined,
-  operation: string,
-): Promise<void> {
-  const token = process.env.DISCORD_TOKEN;
-
-  if (!token) {
-    throw new Error(
-      'DISCORD_TOKEN is missing from environment.',
-    );
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(
-    () => controller.abort(),
-    DISCORD_CHANNEL_TIMEOUT_MS,
+  throw new Error(
+    `Discord ${method} ${operation} exhausted its rate-limit retries.`,
   );
-
-  try {
-    console.log(
-      `🌐 Discord native REST: PUT /channels/${channelId}/permissions/${overwriteId} (${operation})`,
-    );
-
-    const response = await fetch(
-      `${DISCORD_API_BASE}/channels/${channelId}/permissions/${overwriteId}`,
-      {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bot ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          type,
-          allow: permissionListToBitfield(allow),
-          deny: permissionListToBitfield(deny),
-        }),
-        signal: controller.signal,
-      },
-    );
-
-    const text = await response.text();
-
-    if (!response.ok) {
-      throw new Error(
-        `Discord PUT ${operation} failed with HTTP ${response.status}: ${text}`,
-      );
-    }
-  } catch (error) {
-    if (
-      error instanceof DOMException &&
-      error.name === 'AbortError'
-    ) {
-      throw new Error(
-        `Discord PUT ${operation} timed out after ${DISCORD_CHANNEL_TIMEOUT_MS}ms.`,
-      );
-    }
-
-    throw error;
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 export async function setChannelTopic(
@@ -188,12 +254,11 @@ export async function setChannelTopic(
   topic: string,
   operation: string,
 ): Promise<void> {
-  await discordChannelRequest(
+  await discordRequest(
     channelId,
     'PATCH',
-    {
-      topic,
-    },
+    `/channels/${channelId}`,
+    { topic },
     operation,
   );
 }
@@ -208,20 +273,15 @@ export async function setChannelPermissionOverwrites(
     overwrites.map((overwrite) => ({
       id: overwrite.id,
       type: roleIds.has(overwrite.id) ? 0 : 1,
-      allow: permissionListToBitfield(
-        overwrite.allow,
-      ),
-      deny: permissionListToBitfield(
-        overwrite.deny,
-      ),
+      allow: permissionListToBitfield(overwrite.allow),
+      deny: permissionListToBitfield(overwrite.deny),
     }));
 
-  await discordChannelRequest(
+  await discordRequest(
     channelId,
     'PATCH',
-    {
-      permission_overwrites: payload,
-    },
+    `/channels/${channelId}`,
+    { permission_overwrites: payload },
     operation,
   );
 }
@@ -234,12 +294,15 @@ export async function setChannelPermissionOverwrite(
   type: 0 | 1,
   operation: string,
 ): Promise<void> {
-  await discordPermissionRequest(
+  await discordRequest(
     channelId,
-    overwriteId,
-    type,
-    allow,
-    deny,
+    'PUT',
+    `/channels/${channelId}/permissions/${overwriteId}`,
+    {
+      type,
+      allow: permissionListToBitfield(allow),
+      deny: permissionListToBitfield(deny),
+    },
     operation,
   );
 }
