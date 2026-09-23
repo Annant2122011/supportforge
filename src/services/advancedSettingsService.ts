@@ -1,1 +1,93 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';\nimport { join } from 'node:path';\nimport type { Guild } from 'discord.js';\n\nexport interface CustomSlashCommand {\n  id: string;\n  name: string;\n  description: string;\n  response: string;\n  staffOnly: boolean;\n  createdAt: string;\n}\n\nexport interface AdvancedGuildSettings {\n  version: 1;\n  settingsChannelId: string | null;\n  closedCategoryId: string | null;\n  archiveCategoryId: string | null;\n  billingCategoryId: string | null;\n  panelActivity: {\n    enabled: boolean;\n    visualLineBudget: number;\n    messageBudget: number;\n    minimumMessagesBeforeMove: number;\n  };\n  retention: {\n    closedDays: number;\n    archiveDays: number;\n  };\n  customCommands: Record<string, CustomSlashCommand>;\n}\n\ninterface SettingsFile {\n  version: 1;\n  guilds: Record<string, AdvancedGuildSettings>;\n}\n\nconst DATA_DIR = join(process.cwd(), 'data');\nconst SETTINGS_PATH = join(DATA_DIR, 'advanced-settings.json');\n\nconst DEFAULTS: AdvancedGuildSettings = {\n  version: 1,\n  settingsChannelId: null,\n  closedCategoryId: null,\n  archiveCategoryId: null,\n  billingCategoryId: null,\n  panelActivity: {\n    enabled: true,\n    visualLineBudget: 18,\n    messageBudget: 12,\n    minimumMessagesBeforeMove: 6,\n  },\n  retention: {\n    closedDays: 30,\n    archiveDays: 0,\n  },\n  customCommands: {},\n};\n\nlet state: SettingsFile | null = null;\nlet writeQueue: Promise<void> = Promise.resolve();\n\nfunction cloneDefaults(): AdvancedGuildSettings {\n  return {\n    ...DEFAULTS,\n    panelActivity: { ...DEFAULTS.panelActivity },\n    retention: { ...DEFAULTS.retention },\n    customCommands: {},\n  };\n}\n\nasync function persist(): Promise<void> {\n  if (!state) return;\n  writeQueue = writeQueue.then(async () => {\n    await mkdir(DATA_DIR, { recursive: true });\n    await writeFile(SETTINGS_PATH, JSON.stringify(state, null, 2), 'utf8');\n  });\n  await writeQueue;\n}\n\nasync function load(): Promise<SettingsFile> {\n  if (state) return state;\n  await mkdir(DATA_DIR, { recursive: true });\n  try {\n    const raw = await readFile(SETTINGS_PATH, 'utf8');\n    const parsed = JSON.parse(raw) as Partial<SettingsFile>;\n    state = { version: 1, guilds: parsed.guilds ?? {} };\n  } catch {\n    state = { version: 1, guilds: {} };\n    await persist();\n  }\n  return state;\n}\n\nexport async function getAdvancedSettings(guildId: string): Promise<AdvancedGuildSettings> {\n  const current = await load();\n  const existing = current.guilds[guildId];\n  if (!existing) {\n    current.guilds[guildId] = cloneDefaults();\n    await persist();\n  } else {\n    existing.panelActivity ??= { ...DEFAULTS.panelActivity };\n    existing.retention ??= { ...DEFAULTS.retention };\n    existing.customCommands ??= {};\n  }\n  return current.guilds[guildId];\n}\n\nexport async function updateAdvancedSettings(\n  guildId: string,\n  updater: (settings: AdvancedGuildSettings) => void,\n): Promise<AdvancedGuildSettings> {\n  const settings = await getAdvancedSettings(guildId);\n  updater(settings);\n  await persist();\n  return settings;\n}\n\nexport function validateCustomCommandName(name: string): boolean {\n  return /^[a-z0-9_-]{1,32}$/.test(name) && name !== 'supportforge';\n}\n\nexport async function createCustomSlashCommand(\n  guild: Guild,\n  name: string,\n  description: string,\n  response: string,\n  staffOnly: boolean,\n): Promise<CustomSlashCommand> {\n  if (!validateCustomCommandName(name)) {\n    throw new Error('Custom command names must use lowercase letters, numbers, hyphens, or underscores and be 1-32 characters.');\n  }\n  const settings = await getAdvancedSettings(guild.id);\n  if (settings.customCommands[name]) throw new Error('A custom command with that name already exists.');\n  const command = await guild.commands.create({\n    name,\n    description: description.slice(0, 100),\n  });\n  const record: CustomSlashCommand = {\n    id: command.id,\n    name,\n    description: description.slice(0, 100),\n    response,\n    staffOnly,\n    createdAt: new Date().toISOString(),\n  };\n  await updateAdvancedSettings(guild.id, (current) => {\n    current.customCommands[name] = record;\n  });\n  return record;\n}\n\nexport async function deleteCustomSlashCommand(guild: Guild, name: string): Promise<boolean> {\n  const settings = await getAdvancedSettings(guild.id);\n  const command = settings.customCommands[name];\n  if (!command) return false;\n  await guild.commands.delete(command.id).catch(() => undefined);\n  await updateAdvancedSettings(guild.id, (current) => {\n    delete current.customCommands[name];\n  });\n  return true;\n}\n\nexport async function executeCustomSlashCommand(\n  interaction: {\n    commandName: string;\n    guildId: string;\n    memberPermissions?: { has(permission: bigint): boolean } | null;\n    reply(payload: { content: string; flags?: number }): Promise<unknown>;\n  },\n  administratorPermission: bigint,\n): Promise<boolean> {\n  const settings = await getAdvancedSettings(interaction.guildId);\n  const command = settings.customCommands[interaction.commandName];\n  if (!command) return false;\n  if (command.staffOnly && !interaction.memberPermissions?.has(administratorPermission)) {\n    await interaction.reply({ content: '❌ This custom command is restricted to staff.', flags: 64 });\n    return true;\n  }\n  await interaction.reply({ content: command.response.slice(0, 2000), flags: 64 });\n  return true;\n}\n\nexport function buildSettingsSummary(settings: AdvancedGuildSettings): string {\n  const customCount = Object.keys(settings.customCommands).length;\n  const closed = settings.retention.closedDays === 0 ? 'Never delete' : settings.retention.closedDays + ' days';\n  const archived = settings.retention.archiveDays === 0 ? 'Never delete' : settings.retention.archiveDays + ' days';\n  return [\n    '**Panel activity**',\n    '• Automatic repositioning: ' + (settings.panelActivity.enabled ? 'Enabled' : 'Disabled'),\n    '• Visual budget: ' + settings.panelActivity.visualLineBudget + ' lines',\n    '• Message safety cap: ' + settings.panelActivity.messageBudget + ' messages',\n    '• Minimum messages: ' + settings.panelActivity.minimumMessagesBeforeMove,\n    '',\n    '**Retention**',\n    '• Closed tickets: ' + closed,\n    '• Archived tickets: ' + archived,\n    '',\n    '**Custom slash commands:** ' + customCount,\n  ].join('\n');\n}
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { MessageFlags, type ChatInputCommandInteraction, type Guild } from 'discord.js';
+
+export interface CustomSlashCommand {
+  id: string;
+  name: string;
+  description: string;
+  response: string;
+  staffOnly: boolean;
+  createdAt: string;
+}
+
+export interface AdvancedGuildSettings {
+  version: 1;
+  settingsChannelId: string | null;
+  closedCategoryId: string | null;
+  archiveCategoryId: string | null;
+  billingCategoryId: string | null;
+  panelActivity: { enabled: boolean; visualLineBudget: number; messageBudget: number; minimumMessagesBeforeMove: number; };
+  retention: { closedDays: number; archiveDays: number; };
+  customCommands: Record<string, CustomSlashCommand>;
+}
+
+interface SettingsFile { version: 1; guilds: Record<string, AdvancedGuildSettings>; }
+const DATA_DIR = join(process.cwd(), 'data');
+const SETTINGS_PATH = join(DATA_DIR, 'advanced-settings.json');
+const DEFAULTS: AdvancedGuildSettings = {
+  version: 1, settingsChannelId: null, closedCategoryId: null, archiveCategoryId: null, billingCategoryId: null,
+  panelActivity: { enabled: true, visualLineBudget: 18, messageBudget: 12, minimumMessagesBeforeMove: 6 },
+  retention: { closedDays: 30, archiveDays: 0 }, customCommands: {},
+};
+let state: SettingsFile | null = null;
+let writeQueue: Promise<void> = Promise.resolve();
+
+function cloneDefaults(): AdvancedGuildSettings {
+  return { ...DEFAULTS, panelActivity: { ...DEFAULTS.panelActivity }, retention: { ...DEFAULTS.retention }, customCommands: {} };
+}
+async function persist(): Promise<void> {
+  if (!state) return;
+  writeQueue = writeQueue.then(async () => { await mkdir(DATA_DIR, { recursive: true }); await writeFile(SETTINGS_PATH, JSON.stringify(state, null, 2), 'utf8'); });
+  await writeQueue;
+}
+async function load(): Promise<SettingsFile> {
+  if (state) return state;
+  await mkdir(DATA_DIR, { recursive: true });
+  try {
+    const raw = await readFile(SETTINGS_PATH, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<SettingsFile>;
+    state = { version: 1, guilds: parsed.guilds ?? {} };
+  } catch {
+    state = { version: 1, guilds: {} };
+    await persist();
+  }
+  return state;
+}
+export async function getAdvancedSettings(guildId: string): Promise<AdvancedGuildSettings> {
+  const current = await load();
+  const existing = current.guilds[guildId];
+  if (!existing) { current.guilds[guildId] = cloneDefaults(); await persist(); }
+  else { existing.panelActivity ??= { ...DEFAULTS.panelActivity }; existing.retention ??= { ...DEFAULTS.retention }; existing.customCommands ??= {}; }
+  return current.guilds[guildId];
+}
+export async function updateAdvancedSettings(guildId: string, updater: (settings: AdvancedGuildSettings) => void): Promise<AdvancedGuildSettings> {
+  const settings = await getAdvancedSettings(guildId); updater(settings); await persist(); return settings;
+}
+export function validateCustomCommandName(name: string): boolean { return /^[a-z0-9_-]{1,32}$/.test(name) && name !== 'supportforge'; }
+export async function createCustomSlashCommand(guild: Guild, name: string, description: string, response: string, staffOnly: boolean): Promise<CustomSlashCommand> {
+  if (!validateCustomCommandName(name)) throw new Error('Custom command names must use lowercase letters, numbers, hyphens, or underscores and be 1-32 characters.');
+  const settings = await getAdvancedSettings(guild.id);
+  if (settings.customCommands[name]) throw new Error('A custom command with that name already exists.');
+  const command = await guild.commands.create({ name, description: description.slice(0, 100) });
+  const record: CustomSlashCommand = { id: command.id, name, description: description.slice(0, 100), response, staffOnly, createdAt: new Date().toISOString() };
+  await updateAdvancedSettings(guild.id, (current) => { current.customCommands[name] = record; });
+  return record;
+}
+export async function deleteCustomSlashCommand(guild: Guild, name: string): Promise<boolean> {
+  const settings = await getAdvancedSettings(guild.id); const command = settings.customCommands[name]; if (!command) return false;
+  await guild.commands.delete(command.id).catch(() => undefined);
+  await updateAdvancedSettings(guild.id, (current) => { delete current.customCommands[name]; });
+  return true;
+}
+export async function executeCustomSlashCommand(interaction: ChatInputCommandInteraction, administratorPermission: bigint): Promise<boolean> {
+  const settings = await getAdvancedSettings(interaction.guildId); const command = settings.customCommands[interaction.commandName]; if (!command) return false;
+  if (command.staffOnly && !interaction.memberPermissions?.has(administratorPermission)) { await interaction.reply({ content: '❌ This custom command is restricted to staff.', flags: MessageFlags.Ephemeral }); return true; }
+  await interaction.reply({ content: command.response.slice(0, 2000), flags: MessageFlags.Ephemeral }); return true;
+}
+export function buildSettingsSummary(settings: AdvancedGuildSettings): string {
+  const customCount = Object.keys(settings.customCommands).length;
+  const closed = settings.retention.closedDays === 0 ? 'Never delete' : settings.retention.closedDays + ' days';
+  const archived = settings.retention.archiveDays === 0 ? 'Never delete' : settings.retention.archiveDays + ' days';
+  return ['**Panel activity**', '• Automatic repositioning: ' + (settings.panelActivity.enabled ? 'Enabled' : 'Disabled'), '• Visual budget: ' + settings.panelActivity.visualLineBudget + ' lines', '• Message safety cap: ' + settings.panelActivity.messageBudget + ' messages', '• Minimum messages: ' + settings.panelActivity.minimumMessagesBeforeMove, '', '**Retention**', '• Closed tickets: ' + closed, '• Archived tickets: ' + archived, '', '**Custom slash commands:** ' + customCount].join('\n');
+}
