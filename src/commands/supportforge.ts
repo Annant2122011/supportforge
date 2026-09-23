@@ -30,7 +30,6 @@ import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
 import {
   getField,
   getTicketStatus,
-  isActiveTicketStatus,
 } from '../services/ticketStateService';
 
 const SUPPORT_CATEGORY_NAME = 'Support Forge';
@@ -39,6 +38,17 @@ const PANEL_TOPIC = 'supportforge:panel';
 const TRANSCRIPT_NAME = '📄 support-transcripts';
 const TRANSCRIPT_TOPIC = 'supportforge:transcript';
 const TICKET_PREFIX = 'supportforge:ticket';
+
+function isActiveTicketStatus(
+  status: ReturnType<typeof getTicketStatus>,
+): boolean {
+  return (
+    status === 'open' ||
+    status === 'claimed' ||
+    status === 'pending' ||
+    status === 'reopened'
+  );
+}
 
 function isAdminLike(
   interaction: ChatInputCommandInteraction,
