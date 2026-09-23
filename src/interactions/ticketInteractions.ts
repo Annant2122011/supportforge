@@ -1612,10 +1612,10 @@ async function transition(
     }
 
     /*
-     * Refresh the panel only AFTER the new topic is committed.
-     *
-     * updateMainMessage() itself verifies that the channel topic still
-     * matches this exact state, preventing stale asynchronous edits.
+     * Refresh the panel immediately, then schedule a relocation to the
+     * bottom of the conversation. This is especially important when a
+     * closed ticket is reopened after a long conversation: the old panel
+     * may be hundreds of messages above the current activity.
      */
     await updateMainMessage(
       channel,
@@ -1623,6 +1623,10 @@ async function transition(
       newStatus,
       newTopic,
     );
+
+    if (ACTIVE_TICKET_STATUSES.includes(newStatus)) {
+      scheduleTicketPanelAtBottom(channel);
+    }
 
     await interaction.editReply(
       `✅ Ticket status changed to **${capitalize(
