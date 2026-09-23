@@ -120,35 +120,6 @@ client.on('messageCreate', async (message) => {
    * produces one panel move instead of a delete/send cycle for every line.
    */
   scheduleTicketPanelAtBottom(message.channel as TextChannel);
-    await message.delete();
-
-    console.log(
-      `🗑️ Deleted message from ${message.author.tag} in ${message.channel.id} because the ticket is ${status}.`,
-    );
-
-    try {
-      await message.channel.send({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle('🤖 SupportForge')
-            .setDescription(
-              'This is not an error. The ticket is closed, so you cannot send any messages.',
-            )
-            .setTimestamp(),
-        ],
-      });
-    } catch (notificationError) {
-      console.warn(
-        `⚠️ Could not send closed-ticket notification in ${message.channel.id}:`,
-        notificationError,
-      );
-    }
-  } catch (error) {
-    console.error(
-      `⚠️ Failed to delete message in ${status} ticket ${message.channel.id}:`,
-      error,
-    );
-  }
 });
 
 client.on(
