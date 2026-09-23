@@ -1378,13 +1378,8 @@ async function transition(
         );
 
       /*
-       * Reopen must restore permissions and commit the reopened topic in
-       * the same Discord channel PATCH. Sending a permissions PATCH and
-       * then a topic PATCH doubles pressure on the channel resource and
-       * can trigger Discord's shared/resource rate limit.
-       *
-       * The status field is added below before this mutation is committed.
-       * The actual combined write is performed after the topic is complete.
+       * Reopening clears the closed/archived metadata. The channel topic
+       * is committed below; permissions are intentionally left unchanged.
        */
     }
 
