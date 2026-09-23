@@ -263,6 +263,33 @@ export async function setChannelTopic(
   );
 }
 
+export async function setChannelTopicAndPermissionOverwrites(
+  channelId: string,
+  topic: string,
+  overwrites: ChannelPermissionOverwrite[],
+  roleIds: ReadonlySet<string>,
+  operation: string,
+): Promise<void> {
+  const payload: DiscordPermissionOverwritePayload[] =
+    overwrites.map((overwrite) => ({
+      id: overwrite.id,
+      type: roleIds.has(overwrite.id) ? 0 : 1,
+      allow: permissionListToBitfield(overwrite.allow),
+      deny: permissionListToBitfield(overwrite.deny),
+    }));
+
+  await discordRequest(
+    channelId,
+    'PATCH',
+    `/channels/${channelId}`,
+    {
+      topic,
+      permission_overwrites: payload,
+    },
+    operation,
+  );
+}
+
 export async function setChannelPermissionOverwrites(
   channelId: string,
   overwrites: ChannelPermissionOverwrite[],
