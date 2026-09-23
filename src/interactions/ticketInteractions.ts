@@ -1644,12 +1644,14 @@ async function transition(
         );
 
       /*
-       * Restore access before committing reopened state.
+       * Reopen must restore permissions and commit the reopened topic in
+       * the same Discord channel PATCH. Sending a permissions PATCH and
+       * then a topic PATCH doubles pressure on the channel resource and
+       * can trigger Discord's shared/resource rate limit.
+       *
+       * The status field is added below before this mutation is committed.
+       * The actual combined write is performed after the topic is complete.
        */
-      await restoreTicketPermissions(
-        channel,
-        newTopic,
-      );
     }
 
     if (
@@ -1662,12 +1664,6 @@ async function transition(
           'archived_at',
           new Date().toISOString(),
         );
-
-      await lockTicketPermissions(
-        channel,
-        newTopic,
-        true,
-      );
     }
 
     newTopic =
@@ -1679,19 +1675,109 @@ async function transition(
 
     /*
      * The topic is the source of truth.
+     *
+     * Reopen and archive also change channel permissions. Commit their
+     * permissions and topic together in ONE Discord channel PATCH.
+     * Ordinary lifecycle transitions only need a topic PATCH.
      */
-    await runChannelMutation(
-      channel,
-      `status ${oldStatus} -> ${newStatus}`,
-      async () => {
-        await setChannelTopic(
-          channel.id,
-          newTopic,
-          `SupportForge: status ${oldStatus} -> ${newStatus}`,
+    if (
+      newStatus ===
+        'reopened'
+    ) {
+      const bot = channel.guild.members.me;
+
+      if (!bot) {
+        throw new Error(
+          'Bot member unavailable.',
         );
-        channel.topic = newTopic;
-      },
-    );
+      }
+
+      const ownerId =
+        getField(
+          newTopic,
+          'owner',
+        );
+
+      if (!ownerId) {
+        throw new Error(
+          'Ticket owner is missing.',
+        );
+      }
+
+      const staffRoleId =
+        getField(
+          newTopic,
+          'staff',
+        );
+
+      const users =
+        (
+          getField(
+            newTopic,
+            'users',
+          ) ?? ''
+        )
+          .split(',')
+          .map((id) =>
+            id.trim(),
+          )
+          .filter(Boolean);
+
+      const roleIds = new Set<string>([
+        channel.guild.roles.everyone.id,
+        ...(staffRoleId && staffRoleId !== 'none'
+          ? [staffRoleId]
+          : []),
+      ]);
+
+      await runChannelMutation(
+        channel,
+        'reopen ticket permissions + topic',
+        () =>
+          setChannelTopicAndPermissionOverwrites(
+            channel.id,
+            newTopic,
+            buildOpenOverwrites(
+              ownerId,
+              staffRoleId && staffRoleId !== 'none'
+                ? staffRoleId
+                : undefined,
+              users,
+              bot.id,
+              channel.guild.roles.everyone.id,
+            ),
+            roleIds,
+            'SupportForge: reopen ticket',
+          ),
+      );
+
+      channel.topic = newTopic;
+    } else if (
+      newStatus ===
+        'archived'
+    ) {
+      await lockTicketPermissions(
+        channel,
+        newTopic,
+        true,
+        newTopic,
+      );
+
+      channel.topic = newTopic;
+    } else {
+      await runChannelMutation(
+        channel,
+        `status ${oldStatus} -> ${newStatus}`,
+        async () => {
+          await setChannelTopic(
+            channel.id,
+            newTopic,
+            `SupportForge: status ${oldStatus} -> ${newStatus}`,
+          );
+          channel.topic = newTopic;
+        },
+      );
+    }
 
     /*
      * Only now update the runtime cache.
