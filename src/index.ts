@@ -26,6 +26,8 @@ import { recordTicketMessageForPanel } from './services/panelActivityService';
 
 import { executeCustomSlashCommand } from './services/advancedSettingsService';
 
+import { startTicketRetentionScheduler } from './services/ticketRetentionService';
+
 const token = process.env.DISCORD_TOKEN;
 
 if (!token) {
@@ -50,6 +52,7 @@ client.once('clientReady', (readyClient) => {
   console.log(
     `✅ SupportForge online as ${readyClient.user.tag}`,
   );
+  startTicketRetentionScheduler(client);
 });
 
 client.on('messageCreate', async (message) => {
