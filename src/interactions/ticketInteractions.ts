@@ -4,6 +4,7 @@ import {
   EmbedBuilder,
   MessageFlags,
   ModalBuilder,
+  type Message,
   PermissionFlagsBits,
   TextInputBuilder,
   TextInputStyle,
@@ -131,8 +132,7 @@ export function scheduleTicketPanelAtBottom(
          * the original panel because moving the panel must not PATCH the
          * channel topic on every chat message.
          */
-        let currentPanel:
-          Awaited<ReturnType<typeof channel.messages.fetch>>[string] | undefined;
+        let currentPanel: Message | undefined;
 
         const messageId =
           getField(topic, 'message') ??
