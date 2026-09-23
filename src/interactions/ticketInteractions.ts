@@ -81,6 +81,127 @@ const TERMINAL_TICKET_STATUSES: readonly TicketStatus[] = [
 const ticketActionLocks = new Set<string>();
 
 const ticketMutationQueues = new Map<string, Promise<void>>();
+const ticketPanelBottomQueues = new Map<string, Promise<void>>();
+const ticketPanelBottomTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+export function scheduleTicketPanelAtBottom(
+  channel: TextChannel,
+): void {
+  const existingTimer = ticketPanelBottomTimers.get(channel.id);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+  }
+
+  const timer = setTimeout(() => {
+    ticketPanelBottomTimers.delete(channel.id);
+
+    const previous =
+      ticketPanelBottomQueues.get(channel.id) ??
+      Promise.resolve();
+
+    const next = previous
+      .catch(() => undefined)
+      .then(async () => {
+        const topic = channel.topic ?? '';
+
+        if (!isTicketTopic(topic)) {
+          return;
+        }
+
+        const persistedStatus =
+          await getPersistedTicketStatus(channel.id);
+
+        const status =
+          persistedStatus ??
+          getTicketStatus(topic);
+
+        if (!ACTIVE_TICKET_STATUSES.includes(status)) {
+          return;
+        }
+
+        const config = await getGuildConfig(channel.guild.id);
+        const ticketNumber =
+          getField(topic, 'number') ?? 'unknown';
+
+        const panelTitle =
+          `🎫 SupportForge Ticket #${ticketNumber}`;
+
+        /*
+         * Find the current panel. The topic's message= field may refer to
+         * the original panel because moving the panel must not PATCH the
+         * channel topic on every chat message.
+         */
+        let currentPanel:
+          Awaited<ReturnType<typeof channel.messages.fetch>>[string] | undefined;
+
+        const messageId =
+          getField(topic, 'message') ??
+          getField(topic, 'panel_message');
+
+        if (messageId) {
+          currentPanel =
+            channel.messages.cache.get(messageId) ??
+            await channel.messages.fetch(messageId).catch(() => undefined);
+        }
+
+        if (!currentPanel) {
+          const recent =
+            await channel.messages.fetch({ limit: 100 });
+
+          currentPanel =
+            recent.find(
+              (message) =>
+                message.author.id === channel.client.user?.id &&
+                message.embeds.some(
+                  (embed) =>
+                    embed.title === panelTitle,
+                ),
+            );
+        }
+
+        /*
+         * Send the fresh panel first. If sending succeeds, remove the old
+         * panel. This guarantees users never lose their controls if Discord
+         * rejects the new message.
+         */
+        const newPanel = await channel.send({
+          embeds: [
+            buildTicketPanelEmbed(
+              channel.guild,
+              channel.name,
+              topic,
+              config,
+            ),
+          ],
+          components:
+            buildTicketPanelComponents(status),
+        });
+
+        if (currentPanel && currentPanel.id !== newPanel.id) {
+          await currentPanel.delete().catch((error) => {
+            console.warn(
+              `⚠️ Could not remove previous ticket panel in ${channel.id}:`,
+              error,
+            );
+          });
+        }
+
+        console.log(
+          `📌 Ticket #${ticketNumber} controls moved to the bottom after new activity.`,
+        );
+      });
+
+    ticketPanelBottomQueues.set(channel.id, next);
+
+    void next.finally(() => {
+      if (ticketPanelBottomQueues.get(channel.id) === next) {
+        ticketPanelBottomQueues.delete(channel.id);
+      }
+    }).catch(() => undefined);
+  }, 1000);
+
+  ticketPanelBottomTimers.set(channel.id, timer);
+}
 
 async function runChannelMutation<T>(
   channel: TextChannel,
