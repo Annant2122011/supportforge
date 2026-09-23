@@ -83,7 +83,11 @@ export async function deleteCustomSlashCommand(guild: Guild, name: string): Prom
 export async function executeCustomSlashCommand(interaction: ChatInputCommandInteraction, administratorPermission: bigint): Promise<boolean> {
   const settings = await getAdvancedSettings(interaction.guildId); const command = settings.customCommands[interaction.commandName]; if (!command) return false;
   if (command.staffOnly && !interaction.memberPermissions?.has(administratorPermission)) { await interaction.reply({ content: '❌ This custom command is restricted to staff.', flags: MessageFlags.Ephemeral }); return true; }
-  await interaction.reply({ content: command.response.slice(0, 2000), flags: MessageFlags.Ephemeral }); return true;
+  await interaction.reply(
+    command.staffOnly
+      ? { content: command.response.slice(0, 2000), flags: MessageFlags.Ephemeral }
+      : { content: command.response.slice(0, 2000) },
+  ); return true;
 }
 export function buildSettingsSummary(settings: AdvancedGuildSettings): string {
   const customCount = Object.keys(settings.customCommands).length;
