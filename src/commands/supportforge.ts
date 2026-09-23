@@ -28,6 +28,25 @@ import { executeTicketCommand } from '../interactions/ticketCommandTools';
 import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
 
 import {
+  buildSettingsSummary,
+  createCustomSlashCommand,
+  deleteCustomSlashCommand,
+  getAdvancedSettings,
+  updateAdvancedSettings,
+} from '../services/advancedSettingsService';
+
+import {
+  ensureArchiveCategory,
+  ensureBillingCategory,
+  ensureClosedCategory,
+} from '../services/ticketStorageService';
+
+import {
+  ensureSettingsChannel,
+  refreshSettingsChannel,
+} from '../services/settingsChannelService';
+
+import {
   getField,
   getTicketStatus,
 } from '../services/ticketStateService';
@@ -603,6 +622,63 @@ export const data =
     )
 
     // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────
+    // ADVANCED SETTINGS
+    // ─────────────────────────────────────────────
+
+    .addSubcommandGroup((group) =>
+      group
+        .setName('settings')
+        .setDescription('Configure advanced SupportForge behavior')
+
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('view')
+            .setDescription('View current SupportForge settings'),
+        )
+
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('panel')
+            .setDescription('Configure automatic panel repositioning')
+            .addBooleanOption((option) => option.setName('enabled').setDescription('Enable activity-based panel movement').setRequired(false))
+            .addIntegerOption((option) => option.setName('visual-lines').setDescription('Approximate visible line budget before moving the panel').setMinValue(6).setMaxValue(40).setRequired(false))
+            .addIntegerOption((option) => option.setName('messages').setDescription('Hard message safety cap').setMinValue(5).setMaxValue(30).setRequired(false))
+            .addIntegerOption((option) => option.setName('minimum-messages').setDescription('Minimum messages before an automatic move').setMinValue(3).setMaxValue(20).setRequired(false)),
+        )
+
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('retention')
+            .setDescription('Configure automatic deletion timing')
+            .addIntegerOption((option) => option.setName('closed-days').setDescription('Days before closed tickets are deleted; 0 = never').setMinValue(0).setMaxValue(3650).setRequired(false))
+            .addIntegerOption((option) => option.setName('archive-days').setDescription('Days before archived tickets are deleted; 0 = never').setMinValue(0).setMaxValue(3650).setRequired(false)),
+        )
+
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('custom-add')
+            .setDescription('Create a custom server slash command')
+            .addStringOption((option) => option.setName('name').setDescription('Command name').setRequired(true).setMaxLength(32))
+            .addStringOption((option) => option.setName('description').setDescription('Command description').setRequired(true).setMaxLength(100))
+            .addStringOption((option) => option.setName('response').setDescription('Private response returned by the command').setRequired(true).setMaxLength(2000))
+            .addBooleanOption((option) => option.setName('staff-only').setDescription('Restrict the command to administrators').setRequired(false)),
+        )
+
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('custom-remove')
+            .setDescription('Remove a custom server slash command')
+            .addStringOption((option) => option.setName('name').setDescription('Command name').setRequired(true).setMaxLength(32)),
+        )
+
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('custom-list')
+            .setDescription('List custom server slash commands'),
+        )
+    )
+
     // PREMIUM
     // ─────────────────────────────────────────────
 
@@ -850,6 +926,7 @@ export async function execute(
     (!group && subcommand === 'setup') ||
     group === 'category' ||
     group === 'premium'
+    group === 'settings' ||
   ) {
     if (!isAdminLike(interaction)) {
       await interaction.reply({
@@ -887,6 +964,11 @@ export async function execute(
         guild,
         supportCategory.id,
       );
+
+      await ensureClosedCategory(guild);
+      await ensureArchiveCategory(guild);
+      await ensureBillingCategory(guild);
+      await ensureSettingsChannel(guild, supportCategory.id);
 
       let config =
         await getGuildConfig(guild.id);
@@ -1175,6 +1257,112 @@ export async function execute(
     }
 
     // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────
+    // ADVANCED SETTINGS
+    // ─────────────────────────────────────────────
+
+    if (group === 'settings' && subcommand === 'view') {
+      const settings = await getAdvancedSettings(guild.id);
+      await interaction.reply({
+        content: '⚙️ **SupportForge Settings**\n\n' + buildSettingsSummary(settings),
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (group === 'settings' && subcommand === 'panel') {
+      const settings = await getAdvancedSettings(guild.id);
+      const enabled = interaction.options.getBoolean('enabled');
+      const visualLines = interaction.options.getInteger('visual-lines');
+      const messages = interaction.options.getInteger('messages');
+      const minimumMessages = interaction.options.getInteger('minimum-messages');
+      if (enabled === null && visualLines === null && messages === null && minimumMessages === null) {
+        await interaction.reply({
+          content: '🎛️ **Panel Settings**\n\n' +
+            'Enabled: **' + (settings.panelActivity.enabled ? 'Yes' : 'No') + '**\n' +
+            'Visual budget: **' + settings.panelActivity.visualLineBudget + ' lines**\n' +
+            'Message cap: **' + settings.panelActivity.messageBudget + '**\n' +
+            'Minimum messages: **' + settings.panelActivity.minimumMessagesBeforeMove + '**',
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      await updateAdvancedSettings(guild.id, (current) => {
+        if (enabled !== null) current.panelActivity.enabled = enabled;
+        if (visualLines !== null) current.panelActivity.visualLineBudget = visualLines;
+        if (messages !== null) current.panelActivity.messageBudget = messages;
+        if (minimumMessages !== null) current.panelActivity.minimumMessagesBeforeMove = minimumMessages;
+      });
+      await refreshSettingsChannel(guild);
+      await interaction.reply({
+        content: '✅ Panel activity settings updated. The panel moves only when the visual-occupancy threshold or safety message cap is reached.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (group === 'settings' && subcommand === 'retention') {
+      const settings = await getAdvancedSettings(guild.id);
+      const closedDays = interaction.options.getInteger('closed-days');
+      const archiveDays = interaction.options.getInteger('archive-days');
+      if (closedDays === null && archiveDays === null) {
+        await interaction.reply({
+          content: '🧹 **Retention Settings**\n\n' +
+            'Closed: **' + (settings.retention.closedDays === 0 ? 'Never delete' : settings.retention.closedDays + ' days') + '**\n' +
+            'Archive: **' + (settings.retention.archiveDays === 0 ? 'Never delete' : settings.retention.archiveDays + ' days') + '**',
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      await updateAdvancedSettings(guild.id, (current) => {
+        if (closedDays !== null) current.retention.closedDays = closedDays;
+        if (archiveDays !== null) current.retention.archiveDays = archiveDays;
+      });
+      await refreshSettingsChannel(guild);
+      await interaction.reply({
+        content: '✅ Retention settings updated. `0` means never delete.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    if (group === 'settings' && subcommand === 'custom-add') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const name = interaction.options.getString('name', true).trim().toLowerCase();
+      const description = interaction.options.getString('description', true).trim();
+      const response = interaction.options.getString('response', true);
+      const staffOnly = interaction.options.getBoolean('staff-only') ?? true;
+      try {
+        const created = await createCustomSlashCommand(guild, name, description, response, staffOnly);
+        await refreshSettingsChannel(guild);
+        await interaction.editReply('✅ Custom slash command **/' + created.name + '** created.');
+      } catch (error) {
+        await interaction.editReply('❌ Could not create custom command: ' + (error instanceof Error ? error.message : 'Unknown error.'));
+      }
+      return;
+    }
+
+    if (group === 'settings' && subcommand === 'custom-remove') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const name = interaction.options.getString('name', true).trim().toLowerCase();
+      const removed = await deleteCustomSlashCommand(guild, name);
+      await refreshSettingsChannel(guild);
+      await interaction.editReply(removed ? '✅ Custom slash command **/' + name + '** removed.' : '❌ Custom slash command **/' + name + '** was not found.');
+      return;
+    }
+
+    if (group === 'settings' && subcommand === 'custom-list') {
+      const settings = await getAdvancedSettings(guild.id);
+      const commands = Object.values(settings.customCommands);
+      await interaction.reply({
+        content: commands.length === 0
+          ? '🧩 No custom slash commands are configured.'
+          : '🧩 **Custom Slash Commands**\n\n' + commands.map((command) => '• **/' + command.name + '** — ' + command.description + ' — ' + (command.staffOnly ? 'staff only' : 'public')).join('\n'),
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
     // PREMIUM STATUS
     // ─────────────────────────────────────────────
 
