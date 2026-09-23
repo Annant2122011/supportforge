@@ -114,10 +114,11 @@ export function buildTicketPanelComponents(status: TicketStatus): ActionRowBuild
   const tools = new ActionRowBuilder<ButtonBuilder>();
   if (status !== 'archived') {
     if (status === 'closed') {
-      tools.addComponents(
-        new ButtonBuilder().setCustomId('ticket:panel:history').setLabel('History').setEmoji('📜').setStyle(ButtonStyle.Secondary),
-      );
-      return [lifecycle, tools];
+      /*
+       * A closed ticket has exactly two allowed actions:
+       * Reopen or Archive. No management tools are exposed.
+       */
+      return [lifecycle];
     }
 
     tools.addComponents(
