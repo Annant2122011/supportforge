@@ -2962,6 +2962,38 @@ async function handlePanelModal(
         'Internal note creation',
       );
 
+      /*
+       * Also record the note in the staff-only audit history so the History
+       * control can show it alongside lifecycle events.
+       */
+      try {
+        const config = await getGuildConfig(
+          channel.guild.id,
+        );
+
+        if (config.supportCategoryId) {
+          await logTicketEvent(
+            channel.guild,
+            config.supportCategoryId,
+            {
+              ticketNumber:
+                getField(channel.topic ?? '', 'number') ?? 'unknown',
+              event:
+                'internal_note',
+              actor:
+                interaction.user.tag,
+              detail:
+                note,
+            },
+          );
+        }
+      } catch (error) {
+        console.error(
+          '⚠️ Internal note audit failed:',
+          error,
+        );
+      }
+
       await interaction.editReply(
         '✅ Internal note added.',
       );
