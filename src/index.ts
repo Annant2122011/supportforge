@@ -73,9 +73,7 @@ client.on('messageCreate', async (message) => {
   }
 
   try {
-    await message.delete(
-      'SupportForge: message posted in a closed/archived ticket',
-    );
+    await message.delete();
     console.log(
       `🗑️ Deleted message from ${message.author.tag} in ${message.channel.id} because the ticket is ${status}.`,
     );
