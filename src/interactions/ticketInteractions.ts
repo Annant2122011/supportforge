@@ -26,6 +26,11 @@ import {
 } from '../services/discordChannelService';
 
 import {
+  getPersistedTicketStatus,
+  setPersistedTicketStatus,
+} from '../services/ticketPersistenceService';
+
+import {
   logTicketEvent,
 } from '../services/auditLogService';
 
@@ -1113,10 +1118,18 @@ async function transition(
       latestTopic ||
       state.topic;
 
-    const oldStatus =
+    const oldTopicStatus =
       getTicketStatus(
         oldTopic,
       );
+
+    const persistedStatus =
+      await getPersistedTicketStatus(
+        channel.id,
+      );
+
+    const oldStatus =
+      persistedStatus ?? oldTopicStatus;
 
     if (
       !isTicketTopic(
@@ -1404,28 +1417,20 @@ async function transition(
       );
 
     /*
-     * Ticket metadata is stored in the topic, but closing/reopening/archiving
-     * no longer changes channel permissions. Closed-ticket message deletion
-     * is enforced by the messageCreate guard in index.ts.
-     *
-     * This deliberately avoids permission PATCH requests, which were causing
-     * Discord shared-resource rate limits on this ticket channel.
+     * Lifecycle status is persisted outside the Discord channel topic.
+     * Discord's /channels PATCH bucket can remain rate-limited for many
+     * minutes, so status changes must not depend on a topic PATCH succeeding.
+     * The topic remains descriptive metadata and is still used by older
+     * tickets and other ticket metadata operations.
      */
-    await runChannelMutation(
-      channel,
-      `status ${oldStatus} -> ${newStatus}`,
-      async () => {
-        await setChannelTopic(
-          channel.id,
-          newTopic,
-          `SupportForge: status ${oldStatus} -> ${newStatus}`,
-        );
-        channel.topic = newTopic;
-      },
+    await setPersistedTicketStatus(
+      channel.id,
+      newStatus,
     );
 
     /*
-     * Only now update the runtime cache.
+     * Keep the local runtime state immediately consistent with the persisted
+     * lifecycle state. The panel is refreshed from newTopic below.
      */
     updateRuntimeTicketState(
       channel,
@@ -1641,10 +1646,18 @@ async function closeTicket(
       latestTopic ||
       state.topic;
 
-    const status =
+    const topicStatus =
       getTicketStatus(
         topic,
       );
+
+    const persistedStatus =
+      await getPersistedTicketStatus(
+        channel.id,
+      );
+
+    const status =
+      persistedStatus ?? topicStatus;
 
     if (
       !isTicketTopic(
@@ -1657,7 +1670,9 @@ async function closeTicket(
     }
 
     /*
-     * Topic state is the source of truth.
+     * The persisted lifecycle state is authoritative when available.
+     * The channel topic remains the fallback for tickets created before
+     * lifecycle persistence was introduced.
      */
     if (
       status ===
@@ -1841,9 +1856,9 @@ async function closeTicket(
     /*
      * Transcript successfully uploaded.
      *
-     * Closing a ticket no longer changes channel permissions. The channel
-     * remains usable for the ticket panel, while messageCreate in index.ts
-     * deletes any human message posted while the ticket is closed.
+     * Closing a ticket no longer changes channel permissions or requires a
+     * Discord channel PATCH. The lifecycle state is persisted locally so the
+     * closed-ticket message guard continues to work after a restart.
      */
     const closedTopic =
       setField(
@@ -1856,17 +1871,9 @@ async function closeTicket(
         closedAt.toISOString(),
       );
 
-    await runChannelMutation(
-      channel,
-      'close ticket state',
-      async () => {
-        await setChannelTopic(
-          channel.id,
-          closedTopic,
-          'SupportForge: close ticket',
-        );
-        channel.topic = closedTopic;
-      },
+    await setPersistedTicketStatus(
+      channel.id,
+      'closed',
     );
 
     updateRuntimeTicketState(
@@ -2214,16 +2221,20 @@ async function handlePanelButton(
    */
   if (
     id.startsWith('ticket:panel:') &&
-    interaction.channel?.type === ChannelType.GuildText &&
-    !['open', 'claimed', 'pending', 'reopened'].includes(
-      getTicketStatus((interaction.channel as TextChannel).topic ?? ''),
-    )
+    interaction.channel?.type === ChannelType.GuildText
   ) {
-    await replyError(
-      interaction,
-      '❌ This ticket is closed or archived. Reopen it before using ticket tools.',
-    );
-    return;
+    const panelChannel = interaction.channel as TextChannel;
+    const panelTopicStatus = getTicketStatus(panelChannel.topic ?? '');
+    const panelPersistedStatus = await getPersistedTicketStatus(panelChannel.id);
+    const panelStatus = panelPersistedStatus ?? panelTopicStatus;
+
+    if (!['open', 'claimed', 'pending', 'reopened'].includes(panelStatus)) {
+      await replyError(
+        interaction,
+        '❌ This ticket is closed or archived. Reopen it before using ticket tools.',
+      );
+      return;
+    }
   }
 
   /*
@@ -2437,6 +2448,15 @@ async function handlePanelModal(
     getRuntimeTicketState(
       channel,
     );
+
+  const persistedStatus =
+    await getPersistedTicketStatus(
+      channel.id,
+    );
+
+  if (persistedStatus && persistedStatus !== state.status) {
+    state.status = persistedStatus;
+  }
 
   if (
     !isTicketTopic(
