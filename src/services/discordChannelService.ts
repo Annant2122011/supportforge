@@ -5,6 +5,16 @@ const DISCORD_CHANNEL_TIMEOUT_MS = 15_000;
 const MAX_AUTOMATIC_RETRY_DELAY_MS = 5_000;
 const MAX_RATE_LIMIT_RETRIES = 1;
 
+/*
+ * Native REST is used for channel mutations because discord.js channel
+ * mutation calls were previously timing out in this project. Since native
+ * fetch bypasses discord.js' REST manager, SupportForge keeps its own
+ * conservative global pacing layer. Discord currently documents a 50
+ * requests/second global bot limit, but the value is deliberately treated
+ * as an implementation safety ceiling rather than a Discord guarantee.
+ */
+const GLOBAL_REQUEST_SPACING_MS = 25;
+
 type PermissionValue = bigint | number | string;
 
 export interface ChannelPermissionOverwrite {
@@ -30,6 +40,8 @@ const channelRateLimitUntil = new Map<string, number>();
 const bucketRateLimitUntil = new Map<string, number>();
 const channelRequestQueues = new Map<string, Promise<void>>();
 let globalRateLimitUntil = 0;
+let lastNativeRequestAt = 0;
+let globalRequestQueue: Promise<void> = Promise.resolve();
 
 function permissionListToBitfield(
   values: PermissionValue[] | undefined,
@@ -181,6 +193,41 @@ function createRateLimitError(
   );
 }
 
+async function waitForGlobalRequestSpacing(): Promise<void> {
+  const previous = globalRequestQueue;
+
+  let release!: () => void;
+
+  const gate =
+    new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+  globalRequestQueue =
+    previous.then(() => gate);
+
+  await previous;
+
+  try {
+    const elapsed =
+      Date.now() - lastNativeRequestAt;
+
+    const remaining =
+      GLOBAL_REQUEST_SPACING_MS - elapsed;
+
+    if (remaining > 0) {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, remaining);
+      });
+    }
+
+    lastNativeRequestAt =
+      Date.now();
+  } finally {
+    release();
+  }
+}
+
 async function waitForCooldown(
   channelId: string,
   operation: string,
@@ -251,6 +298,7 @@ async function discordRequest<T = unknown>(
   try {
     for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt += 1) {
     await waitForCooldown(channelId, operation);
+    await waitForGlobalRequestSpacing();
 
     const controller = new AbortController();
     const timer = setTimeout(
