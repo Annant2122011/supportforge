@@ -21,10 +21,7 @@ import {
 import { generateTranscript } from '../services/transcriptService';
 
 import {
-  setChannelPermissionOverwrite,
-  setChannelPermissionOverwrites,
   setChannelTopic,
-  setChannelTopicAndPermissionOverwrites,
 } from '../services/discordChannelService';
 
 import {
@@ -616,193 +613,6 @@ function buildOpenOverwrites(
   }
 
   return overwrites;
-}
-
-function buildClosedOverwrites(
-  ownerId: string | undefined,
-  staffRoleId: string | null,
-  users: string[],
-  botId: string,
-  everyoneId: string,
-  archived: boolean,
-) {
-  const overwrites: Array<{
-    id: string;
-    allow?: bigint[];
-    deny?: bigint[];
-  }> = [
-    {
-      id: everyoneId,
-      deny: [
-        PermissionFlagsBits.ViewChannel,
-        PermissionFlagsBits.SendMessages,
-        PermissionFlagsBits.ReadMessageHistory,
-      ],
-    },
-    {
-      id: botId,
-      allow: [
-        PermissionFlagsBits.ViewChannel,
-        PermissionFlagsBits.SendMessages,
-        PermissionFlagsBits.ReadMessageHistory,
-        PermissionFlagsBits.ManageChannels,
-        PermissionFlagsBits.ManageMessages,
-        PermissionFlagsBits.AttachFiles,
-        PermissionFlagsBits.EmbedLinks,
-      ],
-    },
-  ];
-
-  const readOnly = [
-    PermissionFlagsBits.ViewChannel,
-    PermissionFlagsBits.ReadMessageHistory,
-  ];
-
-  const ids =
-    new Set<string>([
-      ...(ownerId
-        ? [ownerId]
-        : []),
-      ...(staffRoleId
-        ? [staffRoleId]
-        : []),
-      ...users,
-    ]);
-
-  for (const id of ids) {
-    if (
-      !id ||
-      id === everyoneId ||
-      id === botId
-    ) {
-      continue;
-    }
-
-    if (
-      archived &&
-      id !== staffRoleId
-    ) {
-      overwrites.push({
-        id,
-        allow: [],
-        deny: [
-          PermissionFlagsBits.ViewChannel,
-          PermissionFlagsBits.SendMessages,
-          PermissionFlagsBits.ReadMessageHistory,
-        ],
-      });
-
-      continue;
-    }
-
-    overwrites.push({
-      id,
-      allow: readOnly,
-      deny: [
-        PermissionFlagsBits.SendMessages,
-      ],
-    });
-  }
-
-  return overwrites;
-}
-
-async function lockTicketPermissions(
-  channel: TextChannel,
-  topic: string,
-  archived: boolean,
-  topicOverride?: string,
-): Promise<void> {
-  const bot =
-    channel.guild.members.me;
-
-  if (!bot) {
-    throw new Error(
-      'Bot member unavailable.',
-    );
-  }
-
-  const permissions =
-    channel.permissionsFor(
-      bot,
-    );
-
-  if (
-    !permissions?.has(
-      PermissionFlagsBits.ManageChannels,
-    )
-  ) {
-    throw new Error(
-      'SupportForge is missing Manage Channels permission.',
-    );
-  }
-
-  const ownerId =
-    getField(
-      topic,
-      'owner',
-    );
-
-  const staffRoleId =
-    getField(
-      topic,
-      'staff',
-    );
-
-  const users =
-    (
-      getField(
-        topic,
-        'users',
-      ) ?? ''
-    )
-      .split(',')
-      .map((id) =>
-        id.trim(),
-      )
-      .filter(Boolean);
-
-  const closedOverwrites = buildClosedOverwrites(
-    ownerId,
-    staffRoleId && staffRoleId !== 'none'
-      ? staffRoleId
-      : null,
-    users,
-    bot.id,
-    channel.guild.roles.everyone.id,
-    archived,
-  );
-
-  const roleIds = new Set<string>([
-    channel.guild.roles.everyone.id,
-    ...(staffRoleId && staffRoleId !== 'none'
-      ? [staffRoleId]
-      : []),
-  ]);
-
-  await runChannelMutation(
-    channel,
-    archived ? 'archive ticket permissions' : 'close ticket permissions',
-    () =>
-      topicOverride
-        ? setChannelTopicAndPermissionOverwrites(
-            channel.id,
-            topicOverride,
-            closedOverwrites,
-            roleIds,
-            archived
-              ? 'SupportForge: archive ticket'
-              : 'SupportForge: close ticket',
-          )
-        : setChannelPermissionOverwrites(
-            channel.id,
-            closedOverwrites,
-            roleIds,
-            archived
-              ? 'SupportForge: archive ticket'
-              : 'SupportForge: close ticket',
-          ),
-  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1598,110 +1408,25 @@ async function transition(
       );
 
     /*
-     * The topic is the source of truth.
+     * Ticket metadata is stored in the topic, but closing/reopening/archiving
+     * no longer changes channel permissions. Closed-ticket message deletion
+     * is enforced by the messageCreate guard in index.ts.
      *
-     * Reopen and archive also change channel permissions. Commit their
-     * permissions and topic together in ONE Discord channel PATCH.
-     * Ordinary lifecycle transitions only need a topic PATCH.
+     * This deliberately avoids permission PATCH requests, which were causing
+     * Discord shared-resource rate limits on this ticket channel.
      */
-    if (
-      newStatus ===
-        'reopened'
-    ) {
-      const bot = channel.guild.members.me;
-
-      if (!bot) {
-        throw new Error(
-          'Bot member unavailable.',
-        );
-      }
-
-      const ownerId =
-        getField(
+    await runChannelMutation(
+      channel,
+      `status ${oldStatus} -> ${newStatus}`,
+      async () => {
+        await setChannelTopic(
+          channel.id,
           newTopic,
-          'owner',
+          `SupportForge: status ${oldStatus} -> ${newStatus}`,
         );
-
-      if (!ownerId) {
-        throw new Error(
-          'Ticket owner is missing.',
-        );
-      }
-
-      const staffRoleId =
-        getField(
-          newTopic,
-          'staff',
-        );
-
-      const users =
-        (
-          getField(
-            newTopic,
-            'users',
-          ) ?? ''
-        )
-          .split(',')
-          .map((id) =>
-            id.trim(),
-          )
-          .filter(Boolean);
-
-      const roleIds = new Set<string>([
-        channel.guild.roles.everyone.id,
-        ...(staffRoleId && staffRoleId !== 'none'
-          ? [staffRoleId]
-          : []),
-      ]);
-
-      await runChannelMutation(
-        channel,
-        'reopen ticket permissions + topic',
-        () =>
-          setChannelTopicAndPermissionOverwrites(
-            channel.id,
-            newTopic,
-            buildOpenOverwrites(
-              ownerId,
-              staffRoleId && staffRoleId !== 'none'
-                ? staffRoleId
-                : undefined,
-              users,
-              bot.id,
-              channel.guild.roles.everyone.id,
-            ),
-            roleIds,
-            'SupportForge: reopen ticket',
-          ),
-      );
-
-      channel.topic = newTopic;
-    } else if (
-      newStatus ===
-        'archived'
-    ) {
-      await lockTicketPermissions(
-        channel,
-        newTopic,
-        true,
-        newTopic,
-      );
-
-      channel.topic = newTopic;
-    } else {
-      await runChannelMutation(
-        channel,
-        `status ${oldStatus} -> ${newStatus}`,
-        async () => {
-          await setChannelTopic(
-            channel.id,
-            newTopic,
-            `SupportForge: status ${oldStatus} -> ${newStatus}`,
-          );
-          channel.topic = newTopic;
-        },
-      );
-    }
+        channel.topic = newTopic;
+      },
+    );
 
     /*
      * Only now update the runtime cache.
@@ -2120,10 +1845,9 @@ async function closeTicket(
     /*
      * Transcript successfully uploaded.
      *
-     * The permission lock and closed-state topic are committed in one
-     * Discord channel PATCH. This avoids spending two channel-resource
-     * requests on the same close operation and keeps the channel state
-     * synchronized if Discord rate-limits channel mutations.
+     * Closing a ticket no longer changes channel permissions. The channel
+     * remains usable for the ticket panel, while messageCreate in index.ts
+     * deletes any human message posted while the ticket is closed.
      */
     const closedTopic =
       setField(
@@ -2136,14 +1860,18 @@ async function closeTicket(
         closedAt.toISOString(),
       );
 
-    await lockTicketPermissions(
+    await runChannelMutation(
       channel,
-      topic,
-      false,
-      closedTopic,
+      'close ticket state',
+      async () => {
+        await setChannelTopic(
+          channel.id,
+          closedTopic,
+          'SupportForge: close ticket',
+        );
+        channel.topic = closedTopic;
+      },
     );
-
-    channel.topic = closedTopic;
 
     updateRuntimeTicketState(
       channel,
@@ -2479,6 +2207,25 @@ async function handlePanelButton(
     await transition(
       interaction,
       'archived',
+    );
+    return;
+  }
+
+  /*
+   * Closed and archived tickets expose only their lifecycle controls.
+   * Reject stale/forged tool-button interactions even if an old panel
+   * message still contains one.
+   */
+  if (
+    id.startsWith('ticket:panel:') &&
+    interaction.channel?.type === ChannelType.GuildText &&
+    !['open', 'claimed', 'pending', 'reopened'].includes(
+      getTicketStatus((interaction.channel as TextChannel).topic ?? ''),
+    )
+  ) {
+    await replyError(
+      interaction,
+      '❌ This ticket is closed or archived. Reopen it before using ticket tools.',
     );
     return;
   }
