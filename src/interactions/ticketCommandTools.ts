@@ -192,7 +192,6 @@ async function saveTopic(
     getTicketStatus(topic),
   );
 
-  context.channel.setTopic(topic);
 
   await refreshTicketPanel(
     context.channel,
