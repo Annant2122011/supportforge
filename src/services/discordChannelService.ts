@@ -27,6 +27,8 @@ interface DiscordRateLimitBody {
 }
 
 const channelRateLimitUntil = new Map<string, number>();
+const bucketRateLimitUntil = new Map<string, number>();
+const channelRequestQueues = new Map<string, Promise<void>>();
 let globalRateLimitUntil = 0;
 
 function permissionListToBitfield(
@@ -53,6 +55,7 @@ function rememberRateLimit(
   channelId: string,
   retryAfterMs: number,
   isGlobal: boolean,
+  bucket?: string | null,
 ): void {
   const until = Date.now() + retryAfterMs;
 
@@ -65,13 +68,61 @@ function rememberRateLimit(
     channelId,
     Math.max(channelRateLimitUntil.get(channelId) ?? 0, until),
   );
+
+  if (bucket) {
+    const key = `${channelId}:${bucket}`;
+    bucketRateLimitUntil.set(
+      key,
+      Math.max(bucketRateLimitUntil.get(key) ?? 0, until),
+    );
+  }
+}
+
+function rememberSuccessfulBucket(
+  channelId: string,
+  response: Response,
+): void {
+  const bucket = response.headers.get('x-ratelimit-bucket');
+  const remaining = response.headers.get('x-ratelimit-remaining');
+  const resetAfter = response.headers.get('x-ratelimit-reset-after');
+
+  if (!bucket || remaining !== '0') {
+    return;
+  }
+
+  const seconds = Number(resetAfter);
+
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return;
+  }
+
+  const until = Date.now() + Math.ceil(seconds * 1000);
+  const key = `${channelId}:${bucket}`;
+
+  bucketRateLimitUntil.set(
+    key,
+    Math.max(bucketRateLimitUntil.get(key) ?? 0, until),
+  );
 }
 
 function getRateLimitCooldown(channelId: string): number {
-  return Math.max(
+  let cooldown = Math.max(
     getRemainingCooldown(globalRateLimitUntil),
     getRemainingCooldown(channelRateLimitUntil.get(channelId) ?? 0),
   );
+
+  const prefix = `${channelId}:`;
+
+  for (const [key, until] of bucketRateLimitUntil) {
+    if (key.startsWith(prefix)) {
+      cooldown = Math.max(
+        cooldown,
+        getRemainingCooldown(until),
+      );
+    }
+  }
+
+  return cooldown;
 }
 
 function parseRetryAfter(
@@ -80,6 +131,8 @@ function parseRetryAfter(
 ): {
   retryAfterMs: number;
   global: boolean;
+  bucket: string | null;
+  scope: string | null;
 } {
   let body: DiscordRateLimitBody = {};
 
@@ -105,7 +158,13 @@ function parseRetryAfter(
 
   return {
     retryAfterMs,
-    global: body.global === true,
+    global:
+      body.global === true ||
+      response.headers.get('x-ratelimit-global') === 'true',
+    bucket:
+      response.headers.get('x-ratelimit-bucket'),
+    scope:
+      response.headers.get('x-ratelimit-scope'),
   };
 }
 
@@ -162,7 +221,35 @@ async function discordRequest<T = unknown>(
     throw new Error('DISCORD_TOKEN is missing from environment.');
   }
 
-  for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt += 1) {
+  /*
+   * Serialize every native channel mutation locally as a second line of
+   * defense. Discord's resource limits are keyed around major resources
+   * such as channel IDs, so concurrent PATCH/PUT operations for one ticket
+   * should never race each other.
+   */
+  const previous =
+    channelRequestQueues.get(channelId) ??
+    Promise.resolve();
+
+  let release!: () => void;
+
+  const gate =
+    new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+  const current =
+    previous.then(() => gate);
+
+  channelRequestQueues.set(
+    channelId,
+    current,
+  );
+
+  await previous;
+
+  try {
+    for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt += 1) {
     await waitForCooldown(channelId, operation);
 
     const controller = new AbortController();
@@ -183,6 +270,7 @@ async function discordRequest<T = unknown>(
           headers: {
             Authorization: `Bot ${token}`,
             'Content-Type': 'application/json',
+            'User-Agent': 'DiscordBot (https://github.com/Annant2122011/supportforge, 2.0.0)',
           },
           body: JSON.stringify(body),
           signal: controller.signal,
@@ -192,15 +280,25 @@ async function discordRequest<T = unknown>(
       const text = await response.text();
 
       if (response.status === 429) {
-        const { retryAfterMs, global } = parseRetryAfter(
+        const {
+          retryAfterMs,
+          global,
+          bucket,
+          scope,
+        } = parseRetryAfter(
           text,
           response,
         );
 
-        rememberRateLimit(channelId, retryAfterMs, global);
+        rememberRateLimit(
+          channelId,
+          retryAfterMs,
+          global,
+          bucket,
+        );
 
         console.warn(
-          `⚠️ Discord rate limit: ${operation}; retry_after=${Math.ceil(retryAfterMs / 1000)}s; global=${global}`,
+          `⚠️ Discord rate limit: ${operation}; retry_after=${Math.ceil(retryAfterMs / 1000)}s; global=${global}; scope=${scope ?? 'unknown'}; bucket=${bucket ?? 'unknown'}`,
         );
 
         if (
@@ -223,6 +321,11 @@ async function discordRequest<T = unknown>(
         );
       }
 
+      rememberSuccessfulBucket(
+        channelId,
+        response,
+      );
+
       if (!text) {
         return undefined as T;
       }
@@ -244,9 +347,18 @@ async function discordRequest<T = unknown>(
     }
   }
 
-  throw new Error(
-    `Discord ${method} ${operation} exhausted its rate-limit retries.`,
-  );
+    throw new Error(
+      `Discord ${method} ${operation} exhausted its rate-limit retries.`,
+    );
+  } finally {
+    release();
+
+    if (
+      channelRequestQueues.get(channelId) === current
+    ) {
+      channelRequestQueues.delete(channelId);
+    }
+  }
 }
 
 export async function setChannelTopic(
