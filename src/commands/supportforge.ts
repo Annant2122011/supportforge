@@ -807,6 +807,14 @@ export const data =
             ),
         )
 
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('archive')
+            .setDescription(
+              'Archive the current closed ticket',
+            ),
+        )
+
         // ADD USER
         .addSubcommand((subcommand) =>
           subcommand
