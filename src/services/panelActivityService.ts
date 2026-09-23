@@ -23,12 +23,45 @@ export async function recordTicketMessageForPanel(message: Message): Promise<voi
   if (!topic.startsWith('supportforge:ticket') || !panelMessageId) return;
   const settings = await getAdvancedSettings(message.guild.id); if (!settings.panelActivity.enabled) return;
   let state = states.get(channel.id);
-  if (!state || state.anchorMessageId !== panelMessageId) {
-    state = { anchorMessageId: panelMessageId, messages: 0, visualLines: 0, moving: false };
+  if (!state) {
+    state = {
+      anchorMessageId: panelMessageId,
+      messages: 0,
+      visualLines: 0,
+      moving: false,
+    };
+
     try {
-      const recent = await channel.messages.fetch({ limit: 50 }); const anchor = recent.get(panelMessageId);
-      if (anchor) for (const item of recent.values()) if (item.id !== panelMessageId && item.createdTimestamp > anchor.createdTimestamp && !item.author.bot) { state.messages += 1; state.visualLines += estimateVisualLines(item); }
-    } catch { /* Establish baseline from new messages if history cannot be read. */ }
+      const recent = await channel.messages.fetch({ limit: 50 });
+      const anchor =
+        recent.get(panelMessageId) ??
+        recent.find(
+          (item) =>
+            item.author.id === channel.client.user?.id &&
+            item.embeds.some(
+              (embed) =>
+                embed.title ===
+                `🎫 SupportForge Ticket #${getField(topic, 'number') ?? 'unknown'}`,
+            ),
+        );
+
+      if (anchor) {
+        state.anchorMessageId = anchor.id;
+        for (const item of recent.values()) {
+          if (
+            item.id !== anchor.id &&
+            item.createdTimestamp > anchor.createdTimestamp &&
+            !item.author.bot
+          ) {
+            state.messages += 1;
+            state.visualLines += estimateVisualLines(item);
+          }
+        }
+      }
+    } catch {
+      /* Establish baseline from new messages if history cannot be read. */
+    }
+
     states.set(channel.id, state);
   }
   state.messages += 1; state.visualLines += estimateVisualLines(message);
