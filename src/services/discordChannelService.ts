@@ -409,6 +409,20 @@ async function discordRequest<T = unknown>(
   }
 }
 
+export async function setChannelName(
+  channelId: string,
+  name: string,
+  operation: string,
+): Promise<void> {
+  await discordRequest(
+    channelId,
+    'PATCH',
+    `/channels/${channelId}`,
+    { name },
+    operation,
+  );
+}
+
 export async function setChannelTopic(
   channelId: string,
   topic: string,
