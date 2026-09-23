@@ -1,1 +1,41 @@
-import { ChannelType, type Message, type TextChannel } from 'discord.js';\nimport { getAdvancedSettings } from './advancedSettingsService';\nimport { getField } from './ticketStateService';\nimport { moveTicketPanelToBottom } from './ticketPanelService';\n\ninterface ActivityState { anchorMessageId: string; messages: number; visualLines: number; moving: boolean; }\nconst states = new Map<string, ActivityState>();\n\nfunction estimateVisualLines(message: Message): number {\n  const content = message.content ?? '';\n  const explicitLines = Math.max(1, content.split(/\r?\n/).length);\n  const wrappedLines = Math.ceil(content.length / 70);\n  let score = Math.max(explicitLines, wrappedLines, 1);\n  if (message.attachments.size > 0) score += Math.min(6, message.attachments.size * 3);\n  if (message.embeds.length > 0) score += Math.min(4, message.embeds.length * 2);\n  if (message.stickers.size > 0) score += Math.min(4, message.stickers.size * 2);\n  if (message.reference) score += 1;\n  return Math.min(10, score);\n}\n\nexport function resetPanelActivity(channelId: string, anchorMessageId: string): void {\n  states.set(channelId, { anchorMessageId, messages: 0, visualLines: 0, moving: false });\n}\n\nexport async function recordTicketMessageForPanel(message: Message): Promise<void> {\n  if (!message.guild || message.author.bot || message.channel.type !== ChannelType.GuildText) return;\n  const channel = message.channel as TextChannel;\n  const topic = channel.topic ?? '';\n  const panelMessageId = getField(topic, 'message');\n  if (!topic.startsWith('supportforge:ticket') || !panelMessageId) return;\n  const settings = await getAdvancedSettings(message.guild.id);\n  if (!settings.panelActivity.enabled) return;\n  let state = states.get(channel.id);\n  if (!state || state.anchorMessageId !== panelMessageId) {\n    state = { anchorMessageId: panelMessageId, messages: 0, visualLines: 0, moving: false };\n    try {\n      const recent = await channel.messages.fetch({ limit: 50 });\n      const anchor = recent.get(panelMessageId);\n      if (anchor) {\n        for (const item of recent.values()) {\n          if (item.id !== panelMessageId && item.createdTimestamp > anchor.createdTimestamp && !item.author.bot) {\n            state.messages += 1;\n            state.visualLines += estimateVisualLines(item);\n          }\n        }\n      }\n    } catch {\n      // Establish the baseline from new messages if history cannot be read.\n    }\n    states.set(channel.id, state);\n  }\n  state.messages += 1;\n  state.visualLines += estimateVisualLines(message);\n  const reachedVisualBudget = state.visualLines >= settings.panelActivity.visualLineBudget;\n  const reachedMessageBudget = state.messages >= settings.panelActivity.messageBudget && state.messages >= settings.panelActivity.minimumMessagesBeforeMove;\n  if (!reachedVisualBudget && !reachedMessageBudget) return;\n  if (state.moving) return;\n  state.moving = true;\n  try {\n    await moveTicketPanelToBottom(channel);\n    resetPanelActivity(channel.id, channel.lastMessageId ?? panelMessageId);\n  } catch (error) {\n    console.warn('⚠️ Automatic ticket panel repositioning skipped in ' + channel.id + ':', error);\n  } finally {\n    const current = states.get(channel.id);\n    if (current) current.moving = false;\n  }\n}
+import { ChannelType, type Message, type TextChannel } from 'discord.js';
+import { getAdvancedSettings } from './advancedSettingsService';
+import { getField } from './ticketStateService';
+import { moveTicketPanelToBottom } from './ticketPanelService';
+
+interface ActivityState { anchorMessageId: string; messages: number; visualLines: number; moving: boolean; }
+const states = new Map<string, ActivityState>();
+function estimateVisualLines(message: Message): number {
+  const content = message.content ?? '';
+  const explicitLines = Math.max(1, content.split(/\r?\n/).length);
+  const wrappedLines = Math.ceil(content.length / 70);
+  let score = Math.max(explicitLines, wrappedLines, 1);
+  if (message.attachments.size > 0) score += Math.min(6, message.attachments.size * 3);
+  if (message.embeds.length > 0) score += Math.min(4, message.embeds.length * 2);
+  if (message.stickers.size > 0) score += Math.min(4, message.stickers.size * 2);
+  if (message.reference) score += 1;
+  return Math.min(10, score);
+}
+export function resetPanelActivity(channelId: string, anchorMessageId: string): void { states.set(channelId, { anchorMessageId, messages: 0, visualLines: 0, moving: false }); }
+export async function recordTicketMessageForPanel(message: Message): Promise<void> {
+  if (!message.guild || message.author.bot || message.channel.type !== ChannelType.GuildText) return;
+  const channel = message.channel as TextChannel; const topic = channel.topic ?? ''; const panelMessageId = getField(topic, 'message');
+  if (!topic.startsWith('supportforge:ticket') || !panelMessageId) return;
+  const settings = await getAdvancedSettings(message.guild.id); if (!settings.panelActivity.enabled) return;
+  let state = states.get(channel.id);
+  if (!state || state.anchorMessageId !== panelMessageId) {
+    state = { anchorMessageId: panelMessageId, messages: 0, visualLines: 0, moving: false };
+    try {
+      const recent = await channel.messages.fetch({ limit: 50 }); const anchor = recent.get(panelMessageId);
+      if (anchor) for (const item of recent.values()) if (item.id !== panelMessageId && item.createdTimestamp > anchor.createdTimestamp && !item.author.bot) { state.messages += 1; state.visualLines += estimateVisualLines(item); }
+    } catch { /* Establish baseline from new messages if history cannot be read. */ }
+    states.set(channel.id, state);
+  }
+  state.messages += 1; state.visualLines += estimateVisualLines(message);
+  const reachedVisualBudget = state.visualLines >= settings.panelActivity.visualLineBudget;
+  const reachedMessageBudget = state.messages >= settings.panelActivity.messageBudget && state.messages >= settings.panelActivity.minimumMessagesBeforeMove;
+  if (!reachedVisualBudget && !reachedMessageBudget) return; if (state.moving) return; state.moving = true;
+  try { await moveTicketPanelToBottom(channel); resetPanelActivity(channel.id, channel.lastMessageId ?? panelMessageId); }
+  catch (error) { console.warn('⚠️ Automatic ticket panel repositioning skipped in ' + channel.id + ':', error); }
+  finally { const current = states.get(channel.id); if (current) current.moving = false; }
+}
