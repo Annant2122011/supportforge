@@ -134,6 +134,18 @@ export function buildTicketPanelComponents(status: TicketStatus): ActionRowBuild
     );
   }
 
+  if (status !== 'archived' && status !== 'closed') {
+    const positioning = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId('ticket:panel:move-bottom')
+        .setLabel('Move Controls Here')
+        .setEmoji('⬇️')
+        .setStyle(ButtonStyle.Secondary),
+    );
+
+    return [lifecycle, tools, positioning];
+  }
+
   return status === 'archived' ? [lifecycle] : [lifecycle, tools];
 }
 
