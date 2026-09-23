@@ -21,6 +21,12 @@ import {
 import { generateTranscript } from '../services/transcriptService';
 
 import {
+  setChannelPermissionOverwrite,
+  setChannelPermissionOverwrites,
+  setChannelTopic,
+} from '../services/discordChannelService';
+
+import {
   logTicketEvent,
 } from '../services/auditLogService';
 
@@ -754,7 +760,8 @@ async function restoreTicketPermissions(
   await runChannelMutation(
     channel,
     'restore ticket permissions',
-    () => channel.permissionOverwrites.set(
+    () => setChannelPermissionOverwrites(
+      channel.id,
       buildOpenOverwrites(
         ownerId,
         staffRoleId && staffRoleId !== 'none'
@@ -764,6 +771,12 @@ async function restoreTicketPermissions(
         bot.id,
         channel.guild.roles.everyone.id,
       ),
+      new Set<string>([
+        channel.guild.roles.everyone.id,
+        ...(staffRoleId && staffRoleId !== 'none'
+          ? [staffRoleId]
+          : []),
+      ]),
       'SupportForge: reopen ticket',
     ),
   );
@@ -826,7 +839,8 @@ async function lockTicketPermissions(
   await runChannelMutation(
     channel,
     archived ? 'archive ticket permissions' : 'close ticket permissions',
-    () => channel.permissionOverwrites.set(
+    () => setChannelPermissionOverwrites(
+      channel.id,
       buildClosedOverwrites(
         ownerId,
         staffRoleId && staffRoleId !== 'none'
@@ -837,6 +851,12 @@ async function lockTicketPermissions(
         channel.guild.roles.everyone.id,
         archived,
       ),
+      new Set<string>([
+        channel.guild.roles.everyone.id,
+        ...(staffRoleId && staffRoleId !== 'none'
+          ? [staffRoleId]
+          : []),
+      ]),
       archived ? 'SupportForge: archive ticket' : 'SupportForge: close ticket',
     ),
   );
@@ -1147,13 +1167,13 @@ async function createTicket(
           panel.id,
         );
 
-      await withTimeout(
-        ticketChannel.setTopic(
-          finalTopic,
-        ),
-        DISCORD_OPERATION_TIMEOUT_MS,
+      await setChannelTopic(
+        ticketChannel.id,
+        finalTopic,
         'Ticket topic initialization',
       );
+
+      ticketChannel.topic = finalTopic;
 
       updateRuntimeTicketState(
         ticketChannel,
@@ -1644,10 +1664,14 @@ async function transition(
     await runChannelMutation(
       channel,
       `status ${oldStatus} -> ${newStatus}`,
-      () => channel.setTopic(
-        newTopic,
-        `SupportForge: status ${oldStatus} -> ${newStatus}`,
-      ),
+      async () => {
+        await setChannelTopic(
+          channel.id,
+          newTopic,
+          `SupportForge: status ${oldStatus} -> ${newStatus}`,
+        );
+        channel.topic = newTopic;
+      },
     );
 
     /*
@@ -2088,10 +2112,14 @@ async function closeTicket(
     await runChannelMutation(
       channel,
       'set closed ticket topic',
-      () => channel.setTopic(
-        closedTopic,
-        `SupportForge: close ticket #${ticketNumber}`,
-      ),
+      async () => {
+        await setChannelTopic(
+          channel.id,
+          closedTopic,
+          `SupportForge: close ticket #${ticketNumber}`,
+        );
+        channel.topic = closedTopic;
+      },
     );
 
     updateRuntimeTicketState(
@@ -2751,28 +2779,28 @@ async function handlePanelModal(
           users.join(','),
         );
 
-      await withTimeout(
-        channel.permissionOverwrites.edit(
-          userId,
-          {
-            ViewChannel: true,
-            SendMessages: true,
-            ReadMessageHistory: true,
-            AttachFiles: true,
-            EmbedLinks: true,
-          },
-        ),
-        DISCORD_OPERATION_TIMEOUT_MS,
+      await setChannelPermissionOverwrite(
+        channel.id,
+        userId,
+        [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+          PermissionFlagsBits.AttachFiles,
+          PermissionFlagsBits.EmbedLinks,
+        ],
+        [],
+        1,
         'Add ticket user permissions',
       );
 
-      await withTimeout(
-        channel.setTopic(
-          newTopic,
-        ),
-        DISCORD_OPERATION_TIMEOUT_MS,
+      await setChannelTopic(
+        channel.id,
+        newTopic,
         'Add ticket user topic update',
       );
+
+      channel.topic = newTopic;
 
       updateRuntimeTicketState(
         channel,
@@ -2833,10 +2861,14 @@ async function handlePanelModal(
       await runChannelMutation(
         channel,
         'Priority update',
-        () => channel.setTopic(
-          newTopic,
-          `SupportForge: priority update`,
-        ),
+        async () => {
+          await setChannelTopic(
+            channel.id,
+            newTopic,
+            `SupportForge: priority update`,
+          );
+          channel.topic = newTopic;
+        },
       );
 
       updateRuntimeTicketState(
@@ -2916,10 +2948,14 @@ async function handlePanelModal(
       await runChannelMutation(
         channel,
         'Tag update',
-        () => channel.setTopic(
-          newTopic,
-          `SupportForge: tag update`,
-        ),
+        async () => {
+          await setChannelTopic(
+            channel.id,
+            newTopic,
+            `SupportForge: tag update`,
+          );
+          channel.topic = newTopic;
+        },
       );
 
       updateRuntimeTicketState(
