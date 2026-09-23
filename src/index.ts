@@ -9,7 +9,10 @@ import {
 } from 'discord.js';
 
 import { execute } from './commands/supportforge';
-import { handleTicketInteraction } from './interactions/ticketInteractions';
+import {
+  handleTicketInteraction,
+  scheduleTicketPanelAtBottom,
+} from './interactions/ticketInteractions';
 import {
   getTicketStatus,
   isTicketTopic,
@@ -73,13 +76,49 @@ client.on('messageCreate', async (message) => {
   const status = persistedStatus ?? topicStatus;
 
   if (
-    status !== 'closed' &&
-    status !== 'archived'
+    status === 'closed' ||
+    status === 'archived'
   ) {
+    try {
+      await message.delete();
+
+      console.log(
+        `🗑️ Deleted message from ${message.author.tag} in ${message.channel.id} because the ticket is ${status}.`,
+      );
+
+      try {
+        await message.channel.send({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle('🤖 SupportForge')
+              .setDescription(
+                'This is not an error. The ticket is closed, so you cannot send any messages.',
+              )
+              .setTimestamp(),
+          ],
+        });
+      } catch (notificationError) {
+        console.warn(
+          `⚠️ Could not send closed-ticket notification in ${message.channel.id}:`,
+          notificationError,
+        );
+      }
+    } catch (error) {
+      console.error(
+        `⚠️ Failed to delete message in ${status} ticket ${message.channel.id}:`,
+        error,
+      );
+    }
+
     return;
   }
 
-  try {
+  /*
+   * Keep the active ticket controls close to the newest conversation
+   * activity. The move is debounced by one second, so a burst of messages
+   * produces one panel move instead of a delete/send cycle for every line.
+   */
+  scheduleTicketPanelAtBottom(message.channel as import('discord.js').TextChannel);
     await message.delete();
 
     console.log(
