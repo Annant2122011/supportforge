@@ -6,6 +6,7 @@ import {
   EmbedBuilder,
   GatewayIntentBits,
   MessageFlags,
+  type TextChannel,
 } from 'discord.js';
 
 import { execute } from './commands/supportforge';
@@ -118,7 +119,7 @@ client.on('messageCreate', async (message) => {
    * activity. The move is debounced by one second, so a burst of messages
    * produces one panel move instead of a delete/send cycle for every line.
    */
-  scheduleTicketPanelAtBottom(message.channel as import('discord.js').TextChannel);
+  scheduleTicketPanelAtBottom(message.channel as TextChannel);
     await message.delete();
 
     console.log(
