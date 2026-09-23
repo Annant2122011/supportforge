@@ -510,14 +510,29 @@ async function updateMainMessage(
     const currentTopic =
       channel.topic ?? '';
 
-    const currentStatus =
+    const currentTopicStatus =
       getTicketStatus(
         currentTopic,
       );
 
-    if (
+    const persistedStatus =
+      await getPersistedTicketStatus(
+        channel.id,
+      );
+
+    /*
+     * Lifecycle status may now be newer than the Discord channel topic.
+     * When persisted state exists, use it for stale-update protection.
+     * For legacy tickets without persisted state, retain the original
+     * topic comparison.
+     */
+    if (persistedStatus) {
+      if (persistedStatus !== status) {
+        return;
+      }
+    } else if (
       currentTopic !== topic ||
-      currentStatus !== status
+      currentTopicStatus !== status
     ) {
       return;
     }
