@@ -27,6 +27,13 @@ import {
 } from '../services/discordChannelService';
 
 import {
+  ensureArchiveCategory,
+  ensureBillingCategory,
+  ensureClosedCategory,
+  moveTicketToCategory,
+} from '../services/ticketStorageService';
+
+import {
   getPersistedTicketStatus,
   setPersistedTicketStatus,
 } from '../services/ticketPersistenceService';
@@ -1191,16 +1198,17 @@ async function transition(
     }
 
     /*
-     * A closed ticket can only be reopened.
+     * A closed ticket can be reopened or deliberately archived.
+     * Archive is the permanent historical state.
      */
     if (
       oldStatus ===
         'closed' &&
-      newStatus !==
-        'reopened'
+      newStatus !== 'reopened' &&
+      newStatus !== 'archived'
     ) {
       await interaction.editReply(
-        '❌ This ticket is closed. Reopen it before changing its status.',
+        '❌ This ticket is closed. Reopen it or archive it before changing its state.',
       );
       return;
     }
@@ -1459,6 +1467,43 @@ async function transition(
       newTopic,
       newStatus,
     );
+
+    /*
+     * Storage sections are separate from the active support category.
+     * Billing tickets use the dedicated Billing section when configured.
+     * Closed and archived tickets are physically moved so moderators can
+     * distinguish active work from historical records.
+     */
+    try {
+      if (newStatus === 'closed') {
+        await moveTicketToCategory(
+          channel,
+          await ensureClosedCategory(interaction.guild!),
+        );
+      } else if (newStatus === 'archived') {
+        await moveTicketToCategory(
+          channel,
+          await ensureArchiveCategory(interaction.guild!),
+        );
+      } else if (newStatus === 'reopened' || newStatus === 'open') {
+        const departmentId = getField(newTopic, 'department');
+        const department = departmentId
+          ? (await getGuildConfig(interaction.guild!.id)).departments[departmentId]
+          : undefined;
+
+        if (department?.name.toLowerCase() === 'billing') {
+          await moveTicketToCategory(
+            channel,
+            await ensureBillingCategory(interaction.guild!),
+          );
+        }
+      }
+    } catch (storageError) {
+      console.warn(
+        '⚠️ Ticket storage category transition failed:',
+        storageError,
+      );
+    }
 
     /*
      * Keep the channel name synchronized with the lifecycle state.
