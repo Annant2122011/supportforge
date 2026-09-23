@@ -1,6 +1,7 @@
 import 'dotenv/config';
 
 import {
+  ChannelType,
   Client,
   GatewayIntentBits,
   MessageFlags,
@@ -51,7 +52,7 @@ client.on('messageCreate', async (message) => {
   if (
     message.author.bot ||
     !message.guild ||
-    message.channel.type !== 0
+    message.channel.type !== ChannelType.GuildText
   ) {
     return;
   }
