@@ -1491,11 +1491,24 @@ async function transition(
           ? (await getGuildConfig(interaction.guild!.id)).departments[departmentId]
           : undefined;
 
+        const currentConfig = await getGuildConfig(interaction.guild!.id);
+
         if (department?.name.toLowerCase() === 'billing') {
           await moveTicketToCategory(
             channel,
             await ensureBillingCategory(interaction.guild!),
           );
+        } else if (currentConfig.supportCategoryId) {
+          const supportCategory = interaction.guild!.channels.cache.get(
+            currentConfig.supportCategoryId,
+          );
+
+          if (supportCategory?.type === ChannelType.GuildCategory) {
+            await moveTicketToCategory(
+              channel,
+              supportCategory,
+            );
+          }
         }
       }
     } catch (storageError) {
