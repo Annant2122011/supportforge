@@ -28,7 +28,7 @@ const SETTINGS_PATH = join(DATA_DIR, 'advanced-settings.json');
 const DEFAULTS: AdvancedGuildSettings = {
   version: 1, settingsChannelId: null, closedCategoryId: null, archiveCategoryId: null, billingCategoryId: null,
   panelActivity: { enabled: true, visualLineBudget: 18, messageBudget: 12, minimumMessagesBeforeMove: 6 },
-  retention: { closedDays: 30, archiveDays: 0 }, customCommands: {},
+  retention: { closedDays: 0, archiveDays: 0 }, customCommands: {},
 };
 let state: SettingsFile | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
