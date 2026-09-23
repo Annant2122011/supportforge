@@ -22,6 +22,7 @@ import { generateTranscript } from '../services/transcriptService';
 
 import {
   setChannelPermissionOverwrite,
+  setChannelPermissionOverwrites,
   setChannelTopic,
   setChannelTopicAndPermissionOverwrites,
 } from '../services/discordChannelService';
