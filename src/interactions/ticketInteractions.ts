@@ -741,56 +741,38 @@ async function createTicket(
      * Only active tickets block creation.
      * Closed and archived tickets do not.
      */
-    const existing =
-      guild.channels.cache.find(
-        (channel) => {
-          if (
-            channel.type !==
-              ChannelType.GuildText ||
-            channel.parentId !==
-              categoryId
-          ) {
-            return false;
-          }
+    let existing: TextChannel | undefined;
 
-          const topic =
-            channel.topic ?? '';
+    for (const channel of guild.channels.cache.values()) {
+      if (
+        channel.type !== ChannelType.GuildText ||
+        channel.parentId !== categoryId
+      ) {
+        continue;
+      }
 
-          if (
-            !isTicketTopic(
-              topic,
-            )
-          ) {
-            return false;
-          }
+      const topic = channel.topic ?? '';
 
-          if (
-            getField(
-              topic,
-              'owner',
-            ) !==
-            interaction.user.id
-          ) {
-            return false;
-          }
+      if (
+        !isTicketTopic(topic) ||
+        getField(topic, 'owner') !== interaction.user.id ||
+        getField(topic, 'department') !== departmentId
+      ) {
+        continue;
+      }
 
-          if (
-            getField(
-              topic,
-              'department',
-            ) !==
-            departmentId
-          ) {
-            return false;
-          }
+      const persistedStatus =
+        await getPersistedTicketStatus(channel.id);
 
-          return isActiveTicketStatus(
-            getTicketStatus(
-              topic,
-            ),
-          );
-        },
-      );
+      const status =
+        persistedStatus ??
+        getTicketStatus(topic);
+
+      if (isActiveTicketStatus(status)) {
+        existing = channel;
+        break;
+      }
+    }
 
     if (existing) {
       await replyError(
