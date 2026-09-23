@@ -423,6 +423,20 @@ export async function setChannelName(
   );
 }
 
+export async function setChannelParent(
+  channelId: string,
+  parentId: string,
+  operation: string,
+): Promise<void> {
+  await discordRequest(
+    channelId,
+    'PATCH',
+    `/channels/${channelId}`,
+    { parent_id: parentId },
+    operation,
+  );
+}
+
 export async function setChannelTopic(
   channelId: string,
   topic: string,
