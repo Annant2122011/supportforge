@@ -29,7 +29,7 @@ const client = new Client({
   },
 });
 
-client.once('ready', (readyClient) => {
+client.once('clientReady', (readyClient) => {
   console.log(
     `✅ SupportForge online as ${readyClient.user.tag}`,
   );
