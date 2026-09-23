@@ -24,6 +24,7 @@ import {
   setChannelPermissionOverwrite,
   setChannelPermissionOverwrites,
   setChannelTopic,
+  setChannelTopicAndPermissionOverwrites,
 } from '../services/discordChannelService';
 
 import {
@@ -786,6 +787,7 @@ async function lockTicketPermissions(
   channel: TextChannel,
   topic: string,
   archived: boolean,
+  topicOverride?: string,
 ): Promise<void> {
   const bot =
     channel.guild.members.me;
@@ -836,29 +838,46 @@ async function lockTicketPermissions(
       )
       .filter(Boolean);
 
+  const closedOverwrites = buildClosedOverwrites(
+    ownerId,
+    staffRoleId && staffRoleId !== 'none'
+      ? staffRoleId
+      : null,
+    users,
+    bot.id,
+    channel.guild.roles.everyone.id,
+    archived,
+  );
+
+  const roleIds = new Set<string>([
+    channel.guild.roles.everyone.id,
+    ...(staffRoleId && staffRoleId !== 'none'
+      ? [staffRoleId]
+      : []),
+  ]);
+
   await runChannelMutation(
     channel,
     archived ? 'archive ticket permissions' : 'close ticket permissions',
-    () => setChannelPermissionOverwrites(
-      channel.id,
-      buildClosedOverwrites(
-        ownerId,
-        staffRoleId && staffRoleId !== 'none'
-          ? staffRoleId
-          : null,
-        users,
-        bot.id,
-        channel.guild.roles.everyone.id,
-        archived,
-      ),
-      new Set<string>([
-        channel.guild.roles.everyone.id,
-        ...(staffRoleId && staffRoleId !== 'none'
-          ? [staffRoleId]
-          : []),
-      ]),
-      archived ? 'SupportForge: archive ticket' : 'SupportForge: close ticket',
-    ),
+    () =>
+      topicOverride
+        ? setChannelTopicAndPermissionOverwrites(
+            channel.id,
+            topicOverride,
+            closedOverwrites,
+            roleIds,
+            archived
+              ? 'SupportForge: archive ticket'
+              : 'SupportForge: close ticket',
+          )
+        : setChannelPermissionOverwrites(
+            channel.id,
+            closedOverwrites,
+            roleIds,
+            archived
+              ? 'SupportForge: archive ticket'
+              : 'SupportForge: close ticket',
+          ),
   );
 }
 
@@ -2090,14 +2109,12 @@ async function closeTicket(
 
     /*
      * Transcript successfully uploaded.
-     * Now lock the ticket.
+     *
+     * The permission lock and closed-state topic are committed in one
+     * Discord channel PATCH. This avoids spending two channel-resource
+     * requests on the same close operation and keeps the channel state
+     * synchronized if Discord rate-limits channel mutations.
      */
-    await lockTicketPermissions(
-      channel,
-      topic,
-      false,
-    );
-
     const closedTopic =
       setField(
         setField(
@@ -2109,18 +2126,14 @@ async function closeTicket(
         closedAt.toISOString(),
       );
 
-    await runChannelMutation(
+    await lockTicketPermissions(
       channel,
-      'set closed ticket topic',
-      async () => {
-        await setChannelTopic(
-          channel.id,
-          closedTopic,
-          `SupportForge: close ticket #${ticketNumber}`,
-        );
-        channel.topic = closedTopic;
-      },
+      topic,
+      false,
+      closedTopic,
     );
+
+    channel.topic = closedTopic;
 
     updateRuntimeTicketState(
       channel,
