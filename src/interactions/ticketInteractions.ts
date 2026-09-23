@@ -1407,8 +1407,9 @@ async function transition(
         );
 
       /*
-       * Reopening clears the closed/archived metadata. The channel topic
-       * is committed below; permissions are intentionally left unchanged.
+       * Reopening clears the closed/archived metadata. The lifecycle status
+       * is persisted below; the Discord topic remains descriptive metadata.
+       * Permissions are intentionally left unchanged.
        */
     }
 
