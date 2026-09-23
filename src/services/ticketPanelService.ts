@@ -7,6 +7,7 @@ import {
   type TextChannel,
 } from 'discord.js';
 import { getGuildConfig, type GuildConfig } from './configService';
+import { setChannelName } from './discordChannelService';
 import {
   getField,
   getTicketStatus,
@@ -168,7 +169,17 @@ export function queueTicketChannelRename(
     .catch(() => undefined)
     .then(async () => {
       if (channel.name === newName) return;
-      await channel.setName(newName, reason);
+      await setChannelName(
+        channel.id,
+        newName,
+        reason,
+      );
+      /*
+       * Native REST bypasses discord.js' REST manager. Keep the cached
+       * channel object synchronized so subsequent queued rename requests
+       * do not operate on stale channel.name data.
+       */
+      channel.name = newName;
     });
 
   channelRenameQueues.set(channel.id, next);
