@@ -29,6 +29,13 @@ import {
   refreshTicketPanel,
 } from '../services/ticketPanelService';
 
+import {
+  getPersistedTicketStatus,
+  setPersistedTicketStatus,
+} from '../services/ticketPersistenceService';
+
+import { setChannelTopic } from '../services/discordChannelService';
+
 const PRIORITIES = new Set([
   'low',
   'normal',
@@ -125,7 +132,9 @@ async function getTicketContext(
       topic,
       'previous_assignee',
     ),
-    status: getTicketStatus(topic),
+    status:
+      (await getPersistedTicketStatus(channel.id)) ??
+      getTicketStatus(topic),
   };
 }
 
@@ -166,9 +175,24 @@ async function saveTopic(
   >,
   topic: string,
 ): Promise<void> {
-  await context.channel.setTopic(
+  /*
+   * Keep metadata topics and persisted lifecycle state synchronized for
+   * slash-command mutations. Native REST is used here so topic changes
+   * share the same rate-limit-aware queue as other channel mutations.
+   * Persist only after Discord accepts the topic update.
+   */
+  await setChannelTopic(
+    context.channel.id,
     topic,
+    'SupportForge ticket metadata update',
   );
+
+  await setPersistedTicketStatus(
+    context.channel.id,
+    getTicketStatus(topic),
+  );
+
+  context.channel.setTopic(topic);
 
   await refreshTicketPanel(
     context.channel,
