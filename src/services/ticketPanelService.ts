@@ -192,6 +192,81 @@ export function queueTicketChannelRename(
   return next;
 }
 
+
+export function getTicketChannelName(
+  ticketNumber: string,
+  status: TicketStatus,
+): string {
+  /*
+   * Discord text-channel names are lowercase, hyphen-separated slugs.
+   * "reopened" intentionally uses the normal "open" channel name.
+   */
+  const channelStatus =
+    status === 'reopened'
+      ? 'open'
+      : status === 'archived'
+        ? 'archive'
+        : status;
+
+  return `ticket-${ticketNumber}-${channelStatus}`;
+}
+
+export async function moveTicketPanelToBottom(
+  channel: TextChannel,
+): Promise<void> {
+  const topic = channel.topic ?? '';
+
+  if (!topic.startsWith('supportforge:ticket')) {
+    throw new Error('This channel is not a SupportForge ticket.');
+  }
+
+  const status = getTicketStatus(topic);
+  const config = await getGuildConfig(channel.guild.id);
+  const ticketNumber = getField(topic, 'number') ?? 'unknown';
+  const panelTitle = `🎫 SupportForge Ticket #${ticketNumber}`;
+
+  const messageId = getField(topic, 'message');
+  let currentPanel =
+    messageId
+      ? channel.messages.cache.get(messageId) ??
+        await channel.messages.fetch(messageId).catch(() => undefined)
+      : undefined;
+
+  if (!currentPanel) {
+    const recent = await channel.messages.fetch({ limit: 100 });
+    currentPanel = recent.find(
+      (message) =>
+        message.author.id === channel.client.user?.id &&
+        message.embeds.some((embed) => embed.title === panelTitle),
+    );
+  }
+
+  const newPanel = await channel.send({
+    embeds: [
+      buildTicketPanelEmbed(
+        channel.guild,
+        channel.name,
+        topic,
+        config,
+      ),
+    ],
+    components: buildTicketPanelComponents(status),
+  });
+
+  if (currentPanel && currentPanel.id !== newPanel.id) {
+    await currentPanel.delete().catch((error) => {
+      console.warn(
+        `⚠️ Could not remove previous ticket panel in ${channel.id}:`,
+        error,
+      );
+    });
+  }
+
+  console.log(
+    `📌 Ticket #${ticketNumber} controls manually moved to the bottom.`,
+  );
+}
+
 export function isPanelButton(interaction: ButtonInteraction): boolean {
   return interaction.customId.startsWith('ticket:panel:');
 }
