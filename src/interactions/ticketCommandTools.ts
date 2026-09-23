@@ -204,14 +204,23 @@ async function saveTopic(
 
   const ticketNumber = getField(topic, 'number');
   if (ticketNumber) {
-    await queueTicketChannelRename(
-      context.channel,
-      getTicketChannelName(
-        ticketNumber,
-        getTicketStatus(topic),
-      ),
-      'SupportForge ticket status name synchronization',
+    const expectedName = getTicketChannelName(
+      ticketNumber,
+      getTicketStatus(topic),
     );
+
+    if (context.channel.name !== expectedName) {
+      void queueTicketChannelRename(
+        context.channel,
+        expectedName,
+        'SupportForge ticket status name synchronization',
+      ).catch((error) => {
+        console.error(
+          '⚠️ Failed to synchronize ticket channel name:',
+          error,
+        );
+      });
+    }
   }
 }
 
