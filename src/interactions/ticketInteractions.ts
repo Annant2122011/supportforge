@@ -488,17 +488,44 @@ async function updateMainMessage(
         'Guild configuration load',
       );
 
-    const message =
-      channel.messages.cache.get(
-        messageId,
-      ) ??
-      await withTimeout(
-        channel.messages.fetch(
-          messageId,
-        ),
+    let message;
+    try {
+      message =
+        channel.messages.cache.get(messageId) ??
+        await withTimeout(
+          channel.messages.fetch(messageId),
+          DISCORD_OPERATION_TIMEOUT_MS,
+          'Ticket panel fetch',
+        );
+    } catch {
+      /*
+       * Closed-ticket controls are moved to the bottom as a new message.
+       * The historical message= topic field intentionally remains stable,
+       * so recover the current panel by scanning recent messages.
+       */
+      const recent = await withTimeout(
+        channel.messages.fetch({ limit: 100 }),
         DISCORD_OPERATION_TIMEOUT_MS,
-        'Ticket panel fetch',
+        'Recent ticket panel search',
       );
+
+      const ticketNumber =
+        getField(topic, 'number') ?? 'unknown';
+
+      message = recent.find(
+        (candidate) =>
+          candidate.author.id === channel.client.user?.id &&
+          candidate.embeds.some(
+            (embed) =>
+              embed.title ===
+              `🎫 SupportForge Ticket #${ticketNumber}`,
+          ),
+      );
+    }
+
+    if (!message) {
+      return;
+    }
 
     /*
      * Before editing, verify that the topic still represents the state
@@ -1871,6 +1898,51 @@ async function closeTicket(
     );
 
     /*
+     * Move the live ticket controls to the bottom of the conversation when
+     * the ticket closes. Discord cannot move an existing message, so we
+     * post the final closed panel at the bottom and remove the old panel.
+     * If posting fails, the original panel remains available as a fallback.
+     */
+    if (messageId) {
+      try {
+        const bottomPanel = await withTimeout(
+          channel.send({
+            embeds: [
+              buildTicketPanelEmbed(
+                channel.guild,
+                channel.name,
+                closedTopic,
+                config,
+              ),
+            ],
+            components: buildTicketPanelComponents('closed'),
+          }),
+          DISCORD_OPERATION_TIMEOUT_MS,
+          'Closed ticket bottom panel',
+        );
+
+        const oldPanel = channel.messages.cache.get(messageId);
+        if (oldPanel) {
+          await oldPanel.delete().catch((error) => {
+            console.error(
+              '⚠️ Failed to remove old ticket panel:',
+              error,
+            );
+          });
+        }
+
+        console.log(
+          `📌 Moved closed ticket #${ticketNumber} controls to the bottom (message ${bottomPanel.id}).`,
+        );
+      } catch (error) {
+        console.error(
+          '⚠️ Failed to move closed ticket controls to the bottom:',
+          error,
+        );
+      }
+    }
+
+    /*
      * Background rename is intentionally started FIRST. Channel rename and
      * message edits can share Discord's per-channel resource buckets, so
      * giving the rename queue the first chance reduces visible delay without
@@ -2109,6 +2181,93 @@ async function showTicketCreationModal(
 /* Panel button handlers                                                      */
 /* -------------------------------------------------------------------------- */
 
+async function showTicketHistory(
+  interaction: ButtonInteraction,
+): Promise<void> {
+  if (!(await safeDeferReply(interaction))) {
+    return;
+  }
+
+  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
+    await replyError(
+      interaction,
+      '❌ Ticket history is only available inside a ticket channel.',
+    );
+    return;
+  }
+
+  try {
+    const channel = interaction.channel as TextChannel;
+    const topic = channel.topic ?? '';
+    const ticketNumber = getField(topic, 'number') ?? 'unknown';
+    const config = await withTimeout(
+      getGuildConfig(interaction.guild.id),
+      DISCORD_OPERATION_TIMEOUT_MS,
+      'Guild configuration load',
+    );
+
+    const auditId = config.auditChannelId;
+    const auditChannel = auditId
+      ? interaction.guild.channels.cache.get(auditId)
+      : null;
+
+    if (!auditChannel || auditChannel.type !== ChannelType.GuildText) {
+      await interaction.editReply(
+        'ℹ️ No audit history exists for this ticket yet.',
+      );
+      return;
+    }
+
+    const messages = await withTimeout(
+      auditChannel.messages.fetch({ limit: 100 }),
+      DISCORD_OPERATION_TIMEOUT_MS,
+      'Ticket history fetch',
+    );
+
+    const matching = messages
+      .filter((message) =>
+        message.embeds.some(
+          (embed) =>
+            embed.description?.includes(
+              `Ticket #${ticketNumber}`,
+            ) ?? false,
+        ),
+      )
+      .sort(
+        (a, b) =>
+          b.createdTimestamp - a.createdTimestamp,
+      )
+      .first(15);
+
+    const lines = matching.length
+      ? matching
+          .map((message) => {
+            const embed = message.embeds[0];
+            const description =
+              embed?.description ?? 'Recorded event';
+            const compact = description
+              .replace(/\\n+/g, ' ')
+              .replace(/\\s{2,}/g, ' ')
+              .trim();
+
+            return `• <t:${Math.floor(message.createdTimestamp / 1000)}:f> • ${compact}`;
+          })
+          .join('\\n')
+      : 'No recent audit events found for this ticket.';
+
+    await interaction.editReply(
+      `📜 **Ticket #${ticketNumber} History**\\n\\n${lines}`,
+    );
+  } catch (error) {
+    console.error('❌ Failed to load ticket history:', error);
+
+    await replyError(
+      interaction,
+      '❌ SupportForge could not load this ticket history.',
+    );
+  }
+}
+
 async function handlePanelButton(
   interaction: ButtonInteraction,
 ): Promise<void> {
@@ -2199,6 +2358,11 @@ async function handlePanelButton(
       interaction,
       'archived',
     );
+    return;
+  }
+
+  if (id === 'ticket:panel:history') {
+    await showTicketHistory(interaction);
     return;
   }
 
