@@ -48,7 +48,9 @@ import {
 import {
   buildTicketPanelComponents,
   buildTicketPanelEmbed,
+  getTicketChannelName,
   isPanelButton,
+  moveTicketPanelToBottom,
   queueTicketChannelRename,
 } from '../services/ticketPanelService';
 
@@ -82,127 +84,6 @@ const TERMINAL_TICKET_STATUSES: readonly TicketStatus[] = [
 const ticketActionLocks = new Set<string>();
 
 const ticketMutationQueues = new Map<string, Promise<void>>();
-const ticketPanelBottomQueues = new Map<string, Promise<void>>();
-const ticketPanelBottomTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-export function scheduleTicketPanelAtBottom(
-  channel: TextChannel,
-): void {
-  const existingTimer = ticketPanelBottomTimers.get(channel.id);
-  if (existingTimer) {
-    clearTimeout(existingTimer);
-  }
-
-  const timer = setTimeout(() => {
-    ticketPanelBottomTimers.delete(channel.id);
-
-    const previous =
-      ticketPanelBottomQueues.get(channel.id) ??
-      Promise.resolve();
-
-    const next = previous
-      .catch(() => undefined)
-      .then(async () => {
-        const topic = channel.topic ?? '';
-
-        if (!isTicketTopic(topic)) {
-          return;
-        }
-
-        const persistedStatus =
-          await getPersistedTicketStatus(channel.id);
-
-        const status =
-          persistedStatus ??
-          getTicketStatus(topic);
-
-        if (!ACTIVE_TICKET_STATUSES.includes(status)) {
-          return;
-        }
-
-        const config = await getGuildConfig(channel.guild.id);
-        const ticketNumber =
-          getField(topic, 'number') ?? 'unknown';
-
-        const panelTitle =
-          `🎫 SupportForge Ticket #${ticketNumber}`;
-
-        /*
-         * Find the current panel. The topic's message= field may refer to
-         * the original panel because moving the panel must not PATCH the
-         * channel topic on every chat message.
-         */
-        let currentPanel: Message | undefined;
-
-        const messageId =
-          getField(topic, 'message') ??
-          getField(topic, 'panel_message');
-
-        if (messageId) {
-          currentPanel =
-            channel.messages.cache.get(messageId) ??
-            await channel.messages.fetch(messageId).catch(() => undefined);
-        }
-
-        if (!currentPanel) {
-          const recent =
-            await channel.messages.fetch({ limit: 100 });
-
-          currentPanel =
-            recent.find(
-              (message) =>
-                message.author.id === channel.client.user?.id &&
-                message.embeds.some(
-                  (embed) =>
-                    embed.title === panelTitle,
-                ),
-            );
-        }
-
-        /*
-         * Send the fresh panel first. If sending succeeds, remove the old
-         * panel. This guarantees users never lose their controls if Discord
-         * rejects the new message.
-         */
-        const newPanel = await channel.send({
-          embeds: [
-            buildTicketPanelEmbed(
-              channel.guild,
-              channel.name,
-              topic,
-              config,
-            ),
-          ],
-          components:
-            buildTicketPanelComponents(status),
-        });
-
-        if (currentPanel && currentPanel.id !== newPanel.id) {
-          await currentPanel.delete().catch((error) => {
-            console.warn(
-              `⚠️ Could not remove previous ticket panel in ${channel.id}:`,
-              error,
-            );
-          });
-        }
-
-        console.log(
-          `📌 Ticket #${ticketNumber} controls moved to the bottom after new activity.`,
-        );
-      });
-
-    ticketPanelBottomQueues.set(channel.id, next);
-
-    void next.finally(() => {
-      if (ticketPanelBottomQueues.get(channel.id) === next) {
-        ticketPanelBottomQueues.delete(channel.id);
-      }
-    }).catch(() => undefined);
-  }, 1000);
-
-  ticketPanelBottomTimers.set(channel.id, timer);
-}
-
 async function runChannelMutation<T>(
   channel: TextChannel,
   operation: string,
@@ -1582,35 +1463,25 @@ async function transition(
     );
 
     /*
-     * Reopen a channel previously renamed with "-closed".
+     * Keep the channel name synchronized with the lifecycle state.
+     * "reopened" intentionally uses the normal "open" name.
      */
-    if (
-      newStatus ===
-        'reopened' &&
-      channel.name.endsWith(
-        '-closed',
-      )
-    ) {
-      void queueTicketChannelRename(
-        channel,
-        channel.name.replace(
-          /-closed$/,
-          '',
-        ),
-        `Ticket #${
-          getField(
-            newTopic,
-            'number',
-          ) ?? 'unknown'
-        } reopened`,
-      ).catch((error) => {
-        console.error(
-          '⚠️ Failed to rename reopened ticket:',
-          error,
-        );
-      });
-    }
+    const ticketNumberForName =
+      getField(newTopic, 'number') ?? 'unknown';
 
+    void queueTicketChannelRename(
+      channel,
+      getTicketChannelName(
+        ticketNumberForName,
+        newStatus,
+      ),
+      `Ticket #${ticketNumberForName} status changed to ${newStatus}`,
+    ).catch((error) => {
+      console.error(
+        `⚠️ Failed to rename ticket for status ${newStatus}:`,
+        error,
+      );
+    });
     /*
      * Refresh the panel immediately, then schedule a relocation to the
      * bottom of the conversation. This is especially important when a
@@ -1624,9 +1495,6 @@ async function transition(
       newTopic,
     );
 
-    if (ACTIVE_TICKET_STATUSES.includes(newStatus)) {
-      scheduleTicketPanelAtBottom(channel);
-    }
 
     await interaction.editReply(
       `✅ Ticket status changed to **${capitalize(
@@ -2075,13 +1943,8 @@ async function closeTicket(
      */
     void queueTicketChannelRename(
       channel,
-      channel.name.endsWith(
-        '-closed',
-      )
-        ? channel.name
-        : `${channel.name}-closed`,
-      `Ticket #${ticketNumber} closed`,
-    ).catch((error) => {
+      getTicketChannelName(ticketNumber, 'closed'),
+      `Ticket #${ticketNumber} closed`,    ).catch((error) => {
       console.error(
         '⚠️ Failed to rename closed ticket:',
         error,
@@ -2486,6 +2349,60 @@ async function handlePanelButton(
     return;
   }
 
+  if (id === 'ticket:panel:move-bottom') {
+    if (!(await safeDeferReply(interaction))) {
+      return;
+    }
+
+    if (
+      !interaction.guild ||
+      interaction.channel?.type !== ChannelType.GuildText
+    ) {
+      await replyError(
+        interaction,
+        '❌ Panel controls can only be used inside a ticket channel.',
+      );
+      return;
+    }
+
+    const channel = interaction.channel as TextChannel;
+    const topic = channel.topic ?? '';
+    const status =
+      (await getPersistedTicketStatus(channel.id)) ??
+      getTicketStatus(topic);
+
+    if (!ACTIVE_TICKET_STATUSES.includes(status)) {
+      await replyError(
+        interaction,
+        '❌ Only active tickets can have their panel repositioned.',
+      );
+      return;
+    }
+
+    const staff = getStaffContext(interaction, topic);
+    if (!staff.authorized) {
+      await replyError(
+        interaction,
+        '❌ Only configured staff or administrators can move the ticket panel.',
+      );
+      return;
+    }
+
+    try {
+      await moveTicketPanelToBottom(channel);
+      await interaction.editReply(
+        '✅ Ticket controls were moved to the bottom. The panel will now remain fixed until a moderator deliberately moves it again.',
+      );
+    } catch (error) {
+      console.error('❌ Failed to move ticket panel manually:', error);
+      await replyError(
+        interaction,
+        '❌ SupportForge could not move the ticket panel.',
+      );
+    }
+
+    return;
+  }
   if (id === 'ticket:panel:history') {
     await showTicketHistory(interaction);
     return;
