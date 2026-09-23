@@ -1,4 +1,7 @@
 import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   ChannelType,
   EmbedBuilder,
   MessageFlags,
@@ -25,6 +28,7 @@ import {
 } from '../services/ticketStateService';
 
 import {
+  getTicketChannelName,
   queueTicketChannelRename,
   refreshTicketPanel,
 } from '../services/ticketPanelService';
@@ -197,6 +201,18 @@ async function saveTopic(
     context.channel,
     topic,
   );
+
+  const ticketNumber = getField(topic, 'number');
+  if (ticketNumber) {
+    await queueTicketChannelRename(
+      context.channel,
+      getTicketChannelName(
+        ticketNumber,
+        getTicketStatus(topic),
+      ),
+      'SupportForge ticket status name synchronization',
+    );
+  }
 }
 
 export async function executeTicketCommand(
@@ -256,6 +272,64 @@ export async function executeTicketCommand(
       await interaction.editReply(
         '🔒 This feature is available in Premium/Pro demo mode. Run `/supportforge premium toggle-demo` as an administrator to preview it.',
       );
+
+      return;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Panel controls                                                     */
+    /* ------------------------------------------------------------------ */
+
+    if (subcommand === 'panel') {
+      const ticketNumber = context.ticketNumber;
+      const messageId = getField(context.topic, 'message');
+
+      let panelMessage =
+        messageId
+          ? context.channel.messages.cache.get(messageId) ??
+            await context.channel.messages.fetch(messageId).catch(() => undefined)
+          : undefined;
+
+      if (!panelMessage) {
+        const recent = await context.channel.messages.fetch({ limit: 100 });
+        panelMessage = recent.find(
+          (message) =>
+            message.author.id === interaction.client.user?.id &&
+            message.embeds.some(
+              (embed) =>
+                embed.title ===
+                `🎫 SupportForge Ticket #${ticketNumber}`,
+            ),
+        );
+      }
+
+      const rows = [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId('ticket:panel:move-bottom')
+            .setLabel('Move Panel to Bottom')
+            .setEmoji('⬇️')
+            .setStyle(ButtonStyle.Secondary),
+          ...(panelMessage
+            ? [
+                new ButtonBuilder()
+                  .setLabel('Locate Panel')
+                  .setEmoji('📍')
+                  .setStyle(ButtonStyle.Link)
+                  .setURL(panelMessage.url),
+              ]
+            : []),
+        ),
+      ];
+
+      await interaction.editReply({
+        content:
+          '🎛️ **SupportForge Panel Controls**\n\n' +
+          'The ticket panel is now fixed and will not move automatically when users or staff send messages. ' +
+          'Use **Move Panel to Bottom** only when you deliberately want to reposition it. ' +
+          'The future panel-settings system can switch this control model between button-based and ticket-interaction modes.',
+        components: rows,
+      });
 
       return;
     }
