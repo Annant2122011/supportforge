@@ -902,12 +902,10 @@ async function createTicket(
         (await withTimeout(
           guild.channels.create({
             name:
-              `ticket-${String(
-                number,
-              ).padStart(
-                4,
-                '0',
-              )}`,
+              getTicketChannelName(
+                String(number).padStart(4, '0'),
+                'open',
+              ),
             type:
               ChannelType.GuildText,
             parent:
@@ -1891,51 +1889,6 @@ async function closeTicket(
     );
 
     /*
-     * Move the live ticket controls to the bottom of the conversation when
-     * the ticket closes. Discord cannot move an existing message, so we
-     * post the final closed panel at the bottom and remove the old panel.
-     * If posting fails, the original panel remains available as a fallback.
-     */
-    if (messageId) {
-      try {
-        const bottomPanel = await withTimeout(
-          channel.send({
-            embeds: [
-              buildTicketPanelEmbed(
-                channel.guild,
-                channel.name,
-                closedTopic,
-                config,
-              ),
-            ],
-            components: buildTicketPanelComponents('closed'),
-          }),
-          DISCORD_OPERATION_TIMEOUT_MS,
-          'Closed ticket bottom panel',
-        );
-
-        const oldPanel = channel.messages.cache.get(messageId);
-        if (oldPanel) {
-          await oldPanel.delete().catch((error) => {
-            console.error(
-              '⚠️ Failed to remove old ticket panel:',
-              error,
-            );
-          });
-        }
-
-        console.log(
-          `📌 Moved closed ticket #${ticketNumber} controls to the bottom (message ${bottomPanel.id}).`,
-        );
-      } catch (error) {
-        console.error(
-          '⚠️ Failed to move closed ticket controls to the bottom:',
-          error,
-        );
-      }
-    }
-
-    /*
      * Background rename is intentionally started FIRST. Channel rename and
      * message edits can share Discord's per-channel resource buckets, so
      * giving the rename queue the first chance reduces visible delay without
@@ -1944,7 +1897,8 @@ async function closeTicket(
     void queueTicketChannelRename(
       channel,
       getTicketChannelName(ticketNumber, 'closed'),
-      `Ticket #${ticketNumber} closed`,    ).catch((error) => {
+      `Ticket #${ticketNumber} closed`,
+    ).catch((error) => {
       console.error(
         '⚠️ Failed to rename closed ticket:',
         error,
