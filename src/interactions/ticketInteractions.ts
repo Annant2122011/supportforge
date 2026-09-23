@@ -847,9 +847,6 @@ async function createTicket(
       )}`,
       `number=${number}`,
       `opened_at=${now}`,
-      `description=${encodeURIComponent(
-        cleanDescription,
-      )}`,
     ].join(' ');
 
     const bot =
@@ -2054,7 +2051,7 @@ async function showTicketCreationModal(
           'description',
         )
         .setLabel(
-          'Describe your issue',
+          'Describe your issue (up to 4000 characters)',
         )
         .setPlaceholder(
           'Give us the details we need to help you...',
@@ -2066,7 +2063,7 @@ async function showTicketCreationModal(
           true,
         )
         .setMaxLength(
-          1000,
+          4000,
         );
 
     modal.addComponents(
