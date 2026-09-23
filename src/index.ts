@@ -16,7 +16,6 @@ import {
 
 import {
   getPersistedTicketStatus,
-  setPersistedTicketStatus,
 } from './services/ticketPersistenceService';
 
 const token = process.env.DISCORD_TOKEN;
