@@ -33,6 +33,8 @@ import {
   moveTicketToCategory,
 } from '../services/ticketStorageService';
 
+import { resetPanelActivity } from '../services/panelActivityService';
+
 import {
   getPersistedTicketStatus,
   setPersistedTicketStatus,
@@ -2405,6 +2407,10 @@ async function handlePanelButton(
 
     try {
       await moveTicketPanelToBottom(channel);
+      resetPanelActivity(
+        channel.id,
+        channel.lastMessageId ?? getField(topic, 'message') ?? 'unknown',
+      );
       await interaction.editReply(
         '✅ Ticket controls were moved to the bottom. The panel will now remain fixed until a moderator deliberately moves it again.',
       );
