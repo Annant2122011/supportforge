@@ -14,6 +14,11 @@ import {
   isTicketTopic,
 } from './services/ticketStateService';
 
+import {
+  getPersistedTicketStatus,
+  setPersistedTicketStatus,
+} from './services/ticketPersistenceService';
+
 const token = process.env.DISCORD_TOKEN;
 
 if (!token) {
@@ -63,7 +68,9 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  const status = getTicketStatus(topic);
+  const topicStatus = getTicketStatus(topic);
+  const persistedStatus = await getPersistedTicketStatus(message.channel.id);
+  const status = persistedStatus ?? topicStatus;
 
   if (
     status !== 'closed' &&
@@ -74,9 +81,21 @@ client.on('messageCreate', async (message) => {
 
   try {
     await message.delete();
+
     console.log(
       `🗑️ Deleted message from ${message.author.tag} in ${message.channel.id} because the ticket is ${status}.`,
     );
+
+    try {
+      await message.author.send(
+        'This is not an error. The ticket is closed, so you cannot send any messages.',
+      );
+    } catch (dmError) {
+      console.warn(
+        `⚠️ Could not send closed-ticket notice to ${message.author.tag}:`,
+        dmError,
+      );
+    }
   } catch (error) {
     console.error(
       `⚠️ Failed to delete message in ${status} ticket ${message.channel.id}:`,
