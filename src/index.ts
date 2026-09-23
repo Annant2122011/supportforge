@@ -8,6 +8,10 @@ import {
 
 import { execute } from './commands/supportforge';
 import { handleTicketInteraction } from './interactions/ticketInteractions';
+import {
+  getTicketStatus,
+  isTicketTopic,
+} from './services/ticketStateService';
 
 const token = process.env.DISCORD_TOKEN;
 
@@ -33,6 +37,53 @@ client.once('clientReady', (readyClient) => {
   console.log(
     `✅ SupportForge online as ${readyClient.user.tag}`,
   );
+});
+
+client.on('messageCreate', async (message) => {
+  /*
+   * Closed/archived tickets remain interactive through their lifecycle
+   * buttons, but human messages are not permitted. This deliberately
+   * applies to administrators too, as requested.
+   *
+   * SupportForge's own bot messages are exempt so the ticket panel and
+   * system announcements remain visible.
+   */
+  if (
+    message.author.bot ||
+    !message.guild ||
+    message.channel.type !== 0
+  ) {
+    return;
+  }
+
+  const topic = message.channel.topic ?? '';
+
+  if (!isTicketTopic(topic)) {
+    return;
+  }
+
+  const status = getTicketStatus(topic);
+
+  if (
+    status !== 'closed' &&
+    status !== 'archived'
+  ) {
+    return;
+  }
+
+  try {
+    await message.delete(
+      'SupportForge: message posted in a closed/archived ticket',
+    );
+    console.log(
+      `🗑️ Deleted message from ${message.author.tag} in ${message.channel.id} because the ticket is ${status}.`,
+    );
+  } catch (error) {
+    console.error(
+      `⚠️ Failed to delete message in ${status} ticket ${message.channel.id}:`,
+      error,
+    );
+  }
 });
 
 client.on(
