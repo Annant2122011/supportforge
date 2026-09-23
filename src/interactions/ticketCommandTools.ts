@@ -40,6 +40,11 @@ import {
 
 import { setChannelTopic } from '../services/discordChannelService';
 
+import {
+  ensureArchiveCategory,
+  moveTicketToCategory,
+} from '../services/ticketStorageService';
+
 const PRIORITIES = new Set([
   'low',
   'normal',
@@ -280,6 +285,90 @@ export async function executeTicketCommand(
     ) {
       await interaction.editReply(
         '🔒 This feature is available in Premium/Pro demo mode. Run `/supportforge premium toggle-demo` as an administrator to preview it.',
+      );
+
+      return;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Archive                                                            */
+    /* ------------------------------------------------------------------ */
+
+    if (subcommand === 'archive') {
+      if (context.status !== 'closed') {
+        await interaction.editReply(
+          `❌ Ticket #${context.ticketNumber} must be **closed** before it can be archived.`,
+        );
+        return;
+      }
+
+      let topic = setField(
+        context.topic,
+        'status',
+        'archived',
+      );
+
+      topic = setField(
+        topic,
+        'archived_at',
+        new Date().toISOString(),
+      );
+
+      await setPersistedTicketStatus(
+        context.channel.id,
+        'archived',
+      );
+
+      try {
+        await moveTicketToCategory(
+          context.channel,
+          await ensureArchiveCategory(context.guild),
+        );
+      } catch (error) {
+        console.warn(
+          '⚠️ Archive storage transition failed:',
+          error,
+        );
+      }
+
+      try {
+        await setChannelTopic(
+          context.channel.id,
+          topic,
+          'SupportForge archive metadata update',
+        );
+      } catch (error) {
+        console.warn(
+          '⚠️ Archive topic update failed; persisted lifecycle state remains authoritative:',
+          error,
+        );
+      }
+
+      await refreshTicketPanel(
+        context.channel,
+        topic,
+      );
+
+      const expectedName = getTicketChannelName(
+        context.ticketNumber,
+        'archived',
+      );
+
+      if (context.channel.name !== expectedName) {
+        void queueTicketChannelRename(
+          context.channel,
+          expectedName,
+          `Ticket #${context.ticketNumber} archived`,
+        ).catch((error) => {
+          console.error(
+            '⚠️ Failed to rename archived ticket:',
+            error,
+          );
+        });
+      }
+
+      await interaction.editReply(
+        `🗄️ Ticket #${context.ticketNumber} has been archived and moved to the Archive section.`,
       );
 
       return;
