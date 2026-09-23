@@ -6,13 +6,11 @@ import {
   EmbedBuilder,
   GatewayIntentBits,
   MessageFlags,
-  type TextChannel,
 } from 'discord.js';
 
 import { execute } from './commands/supportforge';
 import {
   handleTicketInteraction,
-  scheduleTicketPanelAtBottom,
 } from './interactions/ticketInteractions';
 import {
   getTicketStatus,
@@ -114,12 +112,6 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  /*
-   * Keep the active ticket controls close to the newest conversation
-   * activity. The move is debounced by one second, so a burst of messages
-   * produces one panel move instead of a delete/send cycle for every line.
-   */
-  scheduleTicketPanelAtBottom(message.channel as TextChannel);
 });
 
 client.on(
