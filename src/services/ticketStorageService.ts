@@ -18,4 +18,4 @@ async function ensureBucket(guild: Guild, baseName: string, key: 'closedCategory
 export async function ensureClosedCategory(guild: Guild): Promise<CategoryChannel> { return ensureBucket(guild, 'SupportForge • Closed', 'closedCategoryId'); }
 export async function ensureArchiveCategory(guild: Guild): Promise<CategoryChannel> { return ensureBucket(guild, 'SupportForge • Archive', 'archiveCategoryId'); }
 export async function ensureBillingCategory(guild: Guild): Promise<CategoryChannel> { return ensureBucket(guild, 'SupportForge • Billing', 'billingCategoryId'); }
-export async function moveTicketToCategory(channel: TextChannel, category: CategoryChannel): Promise<void> { if (channel.parentId === category.id) return; await setChannelParent(channel.id, category.id, 'SupportForge ticket storage transition'); channel.parentId = category.id; }
+export async function moveTicketToCategory(channel: TextChannel, category: CategoryChannel): Promise<void> { if (channel.parentId === category.id) return; await setChannelParent(channel.id, category.id, 'SupportForge ticket storage transition'); }
