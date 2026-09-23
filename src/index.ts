@@ -6,6 +6,7 @@ import {
   EmbedBuilder,
   GatewayIntentBits,
   MessageFlags,
+  PermissionFlagsBits,
 } from 'discord.js';
 
 import { execute } from './commands/supportforge';
@@ -20,6 +21,10 @@ import {
 import {
   getPersistedTicketStatus,
 } from './services/ticketPersistenceService';
+
+import { recordTicketMessageForPanel } from './services/panelActivityService';
+
+import { executeCustomSlashCommand } from './services/advancedSettingsService';
 
 const token = process.env.DISCORD_TOKEN;
 
@@ -112,6 +117,12 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
+  void recordTicketMessageForPanel(message).catch((error) => {
+    console.warn(
+      `⚠️ Ticket panel activity tracking failed in ${message.channel.id}:`,
+      error,
+    );
+  });
 });
 
 client.on(
@@ -121,13 +132,24 @@ client.on(
       /*
        * Slash commands
        */
-      if (
-        interaction.isChatInputCommand() &&
-        interaction.commandName ===
+      if (interaction.isChatInputCommand()) {
+        if (
+          interaction.commandName ===
           'supportforge'
-      ) {
-        await execute(interaction);
-        return;
+        ) {
+          await execute(interaction);
+          return;
+        }
+
+        if (
+          interaction.guild &&
+          await executeCustomSlashCommand(
+            interaction,
+            PermissionFlagsBits.Administrator,
+          )
+        ) {
+          return;
+        }
       }
 
       /*
