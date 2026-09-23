@@ -1634,17 +1634,6 @@ async function closeTicket(
     lockKey,
   );
 
-  if (
-    !(await safeDeferReply(
-      interaction,
-    ))
-  ) {
-    ticketActionLocks.delete(
-      lockKey,
-    );
-    return;
-  }
-
   try {
     /*
      * Always use the latest topic.
@@ -1902,7 +1891,29 @@ async function closeTicket(
     );
 
     /*
-     * Panel update happens only after the state is committed.
+     * Background rename is intentionally started FIRST. Channel rename and
+     * message edits can share Discord's per-channel resource buckets, so
+     * giving the rename queue the first chance reduces visible delay without
+     * making the close interaction wait for Discord channel PATCH latency.
+     */
+    void queueTicketChannelRename(
+      channel,
+      channel.name.endsWith(
+        '-closed',
+      )
+        ? channel.name
+        : `${channel.name}-closed`,
+      `Ticket #${ticketNumber} closed`,
+    ).catch((error) => {
+      console.error(
+        '⚠️ Failed to rename closed ticket:',
+        error,
+      );
+    });
+
+    /*
+     * Panel update happens after the state is committed and remains
+     * background work so it cannot delay the successful close response.
      */
     void updateMainMessage(
       channel,
@@ -1924,24 +1935,6 @@ async function closeTicket(
           error,
         );
       });
-
-    /*
-     * Background rename.
-     */
-    void queueTicketChannelRename(
-      channel,
-      channel.name.endsWith(
-        '-closed',
-      )
-        ? channel.name
-        : `${channel.name}-closed`,
-      `Ticket #${ticketNumber} closed`,
-    ).catch((error) => {
-      console.error(
-        '⚠️ Failed to rename closed ticket:',
-        error,
-      );
-    });
 
     /*
      * Background audit.
