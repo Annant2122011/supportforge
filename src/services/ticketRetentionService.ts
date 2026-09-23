@@ -1,11 +1,11 @@
-import { ChannelType, type Client, type TextChannel } from 'discord.js';
+import { ChannelType, type Client, type Guild, type TextChannel } from 'discord.js';
 import { getAdvancedSettings } from './advancedSettingsService';
 import { getPersistedTicketStatus } from './ticketPersistenceService';
 import { getField, getTicketStatus, isTicketTopic } from './ticketStateService';
 
 let timer: NodeJS.Timeout | undefined;
 
-async function sweepGuild(guild: Client['guilds']['cache']['first'] extends never ? never : any): Promise<void> {
+async function sweepGuild(guild: Guild): Promise<void> {
   const settings = await getAdvancedSettings(guild.id);
   const now = Date.now();
   for (const channel of guild.channels.cache.values()) {
