@@ -27,6 +27,12 @@ import {
 import { executeTicketCommand } from '../interactions/ticketCommandTools';
 import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
 
+import {
+  getField,
+  getTicketStatus,
+  isActiveTicketStatus,
+} from '../services/ticketStateService';
+
 const SUPPORT_CATEGORY_NAME = 'Support Forge';
 const PANEL_CHANNEL_NAME = 'support-panel';
 const PANEL_TOPIC = 'supportforge:panel';
@@ -1123,10 +1129,10 @@ export async function execute(
       }
 
       if (
-        activeTickets.size > 0
+        activeTickets.length > 0
       ) {
         await interaction.editReply(
-          `❌ Cannot remove **${department.name}** while it has **${activeTickets.size}** active ticket(s).`,
+          `❌ Cannot remove **${department.name}** while it has **${activeTickets.length}** active ticket(s).`,
         );
 
         return;
