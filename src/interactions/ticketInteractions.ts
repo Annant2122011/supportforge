@@ -745,8 +745,14 @@ async function createTicket(
       return;
     }
 
-    const categoryId =
-      config.supportCategoryId;
+    const isBillingDepartment =
+      department.name.trim().toLowerCase() === 'billing';
+
+    let categoryId = config.supportCategoryId;
+
+    if (isBillingDepartment) {
+      categoryId = (await ensureBillingCategory(guild)).id;
+    }
 
     if (!categoryId) {
       await replyError(
@@ -757,14 +763,11 @@ async function createTicket(
     }
 
     const category =
-      guild.channels.cache.get(
-        categoryId,
-      );
+      guild.channels.cache.get(categoryId);
 
     if (
       !category ||
-      category.type !==
-        ChannelType.GuildCategory
+      category.type !== ChannelType.GuildCategory
     ) {
       await replyError(
         interaction,
