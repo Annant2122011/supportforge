@@ -37,6 +37,7 @@ import {
 } from '../services/ticketStorageService';
 
 import {
+  ensureAllDepartmentCategories,
   ensureDepartmentCategory,
 } from '../services/departmentCategoryService';
 
@@ -912,6 +913,7 @@ export async function execute(
       await ensureClosedCategory(guild);
       await ensureArchiveCategory(guild);
       await ensureSettingsChannel(guild, supportCategory.id);
+      await ensureAllDepartmentCategories(guild);
 
       let config =
         await getGuildConfig(guild.id);
