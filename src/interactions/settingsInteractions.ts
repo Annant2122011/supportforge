@@ -1158,7 +1158,6 @@ async function normalRepair(guild: Guild): Promise<void> {
   const supportCategory = await ensureContainer(guild);
   await ensureTranscriptChannel(guild, supportCategory.id);
   await ensurePanelChannel(guild, supportCategory.id);
-  await ensureAllDepartmentCategories(guild);
   await ensureSettingsChannel(guild, supportCategory.id);
   await syncPanel(guild);
 }
