@@ -334,15 +334,35 @@ async function showAppearance(interaction: ButtonInteraction): Promise<void> {
 
 async function showUseCases(interaction: ButtonInteraction): Promise<void> {
   const presets = [
-    ['Technical Support', '🛠️'],
-    ['Sales', '💼'],
-    ['Account & Access', '🔐'],
-    ['Partnerships', '🤝'],
-    ['Reports & Abuse', '🚩'],
-    ['Refunds & Returns', '↩️'],
-    ['Product Support', '📦'],
-    ['VIP Support', '⭐'],
+    ['Technical Support', '🛠️', 'technical-support'],
+    ['Sales', '💼', 'sales'],
+    ['Account & Access', '🔐', 'account-access'],
+    ['Partnerships', '🤝', 'partnerships'],
+    ['Reports & Abuse', '🚩', 'reports-abuse'],
+    ['Refunds & Returns', '↩️', 'refunds-returns'],
+    ['Product Support', '📦', 'product-support'],
+    ['VIP Support', '⭐', 'vip-support'],
   ];
+
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+
+  for (let i = 0; i < presets.length; i += 4) {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        ...presets.slice(i, i + 4).map(([name, emoji, key]) =>
+          new ButtonBuilder()
+            .setCustomId('sf:settings:usecases:add:' + key)
+            .setLabel(name)
+            .setEmoji(emoji)
+            .setStyle(ButtonStyle.Secondary),
+        ),
+      ),
+    );
+  }
+
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()),
+  );
 
   await interaction.reply({
     embeds: [
@@ -350,18 +370,10 @@ async function showUseCases(interaction: ButtonInteraction): Promise<void> {
         .setTitle('🧩 Support Use Cases')
         .setDescription(
           'Optional department presets for common support operations. ' +
-          'They do not create any special business logic, so a server can rename, remove, or ignore them and build its own structure.',
+          'They do not create special business logic, so a server can rename, remove, or ignore them and build its own structure.',
         ),
     ],
-    components: presets.map(([name, emoji]) =>
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId('sf:settings:usecases:add:' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-'))
-          .setLabel(name)
-          .setEmoji(emoji)
-          .setStyle(ButtonStyle.Secondary),
-      ),
-    ),
+    components: rows,
     flags: MessageFlags.Ephemeral,
   });
 }
