@@ -1,7 +1,7 @@
 import { ChannelType, type Message, type TextChannel } from 'discord.js';
 import { getAdvancedSettings } from './advancedSettingsService';
 import { getField } from './ticketStateService';
-import { moveTicketPanelToBottom } from './ticketPanelService';
+import { collapseTicketPanelToRestoreButton } from './ticketPanelService';
 
 interface ActivityState { anchorMessageId: string; messages: number; visualLines: number; moving: boolean; }
 const states = new Map<string, ActivityState>();
@@ -68,7 +68,17 @@ export async function recordTicketMessageForPanel(message: Message): Promise<voi
   const reachedVisualBudget = state.visualLines >= settings.panelActivity.visualLineBudget;
   const reachedMessageBudget = state.messages >= settings.panelActivity.messageBudget && state.messages >= settings.panelActivity.minimumMessagesBeforeMove;
   if (!reachedVisualBudget && !reachedMessageBudget) return; if (state.moving) return; state.moving = true;
-  try { await moveTicketPanelToBottom(channel); resetPanelActivity(channel.id, channel.lastMessageId ?? panelMessageId); }
-  catch (error) { console.warn('⚠️ Automatic ticket panel repositioning skipped in ' + channel.id + ':', error); }
+  try {
+    await collapseTicketPanelToRestoreButton(channel);
+    resetPanelActivity(
+      channel.id,
+      channel.lastMessageId ?? panelMessageId,
+    );
+  } catch (error) {
+    console.warn(
+      '⚠️ Automatic ticket panel compaction skipped in ' + channel.id + ':',
+      error,
+    );
+  }
   finally { const current = states.get(channel.id); if (current) current.moving = false; }
 }
