@@ -49,7 +49,12 @@ import {
 
 import { logSettingsEvent } from '../services/auditLogService';
 import { performFactoryReset } from '../services/factoryResetService';
-import { runRetentionSweepForGuild } from '../services/ticketRetentionService';
+import {
+  approveRetentionDeletion,
+  declineRetentionDeletion,
+  runRetentionSweepForGuild,
+  startRetentionCountdownFromToday,
+} from '../services/ticketRetentionService';
 
 import {
   ensureContainer,
@@ -697,6 +702,132 @@ export async function handleSettingsInteraction(
       return true;
     }
 
+    if (id.startsWith('sf:settings:retention:approve:')) {
+      const scope = id.endsWith(':closed') ? 'closed' : 'archive';
+      await interaction.deferUpdate();
+
+      try {
+        const deleted = await approveRetentionDeletion(guild, scope, interaction.user.id);
+        await interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle('✅ Retention Deletion Approved')
+              .setDescription(
+                'Deleted **' + deleted + '** eligible ' +
+                (scope === 'closed' ? 'closed' : 'archived') +
+                ' ticket(s).',
+              ),
+          ],
+          components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+        });
+      } catch (error) {
+        await interaction.editReply(
+          '❌ ' + (error instanceof Error ? error.message : 'Retention approval failed.'),
+        );
+      }
+      return true;
+    }
+
+    if (id.startsWith('sf:settings:retention:decline:')) {
+      const scope = id.endsWith(':closed') ? 'closed' : 'archive';
+      await interaction.deferUpdate();
+
+      try {
+        await declineRetentionDeletion(guild, scope, interaction.user.id);
+        const settings = await getAdvancedSettings(guild.id);
+        const days = scope === 'closed'
+          ? settings.retention.closedDays
+          : settings.retention.archiveDays;
+
+        await interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle('✋ Retention Deletion Cancelled')
+              .setDescription(
+                'Deletion was cancelled. Choose what happens next:\n\n' +
+                '1. **Change the deletion period** so the current rule no longer applies.\n' +
+                '2. **Confirm whether to delete chats that are ' + days + ' days old, counting from today.**',
+              ),
+          ],
+          components: [
+            new ActionRowBuilder<ButtonBuilder>().addComponents(
+              new ButtonBuilder()
+                .setCustomId('sf:settings:retention:change-after-decline:' + scope)
+                .setLabel('Change Deletion Period')
+                .setEmoji('🕒')
+                .setStyle(ButtonStyle.Primary),
+              new ButtonBuilder()
+                .setCustomId('sf:settings:retention:from-today:' + scope)
+                .setLabel('Count From Today')
+                .setEmoji('📅')
+                .setStyle(ButtonStyle.Secondary),
+            ),
+          ],
+        });
+      } catch (error) {
+        await interaction.editReply(
+          '❌ ' + (error instanceof Error ? error.message : 'Retention cancellation failed.'),
+        );
+      }
+      return true;
+    }
+
+    if (id.startsWith('sf:settings:retention:change-after-decline:')) {
+      const settings = await getAdvancedSettings(guild.id);
+      await openModal(interaction, 'sf:settings:modal:retention', 'Ticket Retention', [
+        new TextInputBuilder()
+          .setCustomId('closed')
+          .setLabel('Closed ticket days (0 = never)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setValue(String(settings.retention.closedDays)),
+        new TextInputBuilder()
+          .setCustomId('archive')
+          .setLabel('Archived ticket days (0 = never)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setValue(String(settings.retention.archiveDays)),
+      ]);
+      return true;
+    }
+
+    if (id.startsWith('sf:settings:retention:from-today:')) {
+      const scope = id.endsWith(':closed') ? 'closed' : 'archive';
+      await interaction.deferUpdate();
+
+      try {
+        await startRetentionCountdownFromToday(guild, scope, interaction.user.id);
+        const settings = await getAdvancedSettings(guild.id);
+        const days = scope === 'closed'
+          ? settings.retention.closedDays
+          : settings.retention.archiveDays;
+
+        await interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle('📅 Retention Countdown Reset')
+              .setDescription(
+                'Deletion was cancelled and the **' + days +
+                '-day** countdown now starts from today. Existing eligible chats will not be deleted by this decision.',
+              ),
+          ],
+          components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+        });
+
+        await auditSettingsAction(
+          guild,
+          interaction,
+          'RETENTION_COUNTDOWN_RESET',
+          'Retention countdown for ' + scope + ' now starts from today.',
+        );
+      } catch (error) {
+        await interaction.editReply(
+          '❌ ' + (error instanceof Error ? error.message : 'Retention countdown change failed.'),
+        );
+      }
+      return true;
+    }
+
     if (id === 'sf:settings:storage') {
       await showStorage(interaction);
       return true;
@@ -950,6 +1081,10 @@ export async function handleSettingsInteraction(
       await updateAdvancedSettings(guild.id, (settings) => {
         settings.retention.closedDays = closed;
         settings.retention.archiveDays = archive;
+        settings.retention.closedEffectiveFrom = null;
+        settings.retention.archiveEffectiveFrom = null;
+        settings.retention.pendingApprovals.closed = null;
+        settings.retention.pendingApprovals.archive = null;
       });
       await refreshSettingsChannel(guild);
       await interaction.editReply({
@@ -958,6 +1093,30 @@ export async function handleSettingsInteraction(
       });
       await auditSettingsAction(guild, interaction, 'RETENTION_CHANGED', 'Closed retention=' + closed + ' days; archive retention=' + archive + ' days.');
       void runRetentionSweepForGuild(guild, { requestApproval: true });
+      return true;
+    }
+
+    if (interaction.customId === 'sf:settings:modal:reset') {
+      const confirmation = interaction.fields.getTextInputValue('confirmation').trim().toUpperCase();
+
+      if (confirmation !== 'DELETE SUPPORTFORGE') {
+        await reject(interaction, '❌ Final confirmation did not match. No data was deleted.');
+        return true;
+      }
+
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+      try {
+        await performFactoryReset(guild);
+        await interaction.editReply(
+          '✅ SupportForge has been completely reset. All SupportForge-managed messages, channels, categories, and stored data were deleted.',
+        );
+      } catch (error) {
+        console.error('❌ SupportForge factory reset failed:', error);
+        await interaction.editReply(
+          '❌ The complete reset encountered an error. Check the bot console for details.',
+        );
+      }
       return true;
     }
 
