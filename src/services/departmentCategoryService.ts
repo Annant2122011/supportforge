@@ -135,6 +135,11 @@ export async function ensureAllDepartmentCategories(
   const config = await getGuildConfig(guild.id);
 
   for (const department of Object.values(config.departments)) {
+    // Fresh installations keep the default General Support department in
+    // the main Support Forge category. Only explicitly provisioned
+    // department categories are repaired here.
+    if (!department.categoryId) continue;
+
     const category = await ensureDepartmentCategory(guild, department);
 
     if (department.categoryId !== category.id) {
