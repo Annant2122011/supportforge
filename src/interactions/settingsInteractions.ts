@@ -634,11 +634,50 @@ export async function handleSettingsInteraction(
       return true;
     }
 
-    if (id === 'sf:settings:storage:repair' || id === 'sf:settings:repair') {
+    if (id === 'sf:settings:repair') {
+      await showRepairSystem(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:repair:normal') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      await repairSystem(guild);
-      await refreshSettingsChannel(guild);
-      await interaction.editReply('✅ SupportForge storage, panel, transcript, and settings infrastructure has been repaired.');
+      try {
+        await normalRepair(guild);
+        await refreshSettingsChannel(guild);
+        await interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle('✅ Normal Repair Complete')
+              .setDescription('SupportForge normal infrastructure has been checked and repaired where required.'),
+          ],
+          components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+        });
+        await auditSettingsAction(guild, interaction, 'NORMAL_REPAIR', 'Normal Repair completed successfully.');
+      } catch (error) {
+        console.error('❌ Normal Repair failed:', error);
+        await interaction.editReply('❌ Normal Repair could not be completed. Check the bot console for details.');
+      }
+      return true;
+    }
+
+    if (id === 'sf:settings:repair:storage' || id === 'sf:settings:storage:repair') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        await storageRepair(guild);
+        await refreshSettingsChannel(guild);
+        await interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle('✅ Storage Repair Complete')
+              .setDescription('Closed and Archive storage categories and their persisted references have been checked and repaired where required.'),
+          ],
+          components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+        });
+        await auditSettingsAction(guild, interaction, 'STORAGE_REPAIR', 'Storage Repair completed successfully.');
+      } catch (error) {
+        console.error('❌ Storage Repair failed:', error);
+        await interaction.editReply('❌ Storage Repair could not be completed. Check the bot console for details.');
+      }
       return true;
     }
   }
