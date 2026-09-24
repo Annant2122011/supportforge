@@ -3,6 +3,7 @@ import {
   ButtonBuilder,
   ButtonInteraction,
   ButtonStyle,
+  ChannelType,
   EmbedBuilder,
   MessageFlags,
   ModalBuilder,
@@ -56,7 +57,7 @@ function isAdministrator(interaction: ButtonInteraction | StringSelectMenuIntera
 }
 
 function isSettingsChannel(interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction): boolean {
-  return interaction.channel?.type === 0 &&
+  return interaction.channel?.type === ChannelType.GuildText &&
     Boolean(interaction.channel.topic?.startsWith(SETTINGS_TOPIC_PREFIX));
 }
 
