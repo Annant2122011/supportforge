@@ -93,15 +93,15 @@ async function buildPanelEmbed(
 ): Promise<EmbedBuilder> {
   const settings = await getAdvancedSettings(guild.id);
   const lines = departments.length
-    ? departments.map((department) => `🎫 **${department.name}**`).join('\\n')
+    ? departments.map((department) => `🎫 **${department.name}**`).join('\n')
     : 'No ticket departments configured.';
 
   return new EmbedBuilder()
     .setTitle(settings.appearance.panelTitle)
     .setDescription(
-      `Welcome to **${guild.name}** support.\\n\\n` +
-        settings.appearance.panelDescription + '\\n\\n' +
-        `${lines}\\n\\n` +
+      `Welcome to **${guild.name}** support.\n\n` +
+        settings.appearance.panelDescription + '\n\n' +
+        `${lines}\n\n` +
         `🔒 Tickets are visible only to the ticket owner, assigned support staff, and administrators.`,
     )
     .setFooter({ text: settings.appearance.panelFooter })
