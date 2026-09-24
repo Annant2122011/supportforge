@@ -96,3 +96,8 @@ export async function removePersistedTicket(
   delete current.tickets[channelId];
   await persistState();
 }
+
+export function resetTicketPersistenceState(): void {
+  state = null;
+  writeQueue = Promise.resolve();
+}
