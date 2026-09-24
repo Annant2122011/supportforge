@@ -34,6 +34,7 @@ import {
 
 import { resetPanelActivity } from '../services/panelActivityService';
 import { getAdvancedSettings } from '../services/advancedSettingsService';
+import { ensureDepartmentCategory } from '../services/departmentCategoryService';
 
 import {
   getPersistedTicketStatus,
@@ -747,26 +748,18 @@ async function createTicket(
       return;
     }
 
-    const categoryId = config.supportCategoryId;
+    const departmentCategory = await withTimeout(
+      ensureDepartmentCategory(guild, department),
+      DISCORD_OPERATION_TIMEOUT_MS,
+      'Department category provisioning',
+    );
+    const categoryId = departmentCategory.id;
+    const auditParentCategoryId = config.supportCategoryId;
 
-    if (!categoryId) {
+    if (!auditParentCategoryId) {
       await replyError(
         interaction,
         '❌ SupportForge is not configured. Run `/supportforge setup` first.',
-      );
-      return;
-    }
-
-    const category =
-      guild.channels.cache.get(categoryId);
-
-    if (
-      !category ||
-      category.type !== ChannelType.GuildCategory
-    ) {
-      await replyError(
-        interaction,
-        '❌ The SupportForge category is missing. Run `/supportforge setup` to repair it.',
       );
       return;
     }
@@ -778,10 +771,7 @@ async function createTicket(
     let existing: TextChannel | undefined;
 
     for (const channel of guild.channels.cache.values()) {
-      if (
-        channel.type !== ChannelType.GuildText ||
-        channel.parentId !== categoryId
-      ) {
+      if (channel.type !== ChannelType.GuildText) {
         continue;
       }
 
@@ -1015,34 +1005,23 @@ async function createTicket(
       /*
        * Audit logging never blocks ticket creation.
        */
-      if (
-        isPremiumOrHigher(
-          config.tier,
-        )
-      ) {
+      if (isPremiumOrHigher(config.tier)) {
         void (async () => {
           try {
             await logTicketEvent(
               guild,
-              categoryId,
+              auditParentCategoryId,
               {
-                ticketNumber:
-                  String(
-                    number,
-                  ),
-                event:
-                  'ticket_created',
-                actor:
-                  interaction.user.tag,
-                detail:
-                  `Ticket created in department ${department.name}.`,
+                ticketNumber: String(number),
+                event: 'ticket_created',
+                actor: interaction.user.tag,
+                actorId: interaction.user.id,
+                actorName: interaction.user.tag,
+                detail: `Ticket created in department ${department.name} under ${departmentCategory.name}.`,
               },
             );
           } catch (error) {
-            console.error(
-              '⚠️ Ticket creation audit failed:',
-              error,
-            );
+            console.error('⚠️ Ticket creation audit failed:', error);
           }
         })();
       }
