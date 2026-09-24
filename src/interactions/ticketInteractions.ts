@@ -793,12 +793,6 @@ async function createTicket(
       );
       return;
     }
-      await replyError(
-        interaction,
-        '❌ SupportForge is not configured. Run `/supportforge setup` first.',
-      );
-      return;
-    }
 
     /*
      * Only active tickets block creation.
