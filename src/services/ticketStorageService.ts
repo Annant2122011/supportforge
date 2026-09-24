@@ -157,7 +157,7 @@ export async function ensureOptionalStatusCategory(
 
   const candidates = [...guild.channels.cache.values()]
     .filter(
-      (channel) =>
+      (channel): channel is CategoryChannel =>
         channel.type === ChannelType.GuildCategory &&
         channel.name.toLowerCase().startsWith(config.name.toLowerCase()),
     )
