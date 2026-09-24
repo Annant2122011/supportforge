@@ -864,7 +864,7 @@ export async function execute(
   if (
     (!group && subcommand === 'setup') ||
     group === 'category' ||
-    group === 'premium' ||
+    group === 'premium'
   ) {
     if (!isAdminLike(interaction)) {
       await interaction.reply({
