@@ -43,7 +43,6 @@ import {
 } from '../services/ticketStorageService';
 
 import {
-  ensureAllDepartmentCategories,
   ensureDepartmentCategory,
 } from '../services/departmentCategoryService';
 
