@@ -165,3 +165,9 @@ export async function allocateTicketNumber(guildId: string): Promise<number> {
 
   return allocated;
 }
+
+
+export function resetConfigState(): void {
+  state = null;
+  writeQueue = Promise.resolve();
+}
