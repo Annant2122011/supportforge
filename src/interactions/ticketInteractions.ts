@@ -30,12 +30,12 @@ import {
 import {
   ensureArchiveCategory,
   ensureClosedCategory,
+  getOptionalStatusCategory,
   moveTicketToCategory,
 } from '../services/ticketStorageService';
 
 import { resetPanelActivity } from '../services/panelActivityService';
 import { getAdvancedSettings } from '../services/advancedSettingsService';
-import { ensureDepartmentCategory } from '../services/departmentCategoryService';
 
 import {
   getPersistedTicketStatus,
@@ -749,24 +749,37 @@ async function createTicket(
       return;
     }
 
-    const departmentCategory = await withTimeout(
-      ensureDepartmentCategory(guild, department),
-      DISCORD_OPERATION_TIMEOUT_MS,
-      'Department category provisioning',
-    );
-    const categoryId = departmentCategory.id;
     const auditParentCategoryId = config.supportCategoryId;
-
-    if (department.categoryId !== categoryId) {
-      await updateGuildConfig(guild.id, (current) => {
-        const currentDepartment = current.departments[departmentId];
-        if (currentDepartment) {
-          currentDepartment.categoryId = categoryId;
-        }
-      });
+    if (!auditParentCategoryId) {
+      await replyError(
+        interaction,
+        '❌ SupportForge is not configured. Run `/supportforge setup` first.',
+      );
+      return;
     }
 
-    if (!auditParentCategoryId) {
+    const departmentCategory =
+      department.categoryId
+        ? guild.channels.cache.get(department.categoryId)
+        : undefined;
+
+    const categoryId =
+      departmentCategory?.type === ChannelType.GuildCategory
+        ? departmentCategory.id
+        : auditParentCategoryId;
+
+    const ticketCategory =
+      guild.channels.cache.get(categoryId);
+
+    if (
+      ticketCategory?.type !== ChannelType.GuildCategory
+    ) {
+      await replyError(
+        interaction,
+        '❌ The ticket destination category is missing. Run `/supportforge setup` to repair it.',
+      );
+      return;
+    }
       await replyError(
         interaction,
         '❌ SupportForge is not configured. Run `/supportforge setup` first.',
@@ -1473,16 +1486,35 @@ async function transition(
           channel,
           await ensureArchiveCategory(interaction.guild!),
         );
+      } else if (newStatus === 'claimed' || newStatus === 'pending') {
+        const optionalCategory = await getOptionalStatusCategory(
+          interaction.guild!,
+          newStatus,
+        );
+
+        if (optionalCategory) {
+          await moveTicketToCategory(channel, optionalCategory);
+        }
       } else if (newStatus === 'reopened' || newStatus === 'open') {
         const currentConfig = await getGuildConfig(interaction.guild!.id);
-        if (currentConfig.supportCategoryId) {
-          const supportCategory = interaction.guild!.channels.cache.get(
-            currentConfig.supportCategoryId,
-          );
+        const departmentId = getField(oldTopic, 'department');
+        const departmentConfig = departmentId
+          ? currentConfig.departments[departmentId]
+          : undefined;
 
-          if (supportCategory?.type === ChannelType.GuildCategory) {
-            await moveTicketToCategory(channel, supportCategory);
-          }
+        const departmentCategory = departmentConfig?.categoryId
+          ? interaction.guild!.channels.cache.get(departmentConfig.categoryId)
+          : undefined;
+
+        const destination =
+          departmentCategory?.type === ChannelType.GuildCategory
+            ? departmentCategory
+            : currentConfig.supportCategoryId
+              ? interaction.guild!.channels.cache.get(currentConfig.supportCategoryId)
+              : undefined;
+
+        if (destination?.type === ChannelType.GuildCategory) {
+          await moveTicketToCategory(channel, destination);
         }
       }
     } catch (storageError) {
