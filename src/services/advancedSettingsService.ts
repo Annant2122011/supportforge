@@ -66,7 +66,7 @@ const DATA_DIR = join(process.cwd(), 'data');
 const SETTINGS_PATH = join(DATA_DIR, 'advanced-settings.json');
 
 const DEFAULTS: AdvancedGuildSettings = {
-  version: 2,
+  version: 3,
   settingsChannelId: null,
   closedCategoryId: null,
   archiveCategoryId: null,
@@ -147,12 +147,12 @@ async function load(): Promise<SettingsFile> {
     const parsed = JSON.parse(raw) as Partial<SettingsFile>;
 
     state = {
-      version: 2,
+      version: 3,
       guilds: parsed.guilds ?? {},
     };
   } catch {
     state = {
-      version: 2,
+      version: 3,
       guilds: {},
     };
 
@@ -168,7 +168,7 @@ function normalizeExistingSettings(
   return {
     ...cloneDefaults(),
     ...settings,
-    version: 2,
+    version: 3,
     panelActivity: {
       ...DEFAULTS.panelActivity,
       ...(settings.panelActivity ?? {}),
