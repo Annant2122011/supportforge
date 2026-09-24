@@ -15,8 +15,7 @@ async function ensureBucket(
   baseName: string,
   key:
     | 'closedCategoryId'
-    | 'archiveCategoryId'
-    | 'billingCategoryId',
+    | 'archiveCategoryId',
 ): Promise<CategoryChannel> {
   const settings = await getAdvancedSettings(guild.id);
   const saved = settings[key];
@@ -100,12 +99,6 @@ export async function ensureArchiveCategory(
   guild: Guild,
 ): Promise<CategoryChannel> {
   return ensureBucket(guild, 'SupportForge • Archive', 'archiveCategoryId');
-}
-
-export async function ensureBillingCategory(
-  guild: Guild,
-): Promise<CategoryChannel> {
-  return ensureBucket(guild, 'SupportForge • Billing', 'billingCategoryId');
 }
 
 export async function moveTicketToCategory(
