@@ -45,6 +45,7 @@ export function buildSettingsDashboardComponents(): ActionRowBuilder<ButtonBuild
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       settingsButton('sf:settings:appearance', 'Appearance', ButtonStyle.Secondary, '🎨'),
       settingsButton('sf:settings:storage', 'Storage', ButtonStyle.Secondary, '🗄️'),
+      settingsButton('sf:settings:usecases', 'Use Cases', ButtonStyle.Secondary, '🧩'),
       settingsButton('sf:settings:repair', 'Repair System', ButtonStyle.Secondary, '🛠️'),
       settingsButton('sf:settings:refresh', 'Refresh', ButtonStyle.Secondary, '🔄'),
     ),
