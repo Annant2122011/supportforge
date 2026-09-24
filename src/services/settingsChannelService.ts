@@ -235,7 +235,7 @@ async function refreshSettingsDashboard(
 
   const recent = await channel.messages.fetch({ limit: 50 }).catch(() => null);
   const dashboards = recent
-    ? recent.filter(
+    ? [...recent.values()].filter(
         (message) =>
           message.author.id === channel.client.user?.id &&
           message.embeds.some((item) => item.title === SETTINGS_TITLE),
