@@ -154,8 +154,9 @@ export async function ensureSettingsChannel(
 
 async function refreshSettingsDashboard(
   channel: TextChannel,
-  settings = await getAdvancedSettings(channel.guild.id),
+  settings?: Awaited<ReturnType<typeof getAdvancedSettings>>,
 ): Promise<void> {
+  const resolvedSettings = settings ?? (await getAdvancedSettings(channel.guild.id));
   const config = await getGuildConfig(channel.guild.id);
   const departmentCount = Object.keys(config.departments).length;
 
@@ -170,11 +171,11 @@ async function refreshSettingsDashboard(
       {
         name: '🎛️ Panel',
         value:
-          (settings.panelActivity.enabled ? 'Enabled' : 'Disabled') +
+          (resolvedSettings.panelActivity.enabled ? 'Enabled' : 'Disabled') +
           ' • ' +
-          settings.panelActivity.visualLineBudget +
+          resolvedSettings.panelActivity.visualLineBudget +
           ' visual lines • ' +
-          settings.panelActivity.messageBudget +
+          resolvedSettings.panelActivity.messageBudget +
           ' message safety cap',
         inline: false,
       },
@@ -182,7 +183,7 @@ async function refreshSettingsDashboard(
         name: '🎟️ Ticket defaults',
         value:
           'Default priority: **' +
-          settings.ticketDefaults.priority +
+          resolvedSettings.ticketDefaults.priority +
           '**',
         inline: true,
       },
@@ -190,7 +191,7 @@ async function refreshSettingsDashboard(
         name: '🏷️ Custom tags',
         value:
           '**' +
-          Object.keys(settings.customTags).length +
+          Object.keys(resolvedSettings.customTags).length +
           '** configured',
         inline: true,
       },
@@ -203,15 +204,15 @@ async function refreshSettingsDashboard(
         name: '🧹 Retention',
         value:
           'Closed: **' +
-          (settings.retention.closedDays || 'Never') +
+          (resolvedSettings.retention.closedDays || 'Never') +
           '** • Archive: **' +
-          (settings.retention.archiveDays || 'Never') +
+          (resolvedSettings.retention.archiveDays || 'Never') +
           '** days',
         inline: false,
       },
       {
         name: '📋 Configuration snapshot',
-        value: buildSettingsSummary(settings).slice(0, 1024),
+        value: buildSettingsSummary(resolvedSettings).slice(0, 1024),
         inline: false,
       },
     )
