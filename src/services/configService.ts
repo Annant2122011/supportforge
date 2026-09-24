@@ -8,6 +8,7 @@ export interface DepartmentConfig {
   id: string;
   name: string;
   staffRoleId: string | null;
+  categoryId?: string | null;
   createdAt: string;
 }
 
@@ -89,6 +90,19 @@ async function persistState(): Promise<void> {
 export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
   const current = await loadState();
   current.guilds[guildId] ??= cloneDefaultConfig();
+
+  let migrated = false;
+  for (const department of Object.values(current.guilds[guildId].departments)) {
+    if (department.categoryId === undefined) {
+      department.categoryId = null;
+      migrated = true;
+    }
+  }
+
+  if (migrated) {
+    await persistState();
+  }
+
   return current.guilds[guildId];
 }
 
