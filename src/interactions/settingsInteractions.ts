@@ -405,8 +405,14 @@ export async function handleSettingsInteraction(
     }
 
     if (id === 'sf:settings:refresh') {
-      await showHome(interaction);
-      await auditSettingsAction(guild, interaction, 'SETTINGS_REFRESH', 'Settings dashboard refreshed.');
+      await interaction.deferUpdate();
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(
+        guild,
+        interaction,
+        'SETTINGS_REFRESH',
+        'Settings dashboard refreshed and the current dashboard message was replaced with the latest persisted configuration.',
+      );
       return true;
     }
 
