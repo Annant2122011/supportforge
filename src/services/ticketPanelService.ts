@@ -229,7 +229,9 @@ export const RESTORE_PANEL_CUSTOM_ID = 'ticket:panel:restore-move';
 function isRestorePanelMessage(message: Message): boolean {
   return message.components.some((row) =>
     row.components.some(
-      (component) => component.customId === RESTORE_PANEL_CUSTOM_ID,
+      (component) =>
+        'customId' in component &&
+        component.customId === RESTORE_PANEL_CUSTOM_ID,
     ),
   );
 }
