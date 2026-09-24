@@ -33,6 +33,7 @@ import {
 } from '../services/ticketStorageService';
 
 import { resetPanelActivity } from '../services/panelActivityService';
+import { getAdvancedSettings } from '../services/advancedSettingsService';
 
 import {
   getPersistedTicketStatus,
@@ -852,6 +853,8 @@ async function createTicket(
     const now =
       new Date().toISOString();
 
+    const advancedSettings = await getAdvancedSettings(guild.id);
+
     const cleanSubject =
       subject.replace(
         /\s+/g,
@@ -871,7 +874,7 @@ async function createTicket(
       `owner=${interaction.user.id}`,
       `department=${departmentId}`,
       `staff=${department.staffRoleId ?? 'none'}`,
-      'priority=normal',
+      `priority=${advancedSettings.ticketDefaults.priority}`,
       'tags=',
       'users=',
       'claimed_by=',
