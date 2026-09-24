@@ -33,6 +33,7 @@ import {
 import {
   buildSettingsDashboardComponents,
   refreshSettingsChannel,
+  ensureSettingsChannel,
 } from '../services/settingsChannelService';
 
 import {
@@ -1152,6 +1153,36 @@ export async function handleSettingsInteraction(
 
 async function showHomeAfterUpdate(interaction: ButtonInteraction): Promise<void> {
   await showHome(interaction);
+}
+
+async function showRepairSystem(interaction: ButtonInteraction): Promise<void> {
+  await renderSettingsView(
+    interaction,
+    [
+      new EmbedBuilder()
+        .setTitle('🛠️ Repair System')
+        .setDescription(
+          'SupportForge can repair its managed infrastructure without resetting ticket data. ' +
+          'Normal Repair checks the main container, panel, transcript, settings channel, and explicitly routed department categories. ' +
+          'Storage Repair only verifies the Closed and Archive storage categories.',
+        ),
+    ],
+    [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId('sf:settings:repair:normal')
+          .setLabel('Normal Repair')
+          .setEmoji('🔧')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('sf:settings:repair:storage')
+          .setLabel('Storage Repair')
+          .setEmoji('🗄️')
+          .setStyle(ButtonStyle.Secondary),
+        backButton(),
+      ),
+    ],
+  );
 }
 
 async function normalRepair(guild: Guild): Promise<void> {
