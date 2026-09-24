@@ -17,6 +17,7 @@ import {
   allocateTicketNumber,
   getGuildConfig,
   isPremiumOrHigher,
+  updateGuildConfig,
 } from '../services/configService';
 
 import { generateTranscript } from '../services/transcriptService';
@@ -755,6 +756,15 @@ async function createTicket(
     );
     const categoryId = departmentCategory.id;
     const auditParentCategoryId = config.supportCategoryId;
+
+    if (department.categoryId !== categoryId) {
+      await updateGuildConfig(guild.id, (current) => {
+        const currentDepartment = current.departments[departmentId];
+        if (currentDepartment) {
+          currentDepartment.categoryId = categoryId;
+        }
+      });
+    }
 
     if (!auditParentCategoryId) {
       await replyError(
