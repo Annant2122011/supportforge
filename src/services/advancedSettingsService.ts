@@ -359,3 +359,8 @@ export async function resetAdvancedSettings(): Promise<void> {
   };
   await persist();
 }
+
+export function resetAdvancedSettingsState(): void {
+  state = null;
+  writeQueue = Promise.resolve();
+}
