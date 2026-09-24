@@ -36,6 +36,7 @@ import {
 
 import { resetPanelActivity } from '../services/panelActivityService';
 import { getAdvancedSettings } from '../services/advancedSettingsService';
+import { ensureDepartmentCategory } from '../services/departmentCategoryService';
 
 import {
   getPersistedTicketStatus,
@@ -758,10 +759,22 @@ async function createTicket(
       return;
     }
 
-    const departmentCategory =
-      department.categoryId
-        ? guild.channels.cache.get(department.categoryId)
-        : undefined;
+    let departmentCategory:
+      | import('discord.js').CategoryChannel
+      | undefined;
+
+    if (department.categoryId) {
+      departmentCategory = await ensureDepartmentCategory(guild, department);
+
+      if (department.categoryId !== departmentCategory.id) {
+        await updateGuildConfig(guild.id, (current) => {
+          const currentDepartment = current.departments[departmentId];
+          if (currentDepartment) {
+            currentDepartment.categoryId = departmentCategory!.id;
+          }
+        });
+      }
+    }
 
     const categoryId =
       departmentCategory?.type === ChannelType.GuildCategory
