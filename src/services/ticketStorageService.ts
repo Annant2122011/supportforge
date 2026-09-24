@@ -138,35 +138,50 @@ export async function ensureOptionalStatusCategory(
   const settings = await getAdvancedSettings(guild.id);
   const config = OPTIONAL_STATUS_CATEGORY_CONFIG[status];
   const savedId = settings.statusCategories[config.setting];
+  const bot = guild.members.me;
+
+  if (!bot) {
+    throw new Error('SupportForge bot member could not be resolved.');
+  }
 
   const saved = savedId
     ? guild.channels.cache.get(savedId)
     : undefined;
 
-  if (saved?.type === ChannelType.GuildCategory) {
+  if (
+    saved?.type === ChannelType.GuildCategory &&
+    saved.children.cache.size < MAX_CHANNELS_PER_CATEGORY
+  ) {
     return saved;
   }
 
-  const existing = guild.channels.cache.find(
-    (channel) =>
-      channel.type === ChannelType.GuildCategory &&
-      channel.name.toLowerCase() === config.name.toLowerCase(),
+  const candidates = [...guild.channels.cache.values()]
+    .filter(
+      (channel) =>
+        channel.type === ChannelType.GuildCategory &&
+        channel.name.toLowerCase().startsWith(config.name.toLowerCase()),
+    )
+    .sort((a, b) => a.position - b.position);
+
+  const available = candidates.find(
+    (category) => category.children.cache.size < MAX_CHANNELS_PER_CATEGORY,
   );
 
-  if (existing?.type === ChannelType.GuildCategory) {
+  if (available) {
     await updateAdvancedSettings(guild.id, (current) => {
-      current.statusCategories[config.setting] = existing.id;
+      current.statusCategories[config.setting] = available.id;
     });
-    return existing;
+    return available;
   }
 
-  const bot = guild.members.me;
-  if (!bot) {
-    throw new Error('SupportForge bot member could not be resolved.');
-  }
+  const suffix = candidates.length + 1;
+  const name =
+    suffix === 1
+      ? config.name
+      : config.name.slice(0, 100 - String(suffix).length - 1) + ' ' + suffix;
 
   const category = await guild.channels.create({
-    name: config.name,
+    name,
     type: ChannelType.GuildCategory,
     permissionOverwrites: [
       {
