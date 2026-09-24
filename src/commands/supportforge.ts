@@ -37,6 +37,13 @@ import {
 } from '../services/ticketStorageService';
 
 import {
+  ensureAllDepartmentCategories,
+  ensureDepartmentCategory,
+} from '../services/departmentCategoryService';
+
+import { logSettingsEvent } from '../services/auditLogService';
+
+import {
   ensureSettingsChannel,
 } from '../services/settingsChannelService';
 
@@ -937,6 +944,7 @@ export async function execute(
           );
       }
 
+      await ensureAllDepartmentCategories(guild);
       await syncPanel(guild);
 
       await interaction.editReply(
@@ -1019,6 +1027,12 @@ export async function execute(
       const id =
         newDepartmentId();
 
+      const category = await ensureDepartmentCategory(guild, {
+        name,
+        staffRoleId: role?.id ?? null,
+        categoryId: null,
+      });
+
       await updateGuildConfig(
         guild.id,
         (current) => {
@@ -1027,6 +1041,7 @@ export async function execute(
             name,
             staffRoleId:
               role?.id ?? null,
+            categoryId: category.id,
             createdAt:
               new Date().toISOString(),
           };
@@ -1050,9 +1065,19 @@ export async function execute(
           role
             ? ` for ${role}`
             : ''
-        }.`,
+        } with category ${category}.`,
       );
 
+      void logSettingsEvent(
+        guild,
+        supportCategory.id,
+        {
+          action: 'DEPARTMENT_ADDED',
+          actorId: interaction.user.id,
+          actorName: interaction.user.tag,
+          detail: 'Added department ' + name + ' with category ' + category.name + '.',
+        },
+      ).catch((error) => console.warn('⚠️ Category command audit failed:', error));
       return;
     }
 
@@ -1187,8 +1212,21 @@ export async function execute(
       await syncPanel(guild);
 
       await interaction.editReply(
-        `✅ Department **${department.name}** removed.`,
+        `✅ Department **${department.name}** removed. Its Discord category was retained.`,
       );
+
+      if (config.supportCategoryId) {
+        void logSettingsEvent(
+          guild,
+          config.supportCategoryId,
+          {
+            action: 'DEPARTMENT_REMOVED',
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Removed department ' + department.name + '. Its Discord category was retained.',
+          },
+        ).catch((error) => console.warn('⚠️ Category removal audit failed:', error));
+      }
 
       return;
     }
