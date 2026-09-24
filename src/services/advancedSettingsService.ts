@@ -361,7 +361,8 @@ export async function resetAdvancedSettings(): Promise<void> {
   await persist();
 }
 
-export function resetAdvancedSettingsState(): void {
+export async function resetAdvancedSettingsState(): Promise<void> {
+  await writeQueue.catch(() => undefined);
   state = null;
   writeQueue = Promise.resolve();
 }
