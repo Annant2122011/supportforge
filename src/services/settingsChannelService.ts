@@ -40,12 +40,12 @@ export function buildSettingsDashboardComponents(): ActionRowBuilder<ButtonBuild
       settingsButton('sf:settings:defaults', 'Ticket Defaults', ButtonStyle.Secondary, '🎟️'),
       settingsButton('sf:settings:tags', 'Custom Tags', ButtonStyle.Secondary, '🏷️'),
       settingsButton('sf:settings:departments', 'Departments', ButtonStyle.Secondary, '📂'),
-      settingsButton('sf:settings:retention', 'Retention', ButtonStyle.Secondary, '🧹'),
+      settingsButton('sf:settings:usecases', 'Use Cases', ButtonStyle.Secondary, '🧩'),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
+      settingsButton('sf:settings:retention', 'Retention', ButtonStyle.Secondary, '🧹'),
       settingsButton('sf:settings:appearance', 'Appearance', ButtonStyle.Secondary, '🎨'),
       settingsButton('sf:settings:storage', 'Storage', ButtonStyle.Secondary, '🗄️'),
-      settingsButton('sf:settings:usecases', 'Use Cases', ButtonStyle.Secondary, '🧩'),
       settingsButton('sf:settings:repair', 'Repair System', ButtonStyle.Secondary, '🛠️'),
       settingsButton('sf:settings:refresh', 'Refresh', ButtonStyle.Secondary, '🔄'),
     ),
@@ -164,8 +164,9 @@ async function refreshSettingsDashboard(
     .setTitle(SETTINGS_TITLE)
     .setDescription(
       'Administrative control center for SupportForge.\n\n' +
-        '**Everything below is button-driven.** No configuration slash commands are required.\n\n' +
-        'Use the buttons to configure ticket behavior, custom tags, departments, retention, appearance, and system repair.',
+        '**Button-driven configuration:** select a section, make a change, and return to this dashboard.\n' +
+        'Every saved Settings action records the administrator and timestamp in the audit log.\n\n' +
+        'Use **Refresh** when you want to re-read the latest persisted configuration.',
     )
     .addFields(
       {
@@ -207,7 +208,15 @@ async function refreshSettingsDashboard(
           (resolvedSettings.retention.closedDays || 'Never') +
           '** • Archive: **' +
           (resolvedSettings.retention.archiveDays || 'Never') +
-          '** days',
+          '**',
+        inline: false,
+      },
+      {
+        name: '🎨 Appearance',
+        value:
+          'Panel title: **' +
+          resolvedSettings.appearance.panelTitle.slice(0, 80) +
+          '**',
         inline: false,
       },
       {
@@ -222,17 +231,25 @@ async function refreshSettingsDashboard(
     .setTimestamp();
 
   const recent = await channel.messages.fetch({ limit: 50 }).catch(() => null);
-  const dashboard = recent?.find(
-    (message) =>
-      message.author.id === channel.client.user?.id &&
-      message.embeds.some((item) => item.title === SETTINGS_TITLE),
-  );
+  const dashboards = recent
+    ? recent.filter(
+        (message) =>
+          message.author.id === channel.client.user?.id &&
+          message.embeds.some((item) => item.title === SETTINGS_TITLE),
+      )
+    : [];
+
+  const dashboard = dashboards[0];
 
   if (dashboard) {
     await dashboard.edit({
       embeds: [embed],
       components: buildSettingsDashboardComponents(),
     });
+
+    for (const duplicate of dashboards.slice(1)) {
+      await duplicate.delete().catch(() => undefined);
+    }
   } else {
     await channel.send({
       embeds: [embed],
