@@ -309,7 +309,7 @@ async function ensureTranscriptChannel(
   return channel;
 }
 
-async function ensurePanelChannel(
+export async function ensurePanelChannel(
   guild: Guild,
   parentId: string,
 ): Promise<TextChannel> {
