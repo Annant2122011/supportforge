@@ -412,3 +412,8 @@ export function startAuditDailySummaryScheduler(client: Client): void {
 
   dailyScheduler.unref();
 }
+
+export function resetAuditLogState(): void {
+  state = null;
+  writeQueue = Promise.resolve();
+}
