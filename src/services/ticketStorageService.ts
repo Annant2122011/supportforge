@@ -113,3 +113,103 @@ export async function moveTicketToCategory(
     'SupportForge ticket storage transition',
   );
 }
+
+
+export type OptionalStatusCategory = 'claimed' | 'pending';
+
+const OPTIONAL_STATUS_CATEGORY_CONFIG: Record<
+  OptionalStatusCategory,
+  { setting: 'claimedCategoryId' | 'pendingCategoryId'; name: string }
+> = {
+  claimed: {
+    setting: 'claimedCategoryId',
+    name: 'SupportForge.Claimed tickets',
+  },
+  pending: {
+    setting: 'pendingCategoryId',
+    name: 'SupportForge.Pending tickets',
+  },
+};
+
+export async function ensureOptionalStatusCategory(
+  guild: Guild,
+  status: OptionalStatusCategory,
+): Promise<CategoryChannel> {
+  const settings = await getAdvancedSettings(guild.id);
+  const config = OPTIONAL_STATUS_CATEGORY_CONFIG[status];
+  const savedId = settings.statusCategories[config.setting];
+
+  const saved = savedId
+    ? guild.channels.cache.get(savedId)
+    : undefined;
+
+  if (saved?.type === ChannelType.GuildCategory) {
+    return saved;
+  }
+
+  const existing = guild.channels.cache.find(
+    (channel) =>
+      channel.type === ChannelType.GuildCategory &&
+      channel.name.toLowerCase() === config.name.toLowerCase(),
+  );
+
+  if (existing?.type === ChannelType.GuildCategory) {
+    await updateAdvancedSettings(guild.id, (current) => {
+      current.statusCategories[config.setting] = existing.id;
+    });
+    return existing;
+  }
+
+  const bot = guild.members.me;
+  if (!bot) {
+    throw new Error('SupportForge bot member could not be resolved.');
+  }
+
+  const category = await guild.channels.create({
+    name: config.name,
+    type: ChannelType.GuildCategory,
+    permissionOverwrites: [
+      {
+        id: guild.roles.everyone.id,
+        deny: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+        ],
+      },
+      {
+        id: bot.id,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+          PermissionFlagsBits.ManageChannels,
+          PermissionFlagsBits.ManageMessages,
+          PermissionFlagsBits.EmbedLinks,
+          PermissionFlagsBits.AttachFiles,
+        ],
+      },
+    ],
+    reason: 'SupportForge optional ticket status category',
+  });
+
+  await updateAdvancedSettings(guild.id, (current) => {
+    current.statusCategories[config.setting] = category.id;
+  });
+
+  return category;
+}
+
+export async function getOptionalStatusCategory(
+  guild: Guild,
+  status: OptionalStatusCategory,
+): Promise<CategoryChannel | null> {
+  const settings = await getAdvancedSettings(guild.id);
+  const setting = OPTIONAL_STATUS_CATEGORY_CONFIG[status].setting;
+  const id = settings.statusCategories[setting];
+
+  if (!id) return null;
+
+  const channel = guild.channels.cache.get(id);
+  return channel?.type === ChannelType.GuildCategory ? channel : null;
+}
