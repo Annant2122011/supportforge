@@ -26,6 +26,7 @@ import { recordTicketMessageForPanel } from './services/panelActivityService';
 
 import { startTicketRetentionScheduler } from './services/ticketRetentionService';
 import { removeLegacyCustomCommands } from './services/advancedSettingsService';
+import { startAuditDailySummaryScheduler } from './services/auditLogService';
 import { handleSettingsInteraction } from './interactions/settingsInteractions';
 
 const token = process.env.DISCORD_TOKEN;
@@ -53,6 +54,7 @@ client.once('clientReady', (readyClient) => {
     `✅ SupportForge online as ${readyClient.user.tag}`,
   );
   startTicketRetentionScheduler(client);
+  startAuditDailySummaryScheduler(client);
   void Promise.all(
     client.guilds.cache.map((guild) => removeLegacyCustomCommands(guild)),
   ).catch((error) => console.warn('⚠️ Legacy settings command cleanup failed:', error));
