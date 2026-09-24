@@ -4,6 +4,7 @@ import {
   ButtonStyle,
   EmbedBuilder,
   type ButtonInteraction,
+  type Message,
   type TextChannel,
 } from 'discord.js';
 import { getGuildConfig, type GuildConfig } from './configService';
@@ -223,6 +224,98 @@ export function getTicketChannelName(
   return `ticket-${ticketNumber}-${channelStatus}`;
 }
 
+export const RESTORE_PANEL_CUSTOM_ID = 'ticket:panel:restore-move';
+
+function isRestorePanelMessage(message: Message): boolean {
+  return message.components.some((row) =>
+    row.components.some(
+      (component) => component.customId === RESTORE_PANEL_CUSTOM_ID,
+    ),
+  );
+}
+
+function restorePanelButton(): ButtonBuilder {
+  return new ButtonBuilder()
+    .setCustomId(RESTORE_PANEL_CUSTOM_ID)
+    .setLabel('Restore/Move Panel')
+    .setEmoji('⬇️')
+    .setStyle(ButtonStyle.Secondary);
+}
+
+async function findCurrentPanelAndRestoreControl(
+  channel: TextChannel,
+  panelTitle: string,
+  messageId: string | undefined,
+): Promise<{ panel?: Message; restore?: Message }> {
+  const recent = await channel.messages.fetch({ limit: 100 });
+
+  const panel =
+    (messageId ? recent.get(messageId) : undefined) ??
+    recent.find(
+      (message) =>
+        message.author.id === channel.client.user?.id &&
+        message.embeds.some((embed) => embed.title === panelTitle),
+    );
+
+  const restore = recent.find(
+    (message) =>
+      message.author.id === channel.client.user?.id &&
+      isRestorePanelMessage(message),
+  );
+
+  return { panel, restore };
+}
+
+export async function collapseTicketPanelToRestoreButton(
+  channel: TextChannel,
+): Promise<void> {
+  const topic = channel.topic ?? '';
+
+  if (!topic.startsWith('supportforge:ticket')) {
+    throw new Error('This channel is not a SupportForge ticket.');
+  }
+
+  const ticketNumber = getField(topic, 'number') ?? 'unknown';
+  const panelTitle = `🎫 SupportForge Ticket #${ticketNumber}`;
+  const messageId = getField(topic, 'message');
+
+  const { panel, restore } = await findCurrentPanelAndRestoreControl(
+    channel,
+    panelTitle,
+    messageId,
+  );
+
+  // Avoid creating repeated restore controls when the channel is already compacted.
+  if (!panel && restore) {
+    return;
+  }
+
+  const restoreMessage = await channel.send({
+    components: [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        restorePanelButton(),
+      ),
+    ],
+  });
+
+  if (panel && panel.id !== restoreMessage.id) {
+    await panel.delete().catch((error) => {
+      console.warn(
+        `⚠️ Could not remove full ticket panel in ${channel.id}:`,
+        error,
+      );
+    });
+  }
+
+  if (restore && restore.id !== restoreMessage.id) {
+    await restore.delete().catch(() => undefined);
+  }
+
+  console.log(
+    `📦 Ticket #${ticketNumber} panel collapsed to Restore/Move Panel.`,
+  );
+}
+
 export async function moveTicketPanelToBottom(
   channel: TextChannel,
 ): Promise<void> {
@@ -236,22 +329,14 @@ export async function moveTicketPanelToBottom(
   const config = await getGuildConfig(channel.guild.id);
   const ticketNumber = getField(topic, 'number') ?? 'unknown';
   const panelTitle = `🎫 SupportForge Ticket #${ticketNumber}`;
-
   const messageId = getField(topic, 'message');
-  let currentPanel =
-    messageId
-      ? channel.messages.cache.get(messageId) ??
-        await channel.messages.fetch(messageId).catch(() => undefined)
-      : undefined;
 
-  if (!currentPanel) {
-    const recent = await channel.messages.fetch({ limit: 100 });
-    currentPanel = recent.find(
-      (message) =>
-        message.author.id === channel.client.user?.id &&
-        message.embeds.some((embed) => embed.title === panelTitle),
+  const { panel: currentPanel, restore: restoreControl } =
+    await findCurrentPanelAndRestoreControl(
+      channel,
+      panelTitle,
+      messageId,
     );
-  }
 
   const newPanel = await channel.send({
     embeds: [
@@ -272,6 +357,10 @@ export async function moveTicketPanelToBottom(
         error,
       );
     });
+  }
+
+  if (restoreControl && restoreControl.id !== newPanel.id) {
+    await restoreControl.delete().catch(() => undefined);
   }
 
   console.log(
