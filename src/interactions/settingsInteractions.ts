@@ -332,6 +332,40 @@ async function showAppearance(interaction: ButtonInteraction): Promise<void> {
   });
 }
 
+async function showUseCases(interaction: ButtonInteraction): Promise<void> {
+  const presets = [
+    ['Technical Support', '🛠️'],
+    ['Sales', '💼'],
+    ['Account & Access', '🔐'],
+    ['Partnerships', '🤝'],
+    ['Reports & Abuse', '🚩'],
+    ['Refunds & Returns', '↩️'],
+    ['Product Support', '📦'],
+    ['VIP Support', '⭐'],
+  ];
+
+  await interaction.reply({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle('🧩 Support Use Cases')
+        .setDescription(
+          'Optional department presets for common support operations. ' +
+          'They do not create any special business logic, so a server can rename, remove, or ignore them and build its own structure.',
+        ),
+    ],
+    components: presets.map(([name, emoji]) =>
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId('sf:settings:usecases:add:' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-'))
+          .setLabel(name)
+          .setEmoji(emoji)
+          .setStyle(ButtonStyle.Secondary),
+      ),
+    ),
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
 async function showStorage(interaction: ButtonInteraction): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
 
@@ -561,6 +595,54 @@ export async function handleSettingsInteraction(
         new TextInputBuilder().setCustomId('description').setLabel('Panel description').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1500).setValue(settings.appearance.panelDescription),
         new TextInputBuilder().setCustomId('footer').setLabel('Panel footer').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(2048).setValue(settings.appearance.panelFooter),
       ]);
+      return true;
+    }
+
+    if (id === 'sf:settings:usecases') {
+      await showUseCases(interaction);
+      return true;
+    }
+
+    if (id.startsWith('sf:settings:usecases:add:')) {
+      const key = id.slice('sf:settings:usecases:add:'.length);
+      const presetMap: Record<string, string> = {
+        'technical-support': 'Technical Support',
+        'sales': 'Sales',
+        'account-access': 'Account & Access',
+        'partnerships': 'Partnerships',
+        'reports-abuse': 'Reports & Abuse',
+        'refunds-returns': 'Refunds & Returns',
+        'product-support': 'Product Support',
+        'vip-support': 'VIP Support',
+      };
+
+      const name = presetMap[key];
+      if (!name) {
+        await reject(interaction, '❌ Unknown support use case.');
+        return true;
+      }
+
+      const config = await getGuildConfig(guild.id);
+      if (Object.values(config.departments).some((department) => department.name.toLowerCase() === name.toLowerCase())) {
+        await reject(interaction, 'ℹ️ **' + name + '** is already configured.');
+        return true;
+      }
+
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const departmentId = newDepartmentId();
+
+      await updateGuildConfig(guild.id, (current) => {
+        current.departments[departmentId] = {
+          id: departmentId,
+          name,
+          staffRoleId: null,
+          createdAt: new Date().toISOString(),
+        };
+      });
+
+      await syncPanel(guild);
+      await refreshSettingsChannel(guild);
+      await interaction.editReply('✅ Added **' + name + '**. Assign its staff role through the department configuration when needed.');
       return true;
     }
 
