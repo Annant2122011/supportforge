@@ -307,7 +307,12 @@ export async function runRetentionSweepForGuild(
     if (eligible.length === 0) continue;
 
     // Never silently delete. A pending approval freezes the batch until the user acts.
-    if (settings.retention.pendingApprovals[scope]) continue;
+    if (
+      settings.retention.pendingApprovals[scope] &&
+      settings.retention.pendingApprovals[scope].status === 'pending'
+    ) {
+      continue;
+    }
 
     if (options.requestApproval ?? true) {
       await requestRetentionApproval(
