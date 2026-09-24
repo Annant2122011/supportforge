@@ -153,6 +153,7 @@ export async function requestRetentionApproval(
 
   const approval = {
     scope,
+    status: 'pending' as const,
     days,
     requestedById,
     requestedAt: new Date().toISOString(),
@@ -243,7 +244,10 @@ export async function declineRetentionDeletion(
   }
 
   await updateAdvancedSettings(guild.id, (current) => {
-    current.retention.pendingApprovals[scope] = null;
+    current.retention.pendingApprovals[scope] = {
+      ...pending,
+      status: 'declined',
+    };
   });
 }
 
@@ -255,8 +259,8 @@ export async function startRetentionCountdownFromToday(
   const settings = await getAdvancedSettings(guild.id);
   const pending = settings.retention.pendingApprovals[scope];
 
-  if (!pending) {
-    throw new Error('No pending retention approval exists.');
+  if (!pending || pending.status !== 'declined') {
+    throw new Error('No cancelled retention decision is awaiting follow-up.');
   }
 
   if (pending.requestedById !== actorId && guild.ownerId !== actorId) {
