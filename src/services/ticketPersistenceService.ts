@@ -97,7 +97,8 @@ export async function removePersistedTicket(
   await persistState();
 }
 
-export function resetTicketPersistenceState(): void {
+export async function resetTicketPersistenceState(): Promise<void> {
+  await writeQueue.catch(() => undefined);
   state = null;
   writeQueue = Promise.resolve();
 }
