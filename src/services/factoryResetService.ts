@@ -61,13 +61,13 @@ export async function performFactoryReset(guild: Guild): Promise<void> {
   const targets = [...guild.channels.cache.values()].filter(isSupportForgeChannel);
 
   // Delete child channels first, then the categories containing them.
-  const childChannels = targets
-    .filter((channel) => channel.type !== ChannelType.GuildCategory)
-    .sort((a, b) => b.position - a.position);
+  const childChannels = targets.filter(
+    (channel) => channel.type !== ChannelType.GuildCategory,
+  );
 
-  const categories = targets
-    .filter((channel) => channel.type === ChannelType.GuildCategory)
-    .sort((a, b) => b.position - a.position);
+  const categories = targets.filter(
+    (channel) => channel.type === ChannelType.GuildCategory,
+  );
 
   for (const channel of [...childChannels, ...categories]) {
     await channel
