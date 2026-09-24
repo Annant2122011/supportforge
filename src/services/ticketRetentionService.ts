@@ -165,24 +165,32 @@ export async function requestRetentionApproval(
     current.retention.pendingApprovals[scope] = approval;
   });
 
-  const message = await channel.send({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle('⚠️ Retention approval required')
-        .setDescription(
-          `SupportForge found **${eligibleChannels.length}** ${label.toLowerCase()} that are already eligible for deletion under the **${days}-day** policy.\n\n` +
-          `The oldest eligible record is ${oldest ? '<t:' + Math.floor(oldest / 1000) + ':R>' : 'unknown'}.\n\n` +
-          `Deletion will **not** happen unless the requested administrator approves it below.`,
-        )
-        .addFields({
-          name: 'Requested permission',
-          value: `Delete ${label.toLowerCase()} older than **${days} days**.`,
-        })
-        .setFooter({ text: 'SupportForge • Retention safeguard' })
-        .setTimestamp(),
-    ],
-    components: approvalComponents(scope),
-  });
+  let message;
+  try {
+    message = await channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle('⚠️ Retention approval required')
+          .setDescription(
+            `SupportForge found **${eligibleChannels.length}** ${label.toLowerCase()} that are already eligible for deletion under the **${days}-day** policy.\n\n` +
+            `The oldest eligible record is ${oldest ? '<t:' + Math.floor(oldest / 1000) + ':R>' : 'unknown'}.\n\n` +
+            `Deletion will **not** happen unless the requested administrator approves it below.`,
+          )
+          .addFields({
+            name: 'Requested permission',
+            value: `Delete ${label.toLowerCase()} older than **${days} days**.`,
+          })
+          .setFooter({ text: 'SupportForge • Retention safeguard' })
+          .setTimestamp(),
+      ],
+      components: approvalComponents(scope),
+    });
+  } catch (error) {
+    await updateAdvancedSettings(guild.id, (current) => {
+      current.retention.pendingApprovals[scope] = null;
+    });
+    throw error;
+  }
 
   await updateAdvancedSettings(guild.id, (current) => {
     const pending = current.retention.pendingApprovals[scope];
