@@ -14,6 +14,7 @@ export interface CustomTag {
 
 export interface RetentionApproval {
   scope: 'closed' | 'archive';
+  status: 'pending' | 'declined';
   days: number;
   requestedById: string;
   requestedAt: string;
