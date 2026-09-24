@@ -5,6 +5,7 @@ import {
   ChannelType,
   EmbedBuilder,
   type Client,
+  type Message,
   type Guild,
   type TextChannel,
 } from 'discord.js';
@@ -165,7 +166,7 @@ export async function requestRetentionApproval(
     current.retention.pendingApprovals[scope] = approval;
   });
 
-  let message;
+  let message: Message;
   try {
     message = await channel.send({
       embeds: [
