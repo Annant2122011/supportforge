@@ -24,9 +24,9 @@ import {
 
 import { recordTicketMessageForPanel } from './services/panelActivityService';
 
-import { executeCustomSlashCommand } from './services/advancedSettingsService';
 
 import { startTicketRetentionScheduler } from './services/ticketRetentionService';
+import { handleSettingsInteraction } from './interactions/settingsInteractions';
 
 const token = process.env.DISCORD_TOKEN;
 
@@ -144,15 +144,6 @@ client.on(
           return;
         }
 
-        if (
-          interaction.guild &&
-          await executeCustomSlashCommand(
-            interaction,
-            PermissionFlagsBits.Administrator,
-          )
-        ) {
-          return;
-        }
       }
 
       /*
@@ -160,11 +151,17 @@ client.on(
        */
       if (
         interaction.isButton() ||
+        interaction.isStringSelectMenu() ||
         interaction.isModalSubmit()
       ) {
-        await handleTicketInteraction(
-          interaction,
-        );
+        if (interaction.customId.startsWith('sf:settings:')) {
+          await handleSettingsInteraction(interaction);
+          return;
+        }
+
+        if (interaction.isButton() || interaction.isModalSubmit()) {
+          await handleTicketInteraction(interaction);
+        }
       }
     } catch (error) {
       console.error(
