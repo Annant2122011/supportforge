@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { Guild } from 'discord.js';
 
 export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent' | 'critical';
 
@@ -234,6 +235,23 @@ export async function removeCustomTag(
   });
 
   return true;
+}
+
+export async function removeLegacyCustomCommands(guild: Guild): Promise<void> {
+  const current = await load();
+  const raw = current.guilds[guild.id] as (AdvancedGuildSettings & {
+    customCommands?: Record<string, { id: string }>;
+  }) | undefined;
+
+  const legacy = raw?.customCommands;
+  if (!legacy) return;
+
+  for (const command of Object.values(legacy)) {
+    await guild.commands.delete(command.id).catch(() => undefined);
+  }
+
+  delete raw.customCommands;
+  await persist();
 }
 
 export function buildSettingsSummary(
