@@ -28,7 +28,6 @@ import { executeTicketCommand } from '../interactions/ticketCommandTools';
 import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
 
 import {
-  buildSettingsSummary,
   getAdvancedSettings,
 } from '../services/advancedSettingsService';
 
