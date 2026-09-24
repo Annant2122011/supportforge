@@ -134,7 +134,7 @@ export function buildTicketPanelComponents(status: TicketStatus): ActionRowBuild
     );
   }
 
-  if (status !== 'archived' && status !== 'closed') {
+  if (['open', 'claimed', 'pending', 'reopened'].includes(status)) {
     const positioning = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId('ticket:panel:move-bottom')
