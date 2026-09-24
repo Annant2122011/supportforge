@@ -6,7 +6,6 @@ import {
   EmbedBuilder,
   GatewayIntentBits,
   MessageFlags,
-  PermissionFlagsBits,
 } from 'discord.js';
 
 import { execute } from './commands/supportforge';
