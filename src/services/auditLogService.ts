@@ -413,7 +413,8 @@ export function startAuditDailySummaryScheduler(client: Client): void {
   dailyScheduler.unref();
 }
 
-export function resetAuditLogState(): void {
+export async function resetAuditLogState(): Promise<void> {
+  await writeQueue.catch(() => undefined);
   state = null;
   writeQueue = Promise.resolve();
 }
