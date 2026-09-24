@@ -28,7 +28,6 @@ import {
 
 import {
   ensureArchiveCategory,
-  ensureBillingCategory,
   ensureClosedCategory,
   moveTicketToCategory,
 } from '../services/ticketStorageService';
@@ -747,14 +746,7 @@ async function createTicket(
       return;
     }
 
-    const isBillingDepartment =
-      department.name.trim().toLowerCase() === 'billing';
-
-    let categoryId = config.supportCategoryId;
-
-    if (isBillingDepartment) {
-      categoryId = (await ensureBillingCategory(guild)).id;
-    }
+    const categoryId = config.supportCategoryId;
 
     if (!categoryId) {
       await replyError(
@@ -1475,7 +1467,6 @@ async function transition(
 
     /*
      * Storage sections are separate from the active support category.
-     * Billing tickets use the dedicated Billing section when configured.
      * Closed and archived tickets are physically moved so moderators can
      * distinguish active work from historical records.
      */
@@ -1491,28 +1482,14 @@ async function transition(
           await ensureArchiveCategory(interaction.guild!),
         );
       } else if (newStatus === 'reopened' || newStatus === 'open') {
-        const departmentId = getField(newTopic, 'department');
-        const department = departmentId
-          ? (await getGuildConfig(interaction.guild!.id)).departments[departmentId]
-          : undefined;
-
         const currentConfig = await getGuildConfig(interaction.guild!.id);
-
-        if (department?.name.toLowerCase() === 'billing') {
-          await moveTicketToCategory(
-            channel,
-            await ensureBillingCategory(interaction.guild!),
-          );
-        } else if (currentConfig.supportCategoryId) {
+        if (currentConfig.supportCategoryId) {
           const supportCategory = interaction.guild!.channels.cache.get(
             currentConfig.supportCategoryId,
           );
 
           if (supportCategory?.type === ChannelType.GuildCategory) {
-            await moveTicketToCategory(
-              channel,
-              supportCategory,
-            );
+            await moveTicketToCategory(channel, supportCategory);
           }
         }
       }
