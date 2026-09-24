@@ -43,6 +43,7 @@ import {
 } from '../services/ticketStorageService';
 
 import {
+  ensureAllDepartmentCategories,
   ensureDepartmentCategory,
 } from '../services/departmentCategoryService';
 
@@ -1158,6 +1159,7 @@ async function normalRepair(guild: Guild): Promise<void> {
   await ensureTranscriptChannel(guild, supportCategory.id);
   await ensurePanelChannel(guild, supportCategory.id);
   await ensureSettingsChannel(guild, supportCategory.id);
+  await ensureAllDepartmentCategories(guild);
   await syncPanel(guild);
 }
 
