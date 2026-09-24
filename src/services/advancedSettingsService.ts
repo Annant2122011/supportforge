@@ -12,8 +12,17 @@ export interface CustomTag {
   createdAt: string;
 }
 
+export interface RetentionApproval {
+  scope: 'closed' | 'archive';
+  days: number;
+  requestedById: string;
+  requestedAt: string;
+  eligibleChannelIds: string[];
+  messageId: string | null;
+}
+
 export interface AdvancedGuildSettings {
-  version: 2;
+  version: 3;
   settingsChannelId: string | null;
   closedCategoryId: string | null;
   archiveCategoryId: string | null;
@@ -26,6 +35,16 @@ export interface AdvancedGuildSettings {
   retention: {
     closedDays: number;
     archiveDays: number;
+    closedEffectiveFrom: string | null;
+    archiveEffectiveFrom: string | null;
+    pendingApprovals: {
+      closed: RetentionApproval | null;
+      archive: RetentionApproval | null;
+    };
+  };
+  statusCategories: {
+    claimedCategoryId: string | null;
+    pendingCategoryId: string | null;
   };
   appearance: {
     panelTitle: string;
@@ -39,7 +58,7 @@ export interface AdvancedGuildSettings {
 }
 
 interface SettingsFile {
-  version: 2;
+  version: 3;
   guilds: Record<string, AdvancedGuildSettings>;
 }
 
@@ -60,6 +79,16 @@ const DEFAULTS: AdvancedGuildSettings = {
   retention: {
     closedDays: 0,
     archiveDays: 0,
+    closedEffectiveFrom: null,
+    archiveEffectiveFrom: null,
+    pendingApprovals: {
+      closed: null,
+      archive: null,
+    },
+  },
+  statusCategories: {
+    claimedCategoryId: null,
+    pendingCategoryId: null,
   },
   appearance: {
     panelTitle: '🎫 SupportForge Support Center',
@@ -80,7 +109,13 @@ function cloneDefaults(): AdvancedGuildSettings {
   return {
     ...DEFAULTS,
     panelActivity: { ...DEFAULTS.panelActivity },
-    retention: { ...DEFAULTS.retention },
+    retention: {
+      ...DEFAULTS.retention,
+      pendingApprovals: {
+        ...DEFAULTS.retention.pendingApprovals,
+      },
+    },
+    statusCategories: { ...DEFAULTS.statusCategories },
     appearance: { ...DEFAULTS.appearance },
     ticketDefaults: { ...DEFAULTS.ticketDefaults },
     customTags: {},
@@ -141,6 +176,14 @@ function normalizeExistingSettings(
     retention: {
       ...DEFAULTS.retention,
       ...(settings.retention ?? {}),
+      pendingApprovals: {
+        ...DEFAULTS.retention.pendingApprovals,
+        ...(settings.retention?.pendingApprovals ?? {}),
+      },
+    },
+    statusCategories: {
+      ...DEFAULTS.statusCategories,
+      ...(settings.statusCategories ?? {}),
     },
     appearance: {
       ...DEFAULTS.appearance,
@@ -267,6 +310,13 @@ export function buildSettingsSummary(
       ? 'Never delete'
       : settings.retention.archiveDays + ' days';
 
+  const claimedCategory = settings.statusCategories.claimedCategoryId
+    ? 'Configured'
+    : 'Not configured';
+  const pendingCategory = settings.statusCategories.pendingCategoryId
+    ? 'Configured'
+    : 'Not configured';
+
   const tags = Object.values(settings.customTags);
 
   return [
@@ -295,5 +345,17 @@ export function buildSettingsSummary(
     '**🧹 Retention**',
     '• Closed: ' + closed,
     '• Archived: ' + archived,
+    '',
+    '**🗂️ Optional status categories**',
+    '• Claimed tickets: ' + claimedCategory,
+    '• Pending tickets: ' + pendingCategory,
   ].join('\n');
+}
+
+export async function resetAdvancedSettings(): Promise<void> {
+  state = {
+    version: 3,
+    guilds: {},
+  };
+  await persist();
 }
