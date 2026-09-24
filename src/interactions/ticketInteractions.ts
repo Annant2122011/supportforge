@@ -2335,7 +2335,10 @@ async function handlePanelButton(
     return;
   }
 
-  if (id === 'ticket:panel:move-bottom') {
+  if (
+    id === 'ticket:panel:move-bottom' ||
+    id === 'ticket:panel:restore-move'
+  ) {
     if (!(await safeDeferReply(interaction))) {
       return;
     }
@@ -2381,7 +2384,7 @@ async function handlePanelButton(
         channel.lastMessageId ?? getField(topic, 'message') ?? 'unknown',
       );
       await interaction.editReply(
-        '✅ Ticket controls were moved to the bottom. The panel will now remain fixed until a moderator deliberately moves it again.',
+        '✅ Ticket controls were restored at the bottom. The panel will now remain fixed until a moderator deliberately moves it again.',
       );
     } catch (error) {
       console.error('❌ Failed to move ticket panel manually:', error);
