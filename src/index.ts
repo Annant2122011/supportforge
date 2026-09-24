@@ -21,6 +21,8 @@ import {
   getPersistedTicketStatus,
 } from './services/ticketPersistenceService';
 
+import { getGuildConfig } from './services/configService';
+
 import { recordTicketMessageForPanel } from './services/panelActivityService';
 
 
@@ -61,16 +63,7 @@ client.once('clientReady', (readyClient) => {
 });
 
 client.on('messageCreate', async (message) => {
-  /*
-   * Closed/archived tickets remain interactive through their lifecycle
-   * buttons, but human messages are not permitted. This deliberately
-   * applies to administrators too, as requested.
-   *
-   * SupportForge's own bot messages are exempt so the ticket panel and
-   * system announcements remain visible.
-   */
   if (
-    message.author.bot ||
     !message.guild ||
     message.channel.type !== ChannelType.GuildText
   ) {
@@ -78,6 +71,35 @@ client.on('messageCreate', async (message) => {
   }
 
   const topic = message.channel.topic ?? '';
+  const guildConfig = await getGuildConfig(message.guild.id);
+
+  /*
+   * The public ticket-panel channel is intentionally read-only.
+   * Button interactions remain usable, while direct messages from users
+   * and other bots are removed as a fallback against channel noise.
+   */
+  if (
+    guildConfig.panelChannelId === message.channel.id ||
+    topic.startsWith('supportforge:panel')
+  ) {
+    if (message.author.id !== client.user?.id) {
+      await message.delete().catch((error) => {
+        console.warn(
+          `⚠️ Could not remove direct panel-channel message ${message.id}:`,
+          error,
+        );
+      });
+    }
+    return;
+  }
+
+  /*
+   * Closed/archived tickets remain interactive through their lifecycle
+   * buttons, but direct human messages are not permitted.
+   */
+  if (message.author.bot) {
+    return;
+  }
 
   if (!isTicketTopic(topic)) {
     return;
