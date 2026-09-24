@@ -77,10 +77,10 @@ export async function performFactoryReset(guild: Guild): Promise<void> {
       });
   }
 
-  resetConfigState();
-  resetAdvancedSettingsState();
-  resetTicketPersistenceState();
-  resetAuditLogState();
+  await resetConfigState();
+  await resetAdvancedSettingsState();
+  await resetTicketPersistenceState();
+  await resetAuditLogState();
 
   for (const filename of [
     'config.json',
