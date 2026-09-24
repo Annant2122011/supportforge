@@ -41,6 +41,13 @@ import {
 } from '../services/ticketStorageService';
 
 import {
+  ensureAllDepartmentCategories,
+  ensureDepartmentCategory,
+} from '../services/departmentCategoryService';
+
+import { logSettingsEvent } from '../services/auditLogService';
+
+import {
   ensureContainer,
   ensurePanelChannel,
   ensureTranscriptChannel,
@@ -48,6 +55,8 @@ import {
 } from '../commands/supportforge';
 
 const SETTINGS_TOPIC_PREFIX = 'supportforge:settings';
+
+type SettingsViewInteraction = ButtonInteraction | StringSelectMenuInteraction;
 
 function isAdministrator(interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction): boolean {
   return Boolean(
@@ -81,255 +90,201 @@ function backButton(): ButtonBuilder {
     .setStyle(ButtonStyle.Secondary);
 }
 
-async function showHome(interaction: ButtonInteraction | StringSelectMenuInteraction): Promise<void> {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+function isEphemeralSettingsMessage(interaction: ButtonInteraction): boolean {
+  return interaction.message.flags.has(MessageFlags.Ephemeral);
+}
 
+async function renderSettingsView(
+  interaction: SettingsViewInteraction,
+  embeds: EmbedBuilder[],
+  components: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>>,
+): Promise<void> {
+  const payload = { embeds, components };
+
+  if (interaction.replied || interaction.deferred) {
+    await interaction.editReply(payload);
+    return;
+  }
+
+  if (interaction.isButton() && isEphemeralSettingsMessage(interaction)) {
+    await interaction.deferUpdate();
+    await interaction.editReply(payload);
+    return;
+  }
+
+  await interaction.reply({
+    ...payload,
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+async function auditSettingsAction(
+  guild: Guild,
+  interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
+  action: string,
+  detail: string,
+): Promise<void> {
+  const config = await getGuildConfig(guild.id);
+  if (!config.supportCategoryId) return;
+
+  void logSettingsEvent(guild, config.supportCategoryId, {
+    action,
+    actorId: interaction.user.id,
+    actorName: interaction.user.tag,
+    detail,
+  }).catch((error) => {
+    console.warn('⚠️ Settings audit logging failed:', error);
+  });
+}
+
+async function showHome(interaction: SettingsViewInteraction): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
   const config = await getGuildConfig(interaction.guild!.id);
+  const departments = Object.values(config.departments);
+  const routed = departments.filter((department) => Boolean(department.categoryId)).length;
 
-  const embed = new EmbedBuilder()
-    .setTitle('⚙️ SupportForge Settings')
-    .setDescription(
-      'Everything here is controlled with buttons and small forms. ' +
-      'The settings slash-command family has been removed so the configuration surface stays inside Discord instead of turning chat into a control panel.',
-    )
-    .addFields(
-      {
-        name: '🎛️ Panel',
-        value: settings.panelActivity.enabled
-          ? 'Automatic positioning is enabled.'
-          : 'Automatic positioning is disabled.',
-        inline: true,
-      },
-      {
-        name: '🏷️ Tags',
-        value: Object.keys(settings.customTags).length + ' custom tags',
-        inline: true,
-      },
-      {
-        name: '📂 Departments',
-        value: Object.keys(config.departments).length + ' departments',
-        inline: true,
-      },
-      {
-        name: '🧹 Retention',
-        value:
-          'Closed: ' +
-          (settings.retention.closedDays || 'Never') +
-          ' • Archive: ' +
-          (settings.retention.archiveDays || 'Never'),
-        inline: false,
-      },
-    );
-
-  await interaction.editReply({
-    embeds: [embed],
-    components: buildSettingsDashboardComponents(),
-  });
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('⚙️ SupportForge Settings')
+      .setDescription(
+        '**Administrative control center**\n' +
+        'Use the buttons below to configure SupportForge without leaving Discord.\n\n' +
+        'Changes are saved immediately and this dashboard can be refreshed at any time.',
+      )
+      .addFields(
+        { name: '🎛️ Panel', value: (settings.panelActivity.enabled ? '🟢 Enabled' : '⚪ Disabled') + `\n${settings.panelActivity.visualLineBudget} visual lines • ${settings.panelActivity.messageBudget} message cap`, inline: true },
+        { name: '🎟️ Defaults', value: `Priority: **${settings.ticketDefaults.priority}**`, inline: true },
+        { name: '🏷️ Tags', value: `**${Object.keys(settings.customTags).length}** configured`, inline: true },
+        { name: '📂 Departments', value: `**${departments.length}** configured\n${routed} with category`, inline: true },
+        { name: '🧹 Retention', value: `Closed: **${settings.retention.closedDays || 'Never'}**\nArchive: **${settings.retention.archiveDays || 'Never'}**`, inline: true },
+        { name: '🗄️ Storage', value: `Closed: ${settings.closedCategoryId ? '✅' : '❌'}\nArchive: ${settings.archiveCategoryId ? '✅' : '❌'}`, inline: true },
+      )
+      .setFooter({ text: 'SupportForge • Select a section to configure it' })
+      .setTimestamp(),
+  ], buildSettingsDashboardComponents());
 }
 
 async function showPanelSettings(interaction: ButtonInteraction): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
 
-  await interaction.reply({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle('🎛️ Panel Settings')
-        .setDescription(
-          'Control when the ticket control panel automatically moves downward. ' +
-          'Discord does not expose a bot-readable viewport, so SupportForge uses activity and visual-occupancy estimates.',
-        )
-        .addFields({
-          name: 'Current configuration',
-          value:
-            'Automatic movement: **' + (settings.panelActivity.enabled ? 'Enabled' : 'Disabled') + '**\n' +
-            'Visual budget: **' + settings.panelActivity.visualLineBudget + ' lines**\n' +
-            'Message cap: **' + settings.panelActivity.messageBudget + '**\n' +
-            'Minimum messages: **' + settings.panelActivity.minimumMessagesBeforeMove + '**',
-        }),
-    ],
-    components: [
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId('sf:settings:panel:toggle')
-          .setLabel(settings.panelActivity.enabled ? 'Disable Auto Move' : 'Enable Auto Move')
-          .setEmoji(settings.panelActivity.enabled ? '⏸️' : '▶️')
-          .setStyle(settings.panelActivity.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
-        new ButtonBuilder()
-          .setCustomId('sf:settings:panel:thresholds')
-          .setLabel('Edit Thresholds')
-          .setEmoji('📏')
-          .setStyle(ButtonStyle.Primary),
-        backButton(),
-      ),
-    ],
-    flags: MessageFlags.Ephemeral,
-  });
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('🎛️ Panel Settings')
+      .setDescription('Automatic panel positioning uses message count and estimated visual occupancy because Discord does not expose a bot-readable viewport.')
+      .addFields({
+        name: 'Current configuration',
+        value:
+          `Automatic movement: **${settings.panelActivity.enabled ? 'Enabled' : 'Disabled'}**\n` +
+          `Visual budget: **${settings.panelActivity.visualLineBudget} lines**\n` +
+          `Message safety cap: **${settings.panelActivity.messageBudget}**\n` +
+          `Minimum messages: **${settings.panelActivity.minimumMessagesBeforeMove}**`,
+      }),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:panel:toggle').setLabel(settings.panelActivity.enabled ? 'Disable Auto Move' : 'Enable Auto Move').setEmoji(settings.panelActivity.enabled ? '⏸️' : '▶️').setStyle(settings.panelActivity.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sf:settings:panel:thresholds').setLabel('Edit Thresholds').setEmoji('📏').setStyle(ButtonStyle.Primary),
+      backButton(),
+    ),
+  ]);
 }
 
 async function showDefaults(interaction: ButtonInteraction): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
 
-  await interaction.reply({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle('🎟️ Ticket Defaults')
-        .setDescription('Set the defaults applied when a new ticket is created.')
-        .addFields({
-          name: 'Default priority',
-          value: '**' + settings.ticketDefaults.priority + '**',
-        }),
-    ],
-    components: [
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId('sf:settings:defaults:edit')
-          .setLabel('Change Default Priority')
-          .setEmoji('⚡')
-          .setStyle(ButtonStyle.Primary),
-        backButton(),
-      ),
-    ],
-    flags: MessageFlags.Ephemeral,
-  });
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('🎟️ Ticket Defaults')
+      .setDescription('Defaults are applied automatically when a new ticket is created.')
+      .addFields({ name: 'Default priority', value: `⚡ **${settings.ticketDefaults.priority}**` }),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:defaults:edit').setLabel('Change Default Priority').setEmoji('⚡').setStyle(ButtonStyle.Primary),
+      backButton(),
+    ),
+  ]);
 }
 
-async function showTags(interaction: ButtonInteraction): Promise<void> {
+async function showTags(interaction: SettingsViewInteraction): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
-  const tags = Object.values(settings.customTags);
+  const tags = Object.values(settings.customTags).sort((a, b) => a.name.localeCompare(b.name));
+  const lines = tags.length
+    ? tags.map((tag) => `${tag.emoji} **${tag.name}**${tag.description ? ` • ${tag.description}` : ''}`).join('\n')
+    : 'No custom tags are configured yet.';
 
-  const embed = new EmbedBuilder()
-    .setTitle('🏷️ Custom Ticket Tags')
-    .setDescription(
-      tags.length
-        ? tags.map((tag) => tag.emoji + ' **' + tag.name + '**' + (tag.description ? ' • ' + tag.description : '')).join('\n')
-        : 'No custom tags are configured yet.',
-    );
-
-  await interaction.reply({
-    embeds: [embed],
-    components: [
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId('sf:settings:tags:add')
-          .setLabel('Add Tag')
-          .setEmoji('➕')
-          .setStyle(ButtonStyle.Success),
-        new ButtonBuilder()
-          .setCustomId('sf:settings:tags:remove')
-          .setLabel('Remove Tag')
-          .setEmoji('➖')
-          .setStyle(ButtonStyle.Danger)
-          .setDisabled(tags.length === 0),
-        backButton(),
-      ),
-    ],
-    flags: MessageFlags.Ephemeral,
-  });
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('🏷️ Custom Ticket Tags')
+      .setDescription(lines.slice(0, 3900))
+      .addFields({ name: 'Active tags', value: tags.length ? `${tags.length} configured tag(s)` : 'None' })
+      .setFooter({ text: 'Add Tag shows the active tags as a reference inside the form.' }),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:tags:add').setLabel('Add Tag').setEmoji('➕').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sf:settings:tags:remove').setLabel('Remove Tag').setEmoji('➖').setStyle(ButtonStyle.Danger).setDisabled(tags.length === 0),
+      backButton(),
+    ),
+  ]);
 }
 
-async function showDepartments(interaction: ButtonInteraction): Promise<void> {
+async function showDepartments(interaction: SettingsViewInteraction): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
   const departments = Object.values(config.departments).sort((a, b) => a.name.localeCompare(b.name));
-
   const lines = departments.length
-    ? departments.map((department) =>
-        '• **' + department.name + '** — ' +
-        (department.staffRoleId ? '<@&' + department.staffRoleId + '>' : 'Administrators only'),
-      ).join('\n')
+    ? departments.map((department) => `• **${department.name}** — ${department.staffRoleId ? '<@&' + department.staffRoleId + '>' : 'Administrators only'} — ${department.categoryId ? '<#' + department.categoryId + '>' : 'Category pending'}`).join('\n')
     : 'No departments configured.';
 
-  await interaction.reply({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle('📂 Ticket Departments')
-        .setDescription(lines)
-        .setFooter({ text: 'Departments are the server-defined support use cases.' }),
-    ],
-    components: [
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId('sf:settings:departments:add')
-          .setLabel('Add Department')
-          .setEmoji('➕')
-          .setStyle(ButtonStyle.Success),
-        new ButtonBuilder()
-          .setCustomId('sf:settings:departments:remove')
-          .setLabel('Remove Department')
-          .setEmoji('➖')
-          .setStyle(ButtonStyle.Danger)
-          .setDisabled(departments.length === 0),
-        backButton(),
-      ),
-    ],
-    flags: MessageFlags.Ephemeral,
-  });
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('📂 Ticket Departments')
+      .setDescription(lines.slice(0, 3900))
+      .addFields({ name: 'Department categories', value: 'New departments automatically receive a **SupportForge.** category.' })
+      .setFooter({ text: 'Categories are retained when departments are removed to avoid destructive history cleanup.' }),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:departments:add').setLabel('Add Department').setEmoji('➕').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sf:settings:departments:remove').setLabel('Remove Department').setEmoji('➖').setStyle(ButtonStyle.Danger).setDisabled(departments.length <= 1),
+      backButton(),
+    ),
+  ]);
 }
 
 async function showRetention(interaction: ButtonInteraction): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
 
-  await interaction.reply({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle('🧹 Ticket Retention')
-        .setDescription(
-          'Set how long closed and archived tickets remain before automatic deletion. ' +
-          'A value of **0** means never delete.',
-        )
-        .addFields(
-          {
-            name: 'Closed',
-            value: settings.retention.closedDays === 0 ? 'Never delete' : settings.retention.closedDays + ' days',
-            inline: true,
-          },
-          {
-            name: 'Archived',
-            value: settings.retention.archiveDays === 0 ? 'Never delete' : settings.retention.archiveDays + ' days',
-            inline: true,
-          },
-        ),
-    ],
-    components: [
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId('sf:settings:retention:edit')
-          .setLabel('Edit Retention')
-          .setEmoji('🕒')
-          .setStyle(ButtonStyle.Primary),
-        backButton(),
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('🧹 Retention')
+      .setDescription('Set how long closed and archived tickets remain before automatic deletion. **0 means never delete.**')
+      .addFields(
+        { name: 'Closed', value: settings.retention.closedDays === 0 ? 'Never delete' : settings.retention.closedDays + ' days', inline: true },
+        { name: 'Archived', value: settings.retention.archiveDays === 0 ? 'Never delete' : settings.retention.archiveDays + ' days', inline: true },
       ),
-    ],
-    flags: MessageFlags.Ephemeral,
-  });
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:retention:edit').setLabel('Edit Retention').setEmoji('🕒').setStyle(ButtonStyle.Primary),
+      backButton(),
+    ),
+  ]);
 }
 
 async function showAppearance(interaction: ButtonInteraction): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
 
-  await interaction.reply({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle('🎨 Panel Appearance')
-        .setDescription('Customize the main support panel without editing source code.')
-        .addFields(
-          { name: 'Title', value: settings.appearance.panelTitle, inline: false },
-          { name: 'Description', value: settings.appearance.panelDescription, inline: false },
-          { name: 'Footer', value: settings.appearance.panelFooter, inline: false },
-        ),
-    ],
-    components: [
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId('sf:settings:appearance:edit')
-          .setLabel('Edit Appearance')
-          .setEmoji('✏️')
-          .setStyle(ButtonStyle.Primary),
-        backButton(),
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('🎨 Appearance')
+      .setDescription('Customize the main support panel without editing source code.')
+      .addFields(
+        { name: 'Title', value: settings.appearance.panelTitle.slice(0, 1024) || 'Not set' },
+        { name: 'Description', value: settings.appearance.panelDescription.slice(0, 1024) || 'Not set' },
+        { name: 'Footer', value: settings.appearance.panelFooter.slice(0, 1024) || 'Not set' },
       ),
-    ],
-    flags: MessageFlags.Ephemeral,
-  });
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:appearance:edit').setLabel('Edit Appearance').setEmoji('✏️').setStyle(ButtonStyle.Primary),
+      backButton(),
+    ),
+  ]);
 }
 
 async function showUseCases(interaction: ButtonInteraction): Promise<void> {
@@ -343,77 +298,58 @@ async function showUseCases(interaction: ButtonInteraction): Promise<void> {
     ['Product Support', '📦', 'product-support'],
     ['VIP Support', '⭐', 'vip-support'],
   ];
-
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-
   for (let i = 0; i < presets.length; i += 4) {
-    rows.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        ...presets.slice(i, i + 4).map(([name, emoji, key]) =>
-          new ButtonBuilder()
-            .setCustomId('sf:settings:usecases:add:' + key)
-            .setLabel(name)
-            .setEmoji(emoji)
-            .setStyle(ButtonStyle.Secondary),
-        ),
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      ...presets.slice(i, i + 4).map(([name, emoji, key]) =>
+        new ButtonBuilder().setCustomId('sf:settings:usecases:add:' + key).setLabel(name).setEmoji(emoji).setStyle(ButtonStyle.Secondary),
       ),
-    );
+    ));
   }
+  rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()));
 
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()),
-  );
-
-  await interaction.reply({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle('🧩 Support Use Cases')
-        .setDescription(
-          'Optional department presets for common support operations. ' +
-          'They do not create special business logic, so a server can rename, remove, or ignore them and build its own structure.',
-        ),
-    ],
-    components: rows,
-    flags: MessageFlags.Ephemeral,
-  });
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('🧩 Use Cases')
+      .setDescription('Optional department presets for common support operations. They create ordinary departments only, so each server keeps control of its own requirements.'),
+  ], rows);
 }
 
 async function showStorage(interaction: ButtonInteraction): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
 
-  const closed = settings.closedCategoryId
-    ? '<#' + settings.closedCategoryId + '>'
-    : 'Not created';
-
-  const archive = settings.archiveCategoryId
-    ? '<#' + settings.archiveCategoryId + '>'
-    : 'Not created';
-
-  await interaction.reply({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle('🗄️ Ticket Storage')
-        .setDescription(
-          'SupportForge keeps active tickets separate from historical storage. ' +
-          'There is intentionally no Billing-specific storage layer; each server can create whatever departments and channel structure it needs.',
-        )
-        .addFields(
-          { name: 'Closed', value: closed, inline: true },
-          { name: 'Archive', value: archive, inline: true },
-        ),
-    ],
-    components: [
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId('sf:settings:storage:repair')
-          .setLabel('Repair Storage')
-          .setEmoji('🛠️')
-          .setStyle(ButtonStyle.Primary),
-        backButton(),
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('🗄️ Storage')
+      .setDescription('Historical ticket storage is kept separate from active support operations.')
+      .addFields(
+        { name: 'Closed', value: settings.closedCategoryId ? '<#' + settings.closedCategoryId + '>' : 'Not provisioned', inline: true },
+        { name: 'Archive', value: settings.archiveCategoryId ? '<#' + settings.archiveCategoryId + '>' : 'Not provisioned', inline: true },
       ),
-    ],
-    flags: MessageFlags.Ephemeral,
-  });
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:storage:repair').setLabel('Storage Repair').setEmoji('🗄️').setStyle(ButtonStyle.Primary),
+      backButton(),
+    ),
+  ]);
+}
+
+async function showRepairSystem(interaction: ButtonInteraction): Promise<void> {
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('🛠️ Repair System')
+      .setDescription('Normal Repair and Storage Repair are separate operations. Choose only the area that needs attention.')
+      .addFields(
+        { name: 'Normal Repair', value: 'Repairs the SupportForge container, transcript channel, panel channel, settings channel, department categories, and support panel.' },
+        { name: 'Storage Repair', value: 'Repairs the Closed and Archive storage categories and their persisted references only.' },
+      ),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:repair:normal').setLabel('Normal Repair').setEmoji('🛠️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:repair:storage').setLabel('Storage Repair').setEmoji('🗄️').setStyle(ButtonStyle.Secondary),
+      backButton(),
+    ),
+  ]);
 }
 
 async function openModal(
@@ -422,15 +358,18 @@ async function openModal(
   title: string,
   inputs: TextInputBuilder[],
 ): Promise<void> {
-  const modal = new ModalBuilder().setCustomId(customId).setTitle(title);
-
-  for (const input of inputs) {
-    modal.addComponents(
-      new ActionRowBuilder<TextInputBuilder>().addComponents(input),
-    );
+  try {
+    const modal = new ModalBuilder().setCustomId(customId).setTitle(title);
+    for (const input of inputs) {
+      modal.addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(input),
+      );
+    }
+    await interaction.showModal(modal);
+  } catch (error) {
+    console.error('❌ Failed to open SupportForge settings form:', error);
+    await reject(interaction, '❌ The settings form could not be opened. Please try again.');
   }
-
-  await interaction.showModal(modal);
 }
 
 export async function handleSettingsInteraction(
@@ -460,8 +399,14 @@ export async function handleSettingsInteraction(
   if (interaction.isButton()) {
     const id = interaction.customId;
 
-    if (id === 'sf:settings:home' || id === 'sf:settings:refresh') {
+    if (id === 'sf:settings:home') {
       await showHome(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:refresh') {
+      await showHome(interaction);
+      await auditSettingsAction(guild, interaction, 'SETTINGS_REFRESH', 'Settings dashboard refreshed.');
       return true;
     }
 
@@ -471,12 +416,14 @@ export async function handleSettingsInteraction(
     }
 
     if (id === 'sf:settings:panel:toggle') {
+      const before = (await getAdvancedSettings(guild.id)).panelActivity.enabled;
       await interaction.deferUpdate();
       await updateAdvancedSettings(guild.id, (settings) => {
         settings.panelActivity.enabled = !settings.panelActivity.enabled;
       });
       await refreshSettingsChannel(guild);
       await showHomeAfterUpdate(interaction);
+      await auditSettingsAction(guild, interaction, 'PANEL_TOGGLE', 'Automatic panel movement: ' + (before ? 'enabled → disabled' : 'disabled → enabled') + '.');
       return true;
     }
 
@@ -507,7 +454,21 @@ export async function handleSettingsInteraction(
     }
 
     if (id === 'sf:settings:tags:add') {
+      const settings = await getAdvancedSettings(guild.id);
+      const tags = Object.values(settings.customTags).sort((a, b) => a.name.localeCompare(b.name));
+      const activeTags = tags.length
+        ? tags.map((tag) => tag.emoji + ' ' + tag.name).join(' • ').slice(0, 900)
+        : 'None configured';
+
       await openModal(interaction, 'sf:settings:modal:tag:add', 'Add Custom Tag', [
+        new TextInputBuilder()
+          .setCustomId('active')
+          .setLabel('Currently active tags (reference)')
+          .setPlaceholder('Reference only. Do not edit this field.')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(false)
+          .setMaxLength(1000)
+          .setValue(activeTags),
         new TextInputBuilder().setCustomId('name').setLabel('Tag name').setPlaceholder('bug, vip, refund, account...').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(32),
         new TextInputBuilder().setCustomId('emoji').setLabel('Emoji').setPlaceholder('🏷️').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(4),
         new TextInputBuilder().setCustomId('description').setLabel('Description').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100),
@@ -642,19 +603,29 @@ export async function handleSettingsInteraction(
 
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const departmentId = newDepartmentId();
+      const category = await ensureDepartmentCategory(guild, {
+        name,
+        staffRoleId: null,
+        categoryId: null,
+      });
 
       await updateGuildConfig(guild.id, (current) => {
         current.departments[departmentId] = {
           id: departmentId,
           name,
           staffRoleId: null,
+          categoryId: category.id,
           createdAt: new Date().toISOString(),
         };
       });
 
       await syncPanel(guild);
       await refreshSettingsChannel(guild);
-      await interaction.editReply('✅ Added **' + name + '**. Assign its staff role through the department configuration when needed.');
+      await interaction.editReply({
+        embeds: [new EmbedBuilder().setTitle('✅ Use Case Added').setDescription('Added **' + name + '** with category ' + category + '.')],
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+      });
+      await auditSettingsAction(guild, interaction, 'USE_CASE_ADDED', 'Added use case department ' + name + ' with category ' + category.name + '.');
       return true;
     }
 
@@ -678,10 +649,10 @@ export async function handleSettingsInteraction(
       await interaction.deferUpdate();
       const removed = await removeCustomTag(guild.id, tagId);
       await refreshSettingsChannel(guild);
-      await interaction.followUp({
-        content: removed ? '✅ Custom tag removed.' : '❌ That tag no longer exists.',
-        flags: MessageFlags.Ephemeral,
-      });
+      await showTags(interaction);
+      if (removed) {
+        await auditSettingsAction(guild, interaction, 'TAG_REMOVED', 'Removed custom tag ' + tagId + '.');
+      }
       return true;
     }
 
@@ -710,10 +681,8 @@ export async function handleSettingsInteraction(
       });
       await syncPanel(guild);
       await refreshSettingsChannel(guild);
-      await interaction.followUp({
-        content: '✅ Department **' + department.name + '** removed.',
-        flags: MessageFlags.Ephemeral,
-      });
+      await showDepartments(interaction);
+      await auditSettingsAction(guild, interaction, 'DEPARTMENT_REMOVED', 'Removed department ' + department.name + '. Its Discord category was retained.');
       return true;
     }
   }
@@ -740,7 +709,11 @@ export async function handleSettingsInteraction(
         settings.panelActivity.minimumMessagesBeforeMove = minimum;
       });
       await refreshSettingsChannel(guild);
-      await interaction.editReply('✅ Panel thresholds updated.');
+      await interaction.editReply({
+        embeds: [new EmbedBuilder().setTitle('✅ Panel Updated').setDescription('Panel thresholds have been saved.')],
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+      });
+      await auditSettingsAction(guild, interaction, 'PANEL_SETTINGS_CHANGED', `Visual budget=${visual}, message cap=${messages}, minimum messages=${minimum}.`);
       return true;
     }
 
@@ -756,7 +729,11 @@ export async function handleSettingsInteraction(
         settings.ticketDefaults.priority = priority;
       });
       await refreshSettingsChannel(guild);
-      await interaction.editReply('✅ Default ticket priority updated to **' + priority + '**.');
+      await interaction.editReply({
+        embeds: [new EmbedBuilder().setTitle('✅ Ticket Defaults Updated').setDescription('Default priority is now **' + priority + '**.')],
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+      });
+      await auditSettingsAction(guild, interaction, 'TICKET_DEFAULTS_CHANGED', 'Default ticket priority changed to ' + priority + '.');
       return true;
     }
 
@@ -769,7 +746,11 @@ export async function handleSettingsInteraction(
       try {
         const tag = await addCustomTag(guild.id, name, emoji, description);
         await refreshSettingsChannel(guild);
-        await interaction.editReply('✅ Added custom tag ' + tag.emoji + ' **' + tag.name + '**.');
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setTitle('✅ Tag Added').setDescription('Added custom tag ' + tag.emoji + ' **' + tag.name + '**.')],
+          components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+        });
+        await auditSettingsAction(guild, interaction, 'TAG_ADDED', 'Added custom tag ' + tag.name + '.');
       } catch (error) {
         await interaction.editReply('❌ ' + (error instanceof Error ? error.message : 'Could not create tag.'));
       }
@@ -803,19 +784,29 @@ export async function handleSettingsInteraction(
 
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const id = newDepartmentId();
+      const category = await ensureDepartmentCategory(guild, {
+        name,
+        staffRoleId,
+        categoryId: null,
+      });
 
       await updateGuildConfig(guild.id, (current) => {
         current.departments[id] = {
           id,
           name,
           staffRoleId,
+          categoryId: category.id,
           createdAt: new Date().toISOString(),
         };
       });
 
       await syncPanel(guild);
       await refreshSettingsChannel(guild);
-      await interaction.editReply('✅ Department **' + name + '** added.');
+      await interaction.editReply({
+        embeds: [new EmbedBuilder().setTitle('✅ Department Added').setDescription('**' + name + '** is ready.\n\nCategory: ' + category + '\nTickets for this department will use its **SupportForge.** category.')],
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+      });
+      await auditSettingsAction(guild, interaction, 'DEPARTMENT_ADDED', 'Added department ' + name + ' with category ' + category.name + '.');
       return true;
     }
 
@@ -837,7 +828,11 @@ export async function handleSettingsInteraction(
         settings.retention.archiveDays = archive;
       });
       await refreshSettingsChannel(guild);
-      await interaction.editReply('✅ Retention settings updated.');
+      await interaction.editReply({
+        embeds: [new EmbedBuilder().setTitle('✅ Retention Updated').setDescription('Closed: **' + (closed || 'Never') + '** days • Archive: **' + (archive || 'Never') + '** days.')],
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+      });
+      await auditSettingsAction(guild, interaction, 'RETENTION_CHANGED', 'Closed retention=' + closed + ' days; archive retention=' + archive + ' days.');
       return true;
     }
 
@@ -859,7 +854,11 @@ export async function handleSettingsInteraction(
       });
       await syncPanel(guild);
       await refreshSettingsChannel(guild);
-      await interaction.editReply('✅ Panel appearance updated and the support panel has been refreshed.');
+      await interaction.editReply({
+        embeds: [new EmbedBuilder().setTitle('✅ Appearance Updated').setDescription('Panel title, description, and footer were saved and the support panel was refreshed.')],
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+      });
+      await auditSettingsAction(guild, interaction, 'APPEARANCE_CHANGED', 'Updated the SupportForge panel appearance.');
       return true;
     }
   }
@@ -868,29 +867,19 @@ export async function handleSettingsInteraction(
 }
 
 async function showHomeAfterUpdate(interaction: ButtonInteraction): Promise<void> {
-  const settings = await getAdvancedSettings(interaction.guild!.id);
-  const config = await getGuildConfig(interaction.guild!.id);
-
-  await interaction.editReply({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle('⚙️ SupportForge Settings')
-        .setDescription('Settings updated successfully.')
-        .addFields(
-          { name: 'Panel', value: settings.panelActivity.enabled ? 'Automatic movement enabled' : 'Automatic movement disabled', inline: true },
-          { name: 'Tags', value: String(Object.keys(settings.customTags).length), inline: true },
-          { name: 'Departments', value: String(Object.keys(config.departments).length), inline: true },
-        ),
-    ],
-    components: buildSettingsDashboardComponents(),
-  });
+  await showHome(interaction);
 }
 
-async function repairSystem(guild: Guild): Promise<void> {
+async function normalRepair(guild: Guild): Promise<void> {
   const supportCategory = await ensureContainer(guild);
   await ensureTranscriptChannel(guild, supportCategory.id);
   await ensurePanelChannel(guild, supportCategory.id);
+  await ensureAllDepartmentCategories(guild);
+  await ensureSettingsChannel(guild, supportCategory.id);
+  await syncPanel(guild);
+}
+
+async function storageRepair(guild: Guild): Promise<void> {
   await ensureClosedCategory(guild);
   await ensureArchiveCategory(guild);
-  await syncPanel(guild);
 }
