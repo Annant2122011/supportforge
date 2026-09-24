@@ -1,38 +1,44 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import {
-  MessageFlags,
-  type ChatInputCommandInteraction,
-  type Guild,
-} from 'discord.js';
 
-export interface CustomSlashCommand {
+export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent' | 'critical';
+
+export interface CustomTag {
   id: string;
   name: string;
+  emoji: string;
   description: string;
-  response: string;
-  staffOnly: boolean;
   createdAt: string;
 }
 
 export interface AdvancedGuildSettings {
-  version: 1;
+  version: 2;
   settingsChannelId: string | null;
   closedCategoryId: string | null;
   archiveCategoryId: string | null;
-  billingCategoryId: string | null;
   panelActivity: {
     enabled: boolean;
     visualLineBudget: number;
     messageBudget: number;
     minimumMessagesBeforeMove: number;
   };
-  retention: { closedDays: number; archiveDays: number };
-  customCommands: Record<string, CustomSlashCommand>;
+  retention: {
+    closedDays: number;
+    archiveDays: number;
+  };
+  appearance: {
+    panelTitle: string;
+    panelDescription: string;
+    panelFooter: string;
+  };
+  ticketDefaults: {
+    priority: TicketPriority;
+  };
+  customTags: Record<string, CustomTag>;
 }
 
 interface SettingsFile {
-  version: 1;
+  version: 2;
   guilds: Record<string, AdvancedGuildSettings>;
 }
 
@@ -40,19 +46,30 @@ const DATA_DIR = join(process.cwd(), 'data');
 const SETTINGS_PATH = join(DATA_DIR, 'advanced-settings.json');
 
 const DEFAULTS: AdvancedGuildSettings = {
-  version: 1,
+  version: 2,
   settingsChannelId: null,
   closedCategoryId: null,
   archiveCategoryId: null,
-  billingCategoryId: null,
   panelActivity: {
     enabled: true,
     visualLineBudget: 18,
     messageBudget: 12,
     minimumMessagesBeforeMove: 6,
   },
-  retention: { closedDays: 0, archiveDays: 0 },
-  customCommands: {},
+  retention: {
+    closedDays: 0,
+    archiveDays: 0,
+  },
+  appearance: {
+    panelTitle: '🎫 SupportForge Support Center',
+    panelDescription:
+      'Click a department button below to open a private support ticket.',
+    panelFooter: 'SupportForge • Professional Ticket System',
+  },
+  ticketDefaults: {
+    priority: 'normal',
+  },
+  customTags: {},
 };
 
 let state: SettingsFile | null = null;
@@ -63,12 +80,15 @@ function cloneDefaults(): AdvancedGuildSettings {
     ...DEFAULTS,
     panelActivity: { ...DEFAULTS.panelActivity },
     retention: { ...DEFAULTS.retention },
-    customCommands: {},
+    appearance: { ...DEFAULTS.appearance },
+    ticketDefaults: { ...DEFAULTS.ticketDefaults },
+    customTags: {},
   };
 }
 
 async function persist(): Promise<void> {
   if (!state) return;
+
   writeQueue = writeQueue.then(async () => {
     await mkdir(DATA_DIR, { recursive: true });
     await writeFile(
@@ -77,23 +97,62 @@ async function persist(): Promise<void> {
       'utf8',
     );
   });
+
   await writeQueue;
 }
 
 async function load(): Promise<SettingsFile> {
   if (state) return state;
+
   await mkdir(DATA_DIR, { recursive: true });
 
   try {
     const raw = await readFile(SETTINGS_PATH, 'utf8');
     const parsed = JSON.parse(raw) as Partial<SettingsFile>;
-    state = { version: 1, guilds: parsed.guilds ?? {} };
+
+    state = {
+      version: 2,
+      guilds: parsed.guilds ?? {},
+    };
   } catch {
-    state = { version: 1, guilds: {} };
+    state = {
+      version: 2,
+      guilds: {},
+    };
+
     await persist();
   }
 
   return state;
+}
+
+function normalizeExistingSettings(
+  settings: Partial<AdvancedGuildSettings>,
+): AdvancedGuildSettings {
+  return {
+    ...cloneDefaults(),
+    ...settings,
+    version: 2,
+    panelActivity: {
+      ...DEFAULTS.panelActivity,
+      ...(settings.panelActivity ?? {}),
+    },
+    retention: {
+      ...DEFAULTS.retention,
+      ...(settings.retention ?? {}),
+    },
+    appearance: {
+      ...DEFAULTS.appearance,
+      ...(settings.appearance ?? {}),
+    },
+    ticketDefaults: {
+      ...DEFAULTS.ticketDefaults,
+      ...(settings.ticketDefaults ?? {}),
+    },
+    customTags: {
+      ...(settings.customTags ?? {}),
+    },
+  };
 }
 
 export async function getAdvancedSettings(
@@ -106,9 +165,7 @@ export async function getAdvancedSettings(
     current.guilds[guildId] = cloneDefaults();
     await persist();
   } else {
-    existing.panelActivity ??= { ...DEFAULTS.panelActivity };
-    existing.retention ??= { ...DEFAULTS.retention };
-    existing.customCommands ??= {};
+    current.guilds[guildId] = normalizeExistingSettings(existing);
   }
 
   return current.guilds[guildId];
@@ -124,97 +181,57 @@ export async function updateAdvancedSettings(
   return settings;
 }
 
-export function validateCustomCommandName(name: string): boolean {
-  return /^[a-z0-9_-]{1,32}$/.test(name) && name !== 'supportforge';
+export function normalizeTagName(name: string): string {
+  return name
+    .trim()
+    .replace(/\s+/g, '-')
+    .toLowerCase()
+    .slice(0, 32);
 }
 
-export async function createCustomSlashCommand(
-  guild: Guild,
+export async function addCustomTag(
+  guildId: string,
   name: string,
-  description: string,
-  response: string,
-  staffOnly: boolean,
-): Promise<CustomSlashCommand> {
-  if (!validateCustomCommandName(name)) {
-    throw new Error(
-      'Custom command names must use lowercase letters, numbers, hyphens, or underscores and be 1-32 characters.',
-    );
+  emoji = '🏷️',
+  description = '',
+): Promise<CustomTag> {
+  const normalized = normalizeTagName(name);
+
+  if (!normalized) {
+    throw new Error('Tag name cannot be empty.');
   }
 
-  const settings = await getAdvancedSettings(guild.id);
+  const settings = await getAdvancedSettings(guildId);
 
-  if (settings.customCommands[name]) {
-    throw new Error('A custom command with that name already exists.');
+  if (settings.customTags[normalized]) {
+    throw new Error('A tag with that name already exists.');
   }
 
-  const command = await guild.commands.create({
-    name,
-    description: description.slice(0, 100),
-  });
-
-  const record: CustomSlashCommand = {
-    id: command.id,
-    name,
-    description: description.slice(0, 100),
-    response,
-    staffOnly,
+  const tag: CustomTag = {
+    id: normalized,
+    name: normalized,
+    emoji: emoji.trim().slice(0, 4) || '🏷️',
+    description: description.trim().slice(0, 100),
     createdAt: new Date().toISOString(),
   };
 
-  await updateAdvancedSettings(guild.id, (current) => {
-    current.customCommands[name] = record;
+  await updateAdvancedSettings(guildId, (current) => {
+    current.customTags[normalized] = tag;
   });
 
-  return record;
+  return tag;
 }
 
-export async function deleteCustomSlashCommand(
-  guild: Guild,
-  name: string,
+export async function removeCustomTag(
+  guildId: string,
+  tagId: string,
 ): Promise<boolean> {
-  const settings = await getAdvancedSettings(guild.id);
-  const command = settings.customCommands[name];
+  const settings = await getAdvancedSettings(guildId);
+  if (!settings.customTags[tagId]) return false;
 
-  if (!command) return false;
-
-  await guild.commands.delete(command.id).catch(() => undefined);
-  await updateAdvancedSettings(guild.id, (current) => {
-    delete current.customCommands[name];
+  await updateAdvancedSettings(guildId, (current) => {
+    delete current.customTags[tagId];
   });
-
-  return true;
-}
-
-export async function executeCustomSlashCommand(
-  interaction: ChatInputCommandInteraction,
-  administratorPermission: bigint,
-): Promise<boolean> {
-  if (!interaction.guildId) return false;
-
-  const settings = await getAdvancedSettings(interaction.guildId);
-  const command = settings.customCommands[interaction.commandName];
-
-  if (!command) return false;
-
-  if (
-    command.staffOnly &&
-    !interaction.memberPermissions?.has(administratorPermission)
-  ) {
-    await interaction.reply({
-      content: '❌ This custom command is restricted to staff.',
-      flags: MessageFlags.Ephemeral,
-    });
-    return true;
-  }
-
-  await interaction.reply(
-    command.staffOnly
-      ? {
-          content: command.response.slice(0, 2000),
-          flags: MessageFlags.Ephemeral,
-        }
-      : { content: command.response.slice(0, 2000) },
-  );
 
   return true;
 }
@@ -222,33 +239,43 @@ export async function executeCustomSlashCommand(
 export function buildSettingsSummary(
   settings: AdvancedGuildSettings,
 ): string {
-  const customCount = Object.keys(settings.customCommands).length;
   const closed =
     settings.retention.closedDays === 0
       ? 'Never delete'
       : settings.retention.closedDays + ' days';
+
   const archived =
     settings.retention.archiveDays === 0
       ? 'Never delete'
       : settings.retention.archiveDays + ' days';
 
+  const tags = Object.values(settings.customTags);
+
   return [
-    '**Panel activity**',
+    '**🎛️ Panel**',
     '• Automatic repositioning: ' +
       (settings.panelActivity.enabled ? 'Enabled' : 'Disabled'),
     '• Visual budget: ' +
       settings.panelActivity.visualLineBudget +
       ' lines',
     '• Message safety cap: ' +
-      settings.panelActivity.messageBudget +
-      ' messages',
-    '• Minimum messages: ' +
-      settings.panelActivity.minimumMessagesBeforeMove,
+      settings.panelActivity.messageBudget,
     '',
-    '**Retention**',
-    '• Closed tickets: ' + closed,
-    '• Archived tickets: ' + archived,
+    '**🎟️ Ticket defaults**',
+    '• Default priority: ' + settings.ticketDefaults.priority,
     '',
-    '**Custom slash commands:** ' + customCount,
+    '**🏷️ Custom tags**',
+    '• Configured tags: ' + tags.length,
+    tags.length
+      ? '• ' +
+        tags
+          .slice(0, 6)
+          .map((tag) => tag.emoji + ' ' + tag.name)
+          .join(' • ')
+      : '• No custom tags configured',
+    '',
+    '**🧹 Retention**',
+    '• Closed: ' + closed,
+    '• Archived: ' + archived,
   ].join('\n');
 }
