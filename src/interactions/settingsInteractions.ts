@@ -397,7 +397,7 @@ async function showResetFinal(interaction: ButtonInteraction): Promise<void> {
             .setStyle(TextInputStyle.Short)
             .setRequired(true)
             .setPlaceholder('DELETE SUPPORTFORGE')
-            .setMaxLength(18),
+            .setMaxLength(19),
         ),
       ),
   );
