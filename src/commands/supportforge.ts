@@ -429,7 +429,7 @@ async function ensurePanelChannel(
   return channel;
 }
 
-async function syncPanel(
+export async function syncPanel(
   guild: Guild,
 ): Promise<void> {
   const config =
