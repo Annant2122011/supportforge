@@ -49,6 +49,9 @@ export function buildSettingsDashboardComponents(): ActionRowBuilder<ButtonBuild
       settingsButton('sf:settings:repair', 'Repair System', ButtonStyle.Secondary, '🛠️'),
       settingsButton('sf:settings:refresh', 'Refresh', ButtonStyle.Secondary, '🔄'),
     ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      settingsButton('sf:settings:reset', 'Delete Everything', ButtonStyle.Danger, '🚨'),
+    ),
   ];
 }
 
