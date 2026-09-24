@@ -1047,7 +1047,7 @@ async function createTicket(
                 actor: interaction.user.tag,
                 actorId: interaction.user.id,
                 actorName: interaction.user.tag,
-                detail: `Ticket created in department ${department.name} under ${departmentCategory.name}.`,
+                detail: `Ticket created in department ${department.name}${departmentCategory ? ` under ${departmentCategory.name}` : ''}.`,
               },
             );
           } catch (error) {
