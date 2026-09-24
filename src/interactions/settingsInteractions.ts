@@ -38,6 +38,8 @@ import {
 import {
   ensureArchiveCategory,
   ensureClosedCategory,
+  ensureOptionalStatusCategory,
+  getOptionalStatusCategory,
 } from '../services/ticketStorageService';
 
 import {
@@ -46,6 +48,8 @@ import {
 } from '../services/departmentCategoryService';
 
 import { logSettingsEvent } from '../services/auditLogService';
+import { performFactoryReset } from '../services/factoryResetService';
+import { runRetentionSweepForGuild } from '../services/ticketRetentionService';
 
 import {
   ensureContainer,
@@ -317,39 +321,82 @@ async function showUseCases(interaction: ButtonInteraction): Promise<void> {
 
 async function showStorage(interaction: ButtonInteraction): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
+  const claimed = await getOptionalStatusCategory(interaction.guild!, 'claimed');
+  const pending = await getOptionalStatusCategory(interaction.guild!, 'pending');
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🗄️ Storage')
-      .setDescription('Historical ticket storage is kept separate from active support operations.')
+      .setTitle('🗄️ Storage & Categories')
+      .setDescription(
+        'Closed tickets and Archive tickets are the only status-storage categories created by default. ' +
+        'Claimed tickets and Pending tickets can be added here when extra segregation is useful.',
+      )
       .addFields(
-        { name: 'Closed', value: settings.closedCategoryId ? '<#' + settings.closedCategoryId + '>' : 'Not provisioned', inline: true },
-        { name: 'Archive', value: settings.archiveCategoryId ? '<#' + settings.archiveCategoryId + '>' : 'Not provisioned', inline: true },
+        { name: 'Closed tickets', value: settings.closedCategoryId ? '<#' + settings.closedCategoryId + '>' : 'Not provisioned', inline: true },
+        { name: 'Archive tickets', value: settings.archiveCategoryId ? '<#' + settings.archiveCategoryId + '>' : 'Not provisioned', inline: true },
+        { name: 'Claimed tickets', value: claimed ? '<#' + claimed.id + '>' : 'Not added', inline: true },
+        { name: 'Pending tickets', value: pending ? '<#' + pending.id + '>' : 'Not added', inline: true },
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:storage:add:claimed').setLabel(claimed ? 'Claimed Added' : 'Add Claimed tickets').setEmoji('🙋').setStyle(ButtonStyle.Secondary).setDisabled(Boolean(claimed)),
+      new ButtonBuilder().setCustomId('sf:settings:storage:add:pending').setLabel(pending ? 'Pending Added' : 'Add Pending tickets').setEmoji('⏳').setStyle(ButtonStyle.Secondary).setDisabled(Boolean(pending)),
       new ButtonBuilder().setCustomId('sf:settings:storage:repair').setLabel('Storage Repair').setEmoji('🗄️').setStyle(ButtonStyle.Primary),
       backButton(),
     ),
   ]);
 }
 
-async function showRepairSystem(interaction: ButtonInteraction): Promise<void> {
+async function showResetStepOne(interaction: ButtonInteraction): Promise<void> {
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🛠️ Repair System')
-      .setDescription('Normal Repair and Storage Repair are separate operations. Choose only the area that needs attention.')
-      .addFields(
-        { name: 'Normal Repair', value: 'Repairs the SupportForge container, transcript channel, panel channel, settings channel, department categories, and support panel.' },
-        { name: 'Storage Repair', value: 'Repairs the Closed and Archive storage categories and their persisted references only.' },
+      .setTitle('🚨 Delete Everything • Confirmation 1 of 3')
+      .setDescription(
+        '**This permanently removes SupportForge data from this server.**\n\n' +
+        'SupportForge-managed ticket channels and their messages, SupportForge categories, the public ticket panel, transcript/audit/settings channels, and stored SupportForge data will be deleted.\n\n' +
+        'Unrelated Discord channels are not targeted.',
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:repair:normal').setLabel('Normal Repair').setEmoji('🛠️').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('sf:settings:repair:storage').setLabel('Storage Repair').setEmoji('🗄️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sf:settings:reset:confirm2').setLabel('Continue to Confirmation 2').setEmoji('⚠️').setStyle(ButtonStyle.Danger),
       backButton(),
     ),
   ]);
+}
+
+async function showResetStepTwo(interaction: ButtonInteraction): Promise<void> {
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('🚨 Delete Everything • Confirmation 2 of 3')
+      .setDescription(
+        '**You are about to erase every SupportForge-managed channel and stored record in this server.**\n\n' +
+        'This includes every message inside SupportForge-managed channels. SupportForge cannot undo this operation.',
+      ),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:reset:confirm3').setLabel('Continue to Final Confirmation').setEmoji('☢️').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('sf:settings:home').setLabel('Cancel').setEmoji('✖️').setStyle(ButtonStyle.Secondary),
+    ),
+  ]);
+}
+
+async function showResetFinal(interaction: ButtonInteraction): Promise<void> {
+  await interaction.showModal(
+    new ModalBuilder()
+      .setCustomId('sf:settings:modal:reset')
+      .setTitle('Final Confirmation • 3 of 3')
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId('confirmation')
+            .setLabel('Type DELETE SUPPORTFORGE to continue')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setPlaceholder('DELETE SUPPORTFORGE')
+            .setMaxLength(18),
+        ),
+      ),
+  );
 }
 
 async function openModal(
@@ -401,6 +448,21 @@ export async function handleSettingsInteraction(
 
     if (id === 'sf:settings:home') {
       await showHome(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:reset') {
+      await showResetStepOne(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:reset:confirm2') {
+      await showResetStepTwo(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:reset:confirm3') {
+      await showResetFinal(interaction);
       return true;
     }
 
@@ -637,6 +699,23 @@ export async function handleSettingsInteraction(
 
     if (id === 'sf:settings:storage') {
       await showStorage(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:storage:add:claimed' || id === 'sf:settings:storage:add:pending') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const status = id.endsWith(':claimed') ? 'claimed' : 'pending';
+      const category = await ensureOptionalStatusCategory(guild, status);
+      await refreshSettingsChannel(guild);
+      await interaction.editReply({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle('✅ Category Added')
+            .setDescription('The **' + (status === 'claimed' ? 'Claimed tickets' : 'Pending tickets') + '** category is now available at ' + category + '.'),
+        ],
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+      });
+      await auditSettingsAction(guild, interaction, 'STATUS_CATEGORY_ADDED', 'Added ' + status + ' ticket category ' + category.name + '.');
       return true;
     }
 
@@ -878,6 +957,7 @@ export async function handleSettingsInteraction(
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
       await auditSettingsAction(guild, interaction, 'RETENTION_CHANGED', 'Closed retention=' + closed + ' days; archive retention=' + archive + ' days.');
+      void runRetentionSweepForGuild(guild, { requestApproval: true });
       return true;
     }
 
