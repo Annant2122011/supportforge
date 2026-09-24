@@ -4,7 +4,6 @@ import {
   ButtonStyle,
   ChannelType,
   EmbedBuilder,
-  MessageFlags,
   type Client,
   type Guild,
   type TextChannel,
@@ -13,7 +12,6 @@ import {
 import { getAdvancedSettings, updateAdvancedSettings, type AdvancedGuildSettings } from './advancedSettingsService';
 import { getPersistedTicketStatus } from './ticketPersistenceService';
 import { getField, getTicketStatus, isTicketTopic } from './ticketStateService';
-import { getGuildConfig } from './configService';
 
 export type RetentionScope = 'closed' | 'archive';
 
@@ -55,9 +53,10 @@ function timestampForScope(
 async function findEligibleTickets(
   guild: Guild,
   scope: RetentionScope,
-  settings = await getAdvancedSettings(guild.id),
+  settings?: AdvancedGuildSettings,
 ): Promise<TextChannel[]> {
-  const days = retentionDays(settings, scope);
+  const resolvedSettings = settings ?? (await getAdvancedSettings(guild.id));
+  const days = retentionDays(resolvedSettings, scope);
   if (days <= 0) return [];
 
   const eligible: TextChannel[] = [];
@@ -65,8 +64,8 @@ async function findEligibleTickets(
   const now = Date.now();
   const effectiveFrom =
     scope === 'closed'
-      ? settings.retention.closedEffectiveFrom
-      : settings.retention.archiveEffectiveFrom;
+      ? resolvedSettings.retention.closedEffectiveFrom
+      : resolvedSettings.retention.archiveEffectiveFrom;
 
   for (const channel of guild.channels.cache.values()) {
     if (channel.type !== ChannelType.GuildText) continue;
