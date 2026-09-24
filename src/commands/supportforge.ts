@@ -38,7 +38,6 @@ import {
 
 import {
   ensureSettingsChannel,
-  refreshSettingsChannel,
 } from '../services/settingsChannelService';
 
 import {
@@ -866,7 +865,6 @@ export async function execute(
     (!group && subcommand === 'setup') ||
     group === 'category' ||
     group === 'premium' ||
-    group === 'settings'
   ) {
     if (!isAdminLike(interaction)) {
       await interaction.reply({
