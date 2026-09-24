@@ -37,7 +37,6 @@ import {
 } from '../services/ticketStorageService';
 
 import {
-  ensureAllDepartmentCategories,
   ensureDepartmentCategory,
 } from '../services/departmentCategoryService';
 
@@ -944,8 +943,7 @@ export async function execute(
           );
       }
 
-      await ensureAllDepartmentCategories(guild);
-      await syncPanel(guild);
+          await syncPanel(guild);
 
       await interaction.editReply(
         `✅ **SupportForge setup complete.**\n\n` +
