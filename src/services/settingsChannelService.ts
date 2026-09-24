@@ -1,100 +1,250 @@
 import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   ChannelType,
   EmbedBuilder,
   PermissionFlagsBits,
   type Guild,
   type TextChannel,
 } from 'discord.js';
+
 import { getGuildConfig } from './configService';
-import { getAdvancedSettings, updateAdvancedSettings, buildSettingsSummary } from './advancedSettingsService';
+import {
+  buildSettingsSummary,
+  getAdvancedSettings,
+} from './advancedSettingsService';
 
 const SETTINGS_TOPIC_PREFIX = 'supportforge:settings';
+const SETTINGS_TITLE = '⚙️ SupportForge Settings';
 
-export async function ensureSettingsChannel(guild: Guild, parentId: string): Promise<TextChannel> {
+function settingsButton(
+  customId: string,
+  label: string,
+  style = ButtonStyle.Secondary,
+  emoji?: string,
+): ButtonBuilder {
+  const button = new ButtonBuilder()
+    .setCustomId(customId)
+    .setLabel(label)
+    .setStyle(style);
+
+  if (emoji) button.setEmoji(emoji);
+  return button;
+}
+
+export function buildSettingsDashboardComponents(): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      settingsButton('sf:settings:panel', 'Panel', ButtonStyle.Primary, '🎛️'),
+      settingsButton('sf:settings:defaults', 'Ticket Defaults', ButtonStyle.Secondary, '🎟️'),
+      settingsButton('sf:settings:tags', 'Custom Tags', ButtonStyle.Secondary, '🏷️'),
+      settingsButton('sf:settings:departments', 'Departments', ButtonStyle.Secondary, '📂'),
+      settingsButton('sf:settings:retention', 'Retention', ButtonStyle.Secondary, '🧹'),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      settingsButton('sf:settings:appearance', 'Appearance', ButtonStyle.Secondary, '🎨'),
+      settingsButton('sf:settings:storage', 'Storage', ButtonStyle.Secondary, '🗄️'),
+      settingsButton('sf:settings:repair', 'Repair System', ButtonStyle.Secondary, '🛠️'),
+      settingsButton('sf:settings:refresh', 'Refresh', ButtonStyle.Secondary, '🔄'),
+    ),
+  ];
+}
+
+export async function ensureSettingsChannel(
+  guild: Guild,
+  parentId: string,
+): Promise<TextChannel> {
   const settings = await getAdvancedSettings(guild.id);
   const bot = guild.members.me;
-  if (!bot) throw new Error('SupportForge bot member could not be resolved.');
+
+  if (!bot) {
+    throw new Error('SupportForge bot member could not be resolved.');
+  }
+
+  let channel: TextChannel | undefined;
 
   if (settings.settingsChannelId) {
     const saved = guild.channels.cache.get(settings.settingsChannelId);
-    if (saved?.type === ChannelType.GuildText) return saved;
+    if (saved?.type === ChannelType.GuildText) {
+      channel = saved;
+    }
   }
 
-  const existing = guild.channels.cache.find(
-    (channel) => channel.type === ChannelType.GuildText && channel.topic?.startsWith(SETTINGS_TOPIC_PREFIX),
-  );
-  const channel = existing?.type === ChannelType.GuildText
-    ? existing
-    : await guild.channels.create({
-        name: 'supportforge-settings',
-        type: ChannelType.GuildText,
-        parent: parentId,
-        topic: SETTINGS_TOPIC_PREFIX + ' guild=' + guild.id,
-        permissionOverwrites: [
-          { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
-          { id: bot.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks] },
-        ],
-      });
+  if (!channel) {
+    const existing = guild.channels.cache.find(
+      (candidate) =>
+        candidate.type === ChannelType.GuildText &&
+        candidate.topic?.startsWith(SETTINGS_TOPIC_PREFIX),
+    );
 
-  for (const department of Object.values((await getGuildConfig(guild.id)).departments)) {
+    channel =
+      existing?.type === ChannelType.GuildText
+        ? existing
+        : await guild.channels.create({
+            name: 'supportforge-settings',
+            type: ChannelType.GuildText,
+            parent: parentId,
+            topic: SETTINGS_TOPIC_PREFIX + ' guild=' + guild.id,
+            permissionOverwrites: [
+              {
+                id: guild.roles.everyone.id,
+                deny: [
+                  PermissionFlagsBits.ViewChannel,
+                  PermissionFlagsBits.SendMessages,
+                ],
+              },
+              {
+                id: bot.id,
+                allow: [
+                  PermissionFlagsBits.ViewChannel,
+                  PermissionFlagsBits.SendMessages,
+                  PermissionFlagsBits.ReadMessageHistory,
+                  PermissionFlagsBits.EmbedLinks,
+                ],
+              },
+            ],
+          });
+  }
+
+  if (channel.parentId !== parentId) {
+    await channel
+      .setParent(parentId, { lockPermissions: false })
+      .catch(() => undefined);
+  }
+
+  for (const department of Object.values(
+    (await getGuildConfig(guild.id)).departments,
+  )) {
     if (!department.staffRoleId) continue;
-    await channel.permissionOverwrites.edit(department.staffRoleId, {
-      ViewChannel: true,
-      ReadMessageHistory: true,
-      SendMessages: false,
-    }).catch(() => undefined);
+
+    await channel.permissionOverwrites
+      .edit(department.staffRoleId, {
+        ViewChannel: true,
+        ReadMessageHistory: true,
+        SendMessages: false,
+      })
+      .catch(() => undefined);
   }
 
-  await updateAdvancedSettings(guild.id, (current) => {
-    current.settingsChannelId = channel.id;
-  });
+  await channel.permissionOverwrites
+    .edit(guild.roles.everyone.id, {
+      ViewChannel: false,
+      SendMessages: false,
+      ReadMessageHistory: false,
+    })
+    .catch(() => undefined);
+
+  await channel.permissionOverwrites
+    .edit(bot.id, {
+      ViewChannel: true,
+      SendMessages: true,
+      ReadMessageHistory: true,
+      EmbedLinks: true,
+    })
+    .catch(() => undefined);
 
   const currentSettings = await getAdvancedSettings(guild.id);
-  const embed = new EmbedBuilder()
-    .setTitle('⚙️ SupportForge Settings')
-    .setDescription(
-      'This channel is the administrative control center for SupportForge.\n\n' +
-      'Use the slash commands below to configure panel movement, closed/archive retention, and custom slash commands. ' +
-      'The ticket conversation itself remains focused on support.',
-    )
-    .addFields({
-      name: '🎛️ Panel positioning',
-      value: 'The panel uses a visual-occupancy heuristic rather than raw character count. Short one-line messages count as one visual unit; long messages, line breaks, attachments and embeds count more.',
-    }, {
-      name: '🗄️ Storage',
-      value: 'Closed tickets are placed in Closed storage. Explicitly archived tickets are placed in Archive storage. Billing departments use the dedicated Billing section.',
-    }, {
-      name: '🧹 Retention',
-      value: 'Closed and archived deletion periods are configurable. `0` means never delete.',
-    }, {
-      name: '🧩 Custom commands',
-      value: 'Administrators can register server-specific slash commands with `/supportforge settings custom-add`. Discord exposes application commands through the `/` command picker.',
-    }, {
-      name: '📋 Current configuration',
-      value: buildSettingsSummary(currentSettings).slice(0, 1024),
-    })
-    .setFooter({ text: 'SupportForge • Advanced Ticket Configuration' })
-    .setTimestamp();
 
-  const recent = await channel.messages.fetch({ limit: 25 }).catch(() => null);
-  const dashboard = recent?.find((message) => message.author.id === guild.client.user?.id && message.embeds.some((item) => item.title === '⚙️ SupportForge Settings'));
-  if (dashboard) await dashboard.edit({ embeds: [embed] });
-  else await channel.send({ embeds: [embed] });
+  await refreshSettingsDashboard(channel, currentSettings);
 
   return channel;
+}
+
+async function refreshSettingsDashboard(
+  channel: TextChannel,
+  settings = await getAdvancedSettings(channel.guild.id),
+): Promise<void> {
+  const config = await getGuildConfig(channel.guild.id);
+  const departmentCount = Object.keys(config.departments).length;
+
+  const embed = new EmbedBuilder()
+    .setTitle(SETTINGS_TITLE)
+    .setDescription(
+      'Administrative control center for SupportForge.\n\n' +
+        '**Everything below is button-driven.** No configuration slash commands are required.\n\n' +
+        'Use the buttons to configure ticket behavior, custom tags, departments, retention, appearance, and system repair.',
+    )
+    .addFields(
+      {
+        name: '🎛️ Panel',
+        value:
+          (settings.panelActivity.enabled ? 'Enabled' : 'Disabled') +
+          ' • ' +
+          settings.panelActivity.visualLineBudget +
+          ' visual lines • ' +
+          settings.panelActivity.messageBudget +
+          ' message safety cap',
+        inline: false,
+      },
+      {
+        name: '🎟️ Ticket defaults',
+        value:
+          'Default priority: **' +
+          settings.ticketDefaults.priority +
+          '**',
+        inline: true,
+      },
+      {
+        name: '🏷️ Custom tags',
+        value:
+          '**' +
+          Object.keys(settings.customTags).length +
+          '** configured',
+        inline: true,
+      },
+      {
+        name: '📂 Departments',
+        value: '**' + departmentCount + '** configured',
+        inline: true,
+      },
+      {
+        name: '🧹 Retention',
+        value:
+          'Closed: **' +
+          (settings.retention.closedDays || 'Never') +
+          '** • Archive: **' +
+          (settings.retention.archiveDays || 'Never') +
+          '** days',
+        inline: false,
+      },
+      {
+        name: '📋 Configuration snapshot',
+        value: buildSettingsSummary(settings).slice(0, 1024),
+        inline: false,
+      },
+    )
+    .setFooter({
+      text: 'SupportForge • Advanced Ticket Configuration',
+    })
+    .setTimestamp();
+
+  const recent = await channel.messages.fetch({ limit: 50 }).catch(() => null);
+  const dashboard = recent?.find(
+    (message) =>
+      message.author.id === channel.client.user?.id &&
+      message.embeds.some((item) => item.title === SETTINGS_TITLE),
+  );
+
+  if (dashboard) {
+    await dashboard.edit({
+      embeds: [embed],
+      components: buildSettingsDashboardComponents(),
+    });
+  } else {
+    await channel.send({
+      embeds: [embed],
+      components: buildSettingsDashboardComponents(),
+    });
+  }
 }
 
 export async function refreshSettingsChannel(guild: Guild): Promise<void> {
   const settings = await getAdvancedSettings(guild.id);
   if (!settings.settingsChannelId) return;
+
   const channel = guild.channels.cache.get(settings.settingsChannelId);
   if (channel?.type !== ChannelType.GuildText) return;
-  const currentSettings = await getAdvancedSettings(guild.id);
-  const recent = await channel.messages.fetch({ limit: 25 }).catch(() => null);
-  const dashboard = recent?.find((message) => message.author.id === guild.client.user?.id && message.embeds.some((item) => item.title === '⚙️ SupportForge Settings'));
-  if (!dashboard) return;
-  const embed = EmbedBuilder.from(dashboard.embeds[0]);
-  const fieldIndex = embed.data.fields?.findIndex((field) => field.name === '📋 Current configuration') ?? -1;
-  if (fieldIndex >= 0 && embed.data.fields) embed.data.fields[fieldIndex].value = buildSettingsSummary(currentSettings).slice(0, 1024);
-  await dashboard.edit({ embeds: [embed] });
+
+  await refreshSettingsDashboard(channel, settings);
 }
