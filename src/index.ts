@@ -165,7 +165,11 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
     changes.push('permission overwrites changed');
   }
 
-  if (oldGuildChannel.position !== newGuildChannel.position) {
+  if (
+    'position' in oldGuildChannel &&
+    'position' in newGuildChannel &&
+    oldGuildChannel.position !== newGuildChannel.position
+  ) {
     changes.push(
       `position: ${oldGuildChannel.position} → ${newGuildChannel.position}`,
     );
