@@ -75,43 +75,37 @@ client.on('channelCreate', async (channel) => {
     return;
   }
 
-  const topic = channel.topic ?? '';
+  const managed = await isSupportForgeManagedChannel(
+    channel.guild,
+    channel,
+  );
+
+  if (!managed) {
+    return;
+  }
 
   /*
    * Ticket channels and the public panel do not receive purpose embeds.
-   * Other SupportForge-managed text channels receive a default purpose
-   * message, including channels introduced by future subsystems.
+   * Every other SupportForge-managed text channel gets the default purpose
+   * message, including future channels placed under SupportForge categories.
    */
   if (
-    !topic.startsWith('supportforge:panel') &&
-    !topic.startsWith('supportforge:ticket')
+    !channel.topic?.startsWith('supportforge:panel') &&
+    !channel.topic?.startsWith('supportforge:ticket')
   ) {
-    const guildConfig = await getGuildConfig(channel.guild.id);
-    const managedByParent =
-      channel.parentId === guildConfig.supportCategoryId ||
-      channel.parentId === guildConfig.openCategoryId;
-    const managedByName =
-      channel.name.toLowerCase().startsWith('supportforge');
-
-    if (
-      topic.startsWith('supportforge:') ||
-      managedByParent ||
-      managedByName
-    ) {
-      void ensureDefaultChannelPurpose(channel).catch((error) => {
-        console.warn(
-          `⚠️ Could not add SupportForge purpose message to ${channel.id}:`,
-          error,
-        );
-      });
-    }
+    void ensureDefaultChannelPurpose(channel).catch((error) => {
+      console.warn(
+        `⚠️ Could not add SupportForge purpose message to ${channel.id}:`,
+        error,
+      );
+    });
   }
 
   void logDiscordMutation(
     channel.guild,
     channel,
     'CHANNEL_CREATED',
-    `Created text channel ${channel.name} (${channel.id}).`,
+    `Created SupportForge-managed channel ${channel.name} (${channel.id}).`,
     AuditLogEvent.ChannelCreate,
   );
 });
