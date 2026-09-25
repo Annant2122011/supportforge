@@ -2458,8 +2458,25 @@ async function handlePanelButton(
         channel.id,
         channel.lastMessageId ?? getField(topic, 'message') ?? 'unknown',
       );
+
+      const panelMoveConfig = await getGuildConfig(channel.guild.id);
+      if (panelMoveConfig.supportCategoryId) {
+        await logTicketEvent(
+          channel.guild,
+          panelMoveConfig.supportCategoryId,
+          {
+            ticketNumber: getField(topic, 'number') ?? 'unknown',
+            event: 'ticket_panel_moved',
+            actor: interaction.user.tag,
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Ticket controls manually moved/restored to the bottom.',
+          },
+        );
+      }
+
       await interaction.editReply(
-        '✅ Ticket controls were restored at the bottom. The panel will now remain fixed until a moderator deliberately moves it again.',
+        '✅ Ticket controls were moved to the bottom. Automatic panel activity tracking is armed again.',
       );
     } catch (error) {
       console.error('❌ Failed to move ticket panel manually:', error);
@@ -2860,6 +2877,22 @@ async function handlePanelModal(
         `✅ <@${userId}> has been added to the ticket.`,
       );
 
+      const userConfig = await getGuildConfig(channel.guild.id);
+      if (userConfig.supportCategoryId) {
+        await logTicketEvent(
+          channel.guild,
+          userConfig.supportCategoryId,
+          {
+            ticketNumber: getField(channel.topic ?? '', 'number') ?? 'unknown',
+            event: 'ticket_user_added',
+            actor: interaction.user.tag,
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Added user <@' + userId + '> to the ticket.',
+          },
+        );
+      }
+
       return;
     }
 
@@ -2929,6 +2962,22 @@ async function handlePanelModal(
       await interaction.editReply(
         `✅ Ticket priority changed to **${parsedPriority}**.`,
       );
+
+      const priorityConfig = await getGuildConfig(channel.guild.id);
+      if (priorityConfig.supportCategoryId) {
+        await logTicketEvent(
+          channel.guild,
+          priorityConfig.supportCategoryId,
+          {
+            ticketNumber: getField(newTopic, 'number') ?? 'unknown',
+            event: 'ticket_priority_changed',
+            actor: interaction.user.tag,
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Priority changed to ' + parsedPriority + '.',
+          },
+        );
+      }
 
       void updateMainMessage(
         channel,
@@ -3016,6 +3065,22 @@ async function handlePanelModal(
       await interaction.editReply(
         `✅ Added ticket tag **${tag}**.`,
       );
+
+      const tagConfig = await getGuildConfig(channel.guild.id);
+      if (tagConfig.supportCategoryId) {
+        await logTicketEvent(
+          channel.guild,
+          tagConfig.supportCategoryId,
+          {
+            ticketNumber: getField(newTopic, 'number') ?? 'unknown',
+            event: 'ticket_tag_added',
+            actor: interaction.user.tag,
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Added ticket tag ' + tag + '.',
+          },
+        );
+      }
 
       void updateMainMessage(
         channel,
