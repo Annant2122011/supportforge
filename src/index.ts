@@ -71,10 +71,39 @@ client.on('channelCreate', async (channel) => {
     return;
   }
 
+  const topic = channel.topic ?? '';
+
   /*
-   * Every future SupportForge-managed non-ticket text channel receives a
-   * purpose message automatically. Ticket channels and the public panel are
-   * intentionally excluded by channelPurposeService.
+   * SupportForge-created/managed text channels can be recognized by their
+   * metadata, their managed category, or the SupportForge naming convention.
+   * Ticket channels and the public panel are explicitly excluded.
+   */
+  if (
+    topic.startsWith('supportforge:panel') ||
+    topic.startsWith('supportforge:ticket')
+  ) {
+    return;
+  }
+
+  const guildConfig = await getGuildConfig(channel.guild.id);
+  const managedByParent =
+    channel.parentId === guildConfig.supportCategoryId ||
+    channel.parentId === guildConfig.openCategoryId;
+  const managedByName =
+    channel.name.toLowerCase().startsWith('supportforge');
+
+  if (
+    !topic.startsWith('supportforge:') &&
+    !managedByParent &&
+    !managedByName
+  ) {
+    return;
+  }
+
+  /*
+   * Future SupportForge-managed non-ticket text channels automatically get
+   * a default purpose message. A future subsystem can replace it with a
+   * custom description by calling ensureChannelPurposeMessage directly.
    */
   void ensureDefaultChannelPurpose(channel).catch((error) => {
     console.warn(
