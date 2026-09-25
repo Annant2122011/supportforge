@@ -23,7 +23,7 @@ export interface RetentionApproval {
 }
 
 export interface AdvancedGuildSettings {
-  version: 3;
+  version: 4;
   settingsChannelId: string | null;
   closedCategoryId: string | null;
   archiveCategoryId: string | null;
@@ -55,11 +55,17 @@ export interface AdvancedGuildSettings {
   ticketDefaults: {
     priority: TicketPriority;
   };
+  /**
+   * Optional server roles explicitly created by an administrator for
+   * priority-based routing/visibility. No priority role is created by
+   * default.
+   */
+  priorityRoles: Partial<Record<TicketPriority, string>>;
   customTags: Record<string, CustomTag>;
 }
 
 interface SettingsFile {
-  version: 3;
+  version: 4;
   guilds: Record<string, AdvancedGuildSettings>;
 }
 
@@ -100,6 +106,7 @@ const DEFAULTS: AdvancedGuildSettings = {
   ticketDefaults: {
     priority: 'normal',
   },
+  priorityRoles: {},
   customTags: {},
 };
 
@@ -119,6 +126,7 @@ function cloneDefaults(): AdvancedGuildSettings {
     statusCategories: { ...DEFAULTS.statusCategories },
     appearance: { ...DEFAULTS.appearance },
     ticketDefaults: { ...DEFAULTS.ticketDefaults },
+    priorityRoles: { ...DEFAULTS.priorityRoles },
     customTags: {},
   };
 }
@@ -193,6 +201,10 @@ function normalizeExistingSettings(
     ticketDefaults: {
       ...DEFAULTS.ticketDefaults,
       ...(settings.ticketDefaults ?? {}),
+    },
+    priorityRoles: {
+      ...DEFAULTS.priorityRoles,
+      ...(settings.priorityRoles ?? {}),
     },
     customTags: {
       ...(settings.customTags ?? {}),
@@ -332,6 +344,9 @@ export function buildSettingsSummary(
     '',
     '**🎟️ Ticket defaults**',
     '• Default priority: ' + settings.ticketDefaults.priority,
+    '',
+    '**🎨 Priority roles**',
+    '• Explicitly created roles: ' + Object.keys(settings.priorityRoles).length,
     '',
     '**🏷️ Custom tags**',
     '• Configured tags: ' + tags.length,
