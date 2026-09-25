@@ -80,13 +80,18 @@ export async function performFactoryReset(guild: Guild): Promise<void> {
   await resetConfigState();
   await resetAdvancedSettingsState();
   await resetTicketPersistenceState();
+  /*
+   * Keep the audit database intact. A factory reset removes the Discord
+   * surface and configuration, but historical audit evidence is useful for
+   * recovery and must survive so a later /supportforge setup can rebuild the
+   * audit channel and its summaries.
+   */
   await resetAuditLogState();
 
   for (const filename of [
     'config.json',
     'advanced-settings.json',
     'tickets.json',
-    'audit-log.json',
   ]) {
     await unlink(join(DATA_DIR, filename)).catch(() => undefined);
   }
