@@ -1,11 +1,19 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import type { TicketPriority } from './advancedSettingsService';
 import type { TicketStatus } from './ticketStateService';
 
-interface PersistedTicket {
+export interface PersistedTicket {
   status: TicketStatus;
   updatedAt: string;
+  createdAt: string;
+  ticketNumber: string | null;
+  departmentId: string | null;
+  ownerId: string | null;
+  priority: TicketPriority | null;
+  deletedAt: string | null;
+  deletionReason: string | null;
 }
 
 interface TicketStateFile {
@@ -30,9 +38,27 @@ async function loadState(): Promise<TicketStateFile> {
     const raw = await readFile(TICKETS_PATH, 'utf8');
     const parsed = JSON.parse(raw) as Partial<TicketStateFile>;
 
+    const rawTickets = parsed.tickets ?? {};
+    const normalizedTickets: Record<string, PersistedTicket> = {};
+
+    for (const [channelId, ticket] of Object.entries(rawTickets)) {
+      const legacy = ticket as Partial<PersistedTicket>;
+      normalizedTickets[channelId] = {
+        status: legacy.status ?? 'open',
+        updatedAt: legacy.updatedAt ?? new Date().toISOString(),
+        createdAt: legacy.createdAt ?? legacy.updatedAt ?? new Date().toISOString(),
+        ticketNumber: legacy.ticketNumber ?? null,
+        departmentId: legacy.departmentId ?? null,
+        ownerId: legacy.ownerId ?? null,
+        priority: legacy.priority ?? null,
+        deletedAt: legacy.deletedAt ?? null,
+        deletionReason: legacy.deletionReason ?? null,
+      };
+    }
+
     state = {
       version: 1,
-      tickets: parsed.tickets ?? {},
+      tickets: normalizedTickets,
     };
   } catch {
     state = {
@@ -70,15 +96,76 @@ export async function getPersistedTicketStatus(
   return current.tickets[channelId]?.status;
 }
 
+export interface TicketRegistration {
+  ticketNumber: string;
+  departmentId: string;
+  ownerId: string;
+  priority: TicketPriority;
+  createdAt: string;
+}
+
+export async function registerTicket(
+  channelId: string,
+  registration: TicketRegistration,
+): Promise<void> {
+  const current = await loadState();
+  const existing = current.tickets[channelId];
+
+  current.tickets[channelId] = {
+    status: existing?.status ?? 'open',
+    updatedAt: registration.createdAt,
+    createdAt: existing?.createdAt ?? registration.createdAt,
+    ticketNumber: existing?.ticketNumber ?? registration.ticketNumber,
+    departmentId: existing?.departmentId ?? registration.departmentId,
+    ownerId: existing?.ownerId ?? registration.ownerId,
+    priority: existing?.priority ?? registration.priority,
+    deletedAt: existing?.deletedAt ?? null,
+    deletionReason: existing?.deletionReason ?? null,
+  };
+
+  await persistState();
+}
+
 export async function setPersistedTicketStatus(
   channelId: string,
   status: TicketStatus,
 ): Promise<void> {
   const current = await loadState();
+  const existing = current.tickets[channelId];
+  const now = new Date().toISOString();
 
   current.tickets[channelId] = {
     status,
-    updatedAt: new Date().toISOString(),
+    updatedAt: now,
+    createdAt: existing?.createdAt ?? now,
+    ticketNumber: existing?.ticketNumber ?? null,
+    departmentId: existing?.departmentId ?? null,
+    ownerId: existing?.ownerId ?? null,
+    priority: existing?.priority ?? null,
+    deletedAt: existing?.deletedAt ?? null,
+    deletionReason: existing?.deletionReason ?? null,
+  };
+
+  await persistState();
+}
+
+export async function getPersistedTicketRecords(): Promise<PersistedTicket[]> {
+  const current = await loadState();
+  return Object.values(current.tickets).map((ticket) => ({ ...ticket }));
+}
+
+export async function markPersistedTicketDeleted(
+  channelId: string,
+  reason: string,
+): Promise<void> {
+  const current = await loadState();
+  const existing = current.tickets[channelId];
+  if (!existing) return;
+
+  current.tickets[channelId] = {
+    ...existing,
+    deletedAt: new Date().toISOString(),
+    deletionReason: reason,
   };
 
   await persistState();
