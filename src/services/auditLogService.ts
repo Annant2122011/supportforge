@@ -77,6 +77,7 @@ const AUDIT_TOPIC = 'supportforge:audit';
 const AUDIT_NAME = '📒 supportforge-audit-log';
 const DATA_DIR = join(process.cwd(), 'data');
 const AUDIT_PATH = join(DATA_DIR, 'audit-log.json');
+const AUDIT_BACKUP_PATH = join(DATA_DIR, 'audit-log.backup.json');
 
 let state: AuditStore | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
@@ -97,7 +98,16 @@ async function persist(): Promise<void> {
 
   writeQueue = writeQueue.then(async () => {
     await mkdir(DATA_DIR, { recursive: true });
-    await writeFile(AUDIT_PATH, JSON.stringify(state, null, 2), 'utf8');
+    const serialized = JSON.stringify(state, null, 2);
+
+    /*
+     * Keep a second local copy so a damaged/missing primary audit file does
+     * not destroy the historical record. This backup is deliberately
+     * separate from Discord's channels and survives SupportForge channel
+     * deletion.
+     */
+    await writeFile(AUDIT_PATH, serialized, 'utf8');
+    await writeFile(AUDIT_BACKUP_PATH, serialized, 'utf8');
   });
 
   await writeQueue;
@@ -109,8 +119,21 @@ async function load(): Promise<AuditStore> {
   await mkdir(DATA_DIR, { recursive: true });
 
   try {
-    const raw = await readFile(AUDIT_PATH, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<AuditStore>;
+    let raw: string;
+
+    try {
+      raw = await readFile(AUDIT_PATH, 'utf8');
+    } catch {
+      raw = await readFile(AUDIT_BACKUP_PATH, 'utf8');
+    }
+
+    let parsed: Partial<AuditStore>;
+    try {
+      parsed = JSON.parse(raw) as Partial<AuditStore>;
+    } catch {
+      const backup = await readFile(AUDIT_BACKUP_PATH, 'utf8');
+      parsed = JSON.parse(backup) as Partial<AuditStore>;
+    }
 
     const rawGuilds = parsed.guilds ?? {};
     const guilds: Record<string, AuditGuildStore> = {};
@@ -863,6 +886,8 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
   const metricsLines = [
     '**Ticket lifecycle audit actions:** ' + ticketActions,
     '**Settings actions:** ' + settingsActions,
+    '**Categories created:** ' + (actionCounts.get('CATEGORY_CREATED') ?? 0),
+    '**Categories deleted:** ' + (actionCounts.get('CATEGORY_DELETED') ?? 0),
     '**Channels created:** ' + (actionCounts.get('CHANNEL_CREATED') ?? 0),
     '**Channels renamed:** ' + (actionCounts.get('CHANNEL_RENAMED') ?? 0),
     '**Channels moved/reordered:** ' +
@@ -873,8 +898,9 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
     '**Ticket panel moves:** ' +
       ((actionCounts.get('TICKET_PANEL_MOVED') ?? 0) + (actionCounts.get('TICKET_PANEL_AUTO_MOVED') ?? 0)),
     '**Priority roles created:** ' + priorityRolesCreated,
-    '**Roles updated/deleted:** ' +
-      ((actionCounts.get('ROLE_UPDATED') ?? 0) + (actionCounts.get('ROLE_DELETED') ?? 0)),
+    '**Roles created:** ' + (actionCounts.get('ROLE_CREATED') ?? 0),
+    '**Roles updated:** ' + (actionCounts.get('ROLE_UPDATED') ?? 0),
+    '**Roles deleted:** ' + (actionCounts.get('ROLE_DELETED') ?? 0),
     '**Retention reviewed/approved/declined:** ' +
       ((actionCounts.get('RETENTION_REVIEWED') ?? 0) +
         (actionCounts.get('RETENTION_APPROVED') ?? 0) +
@@ -1150,7 +1176,7 @@ async function runDailySummarySweep(client: Client): Promise<void> {
         continue;
       }
 
-      const summaryDate =
+          const summaryDate =
         previousEvents.length > 0
           ? previousDate
           : today;
