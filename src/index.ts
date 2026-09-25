@@ -32,6 +32,7 @@ import { removeLegacyCustomCommands } from './services/advancedSettingsService';
 import {
   handleAuditInteraction,
   isSupportForgeManagedChannel,
+  isSupportForgeManagedRole,
   logDiscordMutation,
   startAuditDailySummaryScheduler,
 } from './services/auditLogService';
@@ -197,7 +198,72 @@ client.on('channelDelete', async (channel) => {
 client.on('roleCreate', async (role) => {
   if (!role.guild) return;
 
-  const settings = await removeLegacyCustomCommands; // no-op placeholder
+  if (!(await isSupportForgeManagedRole(role.guild, role))) {
+    return;
+  }
+
+  void logDiscordMutation(
+    role.guild,
+    role,
+    'ROLE_CREATED',
+    `Created SupportForge-managed role ${role.name} (${role.id}).`,
+    AuditLogEvent.RoleCreate,
+  );
+});
+
+client.on('roleUpdate', async (oldRole, newRole) => {
+  if (!(await isSupportForgeManagedRole(newRole.guild, oldRole)) &&
+      !(await isSupportForgeManagedRole(newRole.guild, newRole))) {
+    return;
+  }
+
+  const changes: string[] = [];
+
+  if (oldRole.name !== newRole.name) {
+    changes.push(`name: ${oldRole.name} → ${newRole.name}`);
+  }
+
+  if (oldRole.color !== newRole.color) {
+    changes.push(`color: ${oldRole.color} → ${newRole.color}`);
+  }
+
+  if (oldRole.permissions.bitfield !== newRole.permissions.bitfield) {
+    changes.push('permissions changed');
+  }
+
+  if (oldRole.hoist !== newRole.hoist) {
+    changes.push(`hoist: ${oldRole.hoist} → ${newRole.hoist}`);
+  }
+
+  if (oldRole.mentionable !== newRole.mentionable) {
+    changes.push(`mentionable: ${oldRole.mentionable} → ${newRole.mentionable}`);
+  }
+
+  if (!changes.length) return;
+
+  void logDiscordMutation(
+    newRole.guild,
+    newRole,
+    'ROLE_UPDATED',
+    changes.join(' • '),
+    AuditLogEvent.RoleUpdate,
+  );
+});
+
+client.on('roleDelete', async (role) => {
+  if (!role.guild) return;
+
+  if (!(await isSupportForgeManagedRole(role.guild, role))) {
+    return;
+  }
+
+  void logDiscordMutation(
+    role.guild,
+    role,
+    'ROLE_DELETED',
+    `Deleted SupportForge-managed role ${role.name} (${role.id}).`,
+    AuditLogEvent.RoleDelete,
+  );
 });
 
 
