@@ -4622,3 +4622,142 @@ If the configured category disappears or becomes full, SupportForge finds anothe
 
 The setup command repairs/provisions the Open category alongside the existing SupportForge system without altering the existing **Support Forge** category.
 
+# 76. REPEATED PANEL ACTIVITY REPOSITIONING
+
+Automatic ticket-panel compaction is now a repeating cycle rather than a one-time action.
+
+When the configured visual/message threshold is reached, SupportForge moves the compact Restore/Move control to the newest position.
+
+If conversation activity reaches the threshold again, the restore control is moved again instead of being treated as a completed one-time operation.
+
+Manual panel movement also resets the activity tracker so future conversation growth can trigger another automatic repositioning.
+
+The panel therefore remains discoverable throughout long conversations without creating multiple restore controls.
+
+# 77. EXPANDED AUDIT COVERAGE
+
+The audit system now records a much broader set of SupportForge mutations.
+
+## Discord infrastructure
+
+SupportForge-managed channel and category events include:
+
+- Channel/category creation.
+- Channel renames.
+- Parent/category moves.
+- Category/channel reordering.
+- Topic and SupportForge metadata changes.
+- Permission-overwrite changes.
+- Text-channel settings changes such as NSFW and slowmode.
+- Channel/category deletion.
+
+Managed priority-role events include:
+
+- Role creation.
+- Role name/color/permission changes.
+- Hoist and mentionability changes.
+- Role deletion.
+
+The system attempts to resolve the Discord audit-log executor for infrastructure changes. When Discord does not expose a usable executor or the bot cannot read audit logs, the entry identifies the actor as Discord/SupportForge rather than inventing a user.
+
+## Ticket workflow
+
+Audit coverage includes:
+
+- Ticket creation.
+- Claiming and unclaiming.
+- Reassignment.
+- Pending/resume.
+- Closing/reopening/archiving.
+- User additions.
+- Priority changes.
+- Ticket-tag changes.
+- Internal notes.
+- Panel movement.
+- Automatic panel repositioning.
+
+## Settings and operations
+
+Audit coverage includes:
+
+- Setup completion.
+- Tier changes.
+- Panel enable/disable.
+- Panel threshold changes.
+- Ticket-default changes.
+- Custom-tag creation/removal.
+- Department creation/removal.
+- Use-case additions.
+- Retention changes.
+- Retention review.
+- Retention approval/decline.
+- Storage-category additions.
+- Repair operations.
+- Priority-role creation.
+- Settings dashboard refresh.
+
+The audit model distinguishes ticket, settings, and system/infrastructure events.
+
+# 78. AUDIT SUMMARY AND RECOVERY
+
+## Overall summary
+
+The overall audit summary now includes explicit counts for infrastructure and operational changes, including:
+
+- Channels created.
+- Channels renamed.
+- Channels moved/reordered.
+- Permission changes.
+- Channel deletions.
+- Channel settings changes.
+- Ticket panel moves.
+- Priority-role changes.
+- Retention review/approval/decline actions.
+- Ticket metadata changes.
+
+It also includes a dynamic audit-action breakdown generated from the actual persisted event types. This means new audit event names are automatically visible in the summary without requiring a second manual summary list.
+
+## Daily summary date selection
+
+The daily scheduler no longer posts an empty prior-day summary merely because the bot restarted.
+
+When yesterday has recorded activity, yesterday's summary is generated.
+
+When yesterday has no activity but today has recorded activity, today's summary is generated instead.
+
+When neither day has recorded activity, no empty daily summary is created.
+
+## Recovery after Discord-side deletion
+
+Persisted SupportForge configuration and audit history are not tied to the continued existence of the Discord channels themselves.
+
+If SupportForge-managed Discord channels are manually deleted but the local SupportForge data files still exist:
+
+- `/supportforge setup` can recreate the SupportForge infrastructure.
+- The persisted audit history remains available.
+- The recreated audit channel can display the historical overall summary.
+- The setup workflow records the restoration/setup event.
+
+This does not apply after the deliberate three-step **Delete Everything** factory reset, because that operation intentionally removes the persisted SupportForge state.
+
+# 79. DISASTER-RECOVERY GUIDANCE FOR THE SETTINGS HUB
+
+The Settings channel is an operational convenience layer, not the only recovery mechanism.
+
+## Primary recovery
+
+Use the standalone:
+
+`/supportforge setup`
+
+command from another server channel.
+
+It does not require the Settings channel to exist and can recreate the core SupportForge infrastructure.
+
+## Recommended future backup plan
+
+A future recovery feature can provide a small administrator-only recovery beacon outside the SupportForge-managed channels, containing the setup command and a one-click recovery action.
+
+A second, stronger backup is an exported SupportForge configuration snapshot stored outside Discord. This would preserve departments, categories, retention rules, appearance, tags and other configuration even if both Discord channels and local runtime data are lost.
+
+These recovery mechanisms should remain separate from the normal Settings channel so deleting the Settings hub cannot remove every recovery path.
