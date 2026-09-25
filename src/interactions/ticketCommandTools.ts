@@ -371,6 +371,13 @@ export async function executeTicketCommand(
         `🗄️ Ticket #${context.ticketNumber} has been archived and moved to the Archive section.`,
       );
 
+      await audit(
+        interaction,
+        context,
+        'Ticket archived',
+        'Ticket moved to the Archive category.',
+      );
+
       return;
     }
 
@@ -423,9 +430,8 @@ export async function executeTicketCommand(
       await interaction.editReply({
         content:
           '🎛️ **SupportForge Panel Controls**\n\n' +
-          'The ticket panel is now fixed and will not move automatically when users or staff send messages. ' +
-          'Use **Move Panel to Bottom** only when you deliberately want to reposition it. ' +
-          'The future panel-settings system can switch this control model between button-based and ticket-interaction modes.',
+          'Move the ticket controls to the bottom of the conversation when needed. ' +
+          'Automatic activity-based repositioning is re-armed after each move, so the panel can be surfaced repeatedly as the conversation grows.',
         components: rows,
       });
 
@@ -1149,6 +1155,13 @@ export async function executeTicketCommand(
 
       await interaction.editReply(
         '✅ Internal note recorded in the staff-only audit log.',
+      );
+
+      await audit(
+        interaction,
+        context,
+        'Internal note added',
+        'Staff internal note recorded in the audit history.',
       );
 
       return;
