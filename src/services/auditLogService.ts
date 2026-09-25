@@ -174,7 +174,7 @@ function hasSupportForgeName(name: string): boolean {
   );
 }
 
-function permissionOverwriteSignature(channel: GuildBasedChannel): string {
+export function permissionOverwriteSignature(channel: GuildBasedChannel): string {
   const entries = [...channel.permissionOverwrites.cache.values()]
     .sort((a, b) => a.id.localeCompare(b.id))
     .map((overwrite) => ({
