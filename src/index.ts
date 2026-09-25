@@ -73,17 +73,15 @@ client.once('clientReady', (readyClient) => {
 });
 
 client.on('channelCreate', async (channel) => {
-  if (
-    !('guild' in channel) ||
-    channel.type !== ChannelType.GuildText
-  ) {
+  if (!('guild' in channel)) {
     return;
   }
 
-  const guildChannel = channel as TextChannel;
+  const guildChannel = channel as GuildBasedChannel;
+
   const managed = await isSupportForgeManagedChannel(
     guildChannel.guild,
-    guildChannel as GuildBasedChannel,
+    guildChannel,
   );
 
   if (!managed) {
@@ -91,11 +89,11 @@ client.on('channelCreate', async (channel) => {
   }
 
   /*
-   * Ticket channels and the public panel do not receive purpose embeds.
-   * Every other SupportForge-managed text channel gets the default purpose
-   * message, including future channels placed under SupportForge categories.
+   * Only text channels receive purpose messages. Tickets and the public
+   * panel remain explicit exceptions.
    */
   if (
+    guildChannel.type === ChannelType.GuildText &&
     !guildChannel.topic?.startsWith('supportforge:panel') &&
     !guildChannel.topic?.startsWith('supportforge:ticket')
   ) {
@@ -110,8 +108,10 @@ client.on('channelCreate', async (channel) => {
   void logDiscordMutation(
     guildChannel.guild,
     guildChannel,
-    'CHANNEL_CREATED',
-    `Created SupportForge-managed channel ${guildChannel.name} (${guildChannel.id}).`,
+    guildChannel.type === ChannelType.GuildCategory
+      ? 'CATEGORY_CREATED'
+      : 'CHANNEL_CREATED',
+    `Created SupportForge-managed ${guildChannel.type === ChannelType.GuildCategory ? 'category' : 'channel'} ${guildChannel.name} (${guildChannel.id}).`,
     AuditLogEvent.ChannelCreate,
   );
 });
