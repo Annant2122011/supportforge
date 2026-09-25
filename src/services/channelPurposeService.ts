@@ -1,5 +1,6 @@
 import {
   EmbedBuilder,
+  type Guild,
   type TextChannel,
 } from 'discord.js';
 
@@ -152,4 +153,32 @@ export async function ensureDefaultChannelPurpose(
     channel,
     getDefaultChannelPurpose(purpose),
   );
+}
+
+export async function ensureSupportForgeCategoryPurposeMessages(
+  guild: Guild,
+  categoryId: string,
+): Promise<void> {
+  const category = guild.channels.cache.get(categoryId);
+
+  if (!category || category.type !== 'GUILD_CATEGORY') {
+    return;
+  }
+
+  for (const child of category.children.cache.values()) {
+    if (child.type !== 'GUILD_TEXT') {
+      continue;
+    }
+
+    const topic = child.topic ?? '';
+
+    if (
+      topic.startsWith('supportforge:panel') ||
+      topic.startsWith('supportforge:ticket')
+    ) {
+      continue;
+    }
+
+    await ensureDefaultChannelPurpose(child);
+  }
 }
