@@ -289,7 +289,7 @@ async function findRecentAuditExecutor(
 
     return {
       id: executor.id,
-      name: executor.tag ?? executor.username,
+      name: executor.tag || executor.username || executor.id,
     };
   } catch {
     return null;
