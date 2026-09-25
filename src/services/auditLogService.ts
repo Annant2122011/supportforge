@@ -623,6 +623,73 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
       : '**Oldest active ticket:** none',
   ];
 
+  const chunkLines = (lines: string[], max = 900): string[][] => {
+    const chunks: string[][] = [];
+    let current: string[] = [];
+    let length = 0;
+
+    for (const line of lines) {
+      const nextLength = length + line.length + (current.length ? 1 : 0);
+      if (current.length && nextLength > max) {
+        chunks.push(current);
+        current = [];
+        length = 0;
+      }
+
+      current.push(line);
+      length += line.length + (current.length > 1 ? 1 : 0);
+    }
+
+    if (current.length) chunks.push(current);
+    return chunks;
+  };
+
+  const tagChunks = chunkLines(tagLines);
+  const departmentChunks = chunkLines(departmentLines);
+  const detailEmbeds: EmbedBuilder[] = [];
+  const detailSections = Math.max(tagChunks.length, departmentChunks.length, 1);
+
+  for (let index = 0; index < detailSections; index += 1) {
+    const embed = new EmbedBuilder()
+      .setTitle(
+        '📋 Audit Details' +
+          (detailSections > 1 ? ' • Page ' + (index + 1) + '/' + detailSections : ''),
+      )
+      .setFooter({ text: 'SupportForge • Overall audit to date' })
+      .setTimestamp();
+
+    if (tagChunks[index]) {
+      embed.addFields({
+        name:
+          '🏷️ Tags created to date (' +
+          tagCreations +
+          ')' +
+          (tagChunks.length > 1 ? ' • Part ' + (index + 1) + '/' + tagChunks.length : ''),
+        value: tagChunks[index].join('\n'),
+      });
+    }
+
+    if (departmentChunks[index]) {
+      embed.addFields({
+        name:
+          '📂 Departments (' +
+          departments.length +
+          ')' +
+          (departmentChunks.length > 1 ? ' • Part ' + (index + 1) + '/' + departmentChunks.length : ''),
+        value: departmentChunks[index].join('\n'),
+      });
+    }
+
+    if (index === 0) {
+      embed.addFields({
+        name: '📈 Additional metrics',
+        value: metricsLines.join('\n').slice(0, 1024),
+      });
+    }
+
+    detailEmbeds.push(embed);
+  }
+
   const first = new EmbedBuilder()
     .setTitle('📊 SupportForge Overall Audit Summary • ' + guild.name)
     .setDescription(summaryLines.join('\n'))
@@ -630,17 +697,7 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
     .setFooter({ text: 'Persisted audit history + current live ticket snapshot' })
     .setTimestamp();
 
-  const second = new EmbedBuilder()
-    .setTitle('📋 Audit Details')
-    .addFields(
-      { name: '🏷️ Tags created to date (' + tagCreations + ')', value: tagLines.join('\n').slice(0, 1024) },
-      { name: '📂 Departments (' + departments.length + ')', value: departmentLines.join('\n').slice(0, 1024) },
-      { name: '📈 Additional metrics', value: metricsLines.join('\n') },
-    )
-    .setFooter({ text: 'SupportForge • Overall audit to date' })
-    .setTimestamp();
-
-  return [first, second];
+  return [first, ...detailEmbeds];
 }
 
 async function recordAndPublish(
