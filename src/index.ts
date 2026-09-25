@@ -39,6 +39,7 @@ import {
   startAuditDailySummaryScheduler,
 } from './services/auditLogService';
 import { handleSettingsInteraction } from './interactions/settingsInteractions';
+import { ensureSettingsChannel } from './services/settingsChannelService';
 import type { GuildBasedChannel, TextChannel } from 'discord.js';
 
 const token = process.env.DISCORD_TOKEN;
@@ -228,6 +229,10 @@ client.on('channelDelete', async (channel) => {
 
   if (!managed) return;
 
+  const deletedWasSettings =
+    guildChannel.type === ChannelType.GuildText &&
+    guildChannel.topic?.startsWith('supportforge:settings');
+
   void logDiscordMutation(
     guildChannel.guild,
     guildChannel,
@@ -235,6 +240,33 @@ client.on('channelDelete', async (channel) => {
     `Deleted SupportForge-managed channel ${guildChannel.name} (${guildChannel.id}).`,
     AuditLogEvent.ChannelDelete,
   );
+
+  /*
+   * Settings is the recovery hub. If somebody deletes it manually while the
+   * main Support Forge category still exists, recreate it immediately.
+   * If the entire SupportForge structure was deleted, /supportforge setup
+   * remains the explicit recovery path.
+   */
+  if (deletedWasSettings) {
+    const config = await getGuildConfig(guildChannel.guild.id);
+    if (config.supportCategoryId) {
+      const parent = guildChannel.guild.channels.cache.get(
+        config.supportCategoryId,
+      );
+
+      if (parent?.type === ChannelType.GuildCategory) {
+        await ensureSettingsChannel(
+          guildChannel.guild,
+          parent.id,
+        ).catch((error) => {
+          console.warn(
+            `⚠️ Automatic SupportForge Settings recovery failed for ${guildChannel.guild.id}:`,
+            error,
+          );
+        });
+      }
+    }
+  }
 });
 
 client.on('roleCreate', async (role) => {
