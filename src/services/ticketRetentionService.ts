@@ -11,7 +11,7 @@ import {
 } from 'discord.js';
 
 import { getAdvancedSettings, updateAdvancedSettings, type AdvancedGuildSettings } from './advancedSettingsService';
-import { getPersistedTicketStatus } from './ticketPersistenceService';
+import { getPersistedTicketStatus, markPersistedTicketDeleted } from './ticketPersistenceService';
 import { getField, getTicketStatus, isTicketTopic } from './ticketStateService';
 
 export type RetentionScope = 'closed' | 'archive';
@@ -221,8 +221,12 @@ export async function approveRetentionDeletion(
   for (const channel of eligible) {
     await channel
       .delete('SupportForge approved retention cleanup')
-      .then(() => {
+      .then(async () => {
         deleted += 1;
+        await markPersistedTicketDeleted(
+          channel.id,
+          'Approved SupportForge retention cleanup',
+        );
       })
       .catch((error) => {
         console.warn(`⚠️ Retention could not delete ${channel.id}:`, error);
