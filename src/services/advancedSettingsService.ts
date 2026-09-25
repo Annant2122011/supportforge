@@ -73,7 +73,7 @@ const DATA_DIR = join(process.cwd(), 'data');
 const SETTINGS_PATH = join(DATA_DIR, 'advanced-settings.json');
 
 const DEFAULTS: AdvancedGuildSettings = {
-  version: 3,
+  version: 4,
   settingsChannelId: null,
   closedCategoryId: null,
   archiveCategoryId: null,
