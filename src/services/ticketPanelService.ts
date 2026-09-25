@@ -293,8 +293,29 @@ export async function collapseTicketPanelToRestoreButton(
     messageId,
   );
 
-  // Avoid creating repeated restore controls when the channel is already compacted.
+  /*
+   * If the panel is already compacted, keep the restore control unique but
+   * move it to the newest position. This allows the automatic activity
+   * threshold to trigger again after the user continues the conversation.
+   */
   if (!panel && restore) {
+    const restoreMessage = await channel.send({
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          restorePanelButton(),
+        ),
+      ],
+    });
+
+    if (restore.id !== restoreMessage.id) {
+      await restore.delete().catch((error) => {
+        console.warn(
+          `⚠️ Could not remove previous Restore/Move Panel control in ${channel.id}:`,
+          error,
+        );
+      });
+    }
+
     return;
   }
 
