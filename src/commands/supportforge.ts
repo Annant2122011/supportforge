@@ -47,7 +47,10 @@ import { logSettingsEvent } from '../services/auditLogService';
 import {
   ensureSettingsChannel,
 } from '../services/settingsChannelService';
-import { ensureChannelPurposeMessage } from '../services/channelPurposeService';
+import {
+  ensureChannelPurposeMessage,
+  ensureSupportForgeCategoryPurposeMessages,
+} from '../services/channelPurposeService';
 
 import {
   getField,
@@ -933,6 +936,10 @@ export async function execute(
       await ensureArchiveCategory(guild);
       await ensureSettingsChannel(guild, supportCategory.id);
       await ensureAllDepartmentCategories(guild);
+      await ensureSupportForgeCategoryPurposeMessages(
+        guild,
+        supportCategory.id,
+      );
 
       let config =
         await getGuildConfig(guild.id);
