@@ -174,6 +174,19 @@ function hasSupportForgeName(name: string): boolean {
   );
 }
 
+function permissionOverwriteSignature(channel: GuildBasedChannel): string {
+  const entries = [...channel.permissionOverwrites.cache.values()]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((overwrite) => ({
+      id: overwrite.id,
+      type: overwrite.type,
+      allow: overwrite.allow.bitfield.toString(),
+      deny: overwrite.deny.bitfield.toString(),
+    }));
+
+  return JSON.stringify(entries);
+}
+
 export async function isSupportForgeManagedChannel(
   guild: Guild,
   channel: GuildBasedChannel,
@@ -1091,12 +1104,14 @@ async function runDailySummarySweep(client: Client): Promise<void> {
        * configured today. Prefer the current setup/activity day whenever
        * the previous day has no recorded actions.
        */
+      if (previousEvents.length === 0 && todayEvents.length === 0) {
+        continue;
+      }
+
       const summaryDate =
         previousEvents.length > 0
           ? previousDate
-          : todayEvents.length > 0
-            ? today
-            : previousDate;
+          : today;
 
       await publishDailySummary(guild, summaryDate);
     } catch (error) {
