@@ -260,33 +260,12 @@ export async function declineRetentionDeletion(
   });
 }
 
-export async function startRetentionCountdownFromToday(
+export async function getEligibleRetentionTickets(
   guild: Guild,
   scope: RetentionScope,
-  actorId: string,
-): Promise<void> {
+): Promise<TextChannel[]> {
   const settings = await getAdvancedSettings(guild.id);
-  const pending = settings.retention.pendingApprovals[scope];
-
-  if (!pending || pending.status !== 'declined') {
-    throw new Error('No cancelled retention decision is awaiting follow-up.');
-  }
-
-  if (pending.requestedById !== actorId && guild.ownerId !== actorId) {
-    throw new Error('Only the administrator who was asked, or the server owner, can change this retention decision.');
-  }
-
-  const now = new Date().toISOString();
-
-  await updateAdvancedSettings(guild.id, (current) => {
-    current.retention.pendingApprovals[scope] = null;
-
-    if (scope === 'closed') {
-      current.retention.closedEffectiveFrom = now;
-    } else {
-      current.retention.archiveEffectiveFrom = now;
-    }
-  });
+  return findEligibleTickets(guild, scope, settings);
 }
 
 export async function clearRetentionEffectiveFrom(
