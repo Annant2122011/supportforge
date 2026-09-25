@@ -8,6 +8,7 @@ import {
 import { getAdvancedSettings, updateAdvancedSettings } from './advancedSettingsService';
 import { getGuildConfig, updateGuildConfig } from './configService';
 import { setChannelParent } from './discordChannelService';
+import { logSystemEvent } from './auditLogService';
 
 const MAX_CHANNELS_PER_CATEGORY = 50;
 
@@ -86,6 +87,16 @@ async function ensureBucket(
   await updateAdvancedSettings(guild.id, (current) => {
     current[key] = category.id;
   });
+
+  const config = await getGuildConfig(guild.id);
+  if (config.supportCategoryId) {
+    void logSystemEvent(
+      guild,
+      config.supportCategoryId,
+      'CATEGORY_CREATED',
+      `Created SupportForge storage category ${category.name} (${category.id}) for ${key.replace('CategoryId', '')} tickets.`,
+    ).catch(() => undefined);
+  }
 
   return category;
 }
