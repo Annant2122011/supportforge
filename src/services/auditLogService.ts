@@ -438,20 +438,6 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
   await persist();
 }
 
-async function collapseAuditPanel(
-  guild: Guild,
-  channel: TextChannel,
-): Promise<void> {
-  const current = await load();
-  const store = getGuildStore(current, guild.id);
-
-  if (!store.panelMessageId) return;
-  if (store.events.length - store.panelEventCheckpoint < AUDIT_COLLAPSE_AFTER) return;
-
-  // An explicit collapse button is exposed after the threshold. Do not
-  // move the panel automatically.
-}
-
 function currentStatusCounts(tickets: Awaited<ReturnType<typeof collectLiveTickets>>): Map<TicketStatus, number> {
   const counts = new Map<TicketStatus, number>();
   for (const ticket of tickets) {
@@ -519,6 +505,25 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
   const closedOnly = counts.get('closed') ?? 0;
   const openTotal = unclaimedOpen + claimed + pending + reopened;
   const closedTotal = closedOnly + archived;
+
+  const lifetimeCounts = new Map<TicketStatus, number>();
+  for (const ticket of ticketRecords) {
+    lifetimeCounts.set(
+      ticket.status,
+      (lifetimeCounts.get(ticket.status) ?? 0) + 1,
+    );
+  }
+
+  const lifetimeOpen =
+    (lifetimeCounts.get('open') ?? 0) +
+    (lifetimeCounts.get('claimed') ?? 0) +
+    (lifetimeCounts.get('pending') ?? 0) +
+    (lifetimeCounts.get('reopened') ?? 0);
+  const lifetimeClaimed = lifetimeCounts.get('claimed') ?? 0;
+  const lifetimePending = lifetimeCounts.get('pending') ?? 0;
+  const lifetimeArchived = lifetimeCounts.get('archived') ?? 0;
+  const lifetimeClosed =
+    (lifetimeCounts.get('closed') ?? 0) + lifetimeArchived;
   const ticketCreationEvents = store.events.filter((event) => event.action === 'TICKET_CREATED').length;
   const ticketsCreatedToDate = Math.max(
     ticketRecords.length,
@@ -574,6 +579,13 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
     '**Reopened:** ' + reopened,
     '**Closed:** ' + closedTotal + ' *(includes ' + archived + ' archived)*',
     '**Archived:** ' + archived,
+    '',
+    '**Lifetime recorded statuses**',
+    '**Open chats to date:** ' + lifetimeOpen + ' *(includes ' + lifetimeClaimed + ' claimed, ' + lifetimePending + ' pending, and reopened chats)*',
+    '**Claimed chats recorded:** ' + lifetimeClaimed,
+    '**Pending chats recorded:** ' + lifetimePending,
+    '**Closed chats to date:** ' + lifetimeClosed + ' *(includes ' + lifetimeArchived + ' archived)*',
+    '**Archived chats to date:** ' + lifetimeArchived,
     '',
     '**Channels currently in server:** ' + guild.channels.cache.size,
     '**SupportForge-managed channels currently present:** ' + managedChannels,
@@ -727,7 +739,6 @@ async function recordAndPublish(
   try {
     const channel = await getOrCreateAuditChannel(guild, parentCategoryId);
     await sendAuditEntry(channel, record);
-    await collapseAuditPanel(guild, channel);
   } catch (error) {
     console.error('❌ Failed to publish audit log entry:', error);
   }
