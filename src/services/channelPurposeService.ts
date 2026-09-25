@@ -135,11 +135,18 @@ export async function ensureChannelPurposeMessage(
 export async function ensureDefaultChannelPurpose(
   channel: TextChannel,
 ): Promise<void> {
-  const purpose = getChannelPurposeFromTopic(channel.topic);
+  const topic = channel.topic ?? '';
 
-  if (!purpose) {
+  if (
+    topic.startsWith('supportforge:panel') ||
+    topic.startsWith('supportforge:ticket')
+  ) {
     return;
   }
+
+  const purpose =
+    getChannelPurposeFromTopic(topic) ??
+    'managed';
 
   await ensureChannelPurposeMessage(
     channel,
