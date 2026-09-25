@@ -24,6 +24,7 @@ import {
 import { getGuildConfig } from './services/configService';
 
 import { recordTicketMessageForPanel } from './services/panelActivityService';
+import { ensureDefaultChannelPurpose } from './services/channelPurposeService';
 
 
 import { startTicketRetentionScheduler } from './services/ticketRetentionService';
@@ -63,6 +64,24 @@ client.once('clientReady', (readyClient) => {
   void Promise.all(
     client.guilds.cache.map((guild) => removeLegacyCustomCommands(guild)),
   ).catch((error) => console.warn('⚠️ Legacy settings command cleanup failed:', error));
+});
+
+client.on('channelCreate', async (channel) => {
+  if (channel.type !== ChannelType.GuildText) {
+    return;
+  }
+
+  /*
+   * Every future SupportForge-managed non-ticket text channel receives a
+   * purpose message automatically. Ticket channels and the public panel are
+   * intentionally excluded by channelPurposeService.
+   */
+  void ensureDefaultChannelPurpose(channel).catch((error) => {
+    console.warn(
+      `⚠️ Could not add SupportForge purpose message to ${channel.id}:`,
+      error,
+    );
+  });
 });
 
 client.on('messageCreate', async (message) => {
