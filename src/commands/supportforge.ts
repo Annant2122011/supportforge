@@ -204,8 +204,6 @@ async function ensureContainer(guild: Guild) {
   return category;
 }
 
-export { ensureOpenCategory };
-
 async function ensureTranscriptChannel(
   guild: Guild,
   parentId: string,
@@ -229,6 +227,10 @@ async function ensureTranscriptChannel(
     if (
       saved?.type === ChannelType.GuildText
     ) {
+      await ensureChannelPurposeMessage(
+        saved,
+        'This private channel is the SupportForge transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
+      );
       return saved;
     }
   }
