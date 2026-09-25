@@ -14,6 +14,7 @@ import {
   buildSettingsSummary,
   getAdvancedSettings,
 } from './advancedSettingsService';
+import { ensureChannelPurposeMessage } from './channelPurposeService';
 
 const SETTINGS_TOPIC_PREFIX = 'supportforge:settings';
 const SETTINGS_TITLE = '⚙️ SupportForge Settings';
@@ -151,6 +152,11 @@ export async function ensureSettingsChannel(
     .catch(() => undefined);
 
   const currentSettings = await getAdvancedSettings(guild.id);
+
+  await ensureChannelPurposeMessage(
+    channel,
+    'This private channel is SupportForge’s administrative control center. Use the buttons here to configure tickets, departments, tags, retention, appearance, storage, rules, roles, repairs, and other server-level SupportForge settings.',
+  );
 
   await refreshSettingsDashboard(channel, currentSettings);
 
