@@ -257,7 +257,7 @@ async function createPriorityRole(interaction: ButtonInteraction, priority: Tick
       components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
     });
 
-    await auditSettingsAction(interaction.guild!, (await getGuildConfig(interaction.guild!.id)).supportCategoryId ? interaction : interaction, 'PRIORITY_ROLE_CREATED', 'Created ' + role.name + ' for ' + priority + ' priority.');
+    await auditSettingsAction(interaction.guild!, interaction, 'PRIORITY_ROLE_CREATED', 'Created ' + role.name + ' for ' + priority + ' priority.');
   } catch (error) {
     console.error('❌ Priority role creation failed:', error);
     await interaction.editReply('❌ SupportForge could not create that priority role. Check that the bot can Manage Roles and that its role is above the new role.');
