@@ -34,6 +34,7 @@ import {
 import {
   ensureArchiveCategory,
   ensureClosedCategory,
+  ensureOpenCategory,
 } from '../services/ticketStorageService';
 
 import {
@@ -46,6 +47,7 @@ import { logSettingsEvent } from '../services/auditLogService';
 import {
   ensureSettingsChannel,
 } from '../services/settingsChannelService';
+import { ensureChannelPurposeMessage } from '../services/channelPurposeService';
 
 import {
   getField,
@@ -202,6 +204,8 @@ async function ensureContainer(guild: Guild) {
   return category;
 }
 
+export { ensureOpenCategory };
+
 async function ensureTranscriptChannel(
   guild: Guild,
   parentId: string,
@@ -274,6 +278,11 @@ async function ensureTranscriptChannel(
       },
     );
 
+    await ensureChannelPurposeMessage(
+      existing,
+      'This private channel is the SupportForge transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
+    );
+
     return existing;
   }
 
@@ -311,6 +320,11 @@ async function ensureTranscriptChannel(
       current.transcriptChannelId =
         channel.id;
     },
+  );
+
+  await ensureChannelPurposeMessage(
+    channel,
+    'This private channel is the SupportForge transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
   );
 
   return channel;
@@ -900,6 +914,9 @@ export async function execute(
       const supportCategory =
         await ensureContainer(guild);
 
+      const openCategory =
+        await ensureOpenCategory(guild);
+
       await ensureTranscriptChannel(
         guild,
         supportCategory.id,
@@ -950,6 +967,7 @@ export async function execute(
       await interaction.editReply(
         `✅ **SupportForge setup complete.**\n\n` +
           `📁 Container: ${supportCategory}\n` +
+          `🟢 Open tickets: ${openCategory}\n` +
           `📋 Departments: **${Object.keys(
             config.departments,
           ).length}**\n` +
