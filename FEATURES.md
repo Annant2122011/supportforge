@@ -4772,3 +4772,65 @@ Read-only navigation such as opening a settings page or reading ticket history i
 
 Channel and category additions created manually by administrators are also detected when they match SupportForge-managed naming/configuration, not only when SupportForge creates them itself.
 
+
+
+# 76. EXPANDED AUDIT COVERAGE AND RECOVERY
+
+SupportForge auditing now observes the Discord mutations that affect SupportForge-managed infrastructure, not only the high-level settings/ticket functions.
+
+## Newly audited infrastructure actions
+
+- SupportForge-managed channel creation.
+- SupportForge-managed category creation.
+- SupportForge-managed channel/category deletion.
+- Channel renames.
+- Channel/category moves.
+- Channel reordering.
+- Channel topic/metadata changes.
+- Permission-overwrite changes.
+- Text-channel NSFW changes.
+- Text-channel slowmode changes.
+- SupportForge-managed role creation.
+- SupportForge-managed role updates.
+- SupportForge-managed role deletion.
+- Manual ticket-panel movement.
+- Automatic ticket-panel movement.
+- Setup/repair completion.
+
+The audit summary now includes these infrastructure actions and an action-by-action breakdown.
+
+## Repeated ticket-panel movement
+
+The activity tracker is re-armed after every automatic panel compaction. If the panel is compacted already, the next threshold creates a fresh Restore/Move control at the bottom and removes the previous control.
+
+Therefore repeated long-message activity can trigger panel movement repeatedly rather than only once.
+
+## Current-day setup summary
+
+The audit store records the date of the most recent SupportForge setup/repair.
+
+If SupportForge is fully rebuilt today, the daily summary scheduler uses today's setup/activity date instead of incorrectly preferring an older previous-day summary.
+
+## Audit persistence after factory reset
+
+Factory reset removes SupportForge's Discord infrastructure and normal configuration/ticket state, but the durable audit database is intentionally preserved.
+
+The audit database is stored in:
+
+- `data/audit-log.json`
+- `data/audit-log.backup.json`
+
+The second file is a continuously maintained local backup. If the primary audit file is missing or corrupted, SupportForge attempts to load the backup.
+
+After a later `/supportforge setup`, the audit channel and audit panel can therefore be rebuilt while retaining the previous audit history.
+
+## Settings-channel recovery
+
+If only the Settings channel is deleted manually while the main Support Forge category still exists, SupportForge automatically recreates the Settings channel and restores its dashboard.
+
+If the entire SupportForge structure is deleted, use:
+
+`/supportforge setup`
+
+The setup command provisions/repairs the Support Forge container, Open category, Settings channel, Audit channel, Transcript channel, panel, storage categories, and department categories.
+
