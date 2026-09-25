@@ -70,9 +70,23 @@ export async function recordTicketMessageForPanel(message: Message): Promise<voi
   if (!reachedVisualBudget && !reachedMessageBudget) return; if (state.moving) return; state.moving = true;
   try {
     await collapseTicketPanelToRestoreButton(channel);
+    const latest = await channel.messages.fetch({ limit: 25 }).catch(() => null);
+    const restore = latest?.find(
+      (item) =>
+        item.author.id === channel.client.user?.id &&
+        item.components.some(
+          (row) =>
+            row.type === 1 &&
+            row.components.some(
+              (component) =>
+                'customId' in component &&
+                component.customId === 'ticket:panel:restore-move',
+            ),
+        ),
+    );
     resetPanelActivity(
       channel.id,
-      channel.lastMessageId ?? panelMessageId,
+      restore?.id ?? channel.lastMessageId ?? panelMessageId,
     );
   } catch (error) {
     console.warn(
