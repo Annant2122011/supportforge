@@ -993,6 +993,7 @@ async function createTicket(
       await registerTicket(
         ticketChannel.id,
         {
+          guildId: guild.id,
           ticketNumber: String(number),
           departmentId,
           ownerId: interaction.user.id,
