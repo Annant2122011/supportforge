@@ -39,7 +39,7 @@ import {
   startAuditDailySummaryScheduler,
 } from './services/auditLogService';
 import { handleSettingsInteraction } from './interactions/settingsInteractions';
-import type { GuildBasedChannel } from 'discord.js';
+import type { GuildBasedChannel, TextChannel } from 'discord.js';
 
 const token = process.env.DISCORD_TOKEN;
 
