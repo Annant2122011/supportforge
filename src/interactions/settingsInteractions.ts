@@ -75,6 +75,194 @@ function isAdministrator(interaction: ButtonInteraction | StringSelectMenuIntera
   );
 }
 
+const PRIORITY_ROLE_DEFINITIONS: Record<TicketPriority, { label: string; emoji: string; color: number }> = {
+  low: { label: 'Low', emoji: '🟢', color: 0x2ecc71 },
+  normal: { label: 'Normal', emoji: '🟡', color: 0xf1c40f },
+  high: { label: 'High', emoji: '🔴', color: 0xe74c3c },
+  urgent: { label: 'Urgent', emoji: '🟠', color: 0xe67e22 },
+  critical: { label: 'Critical', emoji: '🟣', color: 0x9b59b6 },
+};
+
+async function isDepartmentStaff(interaction: SettingsViewInteraction): Promise<boolean> {
+  const guild = interaction.guild;
+  if (!guild) return false;
+  const roleIds = new Set(
+    Object.values((await getGuildConfig(guild.id)).departments)
+      .map((department) => department.staffRoleId)
+      .filter((id): id is string => Boolean(id)),
+  );
+  if (roleIds.size === 0) return false;
+  const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+  return Boolean(member?.roles.cache.some((role) => roleIds.has(role.id)));
+};
+
+function manualQuickEmbed(): EmbedBuilder {
+  return new EmbedBuilder()
+    .setTitle('📖 SupportForge Staff Manual • Quick Overview')
+    .setDescription(
+      '**1. Ticket lifecycle**\n' +
+      'Open → Claimed/Pending → Closed → Archived. Reopened tickets return to the active workflow.\n\n' +
+      '**2. Main staff controls**\n' +
+      'Claim a ticket when you take ownership. Pending means you are waiting for information. Resume returns it to Open. Close creates the transcript and makes the ticket read-only.\n\n' +
+      '**3. Priority**\n' +
+      '🟢 Low • 🟡 Normal • 🔴 High • 🟠 Urgent • 🟣 Critical. Priority is shown in the ticket name and panel.\n\n' +
+      '**4. Ticket tools**\n' +
+      'Use Add User, Priority, Tag, Note and History from the ticket panel.\n\n' +
+      '**5. Audit & Settings**\n' +
+      'The audit log records important activity. Settings is button-driven. Staff can read the Manual; administrators can change configuration.\n\n' +
+      '**6. Important rule**\n' +
+      'Closed and archived tickets are read-only. Do not work around the lock by sending messages manually.',
+    )
+    .setFooter({ text: 'Private manual view • only you can see this response' })
+    .setTimestamp();
+}
+
+function manualDetailedEmbeds(): EmbedBuilder[] {
+  return [
+    new EmbedBuilder()
+      .setTitle('📖 SupportForge Staff Manual • Detailed • Page 1')
+      .setDescription(
+        '**Getting started**\n' +
+        'SupportForge keeps ticket work private and structured. Your department role controls which support areas and audit/settings resources you can access. Use the buttons in the ticket panel instead of attempting manual channel-management actions.\n\n' +
+        '**Ticket states**\n' +
+        '• **Open:** Active ticket waiting for staff action.\n' +
+        '• **Claimed:** A staff member has taken ownership.\n' +
+        '• **Pending:** Waiting for the customer or another dependency.\n' +
+        '• **Reopened:** A previously closed ticket has returned to active work.\n' +
+        '• **Closed:** Transcript saved; ticket becomes read-only.\n' +
+        '• **Archived:** Historical terminal state.\n\n' +
+        '**Claiming and pending**\n' +
+        'Claim only when you intend to own the work. Pending should be used when progress genuinely depends on a response. Resume moves a pending ticket back to Open.\n\n' +
+        '**Closing**\n' +
+        'SupportForge generates and uploads the transcript before committing the Closed state. If transcript creation fails, the ticket is not treated as safely closed. Reopen is available only from Closed, and Archive is the deliberate terminal historical action.',
+      )
+      .setFooter({ text: 'Private manual view • Page 1 of 2' })
+      .setTimestamp(),
+    new EmbedBuilder()
+      .setTitle('📖 SupportForge Staff Manual • Detailed • Page 2')
+      .setDescription(
+        '**Priority & tags**\n' +
+        'Priority is not cosmetic. It is displayed in the ticket name, panel color, and status area. Use the lowest accurate priority and increase it when urgency changes. Tags add searchable operational context.\n\n' +
+        '**Internal notes & history**\n' +
+        'Internal notes are staff-only workflow context. History reads the audit record for the ticket. Do not put customer-facing promises, passwords, tokens, or other secrets into notes.\n\n' +
+        '**Panel navigation**\n' +
+        'When conversation activity pushes the panel away from view, SupportForge may collapse or move it. Restore/Move Panel brings the controls back to the bottom without duplicating old panels.\n\n' +
+        '**Audit log**\n' +
+        'The audit log records ticket and administrative activity. Its Summarise Everything control produces a current snapshot with ticket counts, tag dates, channels, departments, priorities and additional metrics.\n\n' +
+        '**Settings & priority roles**\n' +
+        'Administrators can configure departments, retention, appearance, storage and optional priority roles. Priority roles are never created automatically. Claimed and Pending are status states, not extra role types.\n\n' +
+        '**Retention**\n' +
+        'Closed and archived tickets are not silently deleted. When a retention rule finds eligible tickets, an approval step is required. Review the eligible tickets before approving deletion.\n\n' +
+        '**Safety**\n' +
+        'Never bypass SupportForge permissions. Never expose private tickets. When a workflow looks stale, use the supported panel controls or ask an administrator to run Repair System.',
+      )
+      .setFooter({ text: 'Private manual view • Page 2 of 2' })
+      .setTimestamp(),
+  ];
+}
+
+function priorityRoleLabel(priority: TicketPriority): string {
+  return PRIORITY_ROLE_DEFINITIONS[priority].label;
+}
+
+async function showManual(interaction: SettingsViewInteraction): Promise<void> {
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('📖 Staff Manual')
+      .setDescription(
+        'A newcomer-friendly guide to SupportForge. Choose a concise overview or the full instructions. Each manual is delivered as an **ephemeral** response, so other staff do not see or accumulate your manual pages.',
+      )
+      .addFields(
+        { name: 'Quick Overview', value: 'Core workflow and the controls you need most often.', inline: true },
+        { name: 'Detailed Manual', value: 'Full lifecycle, priorities, notes, audit, settings, retention and safety guidance.', inline: true },
+      ),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:manual:quick').setLabel('Display Quick Manual').setEmoji('⚡').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:manual:detailed').setLabel('Display Detailed Manual').setEmoji('📚').setStyle(ButtonStyle.Secondary),
+      backButton(),
+    ),
+  ]);
+}
+
+async function showManualVersion(interaction: ButtonInteraction, detailed: boolean): Promise<void> {
+  await interaction.reply({
+    embeds: detailed ? manualDetailedEmbeds() : [manualQuickEmbed()],
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+async function showPriorityRules(interaction: ButtonInteraction): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const lines = (Object.keys(PRIORITY_ROLE_DEFINITIONS) as TicketPriority[]).map((priority) => {
+    const roleId = settings.priorityRoles[priority];
+    const role = roleId ? interaction.guild!.roles.cache.get(roleId) : undefined;
+    return PRIORITY_ROLE_DEFINITIONS[priority].emoji + ' **' + PRIORITY_ROLE_DEFINITIONS[priority].label + '** • ' + (role ? role.toString() : roleId ? 'Role missing, recreate' : 'No role created');
+  });
+
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('🎨 Priority Rules & Roles')
+      .setDescription(
+        'Priority roles are optional server rules. **Nothing is created by default.** An administrator must explicitly choose a priority below to create its role. Claimed and Pending are intentionally excluded because they are workflow states, not new priority-role types.',
+      )
+      .addFields({ name: 'Current priority rules', value: lines.join('\n') }),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      ...(Object.keys(PRIORITY_ROLE_DEFINITIONS) as TicketPriority[]).map((priority) =>
+        new ButtonBuilder()
+          .setCustomId('sf:settings:rules:create:' + priority)
+          .setLabel('Create ' + PRIORITY_ROLE_DEFINITIONS[priority].label + ' Role')
+          .setEmoji(PRIORITY_ROLE_DEFINITIONS[priority].emoji)
+          .setStyle(priority === 'high' || priority === 'urgent' || priority === 'critical' ? ButtonStyle.Danger : ButtonStyle.Secondary),
+      ),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()),
+  ]);
+}
+
+async function createPriorityRole(interaction: ButtonInteraction, priority: TicketPriority): Promise<void> {
+  if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+    await reject(interaction, '❌ Creating priority roles requires the **Administrator** permission.');
+    return;
+  }
+
+  const existingSettings = await getAdvancedSettings(interaction.guild!.id);
+  const configuredRoleId = existingSettings.priorityRoles[priority];
+  const configuredRole = configuredRoleId ? interaction.guild!.roles.cache.get(configuredRoleId) : undefined;
+
+  if (configuredRole) {
+    await interaction.reply({ content: 'ℹ️ The ' + priorityRoleLabel(priority) + ' priority role already exists: ' + configuredRole.toString(), flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  try {
+    const definition = PRIORITY_ROLE_DEFINITIONS[priority];
+    const role = await interaction.guild!.roles.create({
+      name: 'SupportForge • ' + definition.label + ' Tickets',
+      color: definition.color,
+      mentionable: false,
+      reason: 'SupportForge administrator-created priority rule',
+    });
+
+    await updateAdvancedSettings(interaction.guild!.id, (settings) => {
+      settings.priorityRoles[priority] = role.id;
+    });
+    await refreshSettingsChannel(interaction.guild!);
+
+    await interaction.editReply({
+      embeds: [new EmbedBuilder().setTitle('✅ Priority Role Created').setDescription(definition.emoji + ' **' + definition.label + '** tickets can now use ' + role.toString() + '.\n\nThe role was created only because an administrator explicitly requested it. SupportForge did not create any default priority roles.')],
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+    });
+
+    await auditSettingsAction(interaction.guild!, (await getGuildConfig(interaction.guild!.id)).supportCategoryId ? interaction : interaction, 'PRIORITY_ROLE_CREATED', 'Created ' + role.name + ' for ' + priority + ' priority.');
+  } catch (error) {
+    console.error('❌ Priority role creation failed:', error);
+    await interaction.editReply('❌ SupportForge could not create that priority role. Check that the bot can Manage Roles and that its role is above the new role.');
+  }
+}
 function isSettingsChannel(interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction): boolean {
   return interaction.channel?.type === ChannelType.GuildText &&
     Boolean(interaction.channel.topic?.startsWith(SETTINGS_TOPIC_PREFIX));
@@ -439,8 +627,17 @@ export async function handleSettingsInteraction(
       return true;
     }
 
-    if (!isAdministrator(interaction)) {
-      await reject(interaction, '❌ You need **Manage Server** or **Administrator** to change SupportForge settings.');
+    const manualAction = interaction.customId === 'sf:settings:manual' ||
+      interaction.customId === 'sf:settings:manual:quick' ||
+      interaction.customId === 'sf:settings:manual:detailed';
+
+    if (!isAdministrator(interaction) && !(manualAction && await isDepartmentStaff(interaction))) {
+      await reject(
+        interaction,
+        manualAction
+          ? '❌ The Staff Manual is available to configured department staff or administrators.'
+          : '❌ You need **Manage Server** or **Administrator** to change SupportForge settings.',
+      );
       return true;
     }
   } else {
@@ -454,6 +651,36 @@ export async function handleSettingsInteraction(
 
     if (id === 'sf:settings:home') {
       await showHome(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:manual') {
+      await showManual(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:manual:quick') {
+      await showManualVersion(interaction, false);
+      return true;
+    }
+
+    if (id === 'sf:settings:manual:detailed') {
+      await showManualVersion(interaction, true);
+      return true;
+    }
+
+    if (id === 'sf:settings:rules') {
+      await showPriorityRules(interaction);
+      return true;
+    }
+
+    if (id.startsWith('sf:settings:rules:create:')) {
+      const priority = id.slice('sf:settings:rules:create:'.length);
+      if (!Object.prototype.hasOwnProperty.call(PRIORITY_ROLE_DEFINITIONS, priority)) {
+        await reject(interaction, '❌ Unknown priority rule.');
+        return true;
+      }
+      await createPriorityRole(interaction, priority as TicketPriority);
       return true;
     }
 
