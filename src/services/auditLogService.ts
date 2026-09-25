@@ -291,18 +291,31 @@ async function sendAuditEntry(
 
 const AUDIT_PANEL_TITLE = '📒 SupportForge Audit Log';
 const AUDIT_SUMMARY_CUSTOM_ID = 'sf:audit:summary';
+const AUDIT_COLLAPSE_CUSTOM_ID = 'sf:audit:collapse-panel';
 const AUDIT_RESTORE_CUSTOM_ID = 'sf:audit:restore-panel';
 const AUDIT_COLLAPSE_AFTER = 12;
 
-function auditPanelComponents(): ActionRowBuilder<ButtonBuilder>[] {
-  return [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
+function auditPanelComponents(canCollapse = false): ActionRowBuilder<ButtonBuilder>[] {
+  const buttons = [
+    new ButtonBuilder()
+      .setCustomId(AUDIT_SUMMARY_CUSTOM_ID)
+      .setLabel('Summarise Everything')
+      .setEmoji('📊')
+      .setStyle(ButtonStyle.Primary),
+  ];
+
+  if (canCollapse) {
+    buttons.push(
       new ButtonBuilder()
-        .setCustomId(AUDIT_SUMMARY_CUSTOM_ID)
-        .setLabel('Summarise Everything')
-        .setEmoji('📊')
-        .setStyle(ButtonStyle.Primary),
-    ),
+        .setCustomId(AUDIT_COLLAPSE_CUSTOM_ID)
+        .setLabel('Collapse Audit Panel')
+        .setEmoji('⬇️')
+        .setStyle(ButtonStyle.Secondary),
+    );
+  }
+
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(...buttons),
   ];
 }
 
@@ -351,7 +364,27 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
 
   if (store.panelMessageId) {
     const panel = channel.messages.cache.get(store.panelMessageId);
-    if (panel?.embeds.some((embed) => embed.title === AUDIT_PANEL_TITLE)) return;
+    if (panel?.embeds.some((embed) => embed.title === AUDIT_PANEL_TITLE)) {
+      const canCollapse =
+        store.events.length - store.panelEventCheckpoint >= AUDIT_COLLAPSE_AFTER;
+      const hasCollapse = panel.components.some(
+        (row) =>
+          row.type === ComponentType.ActionRow &&
+          row.components.some(
+            (component) =>
+              'customId' in component &&
+              component.customId === AUDIT_COLLAPSE_CUSTOM_ID,
+          ),
+      );
+
+      if (canCollapse !== hasCollapse) {
+        await panel.edit({
+          components: auditPanelComponents(canCollapse),
+        });
+      }
+      return;
+    }
+
     store.panelMessageId = null;
   }
 
@@ -384,6 +417,11 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
     );
     if (existingPanel) {
       store.panelMessageId = existingPanel.id;
+      const canCollapse =
+        store.events.length - store.panelEventCheckpoint >= AUDIT_COLLAPSE_AFTER;
+      await existingPanel
+        .edit({ components: auditPanelComponents(canCollapse) })
+        .catch(() => undefined);
       await persist();
       return;
     }
@@ -391,7 +429,7 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
 
   const panel = await channel.send({
     embeds: [buildAuditPanelEmbed(guild)],
-    components: auditPanelComponents(),
+    components: auditPanelComponents(false),
   });
 
   store.panelMessageId = panel.id;
@@ -400,31 +438,18 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
   await persist();
 }
 
-async function collapseAuditPanel(guild: Guild, channel: TextChannel): Promise<void> {
+async function collapseAuditPanel(
+  guild: Guild,
+  channel: TextChannel,
+): Promise<void> {
   const current = await load();
   const store = getGuildStore(current, guild.id);
 
   if (!store.panelMessageId) return;
   if (store.events.length - store.panelEventCheckpoint < AUDIT_COLLAPSE_AFTER) return;
 
-  const panel =
-    channel.messages.cache.get(store.panelMessageId) ??
-    await channel.messages.fetch(store.panelMessageId).catch(() => null);
-  if (!panel) {
-    store.panelMessageId = null;
-    await persist();
-    return;
-  }
-
-  const restore = await channel.send({ components: auditRestoreComponents() });
-  await panel.delete().catch((error) => {
-    console.warn('⚠️ Could not remove the audit panel:', error);
-  });
-
-  store.panelMessageId = null;
-  store.restoreMessageId = restore.id;
-  store.panelEventCheckpoint = store.events.length;
-  await persist();
+  // An explicit collapse button is exposed after the threshold. Do not
+  // move the panel automatically.
 }
 
 function currentStatusCounts(tickets: Awaited<ReturnType<typeof collectLiveTickets>>): Map<TicketStatus, number> {
@@ -816,6 +841,42 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
     if (restore) await restore.delete().catch(() => undefined);
     store.panelMessageId = panel.id;
     store.restoreMessageId = null;
+    store.panelEventCheckpoint = store.events.length;
+    await persist();
+    return true;
+  }
+
+  if (interaction.customId === AUDIT_COLLAPSE_CUSTOM_ID) {
+    await interaction.deferUpdate();
+
+    const current = await load();
+    const store = getGuildStore(current, interaction.guild.id);
+
+    if (
+      !store.panelMessageId ||
+      store.events.length - store.panelEventCheckpoint < AUDIT_COLLAPSE_AFTER
+    ) {
+      return true;
+    }
+
+    const oldPanel =
+      interaction.channel.messages.cache.get(store.panelMessageId) ??
+      await interaction.channel.messages.fetch(store.panelMessageId).catch(() => null);
+
+    if (!oldPanel) {
+      store.panelMessageId = null;
+      await persist();
+      return true;
+    }
+
+    const movedPanel = await interaction.channel.send({
+      embeds: [buildAuditPanelEmbed(interaction.guild)],
+      components: auditPanelComponents(false),
+    });
+
+    await oldPanel.delete().catch(() => undefined);
+
+    store.panelMessageId = movedPanel.id;
     store.panelEventCheckpoint = store.events.length;
     await persist();
     return true;
