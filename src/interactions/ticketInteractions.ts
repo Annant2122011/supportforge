@@ -40,6 +40,7 @@ import { ensureDepartmentCategory } from '../services/departmentCategoryService'
 
 import {
   getPersistedTicketStatus,
+  registerTicket,
   setPersistedTicketStatus,
 } from '../services/ticketPersistenceService';
 
@@ -932,6 +933,7 @@ async function createTicket(
               getTicketChannelName(
                 String(number).padStart(4, '0'),
                 'open',
+                advancedSettings.ticketDefaults.priority,
               ),
             type:
               ChannelType.GuildText,
@@ -986,6 +988,17 @@ async function createTicket(
         ticketChannel,
         finalTopic,
         'open',
+      );
+
+      await registerTicket(
+        ticketChannel.id,
+        {
+          ticketNumber: String(number),
+          departmentId,
+          ownerId: interaction.user.id,
+          priority: advancedSettings.ticketDefaults.priority,
+          createdAt: now,
+        },
       );
 
       await withTimeout(
@@ -1543,6 +1556,7 @@ async function transition(
       getTicketChannelName(
         ticketNumberForName,
         newStatus,
+        getField(newTopic, 'priority') ?? 'normal',
       ),
       `Ticket #${ticketNumberForName} status changed to ${newStatus}`,
     ).catch((error) => {
@@ -1967,7 +1981,11 @@ async function closeTicket(
      */
     void queueTicketChannelRename(
       channel,
-      getTicketChannelName(ticketNumber, 'closed'),
+      getTicketChannelName(
+        ticketNumber,
+        'closed',
+        getField(topic, 'priority') ?? 'normal',
+      ),
       `Ticket #${ticketNumber} closed`,
     ).catch((error) => {
       console.error(
@@ -2888,6 +2906,18 @@ async function handlePanelModal(
         newTopic,
         state.status,
       );
+
+      void queueTicketChannelRename(
+        channel,
+        getTicketChannelName(
+          getField(newTopic, 'number') ?? 'unknown',
+          state.status,
+          priority,
+        ),
+        `Ticket priority changed to ${priority}`,
+      ).catch((error) => {
+        console.error('⚠️ Failed to rename ticket for priority change:', error);
+      });
 
       await interaction.editReply(
         `✅ Ticket priority changed to **${priority}**.`,
