@@ -49,6 +49,7 @@ import {
 } from '../services/departmentCategoryService';
 
 import { logSettingsEvent } from '../services/auditLogService';
+import { getField } from '../services/ticketStateService';
 import { performFactoryReset } from '../services/factoryResetService';
 import {
   approveRetentionDeletion,
@@ -83,7 +84,7 @@ const PRIORITY_ROLE_DEFINITIONS: Record<TicketPriority, { label: string; emoji: 
   critical: { label: 'Critical', emoji: '🟣', color: 0x9b59b6 },
 };
 
-async function isDepartmentStaff(interaction: SettingsViewInteraction): Promise<boolean> {
+async function isDepartmentStaff(interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction): Promise<boolean> {
   const guild = interaction.guild;
   if (!guild) return false;
   const roleIds = new Set(
