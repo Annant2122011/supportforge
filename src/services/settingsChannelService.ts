@@ -46,10 +46,12 @@ export function buildSettingsDashboardComponents(): ActionRowBuilder<ButtonBuild
       settingsButton('sf:settings:retention', 'Retention', ButtonStyle.Secondary, '🧹'),
       settingsButton('sf:settings:appearance', 'Appearance', ButtonStyle.Secondary, '🎨'),
       settingsButton('sf:settings:storage', 'Storage', ButtonStyle.Secondary, '🗄️'),
+      settingsButton('sf:settings:rules', 'Rules & Roles', ButtonStyle.Secondary, '🎨'),
       settingsButton('sf:settings:repair', 'Repair System', ButtonStyle.Secondary, '🛠️'),
-      settingsButton('sf:settings:refresh', 'Refresh', ButtonStyle.Secondary, '🔄'),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
+      settingsButton('sf:settings:manual', 'Manual', ButtonStyle.Secondary, '📖'),
+      settingsButton('sf:settings:refresh', 'Refresh', ButtonStyle.Secondary, '🔄'),
       settingsButton('sf:settings:reset', 'Delete Everything', ButtonStyle.Danger, '🚨'),
     ),
   ];
@@ -202,6 +204,14 @@ async function refreshSettingsDashboard(
       {
         name: '📂 Departments',
         value: '**' + departmentCount + '** configured',
+        inline: true,
+      },
+      {
+        name: '🎨 Priority rules',
+        value:
+          '**' +
+          Object.keys(resolvedSettings.priorityRoles).length +
+          '** role(s) explicitly created',
         inline: true,
       },
       {
