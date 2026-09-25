@@ -4761,3 +4761,14 @@ A future recovery feature can provide a small administrator-only recovery beacon
 A second, stronger backup is an exported SupportForge configuration snapshot stored outside Discord. This would preserve departments, categories, retention rules, appearance, tags and other configuration even if both Discord channels and local runtime data are lost.
 
 These recovery mechanisms should remain separate from the normal Settings channel so deleting the Settings hub cannot remove every recovery path.
+
+# 80. AUDIT INTERPRETATION
+
+SupportForge now treats every meaningful SupportForge state-changing operation and managed Discord infrastructure mutation as auditable.
+
+This includes channel/category lifecycle changes, permission/settings changes, managed role changes, ticket workflow mutations, ticket metadata changes, settings changes, retention decisions, repairs, panel repositioning, setup, and related operations.
+
+Read-only navigation such as opening a settings page or reading ticket history is intentionally not treated as a state-changing mutation. Ticket conversation messages themselves remain in the ticket record/transcript rather than being duplicated as one audit entry per message.
+
+Channel and category additions created manually by administrators are also detected when they match SupportForge-managed naming/configuration, not only when SupportForge creates them itself.
+
