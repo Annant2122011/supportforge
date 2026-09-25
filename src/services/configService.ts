@@ -14,6 +14,7 @@ export interface DepartmentConfig {
 
 export interface GuildConfig {
   supportCategoryId: string | null;
+  openCategoryId: string | null;
   panelChannelId: string | null;
   panelMessageId: string | null;
   transcriptChannelId: string | null;
@@ -33,6 +34,7 @@ const CONFIG_PATH = join(DATA_DIR, 'config.json');
 
 const DEFAULT_CONFIG: GuildConfig = {
   supportCategoryId: null,
+  openCategoryId: null,
   panelChannelId: null,
   panelMessageId: null,
   transcriptChannelId: null,
@@ -92,6 +94,11 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
   current.guilds[guildId] ??= cloneDefaultConfig();
 
   let migrated = false;
+
+  if (current.guilds[guildId].openCategoryId === undefined) {
+    current.guilds[guildId].openCategoryId = null;
+    migrated = true;
+  }
   for (const department of Object.values(current.guilds[guildId].departments)) {
     if (department.categoryId === undefined) {
       department.categoryId = null;
