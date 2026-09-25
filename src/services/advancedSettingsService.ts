@@ -156,12 +156,12 @@ async function load(): Promise<SettingsFile> {
     const parsed = JSON.parse(raw) as Partial<SettingsFile>;
 
     state = {
-      version: 3,
+      version: 4,
       guilds: parsed.guilds ?? {},
     };
   } catch {
     state = {
-      version: 3,
+      version: 4,
       guilds: {},
     };
 
@@ -177,7 +177,7 @@ function normalizeExistingSettings(
   return {
     ...cloneDefaults(),
     ...settings,
-    version: 3,
+    version: 4,
     panelActivity: {
       ...DEFAULTS.panelActivity,
       ...(settings.panelActivity ?? {}),
@@ -370,7 +370,7 @@ export function buildSettingsSummary(
 
 export async function resetAdvancedSettings(): Promise<void> {
   state = {
-    version: 3,
+    version: 4,
     guilds: {},
   };
   await persist();
