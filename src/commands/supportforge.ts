@@ -42,7 +42,7 @@ import {
   ensureDepartmentCategory,
 } from '../services/departmentCategoryService';
 
-import { logSettingsEvent } from '../services/auditLogService';
+import { logSettingsEvent, logSystemEvent } from '../services/auditLogService';
 
 import {
   ensureSettingsChannel,
@@ -973,6 +973,19 @@ export async function execute(
 
           await syncPanel(guild);
 
+      await logSystemEvent(
+        guild,
+        supportCategory.id,
+        'SETUP_COMPLETED',
+        'SupportForge setup/repair completed. Support Forge=' +
+          supportCategory.id +
+          '; Open=' +
+          openCategory.id +
+          '; departments=' +
+          Object.keys(config.departments).length +
+          '.',
+      );
+
       await interaction.editReply(
         `✅ **SupportForge setup complete.**\n\n` +
           `📁 Container: ${supportCategory}\n` +
@@ -1314,6 +1327,25 @@ export async function execute(
           )}**.`,
         flags: MessageFlags.Ephemeral,
       });
+
+      const premiumConfig = await getGuildConfig(guild.id);
+      if (premiumConfig.supportCategoryId) {
+        void logSettingsEvent(
+          guild,
+          premiumConfig.supportCategoryId,
+          {
+            action: 'TIER_CHANGED',
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail:
+              'Tier changed from ' +
+              tierLabel(current) +
+              ' to ' +
+              tierLabel(next) +
+              '.',
+          },
+        ).catch(() => undefined);
+      }
 
       return;
     }
