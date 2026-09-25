@@ -4561,3 +4561,64 @@ Avoid:
 - Automatic retention deletion without approval.
 ```
 
+# 74. SUPPORTFORGE CHANNEL PURPOSE MESSAGES
+
+SupportForge-managed non-ticket text channels now receive a dedicated default purpose message explaining what the channel is for.
+
+## Current default purpose messages
+
+### Settings
+
+The Settings channel explains that it is the private administrative control center for configuring tickets, departments, tags, retention, appearance, storage, rules, roles, repairs, and other server-level settings.
+
+### Audit log
+
+The Audit channel explains that it stores the durable SupportForge operational history, including ticket lifecycle actions, configuration changes, retention decisions, repairs, and other administrative events with responsible users and timestamps.
+
+### Transcripts
+
+The Transcript channel explains that it is the private archive for exported HTML ticket transcripts used for staff records, review, and historical reference.
+
+## Public panel exception
+
+The public SupportForge panel intentionally receives no purpose-message embed. The panel is customer-facing and is reserved for the ticket creation experience.
+
+## Future SupportForge channels
+
+A central channel-purpose service now handles future SupportForge-managed text channels through their SupportForge metadata.
+
+Any future non-ticket channel carrying a `supportforge:` topic marker is automatically given the generic SupportForge-managed purpose message unless it is a ticket channel or the public panel.
+
+Future subsystems can also supply a custom purpose directly through the reusable purpose-message service. This keeps the default behavior automatic while leaving room for later AI-specific or subsystem-specific descriptions.
+
+Purpose messages are idempotent and serialized per channel, so repair/setup runs do not intentionally create duplicate purpose embeds.
+
+# 75. DEDICATED OPEN CATEGORY
+
+SupportForge now provisions a separate **Open** ticket category.
+
+The original **Support Forge** category is not repurposed or renamed.
+
+## Category responsibilities
+
+**Support Forge**
+- Remains the primary SupportForge container for the existing public panel and internal system channels.
+- Continues to be used by the existing configuration and support-system setup logic.
+- Existing permissions and identity remain unchanged.
+
+**Open**
+- Holds active tickets that do not have an explicitly provisioned department category.
+- New default/General Support tickets are created here instead of directly under **Support Forge**.
+- Reopened tickets without a department-specific category return here.
+- The category is private at the category level; ticket-channel overwrites continue to grant the actual owner/staff access.
+
+Explicitly provisioned department categories continue to work as before, so department-specific routing is preserved.
+
+## Persistence and repair
+
+The Open category ID is persisted per guild in `data/config.json`.
+
+If the configured category disappears or becomes full, SupportForge finds another matching Open category or provisions another suffixed category as needed to respect Discord's category channel limit.
+
+The setup command repairs/provisions the Open category alongside the existing SupportForge system without altering the existing **Support Forge** category.
+
