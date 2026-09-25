@@ -1,4 +1,5 @@
 import {
+  ChannelType,
   EmbedBuilder,
   type Guild,
   type TextChannel,
@@ -161,12 +162,12 @@ export async function ensureSupportForgeCategoryPurposeMessages(
 ): Promise<void> {
   const category = guild.channels.cache.get(categoryId);
 
-  if (!category || category.type !== 'GUILD_CATEGORY') {
+  if (!category || category.type !== ChannelType.GuildCategory) {
     return;
   }
 
   for (const child of category.children.cache.values()) {
-    if (child.type !== 'GUILD_TEXT') {
+    if (child.type !== ChannelType.GuildText) {
       continue;
     }
 
