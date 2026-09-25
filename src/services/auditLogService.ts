@@ -16,6 +16,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { getGuildConfig, updateGuildConfig } from './configService';
 import { getAdvancedSettings } from './advancedSettingsService';
+import { ensureChannelPurposeMessage } from './channelPurposeService';
 import {
   getPersistedTicketRecords,
   getPersistedTicketStatus,
@@ -190,6 +191,10 @@ export async function getOrCreateAuditChannel(
 ): Promise<TextChannel> {
   const existing = await findAuditChannel(guild);
   if (existing) {
+    await ensureChannelPurposeMessage(
+      existing,
+      'This private channel stores SupportForge’s durable operational audit history. It records important ticket lifecycle actions, configuration changes, retention decisions, repairs, and other administrative events with responsible users and timestamps.',
+    );
     await ensureAuditPanel(guild, existing);
     return existing;
   }
@@ -238,6 +243,11 @@ export async function getOrCreateAuditChannel(
   await updateGuildConfig(guild.id, (current) => {
     current.auditChannelId = channel.id;
   });
+
+  await ensureChannelPurposeMessage(
+    channel,
+    'This private channel stores SupportForge’s durable operational audit history. It records important ticket lifecycle actions, configuration changes, retention decisions, repairs, and other administrative events with responsible users and timestamps.',
+  );
 
   await ensureAuditPanel(guild, channel);
   return channel;
