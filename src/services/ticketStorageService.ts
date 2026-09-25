@@ -192,12 +192,15 @@ export async function ensureOpenCategory(
     current.openCategoryId = category.id;
   });
 
-  void logSystemEvent(
-    guild,
-    category.id,
-    'CATEGORY_CREATED',
-    `Created the dedicated Open ticket category ${category.name} (${category.id}).`,
-  ).catch(() => undefined);
+  const supportCategoryId = (await getGuildConfig(guild.id)).supportCategoryId;
+  if (supportCategoryId) {
+    void logSystemEvent(
+      guild,
+      supportCategoryId,
+      'CATEGORY_CREATED',
+      `Created the dedicated Open ticket category ${category.name} (${category.id}).`,
+    ).catch(() => undefined);
+  }
 
   return category;
 }
