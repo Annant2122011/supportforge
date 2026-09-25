@@ -31,6 +31,8 @@ import { startTicketRetentionScheduler } from './services/ticketRetentionService
 import { removeLegacyCustomCommands } from './services/advancedSettingsService';
 import {
   handleAuditInteraction,
+  isSupportForgeManagedChannel,
+  logDiscordMutation,
   startAuditDailySummaryScheduler,
 } from './services/auditLogService';
 import { handleSettingsInteraction } from './interactions/settingsInteractions';
@@ -74,44 +76,130 @@ client.on('channelCreate', async (channel) => {
   const topic = channel.topic ?? '';
 
   /*
-   * SupportForge-created/managed text channels can be recognized by their
-   * metadata, their managed category, or the SupportForge naming convention.
-   * Ticket channels and the public panel are explicitly excluded.
+   * Ticket channels and the public panel do not receive purpose embeds.
+   * Other SupportForge-managed text channels receive a default purpose
+   * message, including channels introduced by future subsystems.
    */
   if (
-    topic.startsWith('supportforge:panel') ||
-    topic.startsWith('supportforge:ticket')
+    !topic.startsWith('supportforge:panel') &&
+    !topic.startsWith('supportforge:ticket')
   ) {
-    return;
+    const guildConfig = await getGuildConfig(channel.guild.id);
+    const managedByParent =
+      channel.parentId === guildConfig.supportCategoryId ||
+      channel.parentId === guildConfig.openCategoryId;
+    const managedByName =
+      channel.name.toLowerCase().startsWith('supportforge');
+
+    if (
+      topic.startsWith('supportforge:') ||
+      managedByParent ||
+      managedByName
+    ) {
+      void ensureDefaultChannelPurpose(channel).catch((error) => {
+        console.warn(
+          `⚠️ Could not add SupportForge purpose message to ${channel.id}:`,
+          error,
+        );
+      });
+    }
   }
 
-  const guildConfig = await getGuildConfig(channel.guild.id);
-  const managedByParent =
-    channel.parentId === guildConfig.supportCategoryId ||
-    channel.parentId === guildConfig.openCategoryId;
-  const managedByName =
-    channel.name.toLowerCase().startsWith('supportforge');
-
-  if (
-    !topic.startsWith('supportforge:') &&
-    !managedByParent &&
-    !managedByName
-  ) {
-    return;
-  }
-
-  /*
-   * Future SupportForge-managed non-ticket text channels automatically get
-   * a default purpose message. A future subsystem can replace it with a
-   * custom description by calling ensureChannelPurposeMessage directly.
-   */
-  void ensureDefaultChannelPurpose(channel).catch((error) => {
-    console.warn(
-      `⚠️ Could not add SupportForge purpose message to ${channel.id}:`,
-      error,
-    );
-  });
+  void logDiscordMutation(
+    channel.guild,
+    channel,
+    'CHANNEL_CREATED',
+    `Created text channel ${channel.name} (${channel.id}).`,
+    AuditLogEvent.ChannelCreate,
+  );
 });
+
+client.on('channelUpdate', async (oldChannel, newChannel) => {
+  if (!newChannel.guild) return;
+
+  const oldManaged = await isSupportForgeManagedChannel(
+    newChannel.guild,
+    oldChannel,
+  );
+  const newManaged = await isSupportForgeManagedChannel(
+    newChannel.guild,
+    newChannel,
+  );
+
+  if (!oldManaged && !newManaged) return;
+
+  const changes: string[] = [];
+
+  if (oldChannel.name !== newChannel.name) {
+    changes.push(`name: ${oldChannel.name} → ${newChannel.name}`);
+  }
+
+  if (oldChannel.parentId !== newChannel.parentId) {
+    changes.push(
+      `parent: ${oldChannel.parentId ?? 'none'} → ${newChannel.parentId ?? 'none'}`,
+    );
+  }
+
+  if (oldChannel.type === ChannelType.GuildText &&
+      newChannel.type === ChannelType.GuildText &&
+      oldChannel.topic !== newChannel.topic) {
+    changes.push('topic/metadata changed');
+  }
+
+  if (
+    oldChannel.permissionOverwrites.cache.size !==
+    newChannel.permissionOverwrites.cache.size
+  ) {
+    changes.push(
+      `permission overwrites: ${oldChannel.permissionOverwrites.cache.size} → ${newChannel.permissionOverwrites.cache.size}`,
+    );
+  }
+
+  if (!changes.length) return;
+
+  const event =
+    changes.some((change) => change.startsWith('name:'))
+      ? 'CHANNEL_RENAMED'
+      : changes.some((change) => change.startsWith('parent:'))
+        ? 'CHANNEL_MOVED'
+        : changes.some((change) => change.startsWith('topic/'))
+          ? 'CHANNEL_TOPIC_CHANGED'
+          : 'CHANNEL_PERMISSIONS_CHANGED';
+
+  void logDiscordMutation(
+    newChannel.guild,
+    newChannel,
+    event,
+    changes.join(' • '),
+    AuditLogEvent.ChannelUpdate,
+  );
+});
+
+client.on('channelDelete', async (channel) => {
+  if (!channel.guild) return;
+
+  const managed = await isSupportForgeManagedChannel(
+    channel.guild,
+    channel,
+  );
+
+  if (!managed) return;
+
+  void logDiscordMutation(
+    channel.guild,
+    channel,
+    'CHANNEL_DELETED',
+    `Deleted SupportForge-managed channel ${channel.name} (${channel.id}).`,
+    AuditLogEvent.ChannelDelete,
+  );
+});
+
+client.on('roleCreate', async (role) => {
+  if (!role.guild) return;
+
+  const settings = await removeLegacyCustomCommands; // no-op placeholder
+});
+
 
 client.on('messageCreate', async (message) => {
   if (
