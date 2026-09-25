@@ -6,6 +6,7 @@ import {
   type TextChannel,
 } from 'discord.js';
 import { getAdvancedSettings, updateAdvancedSettings } from './advancedSettingsService';
+import { getGuildConfig, updateGuildConfig } from './configService';
 import { setChannelParent } from './discordChannelService';
 
 const MAX_CHANNELS_PER_CATEGORY = 50;
@@ -93,6 +94,94 @@ export async function ensureClosedCategory(
   guild: Guild,
 ): Promise<CategoryChannel> {
   return ensureBucket(guild, 'SupportForge • Closed', 'closedCategoryId');
+}
+
+
+const OPEN_CATEGORY_NAME = 'Open';
+
+export async function ensureOpenCategory(
+  guild: Guild,
+): Promise<CategoryChannel> {
+  const config = await getGuildConfig(guild.id);
+
+  const saved = config.openCategoryId
+    ? guild.channels.cache.get(config.openCategoryId)
+    : undefined;
+
+  if (
+    saved?.type === ChannelType.GuildCategory &&
+    saved.children.cache.size < MAX_CHANNELS_PER_CATEGORY
+  ) {
+    return saved;
+  }
+
+  const candidates = [...guild.channels.cache.values()]
+    .filter(
+      (channel): channel is CategoryChannel =>
+        channel.type === ChannelType.GuildCategory &&
+        (
+          channel.name === OPEN_CATEGORY_NAME ||
+          channel.name.startsWith(OPEN_CATEGORY_NAME + ' ')
+        ),
+    )
+    .sort((a, b) => a.position - b.position);
+
+  const available = candidates.find(
+    (category) => category.children.cache.size < MAX_CHANNELS_PER_CATEGORY,
+  );
+
+  if (available) {
+    await updateGuildConfig(guild.id, (current) => {
+      current.openCategoryId = available.id;
+    });
+    return available;
+  }
+
+  const suffix = candidates.length + 1;
+  const name =
+    suffix === 1
+      ? OPEN_CATEGORY_NAME
+      : OPEN_CATEGORY_NAME + ' ' + suffix;
+
+  const bot = guild.members.me;
+
+  if (!bot) {
+    throw new Error('SupportForge bot member could not be resolved.');
+  }
+
+  const category = await guild.channels.create({
+    name,
+    type: ChannelType.GuildCategory,
+    permissionOverwrites: [
+      {
+        id: guild.roles.everyone.id,
+        deny: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+        ],
+      },
+      {
+        id: bot.id,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+          PermissionFlagsBits.ManageChannels,
+          PermissionFlagsBits.ManageMessages,
+          PermissionFlagsBits.EmbedLinks,
+          PermissionFlagsBits.AttachFiles,
+        ],
+      },
+    ],
+    reason: 'SupportForge open ticket category provisioning',
+  });
+
+  await updateGuildConfig(guild.id, (current) => {
+    current.openCategoryId = category.id;
+  });
+
+  return category;
 }
 
 export async function ensureArchiveCategory(
