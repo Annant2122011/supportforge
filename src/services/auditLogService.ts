@@ -1,7 +1,12 @@
 import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   ChannelType,
   Client,
+  ComponentType,
   EmbedBuilder,
+  MessageFlags,
   PermissionFlagsBits,
   type ButtonInteraction,
   type Guild,
@@ -184,7 +189,10 @@ export async function getOrCreateAuditChannel(
   parentCategoryId: string,
 ): Promise<TextChannel> {
   const existing = await findAuditChannel(guild);
-  if (existing) return existing;
+  if (existing) {
+    await ensureAuditPanel(guild, existing);
+    return existing;
+  }
 
   const bot = guild.members.me;
   if (!bot) throw new Error('SupportForge bot member could not be resolved.');
@@ -231,6 +239,7 @@ export async function getOrCreateAuditChannel(
     current.auditChannelId = channel.id;
   });
 
+  await ensureAuditPanel(guild, channel);
   return channel;
 }
 
@@ -472,7 +481,7 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
   const [config, settings, ticketRecords, liveTickets] = await Promise.all([
     getGuildConfig(guild.id),
     getAdvancedSettings(guild.id),
-    getPersistedTicketRecords(),
+    getPersistedTicketRecords(guild.id),
     collectLiveTickets(guild),
   ]);
 
@@ -594,6 +603,10 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
 }
 
 async function recordAndPublish(
+  guild: Guild,
+  parentCategoryId: string,
+  event: AuditEvent,
+): Promise<void> {
   const timestamp = new Date().toISOString();
   const category = event.category ?? (event.ticketNumber ? 'ticket' : 'settings');
   const actorId = event.actorId ?? 'unknown';
@@ -615,7 +628,6 @@ async function recordAndPublish(
 
   try {
     const channel = await getOrCreateAuditChannel(guild, parentCategoryId);
-    await ensureAuditPanel(guild, channel);
     await sendAuditEntry(channel, record);
     await collapseAuditPanel(guild, channel);
   } catch (error) {
