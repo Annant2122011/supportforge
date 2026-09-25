@@ -28,7 +28,10 @@ import { recordTicketMessageForPanel } from './services/panelActivityService';
 
 import { startTicketRetentionScheduler } from './services/ticketRetentionService';
 import { removeLegacyCustomCommands } from './services/advancedSettingsService';
-import { startAuditDailySummaryScheduler } from './services/auditLogService';
+import {
+  handleAuditInteraction,
+  startAuditDailySummaryScheduler,
+} from './services/auditLogService';
 import { handleSettingsInteraction } from './interactions/settingsInteractions';
 
 const token = process.env.DISCORD_TOKEN;
@@ -181,6 +184,11 @@ client.on(
         interaction.isStringSelectMenu() ||
         interaction.isModalSubmit()
       ) {
+        if (interaction.customId.startsWith('sf:audit:') && interaction.isButton()) {
+          await handleAuditInteraction(interaction);
+          return;
+        }
+
         if (interaction.customId.startsWith('sf:settings:')) {
           await handleSettingsInteraction(interaction);
           return;
