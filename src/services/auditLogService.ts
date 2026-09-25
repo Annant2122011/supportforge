@@ -66,6 +66,7 @@ interface AuditGuildStore {
   panelMessageId: string | null;
   restoreMessageId: string | null;
   panelEventCheckpoint: number;
+  lastSetupDate: string | null;
 }
 
 interface AuditStore {
@@ -90,6 +91,7 @@ function cloneGuildStore(): AuditGuildStore {
     panelMessageId: null,
     restoreMessageId: null,
     panelEventCheckpoint: 0,
+    lastSetupDate: null,
   };
 }
 
@@ -146,6 +148,7 @@ async function load(): Promise<AuditStore> {
         panelMessageId: store.panelMessageId ?? null,
         restoreMessageId: store.restoreMessageId ?? null,
         panelEventCheckpoint: store.panelEventCheckpoint ?? 0,
+        lastSetupDate: store.lastSetupDate ?? null,
       };
     }
 
@@ -497,6 +500,10 @@ async function appendAuditRecord(
   const store = getGuildStore(current, guild.id);
 
   store.events.push(event);
+
+  if (event.action === 'SETUP_COMPLETED') {
+    store.lastSetupDate = dateKey(event.timestamp);
+  }
 
   // Keep the local audit database bounded while retaining a useful history.
   if (store.events.length > 5000) {
@@ -1177,9 +1184,11 @@ async function runDailySummarySweep(client: Client): Promise<void> {
       }
 
           const summaryDate =
-        previousEvents.length > 0
-          ? previousDate
-          : today;
+        store.lastSetupDate === today
+          ? today
+          : previousEvents.length > 0
+            ? previousDate
+            : today;
 
       await publishDailySummary(guild, summaryDate);
     } catch (error) {
