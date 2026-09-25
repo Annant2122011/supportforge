@@ -224,7 +224,23 @@ export async function isSupportForgeManagedChannel(
     return true;
   }
 
+  const parent =
+    channel.parentId
+      ? guild.channels.cache.get(channel.parentId)
+      : undefined;
+
+  const parentLooksManaged =
+    Boolean(
+      parent &&
+      (
+        hasSupportForgeName(parent.name) ||
+        parent.name === 'Open' ||
+        parent.name.startsWith('Open ')
+      ),
+    );
+
   return hasSupportForgeName(channel.name) ||
+    parentLooksManaged ||
     (
       channel.type === ChannelType.GuildCategory &&
       (
