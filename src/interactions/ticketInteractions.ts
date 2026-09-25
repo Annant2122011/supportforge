@@ -30,6 +30,7 @@ import {
 import {
   ensureArchiveCategory,
   ensureClosedCategory,
+  ensureOpenCategory,
   getOptionalStatusCategory,
   moveTicketToCategory,
 } from '../services/ticketStorageService';
@@ -791,10 +792,12 @@ async function createTicket(
       }
     }
 
+    const openCategory = await ensureOpenCategory(guild);
+
     const categoryId =
       departmentCategory?.type === ChannelType.GuildCategory
         ? departmentCategory.id
-        : auditParentCategoryId;
+        : openCategory.id;
 
     const ticketCategory =
       guild.channels.cache.get(categoryId);
@@ -1541,14 +1544,14 @@ async function transition(
           ? interaction.guild!.channels.cache.get(departmentConfig.categoryId)
           : undefined;
 
+        const openCategory = await ensureOpenCategory(interaction.guild!);
+
         const destination =
           departmentCategory?.type === ChannelType.GuildCategory
             ? departmentCategory
-            : currentConfig.supportCategoryId
-              ? interaction.guild!.channels.cache.get(currentConfig.supportCategoryId)
-              : undefined;
+            : openCategory;
 
-        if (destination?.type === ChannelType.GuildCategory) {
+        if (destination.type === ChannelType.GuildCategory) {
           await moveTicketToCategory(channel, destination);
         }
       }
