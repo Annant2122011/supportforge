@@ -35,7 +35,7 @@ import {
 } from '../services/ticketStorageService';
 
 import { resetPanelActivity } from '../services/panelActivityService';
-import { getAdvancedSettings } from '../services/advancedSettingsService';
+import { getAdvancedSettings, type TicketPriority } from '../services/advancedSettingsService';
 import { ensureDepartmentCategory } from '../services/departmentCategoryService';
 
 import {
@@ -66,6 +66,17 @@ import {
   moveTicketPanelToBottom,
   queueTicketChannelRename,
 } from '../services/ticketPanelService';
+
+function getTopicPriority(topic: string): TicketPriority {
+  const value = getField(topic, 'priority');
+  return value === 'low' ||
+    value === 'normal' ||
+    value === 'high' ||
+    value === 'urgent' ||
+    value === 'critical'
+    ? value
+    : 'normal';
+}
 
 /* -------------------------------------------------------------------------- */
 /* Constants                                                                  */
@@ -1557,7 +1568,7 @@ async function transition(
       getTicketChannelName(
         ticketNumberForName,
         newStatus,
-        getField(newTopic, 'priority') ?? 'normal',
+        getTopicPriority(newTopic),
       ),
       `Ticket #${ticketNumberForName} status changed to ${newStatus}`,
     ).catch((error) => {
@@ -1985,7 +1996,7 @@ async function closeTicket(
       getTicketChannelName(
         ticketNumber,
         'closed',
-        getField(topic, 'priority') ?? 'normal',
+        getTopicPriority(topic),
       ),
       `Ticket #${ticketNumber} closed`,
     ).catch((error) => {
@@ -2913,7 +2924,7 @@ async function handlePanelModal(
         getTicketChannelName(
           getField(newTopic, 'number') ?? 'unknown',
           state.status,
-          priority,
+          priority as TicketPriority,
         ),
         `Ticket priority changed to ${priority}`,
       ).catch((error) => {
