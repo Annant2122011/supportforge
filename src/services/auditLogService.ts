@@ -519,7 +519,12 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
   const closedOnly = counts.get('closed') ?? 0;
   const openTotal = unclaimedOpen + claimed + pending + reopened;
   const closedTotal = closedOnly + archived;
-  const ticketsCreatedToDate = Math.max(ticketRecords.length, liveTickets.length);
+  const ticketCreationEvents = store.events.filter((event) => event.action === 'TICKET_CREATED').length;
+  const ticketsCreatedToDate = Math.max(
+    ticketRecords.length,
+    liveTickets.length,
+    ticketCreationEvents,
+  );
 
   const managedChannels = guild.channels.cache.filter((channel) =>
     channel.topic?.startsWith('supportforge:') ||
@@ -553,7 +558,8 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
     .filter((item): item is { ticket: typeof liveTickets[number]; timestamp: number } => Number.isFinite(item.timestamp))
     .sort((a, b) => a.timestamp - b.timestamp)[0];
 
-  const tagCreations = store.events.filter((event) => event.action === 'TAG_ADDED').length;
+  const tagCreationEvents = store.events.filter((event) => event.action === 'TAG_ADDED');
+  const tagCreations = tagCreationEvents.length;
   const settingsActions = store.events.filter((event) => event.category === 'settings').length;
   const ticketActions = store.events.filter((event) => event.category === 'ticket').length;
   const priorityRolesCreated = store.events.filter((event) => event.action === 'PRIORITY_ROLE_CREATED').length;
@@ -584,9 +590,19 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
     priorityLines.push('• ' + priority + ': ' + (priorityCounts.get(priority) ?? 0));
   }
 
-  const tagLines = tags.length
-    ? tags.map((tag) => '• ' + tag.emoji + ' **' + tag.name + '** • created ' + formatAuditDate(tag.createdAt) + (tag.description ? ' • ' + tag.description : ''))
-    : ['• No active custom tags.'];
+  const historicalTagLines = tagCreationEvents
+    .slice()
+    .reverse()
+    .map((event) => {
+      const nameMatch = event.detail?.match(/custom tag (.+?)(?:\.|$)/i);
+      const name = nameMatch?.[1] ?? 'Unknown tag';
+      return '• **' + name + '** • created ' + formatAuditDate(event.timestamp);
+    });
+  const tagLines = historicalTagLines.length
+    ? historicalTagLines
+    : tags.length
+      ? tags.map((tag) => '• ' + tag.emoji + ' **' + tag.name + '** • created ' + formatAuditDate(tag.createdAt) + (tag.description ? ' • ' + tag.description : ''))
+      : ['• No tags have been created yet.'];
 
   const departmentLines = departments.length
     ? departments.map((department) => {
@@ -617,7 +633,7 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
   const second = new EmbedBuilder()
     .setTitle('📋 Audit Details')
     .addFields(
-      { name: '🏷️ Tags (' + tags.length + ')', value: tagLines.join('\n').slice(0, 1024) },
+      { name: '🏷️ Tags created to date (' + tagCreations + ')', value: tagLines.join('\n').slice(0, 1024) },
       { name: '📂 Departments (' + departments.length + ')', value: departmentLines.join('\n').slice(0, 1024) },
       { name: '📈 Additional metrics', value: metricsLines.join('\n') },
     )
