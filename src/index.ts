@@ -1,6 +1,7 @@
 import 'dotenv/config';
 
 import {
+  AuditLogEvent,
   ChannelType,
   Client,
   EmbedBuilder,
@@ -38,6 +39,7 @@ import {
   startAuditDailySummaryScheduler,
 } from './services/auditLogService';
 import { handleSettingsInteraction } from './interactions/settingsInteractions';
+import type { GuildBasedChannel } from 'discord.js';
 
 const token = process.env.DISCORD_TOKEN;
 
@@ -71,13 +73,17 @@ client.once('clientReady', (readyClient) => {
 });
 
 client.on('channelCreate', async (channel) => {
-  if (channel.type !== ChannelType.GuildText) {
+  if (
+    !('guild' in channel) ||
+    channel.type !== ChannelType.GuildText
+  ) {
     return;
   }
 
+  const guildChannel = channel as TextChannel;
   const managed = await isSupportForgeManagedChannel(
-    channel.guild,
-    channel,
+    guildChannel.guild,
+    guildChannel as GuildBasedChannel,
   );
 
   if (!managed) {
@@ -90,82 +96,92 @@ client.on('channelCreate', async (channel) => {
    * message, including future channels placed under SupportForge categories.
    */
   if (
-    !channel.topic?.startsWith('supportforge:panel') &&
-    !channel.topic?.startsWith('supportforge:ticket')
+    !guildChannel.topic?.startsWith('supportforge:panel') &&
+    !guildChannel.topic?.startsWith('supportforge:ticket')
   ) {
-    void ensureDefaultChannelPurpose(channel).catch((error) => {
+    void ensureDefaultChannelPurpose(guildChannel).catch((error) => {
       console.warn(
-        `⚠️ Could not add SupportForge purpose message to ${channel.id}:`,
+        `⚠️ Could not add SupportForge purpose message to ${guildChannel.id}:`,
         error,
       );
     });
   }
 
   void logDiscordMutation(
-    channel.guild,
-    channel,
+    guildChannel.guild,
+    guildChannel,
     'CHANNEL_CREATED',
-    `Created SupportForge-managed channel ${channel.name} (${channel.id}).`,
+    `Created SupportForge-managed channel ${guildChannel.name} (${guildChannel.id}).`,
     AuditLogEvent.ChannelCreate,
   );
 });
 
 client.on('channelUpdate', async (oldChannel, newChannel) => {
-  if (!newChannel.guild) return;
+  if (
+    !('guild' in oldChannel) ||
+    !('guild' in newChannel)
+  ) {
+    return;
+  }
+
+  const oldGuildChannel = oldChannel as GuildBasedChannel;
+  const newGuildChannel = newChannel as GuildBasedChannel;
 
   const oldManaged = await isSupportForgeManagedChannel(
-    newChannel.guild,
-    oldChannel,
+    newGuildChannel.guild,
+    oldGuildChannel,
   );
   const newManaged = await isSupportForgeManagedChannel(
-    newChannel.guild,
-    newChannel,
+    newGuildChannel.guild,
+    newGuildChannel,
   );
 
   if (!oldManaged && !newManaged) return;
 
   const changes: string[] = [];
 
-  if (oldChannel.name !== newChannel.name) {
-    changes.push(`name: ${oldChannel.name} → ${newChannel.name}`);
+  if (oldGuildChannel.name !== newGuildChannel.name) {
+    changes.push(`name: ${oldGuildChannel.name} → ${newGuildChannel.name}`);
   }
 
-  if (oldChannel.parentId !== newChannel.parentId) {
+  if (oldGuildChannel.parentId !== newGuildChannel.parentId) {
     changes.push(
-      `parent: ${oldChannel.parentId ?? 'none'} → ${newChannel.parentId ?? 'none'}`,
+      `parent: ${oldGuildChannel.parentId ?? 'none'} → ${newGuildChannel.parentId ?? 'none'}`,
     );
   }
 
-  if (oldChannel.type === ChannelType.GuildText &&
-      newChannel.type === ChannelType.GuildText &&
-      oldChannel.topic !== newChannel.topic) {
+  if (
+    oldGuildChannel.type === ChannelType.GuildText &&
+    newGuildChannel.type === ChannelType.GuildText &&
+    oldGuildChannel.topic !== newGuildChannel.topic
+  ) {
     changes.push('topic/metadata changed');
   }
 
-  const oldPermissions = permissionOverwriteSignature(oldChannel);
-  const newPermissions = permissionOverwriteSignature(newChannel);
+  const oldPermissions = permissionOverwriteSignature(oldGuildChannel);
+  const newPermissions = permissionOverwriteSignature(newGuildChannel);
 
   if (oldPermissions !== newPermissions) {
     changes.push('permission overwrites changed');
   }
 
-  if (oldChannel.position !== newChannel.position) {
+  if (oldGuildChannel.position !== newGuildChannel.position) {
     changes.push(
-      `position: ${oldChannel.position} → ${newChannel.position}`,
+      `position: ${oldGuildChannel.position} → ${newGuildChannel.position}`,
     );
   }
 
   if (
-    oldChannel.type === ChannelType.GuildText &&
-    newChannel.type === ChannelType.GuildText
+    oldGuildChannel.type === ChannelType.GuildText &&
+    newGuildChannel.type === ChannelType.GuildText
   ) {
-    if (oldChannel.nsfw !== newChannel.nsfw) {
-      changes.push(`NSFW: ${oldChannel.nsfw} → ${newChannel.nsfw}`);
+    if (oldGuildChannel.nsfw !== newGuildChannel.nsfw) {
+      changes.push(`NSFW: ${oldGuildChannel.nsfw} → ${newGuildChannel.nsfw}`);
     }
 
-    if (oldChannel.rateLimitPerUser !== newChannel.rateLimitPerUser) {
+    if (oldGuildChannel.rateLimitPerUser !== newGuildChannel.rateLimitPerUser) {
       changes.push(
-        `slowmode: ${oldChannel.rateLimitPerUser}s → ${newChannel.rateLimitPerUser}s`,
+        `slowmode: ${oldGuildChannel.rateLimitPerUser}s → ${newGuildChannel.rateLimitPerUser}s`,
       );
     }
   }
@@ -186,8 +202,8 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
               : 'CHANNEL_SETTINGS_CHANGED';
 
   void logDiscordMutation(
-    newChannel.guild,
-    newChannel,
+    newGuildChannel.guild,
+    newGuildChannel,
     event,
     changes.join(' • '),
     AuditLogEvent.ChannelUpdate,
@@ -195,20 +211,24 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
 });
 
 client.on('channelDelete', async (channel) => {
-  if (!channel.guild) return;
+  if (!('guild' in channel)) {
+    return;
+  }
+
+  const guildChannel = channel as GuildBasedChannel;
 
   const managed = await isSupportForgeManagedChannel(
-    channel.guild,
-    channel,
+    guildChannel.guild,
+    guildChannel,
   );
 
   if (!managed) return;
 
   void logDiscordMutation(
-    channel.guild,
-    channel,
+    guildChannel.guild,
+    guildChannel,
     'CHANNEL_DELETED',
-    `Deleted SupportForge-managed channel ${channel.name} (${channel.id}).`,
+    `Deleted SupportForge-managed channel ${guildChannel.name} (${guildChannel.id}).`,
     AuditLogEvent.ChannelDelete,
   );
 });
@@ -230,8 +250,10 @@ client.on('roleCreate', async (role) => {
 });
 
 client.on('roleUpdate', async (oldRole, newRole) => {
-  if (!(await isSupportForgeManagedRole(newRole.guild, oldRole)) &&
-      !(await isSupportForgeManagedRole(newRole.guild, newRole))) {
+  if (
+    !(await isSupportForgeManagedRole(newRole.guild, oldRole)) &&
+    !(await isSupportForgeManagedRole(newRole.guild, newRole))
+  ) {
     return;
   }
 
