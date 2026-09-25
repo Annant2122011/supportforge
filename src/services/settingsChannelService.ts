@@ -15,6 +15,7 @@ import {
   getAdvancedSettings,
 } from './advancedSettingsService';
 import { ensureChannelPurposeMessage } from './channelPurposeService';
+import { logSystemEvent } from './auditLogService';
 
 const SETTINGS_TOPIC_PREFIX = 'supportforge:settings';
 const SETTINGS_TITLE = '⚙️ SupportForge Settings';
@@ -77,6 +78,8 @@ export async function ensureSettingsChannel(
       channel = saved;
     }
   }
+
+  const created = !channel;
 
   if (!channel) {
     const existing = guild.channels.cache.find(
@@ -153,12 +156,24 @@ export async function ensureSettingsChannel(
 
   const currentSettings = await getAdvancedSettings(guild.id);
 
-  await ensureChannelPurposeMessage(
-    channel,
-    'This private channel is SupportForge’s administrative control center. Use the buttons here to configure tickets, departments, tags, retention, appearance, storage, rules, roles, repairs, and other server-level SupportForge settings.',
-  );
+  const purposeMessage =
+    'This private channel is SupportForge’s administrative control center. Use the buttons here to configure tickets, departments, tags, retention, appearance, storage, rules, roles, repairs, and other server-level SupportForge settings.';
+
+  await ensureChannelPurposeMessage(channel, purposeMessage);
 
   await refreshSettingsDashboard(channel, currentSettings);
+
+  if (created) {
+    const config = await getGuildConfig(guild.id);
+    if (config.supportCategoryId) {
+      void logSystemEvent(
+        guild,
+        config.supportCategoryId,
+        'CHANNEL_CREATED',
+        'Created SupportForge Settings channel ' + channel.name + ' (' + channel.id + ').',
+      ).catch(() => undefined);
+    }
+  }
 
   return channel;
 }
