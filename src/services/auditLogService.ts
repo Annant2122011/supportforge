@@ -473,7 +473,7 @@ async function collectLiveTickets(guild: Guild): Promise<Array<{
       status: (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic),
       number: getField(topic, 'number') ?? 'unknown',
       priority: getField(topic, 'priority') ?? 'normal',
-      departmentId: getField(topic, 'department'),
+      departmentId: getField(topic, 'department') ?? null,
       openedAt: getField(topic, 'opened_at') ?? null,
     });
   }
@@ -531,15 +531,17 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
     ticketCreationEvents,
   );
 
-  const managedChannels = guild.channels.cache.filter((channel) =>
-    channel.topic?.startsWith('supportforge:') ||
-    channel.name === 'Support Forge' ||
-    channel.name === '📄 support-transcripts' ||
-    channel.name === '📒 supportforge-audit-log' ||
-    channel.name === 'supportforge-settings' ||
-    channel.name.startsWith('SupportForge.') ||
-    channel.name.startsWith('SupportForge • Closed') ||
-    channel.name.startsWith('SupportForge • Archive'),
+  const managedChannels = guild.channels.cache.filter(
+    (channel) =>
+      (channel.type === ChannelType.GuildText &&
+        channel.topic?.startsWith('supportforge:')) ||
+      channel.name === 'Support Forge' ||
+      channel.name === '📄 support-transcripts' ||
+      channel.name === '📒 supportforge-audit-log' ||
+      channel.name === 'supportforge-settings' ||
+      channel.name.startsWith('SupportForge.') ||
+      channel.name.startsWith('SupportForge • Closed') ||
+      channel.name.startsWith('SupportForge • Archive'),
   ).size;
 
   const tags = Object.values(settings.customTags).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -903,10 +905,11 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
     await interaction.deferUpdate();
     const current = await load();
     const store = getGuildStore(current, interaction.guild.id);
-    const restore = interaction.channel.messages.cache.get(store.restoreMessageId ?? '') ??
-      (await interaction.channel.messages.fetch({ limit: 100 })).find(
+    const auditChannel = interaction.channel;
+    const restore = auditChannel.messages.cache.get(store.restoreMessageId ?? '') ??
+      (await auditChannel.messages.fetch({ limit: 100 })).find(
         (message) =>
-          message.author.id === interaction.channel.client.user?.id &&
+          message.author.id === auditChannel.client.user?.id &&
           message.components.some(
             (row) =>
               row.type === ComponentType.ActionRow &&
