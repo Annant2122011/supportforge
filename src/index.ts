@@ -236,8 +236,10 @@ client.on('channelDelete', async (channel) => {
   void logDiscordMutation(
     guildChannel.guild,
     guildChannel,
-    'CHANNEL_DELETED',
-    `Deleted SupportForge-managed channel ${guildChannel.name} (${guildChannel.id}).`,
+    guildChannel.type === ChannelType.GuildCategory
+      ? 'CATEGORY_DELETED'
+      : 'CHANNEL_DELETED',
+    `Deleted SupportForge-managed ${guildChannel.type === ChannelType.GuildCategory ? 'category' : 'channel'} ${guildChannel.name} (${guildChannel.id}).`,
     AuditLogEvent.ChannelDelete,
   );
 
