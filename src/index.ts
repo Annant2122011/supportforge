@@ -34,6 +34,7 @@ import {
   isSupportForgeManagedChannel,
   isSupportForgeManagedRole,
   logDiscordMutation,
+  permissionOverwriteSignature,
   startAuditDailySummaryScheduler,
 } from './services/auditLogService';
 import { handleSettingsInteraction } from './interactions/settingsInteractions';
@@ -147,13 +148,32 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
     changes.push('topic/metadata changed');
   }
 
-  if (
-    oldChannel.permissionOverwrites.cache.size !==
-    newChannel.permissionOverwrites.cache.size
-  ) {
+  const oldPermissions = permissionOverwriteSignature(oldChannel);
+  const newPermissions = permissionOverwriteSignature(newChannel);
+
+  if (oldPermissions !== newPermissions) {
+    changes.push('permission overwrites changed');
+  }
+
+  if (oldChannel.position !== newChannel.position) {
     changes.push(
-      `permission overwrites: ${oldChannel.permissionOverwrites.cache.size} → ${newChannel.permissionOverwrites.cache.size}`,
+      `position: ${oldChannel.position} → ${newChannel.position}`,
     );
+  }
+
+  if (
+    oldChannel.type === ChannelType.GuildText &&
+    newChannel.type === ChannelType.GuildText
+  ) {
+    if (oldChannel.nsfw !== newChannel.nsfw) {
+      changes.push(`NSFW: ${oldChannel.nsfw} → ${newChannel.nsfw}`);
+    }
+
+    if (oldChannel.rateLimitPerUser !== newChannel.rateLimitPerUser) {
+      changes.push(
+        `slowmode: ${oldChannel.rateLimitPerUser}s → ${newChannel.rateLimitPerUser}s`,
+      );
+    }
   }
 
   if (!changes.length) return;
@@ -163,9 +183,13 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
       ? 'CHANNEL_RENAMED'
       : changes.some((change) => change.startsWith('parent:'))
         ? 'CHANNEL_MOVED'
-        : changes.some((change) => change.startsWith('topic/'))
-          ? 'CHANNEL_TOPIC_CHANGED'
-          : 'CHANNEL_PERMISSIONS_CHANGED';
+        : changes.some((change) => change.startsWith('position:'))
+          ? 'CHANNEL_REORDERED'
+          : changes.some((change) => change.startsWith('topic/'))
+            ? 'CHANNEL_TOPIC_CHANGED'
+            : changes.some((change) => change.startsWith('permission'))
+              ? 'CHANNEL_PERMISSIONS_CHANGED'
+              : 'CHANNEL_SETTINGS_CHANGED';
 
   void logDiscordMutation(
     newChannel.guild,
