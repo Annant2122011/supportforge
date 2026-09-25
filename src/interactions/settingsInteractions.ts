@@ -53,8 +53,8 @@ import { performFactoryReset } from '../services/factoryResetService';
 import {
   approveRetentionDeletion,
   declineRetentionDeletion,
+  getEligibleRetentionTickets,
   runRetentionSweepForGuild,
-  startRetentionCountdownFromToday,
 } from '../services/ticketRetentionService';
 
 import {
@@ -985,9 +985,9 @@ export async function handleSettingsInteraction(
                 .setEmoji('🕒')
                 .setStyle(ButtonStyle.Primary),
               new ButtonBuilder()
-                .setCustomId('sf:settings:retention:from-today:' + scope)
-                .setLabel('Count From Today')
-                .setEmoji('📅')
+                .setCustomId('sf:settings:retention:review:' + scope)
+                .setLabel('Review Eligible Chats')
+                .setEmoji('🔎')
                 .setStyle(ButtonStyle.Secondary),
             ),
           ],
@@ -1019,38 +1019,50 @@ export async function handleSettingsInteraction(
       return true;
     }
 
-    if (id.startsWith('sf:settings:retention:from-today:')) {
+    if (id.startsWith('sf:settings:retention:review:')) {
       const scope = id.endsWith(':closed') ? 'closed' : 'archive';
       await interaction.deferUpdate();
 
       try {
-        await startRetentionCountdownFromToday(guild, scope, interaction.user.id);
         const settings = await getAdvancedSettings(guild.id);
-        const days = scope === 'closed'
-          ? settings.retention.closedDays
-          : settings.retention.archiveDays;
+        const eligible = await getEligibleRetentionTickets(guild, scope);
+        const label = scope === 'closed' ? 'closed' : 'archived';
+
+        const lines = eligible.length
+          ? eligible
+              .slice(0, 25)
+              .map((channel) => {
+                const topic = channel.topic ?? '';
+                const number = getField(topic, 'number') ?? 'unknown';
+                const timestamp = getField(
+                  topic,
+                  scope === 'closed' ? 'closed_at' : 'archived_at',
+                );
+                return '• **#' + number + '** ' + channel.toString() +
+                  (timestamp ? ' • eligible since <t:' + Math.floor(Date.parse(timestamp) / 1000) + ':d>' : '');
+              })
+              .join('\n')
+          : 'No chats are currently eligible under this rule.';
+
+        const suffix = eligible.length > 25
+          ? '\n\n…and ' + (eligible.length - 25) + ' more.'
+          : '';
 
         await interaction.editReply({
           embeds: [
             new EmbedBuilder()
-              .setTitle('📅 Retention Countdown Reset')
+              .setTitle('🔎 Retention Review • ' + (scope === 'closed' ? 'Closed' : 'Archive'))
               .setDescription(
-                'Deletion was cancelled and the **' + days +
-                '-day** countdown now starts from today. Existing eligible chats will not be deleted by this decision.',
+                'This is a read-only review of the **' + eligible.length + '** currently eligible ' + label + ' chat(s) under the **' +
+                (scope === 'closed' ? settings.retention.closedDays : settings.retention.archiveDays) +
+                '-day** policy. No chat was deleted by this review.\n\n' + lines + suffix,
               ),
           ],
           components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
         });
-
-        await auditSettingsAction(
-          guild,
-          interaction,
-          'RETENTION_COUNTDOWN_RESET',
-          'Retention countdown for ' + scope + ' now starts from today.',
-        );
       } catch (error) {
         await interaction.editReply(
-          '❌ ' + (error instanceof Error ? error.message : 'Retention countdown change failed.'),
+          '❌ ' + (error instanceof Error ? error.message : 'Retention review failed.'),
         );
       }
       return true;
