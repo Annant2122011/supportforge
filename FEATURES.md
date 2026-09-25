@@ -4317,3 +4317,247 @@ When a requirement changes, update the description here.
 
 When a major architectural decision is made, record it in `ARCHITECTURE.md` as well.
 
+
+
+# 66. AUDIT OVERALL SUMMARY
+
+The audit channel includes a persistent control panel at the start of the audit workflow.
+
+## Audit panel
+
+Initial state:
+
+```text
+📒 SupportForge Audit Log
+
+[ Summarise Everything ]
+```
+
+The panel explains what the audit log records and what the overall summary contains.
+
+After approximately 12 new audit entries since the last panel placement, the panel adds:
+
+```text
+[ Summarise Everything ] [ Collapse Audit Panel ]
+```
+
+The collapse action moves a fresh copy of the panel to the bottom of the audit channel and removes the old copy. The panel is not moved automatically merely because the threshold is reached.
+
+If the panel is collapsed, the channel contains a lightweight:
+
+```text
+[ Restore Audit Panel ]
+```
+
+control. Restoring creates a fresh full panel and resets the collapse counter.
+
+## Summarise Everything
+
+The summary combines:
+
+- Current live ticket status totals.
+- Lifetime recorded ticket status totals.
+- Total tickets/chats created to date.
+- Open chats shown as a parent category that includes Claimed, Pending, and Reopened.
+- Claimed and Pending shown independently as well.
+- Closed shown as a parent category that includes Archived.
+- Archived shown independently.
+- Current and lifetime priority distribution.
+- Existing department count and department creation dates.
+- Current custom-tag count.
+- Tag creation history and creation dates from audit records.
+- Current server channel count.
+- Current SupportForge-managed channel count.
+- Ticket channels created to date.
+- Audit activity volume.
+- Settings activity volume.
+- Priority roles explicitly created.
+- Retention-deleted historical ticket records.
+- Active-ticket age information, including the oldest active ticket.
+- Retention policy information.
+
+Lifetime ticket records remain available after approved retention deletion, so historical totals do not silently disappear when a ticket channel is deleted.
+
+## Multi-server isolation
+
+Persisted ticket history is partitioned by Discord guild ID when the overall audit summary is generated. One server cannot inflate another server's ticket totals.
+
+# 67. RETENTION CANCELLATION FOLLOW-UP
+
+The previous "Count From Today" action has been replaced.
+
+After an administrator declines a retention deletion request, the Settings view now offers:
+
+```text
+[ Review Eligible Chats ]
+```
+
+This performs a read-only eligibility review and lists the chats currently eligible under the selected Closed or Archive retention policy.
+
+The review does not delete anything.
+
+This gives administrators a concrete inspection step before changing policy, rather than silently changing the age reference point.
+
+# 68. PRIORITY VISUAL SYSTEM
+
+Ticket priorities now have a consistent visual language.
+
+```text
+🟢 Low
+🟡 Normal
+🔴 High
+🟠 Urgent
+🟣 Critical
+```
+
+The priority indicator is placed at the beginning of the ticket channel name:
+
+```text
+🔴-ticket-1023-open
+🟡-ticket-1024-open
+🟢-ticket-1025-open
+```
+
+Reopened tickets continue to use the Open naming form, while Closed and Archived retain their status-specific suffix.
+
+The ticket control-panel embed also uses a matching priority color.
+
+Priority parsing is validated before it reaches the channel-name API, so the naming layer never relies on an unsafe arbitrary string.
+
+# 69. OPTIONAL PRIORITY ROLES
+
+Priority roles are opt-in.
+
+No priority role is created during normal SupportForge setup.
+
+Administrators can open:
+
+```text
+Settings
+→ Rules & Roles
+```
+
+and explicitly create a selected priority role.
+
+Current supported role choices:
+
+- Low
+- Normal
+- High
+- Urgent
+- Critical
+
+The role colors match the priority visual system.
+
+Example:
+
+```text
+SupportForge • Urgent Tickets
+```
+
+uses the Urgent priority color.
+
+The system intentionally does not offer role-creation controls for:
+
+- Claimed
+- Pending
+
+Claimed and Pending are ticket workflow states, not additional priority-role categories.
+
+The selected role ID is persisted in advanced settings so the configuration survives restarts.
+
+# 70. STAFF MANUAL
+
+Settings now contains a Manual section intended for SupportStaff and other configured department staff.
+
+Two versions are available.
+
+## Quick Manual
+
+A concise guide covering:
+
+- Ticket lifecycle.
+- Claiming.
+- Pending.
+- Closing.
+- Priority.
+- Ticket tools.
+- Audit and Settings.
+- Read-only behavior for Closed and Archived tickets.
+
+## Detailed Manual
+
+A longer guide covering:
+
+- Ticket states and transitions.
+- Claiming and Pending usage.
+- Closing and transcript guarantees.
+- Priority and tags.
+- Internal notes and History.
+- Panel movement.
+- Audit summaries.
+- Settings and priority roles.
+- Retention approvals and review.
+- Operational safety.
+
+Manual output is ephemeral. Clicking a display button produces the manual only for the requesting user, preventing one staff member's manual from cluttering another staff member's view.
+
+The detailed version is split across embeds so it remains within Discord's message/embed limits.
+
+# 71. PERSISTENT TICKET HISTORY FOR AUDIT
+
+Ticket persistence now stores more than only current status.
+
+Recorded metadata includes:
+
+- Guild ID.
+- Creation time.
+- Ticket number.
+- Department ID.
+- Owner ID.
+- Priority.
+- Last status/update time.
+- Deletion time when retention cleanup succeeds.
+- Deletion reason.
+
+Legacy records are normalized when loaded so older `tickets.json` files remain usable.
+
+Retention deletion marks the persisted historical record after the Discord channel is successfully deleted.
+
+# 72. BUILD VERIFICATION
+
+A GitHub Actions workflow now runs:
+
+```text
+npm ci
+npm run build
+```
+
+for pushes to `main` and pull requests targeting `main`.
+
+The purpose is to catch TypeScript regressions before they are pulled into a local Windows checkout.
+
+The workflow uses Node.js 24 to match the current project runtime family.
+
+# 73. IMPLEMENTATION NOTES FOR FUTURE CHANGES
+
+For this feature family:
+
+```text
+Prefer:
+- Durable persisted state.
+- Explicit TypeScript narrowing.
+- Validated priority enums.
+- Ephemeral user-specific UI where appropriate.
+- Administrator-only destructive/configuration actions.
+- Clear audit records.
+
+Avoid:
+- `any` casts.
+- Silent truncation of audit details.
+- Automatic creation of Discord roles.
+- Status roles for Claimed/Pending.
+- Cross-guild aggregate counts.
+- Automatic retention deletion without approval.
+```
+
