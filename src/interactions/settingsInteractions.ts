@@ -949,6 +949,12 @@ export async function handleSettingsInteraction(
           ],
           components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
         });
+        await auditSettingsAction(
+          guild,
+          interaction,
+          'RETENTION_APPROVED',
+          'Approved deletion of ' + deleted + ' eligible ' + scope + ' ticket(s).',
+        );
       } catch (error) {
         await interaction.editReply(
           '❌ ' + (error instanceof Error ? error.message : 'Retention approval failed.'),
@@ -974,8 +980,8 @@ export async function handleSettingsInteraction(
               .setTitle('✋ Retention Deletion Cancelled')
               .setDescription(
                 'Deletion was cancelled. Choose what happens next:\n\n' +
-                '1. **Change the deletion period** so the current rule no longer applies.\n' +
-                '2. **Confirm whether to delete chats that are ' + days + ' days old, counting from today.**',
+                '1. **Change the deletion period** so the current rule no longer applies.\n\n' +
+                '2. **Review Eligible Chats** to inspect which chats are currently eligible. No deletion occurs during review.',
               ),
           ],
           components: [
@@ -993,6 +999,13 @@ export async function handleSettingsInteraction(
             ),
           ],
         });
+
+        await auditSettingsAction(
+          guild,
+          interaction,
+          'RETENTION_DECLINED',
+          'Declined pending ' + scope + ' retention deletion request.',
+        );
       } catch (error) {
         await interaction.editReply(
           '❌ ' + (error instanceof Error ? error.message : 'Retention cancellation failed.'),
@@ -1061,6 +1074,13 @@ export async function handleSettingsInteraction(
           ],
           components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
         });
+
+        await auditSettingsAction(
+          guild,
+          interaction,
+          'RETENTION_REVIEWED',
+          'Reviewed ' + eligible.length + ' eligible ' + scope + ' ticket(s) without deletion.',
+        );
       } catch (error) {
         await interaction.editReply(
           '❌ ' + (error instanceof Error ? error.message : 'Retention review failed.'),
