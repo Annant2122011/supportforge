@@ -12,6 +12,8 @@ export type SupportForgeChannelPurpose =
   | 'transcript'
   | 'managed';
 
+const purposeQueues = new Map<string, Promise<void>>();
+
 const DEFAULT_PURPOSES: Record<
   SupportForgeChannelPurpose,
   string
@@ -72,39 +74,62 @@ export async function ensureChannelPurposeMessage(
     return;
   }
 
-  const botId = channel.client.user?.id;
-  if (!botId) {
-    return;
-  }
+  const previous =
+    purposeQueues.get(channel.id) ??
+    Promise.resolve();
 
-  const recent = await channel.messages
-    .fetch({ limit: 50 })
-    .catch(() => null);
+  let release!: () => void;
 
-  const existing = recent?.find(
-    (message) =>
-      message.author.id === botId &&
-      message.embeds.some(
-        (embed) =>
-          embed.title === PURPOSE_TITLE &&
-          embed.footer?.text === PURPOSE_FOOTER,
-      ),
-  );
-
-  const embed = new EmbedBuilder()
-    .setTitle(PURPOSE_TITLE)
-    .setDescription(purpose)
-    .setFooter({ text: PURPOSE_FOOTER })
-    .setTimestamp();
-
-  if (existing) {
-    await existing.edit({ embeds: [embed] });
-    return;
-  }
-
-  await channel.send({
-    embeds: [embed],
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
   });
+
+  const current = previous.then(() => gate);
+  purposeQueues.set(channel.id, current);
+
+  await previous;
+
+  try {
+    const botId = channel.client.user?.id;
+    if (!botId) {
+      return;
+    }
+
+    const recent = await channel.messages
+      .fetch({ limit: 50 })
+      .catch(() => null);
+
+    const existing = recent?.find(
+      (message) =>
+        message.author.id === botId &&
+        message.embeds.some(
+          (embed) =>
+            embed.title === PURPOSE_TITLE &&
+            embed.footer?.text === PURPOSE_FOOTER,
+        ),
+    );
+
+    const embed = new EmbedBuilder()
+      .setTitle(PURPOSE_TITLE)
+      .setDescription(purpose)
+      .setFooter({ text: PURPOSE_FOOTER })
+      .setTimestamp();
+
+    if (existing) {
+      await existing.edit({ embeds: [embed] });
+      return;
+    }
+
+    await channel.send({
+      embeds: [embed],
+    });
+  } finally {
+    release();
+
+    if (purposeQueues.get(channel.id) === current) {
+      purposeQueues.delete(channel.id);
+    }
+  }
 }
 
 export async function ensureDefaultChannelPurpose(
