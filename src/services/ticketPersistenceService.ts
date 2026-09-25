@@ -5,6 +5,7 @@ import type { TicketPriority } from './advancedSettingsService';
 import type { TicketStatus } from './ticketStateService';
 
 export interface PersistedTicket {
+  guildId: string | null;
   status: TicketStatus;
   updatedAt: string;
   createdAt: string;
@@ -44,6 +45,7 @@ async function loadState(): Promise<TicketStateFile> {
     for (const [channelId, ticket] of Object.entries(rawTickets)) {
       const legacy = ticket as Partial<PersistedTicket>;
       normalizedTickets[channelId] = {
+        guildId: legacy.guildId ?? null,
         status: legacy.status ?? 'open',
         updatedAt: legacy.updatedAt ?? new Date().toISOString(),
         createdAt: legacy.createdAt ?? legacy.updatedAt ?? new Date().toISOString(),
@@ -97,6 +99,7 @@ export async function getPersistedTicketStatus(
 }
 
 export interface TicketRegistration {
+  guildId: string;
   ticketNumber: string;
   departmentId: string;
   ownerId: string;
@@ -112,6 +115,7 @@ export async function registerTicket(
   const existing = current.tickets[channelId];
 
   current.tickets[channelId] = {
+    guildId: existing?.guildId ?? registration.guildId,
     status: existing?.status ?? 'open',
     updatedAt: registration.createdAt,
     createdAt: existing?.createdAt ?? registration.createdAt,
@@ -135,6 +139,7 @@ export async function setPersistedTicketStatus(
   const now = new Date().toISOString();
 
   current.tickets[channelId] = {
+    guildId: existing?.guildId ?? null,
     status,
     updatedAt: now,
     createdAt: existing?.createdAt ?? now,
@@ -149,9 +154,11 @@ export async function setPersistedTicketStatus(
   await persistState();
 }
 
-export async function getPersistedTicketRecords(): Promise<PersistedTicket[]> {
+export async function getPersistedTicketRecords(guildId?: string): Promise<PersistedTicket[]> {
   const current = await loadState();
-  return Object.values(current.tickets).map((ticket) => ({ ...ticket }));
+  return Object.values(current.tickets)
+    .filter((ticket) => !guildId || ticket.guildId === guildId)
+    .map((ticket) => ({ ...ticket }));
 }
 
 export async function markPersistedTicketDeleted(
