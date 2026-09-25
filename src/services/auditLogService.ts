@@ -263,6 +263,21 @@ async function findRecentAuditExecutor(
   }
 }
 
+export async function isSupportForgeManagedRole(
+  guild: Guild,
+  role: Role,
+): Promise<boolean> {
+  const settings = await getAdvancedSettings(guild.id);
+  const configuredIds = new Set(
+    Object.values(settings.priorityRoles).filter(
+      (id): id is string => Boolean(id),
+    ),
+  );
+
+  return configuredIds.has(role.id) ||
+    role.name.toLowerCase().startsWith('supportforge •');
+}
+
 export async function logDiscordMutation(
   guild: Guild,
   target: DiscordAuditTarget,
