@@ -1,5 +1,6 @@
 import {
   ActionRowBuilder,
+  AuditLogEvent,
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
@@ -10,6 +11,8 @@ import {
   PermissionFlagsBits,
   type ButtonInteraction,
   type Guild,
+  type GuildBasedChannel,
+  type Role,
   type TextChannel,
 } from 'discord.js';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -157,6 +160,168 @@ function actionLabel(action: string): string {
     .filter(Boolean)
     .map((part) => part.charAt(0) + part.slice(1).toLowerCase())
     .join(' ');
+}
+
+
+const SUPPORTFORGE_NAME_PREFIXES = [
+  'SupportForge.',
+  'SupportForge •',
+];
+
+function hasSupportForgeName(name: string): boolean {
+  return SUPPORTFORGE_NAME_PREFIXES.some((prefix) =>
+    name.toLowerCase().startsWith(prefix.toLowerCase()),
+  );
+}
+
+export async function isSupportForgeManagedChannel(
+  guild: Guild,
+  channel: GuildBasedChannel,
+): Promise<boolean> {
+  const topic =
+    channel.type === ChannelType.GuildText
+      ? channel.topic ?? ''
+      : '';
+
+  if (topic.startsWith('supportforge:')) {
+    return true;
+  }
+
+  const config = await getGuildConfig(guild.id);
+  const settings = await getAdvancedSettings(guild.id);
+
+  const configuredIds = new Set(
+    [
+      config.supportCategoryId,
+      config.openCategoryId,
+      config.panelChannelId,
+      config.transcriptChannelId,
+      config.auditChannelId,
+      settings.closedCategoryId,
+      settings.archiveCategoryId,
+      settings.statusCategories.claimedCategoryId,
+      settings.statusCategories.pendingCategoryId,
+      ...Object.values(config.departments).map(
+        (department) => department.categoryId ?? null,
+      ),
+    ].filter((id): id is string => Boolean(id)),
+  );
+
+  if (configuredIds.has(channel.id)) {
+    return true;
+  }
+
+  return hasSupportForgeName(channel.name) ||
+    (
+      channel.type === ChannelType.GuildCategory &&
+      (
+        channel.name === 'Open' ||
+        channel.name.startsWith('Open ')
+      )
+    );
+}
+
+type DiscordAuditTarget =
+  | GuildBasedChannel
+  | Role;
+
+async function findRecentAuditExecutor(
+  guild: Guild,
+  auditType:
+    | AuditLogEvent.ChannelCreate
+    | AuditLogEvent.ChannelUpdate
+    | AuditLogEvent.ChannelDelete
+    | AuditLogEvent.RoleCreate
+    | AuditLogEvent.RoleUpdate
+    | AuditLogEvent.RoleDelete,
+  targetId: string,
+): Promise<{ id: string; name: string } | null> {
+  try {
+    const logs = await guild.fetchAuditLogs({
+      type: auditType,
+      limit: 10,
+    });
+
+    const entry = logs.entries.find(
+      (candidate) =>
+        candidate.targetId === targetId &&
+        Date.now() - candidate.createdTimestamp < 15_000,
+    );
+
+    const executor = entry?.executor;
+
+    if (!executor) {
+      return null;
+    }
+
+    return {
+      id: executor.id,
+      name: executor.tag,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function logDiscordMutation(
+  guild: Guild,
+  target: DiscordAuditTarget,
+  action: string,
+  detail: string,
+  auditType:
+    | AuditLogEvent.ChannelCreate
+    | AuditLogEvent.ChannelUpdate
+    | AuditLogEvent.ChannelDelete
+    | AuditLogEvent.RoleCreate
+    | AuditLogEvent.RoleUpdate
+    | AuditLogEvent.RoleDelete,
+): Promise<void> {
+  try {
+    const config = await getGuildConfig(guild.id);
+
+    if (!config.supportCategoryId) {
+      return;
+    }
+
+    const executor = await findRecentAuditExecutor(
+      guild,
+      auditType,
+      target.id,
+    );
+
+    await recordAndPublish(
+      guild,
+      config.supportCategoryId,
+      {
+        event: action,
+        actorId: executor?.id ?? 'discord-system',
+        actorName: executor?.name ?? 'Discord / SupportForge',
+        detail,
+        category: 'system',
+      },
+    );
+  } catch (error) {
+    console.warn('⚠️ Discord mutation audit failed:', error);
+  }
+}
+
+export async function logSystemEvent(
+  guild: Guild,
+  parentCategoryId: string,
+  action: string,
+  detail: string,
+): Promise<void> {
+  try {
+    await recordAndPublish(guild, parentCategoryId, {
+      event: action,
+      actorId: 'supportforge-system',
+      actorName: 'SupportForge',
+      detail,
+      category: 'system',
+    });
+  } catch (error) {
+    console.warn('⚠️ SupportForge system audit failed:', error);
+  }
 }
 
 async function findAuditChannel(guild: Guild): Promise<TextChannel | null> {
@@ -636,6 +801,14 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
       })
     : ['• None configured.'];
 
+  const actionBreakdown = [...new Map(
+    store.events.map((event) => [
+      event.action,
+      (store.events.filter((item) => item.action === event.action)).length,
+    ]),
+  ).entries()]
+    .sort((a, b) => b[1] - a[1]);
+
   const metricsLines = [
     '**Ticket lifecycle audit actions:** ' + ticketActions,
     '**Settings actions:** ' + settingsActions,
@@ -708,6 +881,18 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
       embed.addFields({
         name: '📈 Additional metrics',
         value: metricsLines.join('\n').slice(0, 1024),
+      });
+    }
+
+    const actionStart = index * 16;
+    const actionChunk = actionBreakdown.slice(actionStart, actionStart + 16);
+    if (actionChunk.length) {
+      embed.addFields({
+        name: '🧾 Audit action breakdown',
+        value: actionChunk
+          .map(([action, count]) => '• **' + actionLabel(action) + ':** ' + count)
+          .join('\n')
+          .slice(0, 1024),
       });
     }
 
@@ -869,11 +1054,36 @@ async function publishDailySummary(
 }
 
 async function runDailySummarySweep(client: Client): Promise<void> {
-  const previousDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const previousDate = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
 
   for (const guild of client.guilds.cache.values()) {
     try {
-      await publishDailySummary(guild, previousDate);
+      const current = await load();
+      const store = getGuildStore(current, guild.id);
+      const previousEvents = store.events.filter(
+        (event) => dateKey(event.timestamp) === previousDate,
+      );
+      const todayEvents = store.events.filter(
+        (event) => dateKey(event.timestamp) === today,
+      );
+
+      /*
+       * Do not post an empty "yesterday" summary when the bot was first
+       * configured today. Prefer the current setup/activity day whenever
+       * the previous day has no recorded actions.
+       */
+      const summaryDate =
+        previousEvents.length > 0
+          ? previousDate
+          : todayEvents.length > 0
+            ? today
+            : previousDate;
+
+      await publishDailySummary(guild, summaryDate);
     } catch (error) {
       console.warn(`⚠️ Daily audit summary skipped for ${guild.id}:`, error);
     }
