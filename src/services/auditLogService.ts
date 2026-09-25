@@ -175,6 +175,10 @@ function hasSupportForgeName(name: string): boolean {
 }
 
 export function permissionOverwriteSignature(channel: GuildBasedChannel): string {
+  if (!('permissionOverwrites' in channel)) {
+    return '';
+  }
+
   const entries = [...channel.permissionOverwrites.cache.values()]
     .sort((a, b) => a.id.localeCompare(b.id))
     .map((overwrite) => ({
@@ -285,7 +289,7 @@ async function findRecentAuditExecutor(
 
     return {
       id: executor.id,
-      name: executor.tag,
+      name: executor.tag ?? executor.username,
     };
   } catch {
     return null;
