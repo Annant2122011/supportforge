@@ -9,6 +9,7 @@ import {
   type TextChannel,
 } from 'discord.js';
 import { getGuildConfig, type GuildConfig } from './configService';
+import type { TicketPriority } from './advancedSettingsService';
 import { setChannelName } from './discordChannelService';
 import {
   getField,
@@ -52,6 +53,7 @@ export function buildTicketPanelEmbed(
   const ticketNumber = getField(topic, 'number') ?? 'Unknown';
 
   return new EmbedBuilder()
+    .setColor(priorityColor(priority))
     .setTitle(`🎫 SupportForge Ticket #${ticketNumber}`)
     .setDescription(
       `**${decodeSubject(getField(topic, 'subject'))}**\n\n` +
@@ -210,6 +212,7 @@ export function queueTicketChannelRename(
 export function getTicketChannelName(
   ticketNumber: string,
   status: TicketStatus,
+  priority: TicketPriority = 'normal',
 ): string {
   /*
    * Discord text-channel names are lowercase, hyphen-separated slugs.
@@ -222,7 +225,7 @@ export function getTicketChannelName(
         ? 'archive'
         : status;
 
-  return `ticket-${ticketNumber}-${channelStatus}`;
+  return `${priorityIndicator(priority)}-ticket-${ticketNumber}-${channelStatus}`;
 }
 
 export const RESTORE_PANEL_CUSTOM_ID = 'ticket:panel:restore-move';
@@ -392,13 +395,40 @@ function statusEmoji(status: TicketStatus): string {
   }[status];
 }
 
+function normalizedPriority(priority: string): TicketPriority {
+  return ['low', 'normal', 'high', 'urgent', 'critical'].includes(priority)
+    ? priority as TicketPriority
+    : 'normal';
+}
+
+export function priorityIndicator(priority: string): string {
+  return {
+    low: '🟢',
+    normal: '🟡',
+    high: '🔴',
+    urgent: '🟠',
+    critical: '🟣',
+  }[normalizedPriority(priority)];
+}
+
+function priorityColor(priority: string): number {
+  return {
+    low: 0x2ecc71,
+    normal: 0xf1c40f,
+    high: 0xe74c3c,
+    urgent: 0xe67e22,
+    critical: 0x9b59b6,
+  }[normalizedPriority(priority)];
+}
+
 function priorityLabel(priority: string): string {
-  const labels: Record<string, string> = {
+  const normalized = normalizedPriority(priority);
+  const labels: Record<TicketPriority, string> = {
     low: '🟢 Low',
-    normal: '⚪ Normal',
-    high: '🟠 High',
-    urgent: '🔴 Urgent',
+    normal: '🟡 Normal',
+    high: '🔴 High',
+    urgent: '🟠 Urgent',
     critical: '🟣 Critical',
   };
-  return labels[priority] ?? priority;
+  return labels[normalized];
 }
