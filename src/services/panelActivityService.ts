@@ -2,6 +2,8 @@ import { ChannelType, type Message, type TextChannel } from 'discord.js';
 import { getAdvancedSettings } from './advancedSettingsService';
 import { getField } from './ticketStateService';
 import { collapseTicketPanelToRestoreButton } from './ticketPanelService';
+import { getGuildConfig } from './configService';
+import { logTicketEvent } from './auditLogService';
 
 interface ActivityState { anchorMessageId: string; messages: number; visualLines: number; moving: boolean; }
 const states = new Map<string, ActivityState>();
@@ -88,6 +90,21 @@ export async function recordTicketMessageForPanel(message: Message): Promise<voi
       channel.id,
       restore?.id ?? channel.lastMessageId ?? panelMessageId,
     );
+
+    const config = await getGuildConfig(channel.guild.id);
+    if (config.supportCategoryId) {
+      void logTicketEvent(
+        channel.guild,
+        config.supportCategoryId,
+        {
+          ticketNumber: getField(topic, 'number') ?? 'unknown',
+          event: 'ticket_panel_auto_moved',
+          actorId: 'supportforge-system',
+          actorName: 'SupportForge',
+          detail: 'Automatic activity threshold reached; ticket controls were moved to the bottom.',
+        },
+      ).catch(() => undefined);
+    }
   } catch (error) {
     console.warn(
       '⚠️ Automatic ticket panel compaction skipped in ' + channel.id + ':',
