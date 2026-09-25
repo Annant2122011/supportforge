@@ -845,18 +845,40 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
       })
     : ['• None configured.'];
 
-  const actionBreakdown = [...new Map(
-    store.events.map((event) => [
+  const actionCounts = new Map<string, number>();
+  for (const event of store.events) {
+    actionCounts.set(
       event.action,
-      (store.events.filter((item) => item.action === event.action)).length,
-    ]),
-  ).entries()]
+      (actionCounts.get(event.action) ?? 0) + 1,
+    );
+  }
+
+  const actionBreakdown = [...actionCounts.entries()]
     .sort((a, b) => b[1] - a[1]);
 
   const metricsLines = [
     '**Ticket lifecycle audit actions:** ' + ticketActions,
     '**Settings actions:** ' + settingsActions,
+    '**Channels created:** ' + (actionCounts.get('CHANNEL_CREATED') ?? 0),
+    '**Channels renamed:** ' + (actionCounts.get('CHANNEL_RENAMED') ?? 0),
+    '**Channels moved/reordered:** ' +
+      ((actionCounts.get('CHANNEL_MOVED') ?? 0) + (actionCounts.get('CHANNEL_REORDERED') ?? 0)),
+    '**Permission changes:** ' + (actionCounts.get('CHANNEL_PERMISSIONS_CHANGED') ?? 0),
+    '**Channel deletions:** ' + (actionCounts.get('CHANNEL_DELETED') ?? 0),
+    '**Channel settings changes:** ' + (actionCounts.get('CHANNEL_SETTINGS_CHANGED') ?? 0),
+    '**Ticket panel moves:** ' +
+      ((actionCounts.get('TICKET_PANEL_MOVED') ?? 0) + (actionCounts.get('TICKET_PANEL_AUTO_MOVED') ?? 0)),
     '**Priority roles created:** ' + priorityRolesCreated,
+    '**Roles updated/deleted:** ' +
+      ((actionCounts.get('ROLE_UPDATED') ?? 0) + (actionCounts.get('ROLE_DELETED') ?? 0)),
+    '**Retention reviewed/approved/declined:** ' +
+      ((actionCounts.get('RETENTION_REVIEWED') ?? 0) +
+        (actionCounts.get('RETENTION_APPROVED') ?? 0) +
+        (actionCounts.get('RETENTION_DECLINED') ?? 0)),
+    '**Ticket metadata changes:** ' +
+      ((actionCounts.get('TICKET_USER_ADDED') ?? 0) +
+        (actionCounts.get('TICKET_PRIORITY_CHANGED') ?? 0) +
+        (actionCounts.get('TICKET_TAG_ADDED') ?? 0)),
     '**Retention-deleted ticket records:** ' + retentionEligible,
     '**Retention policy:** closed ' + (settings.retention.closedDays || 'never') + ' days • archive ' + (settings.retention.archiveDays || 'never') + ' days',
     oldestActive
