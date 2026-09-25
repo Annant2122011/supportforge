@@ -67,15 +67,18 @@ import {
   queueTicketChannelRename,
 } from '../services/ticketPanelService';
 
-function getTopicPriority(topic: string): TicketPriority {
-  const value = getField(topic, 'priority');
+function parseTicketPriority(value: string): TicketPriority | null {
   return value === 'low' ||
     value === 'normal' ||
     value === 'high' ||
     value === 'urgent' ||
     value === 'critical'
     ? value
-    : 'normal';
+    : null;
+}
+
+function getTopicPriority(topic: string): TicketPriority {
+  return parseTicketPriority(getField(topic, 'priority') ?? '') ?? 'normal';
 }
 
 /* -------------------------------------------------------------------------- */
@@ -2873,20 +2876,9 @@ async function handlePanelModal(
           .trim()
           .toLowerCase();
 
-      const valid =
-        new Set([
-          'low',
-          'normal',
-          'high',
-          'urgent',
-          'critical',
-        ]);
+      const parsedPriority = parseTicketPriority(priority);
 
-      if (
-        !valid.has(
-          priority,
-        )
-      ) {
+      if (!parsedPriority) {
         await interaction.editReply(
           '❌ Priority must be `low`, `normal`, `high`, `urgent`, or `critical`.',
         );
@@ -2897,7 +2889,7 @@ async function handlePanelModal(
         setField(
           newTopic,
           'priority',
-          priority,
+          parsedPriority,
         );
 
       await runChannelMutation(
@@ -2924,15 +2916,15 @@ async function handlePanelModal(
         getTicketChannelName(
           getField(newTopic, 'number') ?? 'unknown',
           state.status,
-          priority as TicketPriority,
+          parsedPriority,
         ),
-        `Ticket priority changed to ${priority}`,
+        `Ticket priority changed to ${parsedPriority}`,
       ).catch((error) => {
         console.error('⚠️ Failed to rename ticket for priority change:', error);
       });
 
       await interaction.editReply(
-        `✅ Ticket priority changed to **${priority}**.`,
+        `✅ Ticket priority changed to **${parsedPriority}**.`,
       );
 
       void updateMainMessage(
