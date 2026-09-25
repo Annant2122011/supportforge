@@ -10,6 +10,7 @@ import {
   updateGuildConfig,
   type DepartmentConfig,
 } from './configService';
+import { logSystemEvent } from './auditLogService';
 
 const MAX_CHANNELS_PER_CATEGORY = 50;
 const PREFIX = 'SupportForge.';
@@ -112,6 +113,16 @@ export async function ensureDepartmentCategory(
     ],
     reason: 'SupportForge department category provisioning',
   });
+
+  const config = await getGuildConfig(guild.id);
+  if (config.supportCategoryId) {
+    void logSystemEvent(
+      guild,
+      config.supportCategoryId,
+      'CATEGORY_CREATED',
+      `Created SupportForge department category ${category.name} (${category.id}).`,
+    ).catch(() => undefined);
+  }
 
   return category;
 }
