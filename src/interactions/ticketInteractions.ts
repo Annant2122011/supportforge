@@ -2107,9 +2107,42 @@ async function closeTicket(
 /* Ticket creation modal                                                      */
 /* -------------------------------------------------------------------------- */
 
+async function showTicketTagSelector(interaction: ButtonInteraction, departmentId: string): Promise<void> {
+  if (!interaction.guild) { await replyError(interaction, '❌ This action must be used inside a server.'); return; }
+  const config = await getGuildConfig(interaction.guild.id);
+  const department = config.departments[departmentId];
+  if (!department) { await replyError(interaction, '❌ This department no longer exists.'); return; }
+  const tags = Object.values(department.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
+  if (!tags.length) { await replyError(interaction, '❌ This department has no tags configured. Ask an administrator to add one.'); return; }
+  if (tags.length === 1) { await showTicketCreationModal(interaction, departmentId, tags[0].id); return; }
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId('ticket:create-tag:select:' + departmentId)
+    .setPlaceholder('Choose a tag')
+    .setMinValues(1).setMaxValues(1)
+    .addOptions(tags.slice(0, 25).map((tag) => ({ label: tag.name.slice(0, 100), value: tag.id, description: 'Subcategory of ' + department.name })));
+  await interaction.reply({
+    content: '🏷️ **Choose a tag for your ' + department.name + ' ticket**\nTags are subcategories inside the department and do not create Discord categories.',
+    components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+async function handleTicketTagSelection(interaction: StringSelectMenuInteraction): Promise<void> {
+  const parts = interaction.customId.split(':');
+  const departmentId = parts[3] ?? '';
+  const tagId = interaction.values[0] ?? '';
+  const config = await getGuildConfig(interaction.guild!.id);
+  if (!config.departments[departmentId]?.tags?.[tagId]) {
+    await replyError(interaction, '❌ That tag is no longer configured for this department.');
+    return;
+  }
+  await showTicketCreationModal(interaction, departmentId, tagId);
+}
+
 async function showTicketCreationModal(
-  interaction: ButtonInteraction,
+  interaction: ButtonInteraction | StringSelectMenuInteraction,
   departmentId: string,
+  tagId: string,
 ): Promise<void> {
   if (!interaction.guild) {
     await replyError(
@@ -2133,8 +2166,9 @@ async function showTicketCreationModal(
       config.departments[
         departmentId
       ];
+    const tag = department?.tags?.[tagId];
 
-    if (!department) {
+    if (!department || !tag) {
       await replyError(
         interaction,
         '❌ This ticket department no longer exists. Please refresh the support panel.',
@@ -2145,7 +2179,7 @@ async function showTicketCreationModal(
     const modal =
       new ModalBuilder()
         .setCustomId(
-          `ticket:modal:${departmentId}`,
+          `ticket:modal:${departmentId}:${tagId}`,
         )
         .setTitle(
           `${department.name} Support`,
