@@ -2357,164 +2357,98 @@ async function showTicketHistory(
   }
 }
 
-async function renderRoutingTagSelector(
-  interaction: ButtonInteraction | StringSelectMenuInteraction,
-  page: number,
-): Promise<void> {
-  if (!interaction.guild) {
-    await replyError(interaction, '❌ This action must be used inside a server.');
-    return;
-  }
-
-  const channel =
-    interaction.channel?.type === ChannelType.GuildText
-      ? interaction.channel as TextChannel
-      : undefined;
-
-  if (!channel || !isTicketTopic(channel.topic ?? '')) {
-    await replyError(interaction, '❌ Routing tags can only be changed inside a ticket.');
-    return;
-  }
-
+async function renderDepartmentSelector(interaction: ButtonInteraction | StringSelectMenuInteraction, page = 0): Promise<void> {
+  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) { await replyError(interaction, '❌ This action can only be used inside a ticket.'); return; }
+  const channel = interaction.channel as TextChannel;
+  if (!isTicketTopic(channel.topic ?? '')) { await replyError(interaction, '❌ This action can only be used inside a ticket.'); return; }
   const config = await getGuildConfig(interaction.guild.id);
-  const departments = Object.values(config.departments)
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  if (!departments.length) {
-    await replyError(interaction, '❌ No routing tags/departments are configured.');
-    return;
-  }
-
-  const pageSize = 25;
-  const pageCount = Math.max(1, Math.ceil(departments.length / pageSize));
-  const safePage = Math.min(Math.max(page, 0), pageCount - 1);
-  const currentDepartmentId = getField(channel.topic ?? '', 'department');
-  const pageDepartments = departments.slice(safePage * pageSize, (safePage + 1) * pageSize);
-
-  const selector = new StringSelectMenuBuilder()
-    .setCustomId('ticket:routing-tag:select:' + safePage)
-    .setPlaceholder('Choose the one routing tag for this ticket')
-    .setMinValues(1)
-    .setMaxValues(1)
-    .addOptions(pageDepartments.map((department) => ({
-      label: department.name.slice(0, 100),
-      value: department.id,
-      description: department.staffRoleId
-        ? 'Routes to ' + department.name + ' staff'
-        : 'Routes to ' + department.name + ' administrators',
-      default: department.id === currentDepartmentId,
-    })));
-
-  const navigation = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId('ticket:routing-tag:page:' + (safePage - 1)).setLabel('Previous').setEmoji('⬅️').setStyle(ButtonStyle.Secondary).setDisabled(safePage === 0),
-    new ButtonBuilder().setCustomId('ticket:routing-tag:page:' + (safePage + 1)).setLabel('Next').setEmoji('➡️').setStyle(ButtonStyle.Secondary).setDisabled(safePage >= pageCount - 1),
-    new ButtonBuilder().setCustomId('ticket:routing-tag:cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+  const departments = Object.values(config.departments).sort((x, y) => x.name.localeCompare(y.name));
+  const size = 25, count = Math.max(1, Math.ceil(departments.length / size)), p = Math.min(Math.max(page, 0), count - 1);
+  const current = getField(channel.topic ?? '', 'department');
+  const menu = new StringSelectMenuBuilder().setCustomId('ticket:department:select').setPlaceholder('Choose a department').setMinValues(1).setMaxValues(1)
+    .addOptions(departments.slice(p * size, (p + 1) * size).map((d) => ({ label: d.name.slice(0, 100), value: d.id, description: Object.keys(d.tags ?? {}).length + ' tag(s)', default: d.id === current })));
+  const nav = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('ticket:department:page:' + (p - 1)).setLabel('Previous').setStyle(ButtonStyle.Secondary).setDisabled(p === 0),
+    new ButtonBuilder().setCustomId('ticket:department:page:' + (p + 1)).setLabel('Next').setStyle(ButtonStyle.Secondary).setDisabled(p >= count - 1),
+    new ButtonBuilder().setCustomId('ticket:department:cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
   );
-
-  const payload = {
-    content:
-      '🏷️ **Routing Tag / Department**\n' +
-      'Every ticket has exactly **one** routing tag. Selecting one moves the ticket to that department and updates its staff routing.\n\n' +
-      `Page ${safePage + 1}/${pageCount} • ${departments.length} configured tag(s)`,
-    components: [
-      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selector),
-      navigation,
-    ],
-  };
-
-  if (interaction.replied || interaction.deferred) {
-    await interaction.editReply(payload);
-  } else {
-    await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
-  }
+  const payload = { content: '📂 **Choose a department**\nThe department controls the Discord category and staff routing. Tags belong to the department and never create categories.', components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu), nav] };
+  if (interaction.replied || interaction.deferred) await interaction.editReply(payload); else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
 }
 
-async function showRoutingTagSelector(interaction: ButtonInteraction): Promise<void> {
-  await renderRoutingTagSelector(interaction, 0);
+async function changeTicketDepartment(interaction: StringSelectMenuInteraction): Promise<void> {
+  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) { await replyError(interaction, '❌ This action can only be used inside a ticket.'); return; }
+  const channel = interaction.channel as TextChannel; const topic = channel.topic ?? '';
+  const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
+  if (!isTicketTopic(topic) || !isActiveTicketStatus(status)) { await replyError(interaction, '❌ Only active tickets can be rerouted.'); return; }
+  const staff = getStaffContext(interaction, topic);
+  if (!staff.authorized) { await replyError(interaction, '❌ Only configured staff or administrators can change the department.'); return; }
+  const departmentId = interaction.values[0]; const config = await getGuildConfig(interaction.guild.id); const department = config.departments[departmentId];
+  if (!department) { await replyError(interaction, '❌ Department not found.'); return; }
+  const oldDepartmentId = getField(topic, 'department');
+  if (oldDepartmentId === departmentId) { await interaction.update({ content: 'ℹ️ This ticket is already in **' + department.name + '**.', components: [] }); return; }
+  const tags = Object.values(department.tags ?? {}).sort((x, y) => x.name.localeCompare(y.name));
+  if (!tags.length) { await replyError(interaction, '❌ The destination department has no tags. Add at least one tag first.'); return; }
+  if (tags.length > 1) {
+    await interaction.update({ content: '🏷️ **Choose the tag for ' + department.name + '**', components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId('ticket:routing-tag:select:' + department.id).setPlaceholder('Choose a tag').addOptions(tags.slice(0, 25).map((t) => ({ label: t.name.slice(0, 100), value: t.id, description: 'Subcategory of ' + department.name })) ))] });
+    return;
+  }
+  await applyTicketRouting(interaction, department, tags[0].id, status, topic);
+}
+
+async function renderRoutingTagSelector(interaction: ButtonInteraction | StringSelectMenuInteraction, page: number): Promise<void> {
+  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) { await replyError(interaction, '❌ This action can only be used inside a ticket.'); return; }
+  const channel = interaction.channel as TextChannel; const topic = channel.topic ?? '';
+  const departmentId = getField(topic, 'department'); const config = await getGuildConfig(interaction.guild.id); const department = departmentId ? config.departments[departmentId] : undefined;
+  if (!department) { await replyError(interaction, '❌ This ticket department no longer exists.'); return; }
+  const tags = Object.values(department.tags ?? {}).sort((x, y) => x.name.localeCompare(y.name));
+  if (!tags.length) { await replyError(interaction, '❌ This department has no tags configured.'); return; }
+  const size = 25, count = Math.max(1, Math.ceil(tags.length / size)), p = Math.min(Math.max(page, 0), count - 1);
+  const currentTag = getField(topic, 'tags');
+  const menu = new StringSelectMenuBuilder().setCustomId('ticket:routing-tag:select:' + department.id).setPlaceholder('Choose a tag').setMinValues(1).setMaxValues(1)
+    .addOptions(tags.slice(p * size, (p + 1) * size).map((t) => ({ label: t.name.slice(0, 100), value: t.id, description: 'Subcategory of ' + department.name, default: t.id === currentTag })));
+  const nav = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('ticket:routing-tag:page:' + (p - 1)).setLabel('Previous').setStyle(ButtonStyle.Secondary).setDisabled(p === 0),
+    new ButtonBuilder().setCustomId('ticket:routing-tag:page:' + (p + 1)).setLabel('Next').setStyle(ButtonStyle.Secondary).setDisabled(p >= count - 1),
+    new ButtonBuilder().setCustomId('ticket:routing-tag:cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+  );
+  const payload = { content: '🏷️ **Tag • ' + department.name + '**\nTags are subcategories of this department. Changing a tag does not create or move a Discord category.', components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu), nav] };
+  if (interaction.replied || interaction.deferred) await interaction.editReply(payload); else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
+}
+
+async function applyTicketRouting(interaction: StringSelectMenuInteraction, department: import('discord.js').DepartmentConfig extends never ? never : any, tagId: string, status: TicketStatus, topic: string): Promise<void> {
+  const channel = interaction.channel as TextChannel; const config = await getGuildConfig(interaction.guild!.id);
+  const oldDepartmentId = getField(topic, 'department'); const oldDepartment = oldDepartmentId ? config.departments[oldDepartmentId] : undefined;
+  const category = await ensureDepartmentCategory(interaction.guild!, department);
+  const newTopic = setField(setField(setField(topic, 'department', department.id), 'staff', department.staffRoleId ?? 'none'), 'tags', tagId);
+  await interaction.deferUpdate();
+  try {
+    await runChannelMutation(channel, 'Ticket routing update', async () => {
+      if (oldDepartmentId !== department.id) {
+        await setChannelParent(channel.id, category.id, 'Move ticket to department category');
+        if (oldDepartment?.staffRoleId && oldDepartment.staffRoleId !== department.staffRoleId) await setChannelPermissionOverwrite(channel.id, oldDepartment.staffRoleId, [], [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory], 0, 'Remove previous department staff');
+        if (department.staffRoleId) await setChannelPermissionOverwrite(channel.id, department.staffRoleId, [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks], [], 0, 'Grant department staff');
+      }
+      await setChannelTopic(channel.id, newTopic, 'Update department and tag metadata');
+    });
+    channel.topic = newTopic; updateRuntimeTicketState(channel, newTopic, status);
+    await updatePersistedTicketMetadata(channel.id, { departmentId: department.id, tagId });
+    await updateMainMessage(channel, getField(newTopic, 'message'), status, newTopic);
+    await interaction.editReply({ content: '✅ Ticket routed to **' + department.name + ' → ' + (department.tags[tagId]?.name ?? 'tag') + '**.', components: [] });
+    if (config.supportCategoryId) await logTicketEvent(interaction.guild!, config.supportCategoryId, { ticketNumber: getField(newTopic, 'number') ?? 'unknown', event: 'ticket_routing_changed', actor: interaction.user.tag, actorId: interaction.user.id, actorName: interaction.user.tag, detail: 'Department=' + department.name + '; tag=' + (department.tags[tagId]?.name ?? tagId) + '.' });
+  } catch (error) { console.error('❌ Ticket routing update failed:', error); await interaction.editReply({ content: '❌ The ticket routing update failed.', components: [] }).catch(() => undefined); }
 }
 
 async function changeTicketRoutingTag(interaction: StringSelectMenuInteraction): Promise<void> {
-  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
-    await replyError(interaction, '❌ This action can only be used inside a ticket.');
-    return;
-  }
-
-  const channel = interaction.channel as TextChannel;
-  const topic = channel.topic ?? '';
-  const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
-
-  if (!isTicketTopic(topic) || !isActiveTicketStatus(status)) {
-    await replyError(interaction, '❌ Only active tickets can have their routing tag changed.');
-    return;
-  }
-
+  const parts = interaction.customId.split(':'); const departmentId = parts[3] ?? ''; const tagId = interaction.values[0] ?? '';
+  const config = await getGuildConfig(interaction.guild!.id); const department = config.departments[departmentId];
+  if (!department?.tags?.[tagId]) { await replyError(interaction, '❌ That tag is not valid for this department.'); return; }
+  const channel = interaction.channel as TextChannel; const topic = channel.topic ?? ''; const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
   const staff = getStaffContext(interaction, topic);
-  if (!staff.authorized) {
-    await replyError(interaction, '❌ Only configured staff or administrators can change the routing tag.');
-    return;
-  }
-
-  const departmentId = interaction.values[0];
-  const config = await getGuildConfig(interaction.guild.id);
-  const department = config.departments[departmentId];
-  if (!department) {
-    await replyError(interaction, '❌ That routing tag no longer exists. Refresh the selector and try again.');
-    return;
-  }
-
-  const oldDepartmentId = getField(topic, 'department');
-  if (oldDepartmentId === departmentId) {
-    await interaction.update({ content: 'ℹ️ This ticket is already routed to **' + department.name + '**.', components: [] });
-    return;
-  }
-
-  await interaction.deferUpdate();
-  try {
-    const oldDepartment = oldDepartmentId ? config.departments[oldDepartmentId] : undefined;
-    const departmentCategory = await ensureDepartmentCategory(interaction.guild, department);
-    const newTopic = setField(setField(setField(topic, 'department', department.id), 'staff', department.staffRoleId ?? 'none'), 'tags', department.id);
-
-    await runChannelMutation(channel, 'Routing tag channel move', async () => {
-      await setChannelParent(channel.id, departmentCategory.id, 'Move ticket to routing tag category');
-
-      if (oldDepartment?.staffRoleId && oldDepartment.staffRoleId !== department.staffRoleId) {
-        await setChannelPermissionOverwrite(channel.id, oldDepartment.staffRoleId, [], [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory], 0, 'Remove previous department staff access');
-      }
-
-      if (department.staffRoleId) {
-        await setChannelPermissionOverwrite(channel.id, department.staffRoleId, [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks], [], 0, 'Grant new department staff access');
-      }
-
-      await setChannelTopic(channel.id, newTopic, 'Update ticket routing tag metadata');
-    });
-
-    channel.topic = newTopic;
-    updateRuntimeTicketState(channel, newTopic, status);
-    await updatePersistedTicketMetadata(channel.id, {
-      departmentId: department.id,
-    });
-    await updateGuildConfig(interaction.guild.id, (current) => {
-      const currentDepartment = current.departments[department.id];
-      if (currentDepartment && !currentDepartment.categoryId) currentDepartment.categoryId = departmentCategory.id;
-    });
-    await updateMainMessage(channel, getField(newTopic, 'message'), status, newTopic);
-    await interaction.editReply({ content: '✅ Routing tag changed to **' + department.name + '**. The ticket was moved to ' + departmentCategory.toString() + ' and staff routing was updated.', components: [] });
-
-    if (config.supportCategoryId) {
-      await logTicketEvent(interaction.guild, config.supportCategoryId, {
-        ticketNumber: getField(newTopic, 'number') ?? 'unknown',
-        event: 'ticket_routing_tag_changed',
-        actor: interaction.user.tag,
-        actorId: interaction.user.id,
-        actorName: interaction.user.tag,
-        detail: 'Routing tag changed from ' + (oldDepartment?.name ?? oldDepartmentId ?? 'unknown') + ' to ' + department.name + '. Ticket moved to ' + departmentCategory.name + '.',
-      });
-    }
-  } catch (error) {
-    console.error('❌ Routing tag change failed:', error);
-    await interaction.editReply({ content: '❌ The routing tag could not be changed. The ticket was left unchanged where possible.', components: [] }).catch(() => undefined);
-  }
+  if (!isTicketTopic(topic) || !isActiveTicketStatus(status) || !staff.authorized) { await replyError(interaction, '❌ Only configured staff or administrators can change ticket tags.'); return; }
+  await applyTicketRouting(interaction, department, tagId, status, topic);
 }
+
 async function handlePanelButton(
   interaction: ButtonInteraction,
 ): Promise<void> {
