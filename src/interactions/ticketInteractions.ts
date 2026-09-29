@@ -48,6 +48,7 @@ import {
   getPersistedTicketStatus,
   registerTicket,
   setPersistedTicketStatus,
+  updatePersistedTicketMetadata,
 } from '../services/ticketPersistenceService';
 
 import {
@@ -2451,6 +2452,9 @@ async function changeTicketRoutingTag(interaction: StringSelectMenuInteraction):
 
     channel.topic = newTopic;
     updateRuntimeTicketState(channel, newTopic, status);
+    await updatePersistedTicketMetadata(channel.id, {
+      departmentId: department.id,
+    });
     await updateGuildConfig(interaction.guild.id, (current) => {
       const currentDepartment = current.departments[department.id];
       if (currentDepartment && !currentDepartment.categoryId) currentDepartment.categoryId = departmentCategory.id;
@@ -2461,7 +2465,7 @@ async function changeTicketRoutingTag(interaction: StringSelectMenuInteraction):
     if (config.supportCategoryId) {
       await logTicketEvent(interaction.guild, config.supportCategoryId, {
         ticketNumber: getField(newTopic, 'number') ?? 'unknown',
-        event: 'ticket_department_changed',
+        event: 'ticket_routing_tag_changed',
         actor: interaction.user.tag,
         actorId: interaction.user.id,
         actorName: interaction.user.tag,
