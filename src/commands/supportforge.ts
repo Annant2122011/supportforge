@@ -17,7 +17,6 @@ import {
   getGuildConfig,
   getTier,
   newDepartmentId,
-  newTagId,
   setTier,
   tierLabel,
   updateGuildConfig,
@@ -949,20 +948,12 @@ export async function execute(
         await updateGuildConfig(
           guild.id,
           (current) => {
-            const now = new Date().toISOString();
-            const tagId = newTagId();
             current.departments[id] = {
               id,
               name: 'General Support',
               staffRoleId: null,
-              tags: {
-                [tagId]: {
-                  id: tagId,
-                  name: 'General',
-                  createdAt: now,
-                },
-              },
-              createdAt: now,
+              createdAt:
+                new Date().toISOString(),
             };
           },
         );
@@ -1085,22 +1076,14 @@ export async function execute(
       await updateGuildConfig(
         guild.id,
         (current) => {
-          const now = new Date().toISOString();
-          const tagId = newTagId();
           current.departments[id] = {
             id,
             name,
             staffRoleId:
               role?.id ?? null,
             categoryId: category.id,
-            tags: {
-              [tagId]: {
-                id: tagId,
-                name: 'General',
-                createdAt: now,
-              },
-            },
-            createdAt: now,
+            createdAt:
+              new Date().toISOString(),
           };
         },
       );
