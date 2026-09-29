@@ -407,22 +407,36 @@ async function showDefaults(interaction: ButtonInteraction): Promise<void> {
 }
 
 async function showTags(interaction: SettingsViewInteraction): Promise<void> {
-  const settings = await getAdvancedSettings(interaction.guild!.id);
-  const tags = Object.values(settings.customTags).sort((a, b) => a.name.localeCompare(b.name));
-  const lines = tags.length
-    ? tags.map((tag) => `${tag.emoji} **${tag.name}**${tag.description ? ` • ${tag.description}` : ''}`).join('\n')
-    : 'No custom tags are configured yet.';
+  const config = await getGuildConfig(interaction.guild!.id);
+  const departments = Object.values(config.departments).sort((a, b) => a.name.localeCompare(b.name));
+  const lines = departments.length
+    ? departments.map((department) =>
+        '🏷️ **' + department.name + '**' +
+        (department.staffRoleId ? ' • <@&' + department.staffRoleId + '>' : ' • Administrators only') +
+        (department.categoryId ? ' • <#' + department.categoryId + '>' : ' • Category pending'),
+      ).join('\n')
+    : 'No routing tags are configured yet.';
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🏷️ Custom Ticket Tags')
+      .setTitle('🏷️ Ticket Routing Tags / Departments')
       .setDescription(lines.slice(0, 3900))
-      .addFields({ name: 'Active tags', value: tags.length ? `${tags.length} configured tag(s)` : 'None' })
-      .setFooter({ text: 'Add Tag shows the active tags as a reference inside the form.' }),
+      .addFields(
+        {
+          name: 'One required tag per ticket',
+          value: 'Each ticket has exactly **one** routing tag. That tag is the department, determines the Discord category, and determines staff routing. There is no free-form routing-tag entry.',
+        },
+        {
+          name: 'Configured',
+          value: '**' + departments.length + '** predefined routing tag(s).',
+        },
+      )
+      .setFooter({ text: 'Routing tags and departments intentionally use the same underlying configuration.' }),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId('sf:settings:tags:add').setLabel('Add Tag').setEmoji('➕').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('sf:settings:tags:remove').setLabel('Remove Tag').setEmoji('➖').setStyle(ButtonStyle.Danger).setDisabled(tags.length === 0),
+      new ButtonBuilder().setCustomId('sf:settings:tags:remove').setLabel('Remove Tag').setEmoji('➖').setStyle(ButtonStyle.Danger).setDisabled(departments.length <= 1),
+      new ButtonBuilder().setCustomId('sf:settings:departments:add').setLabel('Add Department').setEmoji('📂').setStyle(ButtonStyle.Secondary),
       backButton(),
     ),
   ]);
@@ -759,47 +773,29 @@ export async function handleSettingsInteraction(
     }
 
     if (id === 'sf:settings:tags:add') {
-      const settings = await getAdvancedSettings(guild.id);
-      const tags = Object.values(settings.customTags).sort((a, b) => a.name.localeCompare(b.name));
-      const activeTags = tags.length
-        ? tags.map((tag) => tag.emoji + ' ' + tag.name).join(' • ').slice(0, 900)
-        : 'None configured';
-
-      await openModal(interaction, 'sf:settings:modal:tag:add', 'Add Custom Tag', [
-        new TextInputBuilder()
-          .setCustomId('active')
-          .setLabel('Currently active tags (reference)')
-          .setPlaceholder('Reference only. Do not edit this field.')
-          .setStyle(TextInputStyle.Paragraph)
-          .setRequired(false)
-          .setMaxLength(1000)
-          .setValue(activeTags),
-        new TextInputBuilder().setCustomId('name').setLabel('Tag name').setPlaceholder('bug, vip, refund, account...').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(32),
-        new TextInputBuilder().setCustomId('emoji').setLabel('Emoji').setPlaceholder('🏷️').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(4),
-        new TextInputBuilder().setCustomId('description').setLabel('Description').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100),
+      await openModal(interaction, 'sf:settings:modal:tag:add', 'Add Routing Tag / Department', [
+        new TextInputBuilder().setCustomId('name').setLabel('Routing tag name').setPlaceholder('Technical Support, Billing, Refunds...').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
+        new TextInputBuilder().setCustomId('staff').setLabel('Staff role ID or mention (optional)').setPlaceholder('@Support or 123456789012345678').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100),
       ]);
       return true;
     }
 
     if (id === 'sf:settings:tags:remove') {
-      const settings = await getAdvancedSettings(guild.id);
-      const tags = Object.values(settings.customTags);
+      const config = await getGuildConfig(guild.id);
+      const departments = Object.values(config.departments);
 
       await interaction.reply({
-        content: 'Select the tag to remove.',
+        content: 'Select the routing tag / department to remove.',
         components: [
           new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
             new StringSelectMenuBuilder()
               .setCustomId('sf:settings:tags:remove:select')
-              .setPlaceholder('Choose a custom tag')
-              .addOptions(
-                tags.slice(0, 25).map((tag) => ({
-                  label: tag.name.slice(0, 100),
-                  value: tag.id,
-                  description: tag.description.slice(0, 100) || 'Custom ticket tag',
-                  emoji: tag.emoji,
-                })),
-              ),
+              .setPlaceholder('Choose a routing tag')
+              .addOptions(departments.slice(0, 25).map((department) => ({
+                label: department.name.slice(0, 100),
+                value: department.id,
+                description: department.staffRoleId ? 'Staff role configured' : 'Administrators only',
+              }))),
           ),
           new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()),
         ],
@@ -1164,14 +1160,44 @@ export async function handleSettingsInteraction(
 
   if (interaction.isStringSelectMenu()) {
     if (interaction.customId === 'sf:settings:tags:remove:select') {
-      const tagId = interaction.values[0];
+      const departmentId = interaction.values[0];
+      const config = await getGuildConfig(guild.id);
+      const department = config.departments[departmentId];
+
+      if (!department) {
+        await interaction.reply({ content: '❌ Routing tag not found.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+
+      const remaining = Object.values(config.departments).filter((item) => item.id !== departmentId);
+      if (remaining.length === 0) {
+        await interaction.reply({ content: '❌ At least one routing tag / department must remain configured.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+
+      const activeTickets = [...guild.channels.cache.values()].filter((channel) =>
+        channel.type === ChannelType.GuildText &&
+        channel.topic?.startsWith('supportforge:ticket') &&
+        getField(channel.topic, 'department') === departmentId &&
+        ['open', 'claimed', 'pending', 'reopened'].includes(getField(channel.topic, 'status') ?? ''),
+      );
+
+      if (activeTickets.length) {
+        await interaction.reply({
+          content: '❌ Cannot remove **' + department.name + '** while it has **' + activeTickets.length + '** active ticket(s). Reassign them first.',
+          flags: MessageFlags.Ephemeral,
+        });
+        return true;
+      }
+
       await interaction.deferUpdate();
-      const removed = await removeCustomTag(guild.id, tagId);
+      await updateGuildConfig(guild.id, (current) => {
+        delete current.departments[departmentId];
+      });
+      await syncPanel(guild);
       await refreshSettingsChannel(guild);
       await showTags(interaction);
-      if (removed) {
-        await auditSettingsAction(guild, interaction, 'TAG_REMOVED', 'Removed custom tag ' + tagId + '.');
-      }
+      await auditSettingsAction(guild, interaction, 'TAG_REMOVED', 'Removed routing tag / department ' + department.name + '. Its Discord category was retained.');
       return true;
     }
 
@@ -1257,21 +1283,58 @@ export async function handleSettingsInteraction(
     }
 
     if (interaction.customId === 'sf:settings:modal:tag:add') {
-      const name = interaction.fields.getTextInputValue('name');
-      const emoji = interaction.fields.getTextInputValue('emoji') || '🏷️';
-      const description = interaction.fields.getTextInputValue('description') || '';
+      const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
+      const rawStaff = interaction.fields.getTextInputValue('staff').trim();
+      const staffMention = rawStaff.match(/^<@&(\d+)>$/);
+      const staffRoleId = staffMention?.[1] ?? (/^\d{15,25}$/.test(rawStaff) ? rawStaff : null);
+
+      if (!name) {
+        await reject(interaction, '❌ Routing tag name cannot be empty.');
+        return true;
+      }
+
+      const config = await getGuildConfig(guild.id);
+      if (Object.values(config.departments).some((department) => department.name.toLowerCase() === name.toLowerCase())) {
+        await reject(interaction, '❌ A routing tag / department with that name already exists.');
+        return true;
+      }
+
+      if (staffRoleId) {
+        const role = guild.roles.cache.get(staffRoleId);
+        if (!role || role.managed || role.id === guild.roles.everyone.id) {
+          await reject(interaction, '❌ The supplied staff role is invalid.');
+          return true;
+        }
+      }
 
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
-        const tag = await addCustomTag(guild.id, name, emoji, description);
+        const id = newDepartmentId();
+        const category = await ensureDepartmentCategory(guild, { name, staffRoleId, categoryId: null });
+
+        await updateGuildConfig(guild.id, (current) => {
+          current.departments[id] = {
+            id,
+            name,
+            staffRoleId,
+            categoryId: category.id,
+            createdAt: new Date().toISOString(),
+          };
+        });
+
+        await syncPanel(guild);
         await refreshSettingsChannel(guild);
         await interaction.editReply({
-          embeds: [new EmbedBuilder().setTitle('✅ Tag Added').setDescription('Added custom tag ' + tag.emoji + ' **' + tag.name + '**.')],
+          embeds: [
+            new EmbedBuilder()
+              .setTitle('✅ Routing Tag Added')
+              .setDescription('**' + name + '** is now a predefined routing tag and department.\n\nCategory: ' + category),
+          ],
           components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
         });
-        await auditSettingsAction(guild, interaction, 'TAG_ADDED', 'Added custom tag ' + tag.name + '.');
+        await auditSettingsAction(guild, interaction, 'TAG_ADDED', 'Added routing tag / department ' + name + ' with category ' + category.name + '.');
       } catch (error) {
-        await interaction.editReply('❌ ' + (error instanceof Error ? error.message : 'Could not create tag.'));
+        await interaction.editReply('❌ ' + (error instanceof Error ? error.message : 'Could not create routing tag.'));
       }
       return true;
     }
