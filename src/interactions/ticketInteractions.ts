@@ -710,6 +710,7 @@ function buildOpenOverwrites(
 async function createTicket(
   interaction: ModalSubmitInteraction,
   departmentId: string,
+  tagId: string,
 ): Promise<void> {
   if (
     !(await safeDeferReply(
@@ -731,7 +732,7 @@ async function createTicket(
     interaction.guild;
 
   const lockKey =
-    `${guild.id}:${interaction.user.id}:${departmentId}`;
+    `${guild.id}:${interaction.user.id}:${departmentId}:${tagId}`;
 
   if (
     ticketCreationLocks.has(
@@ -768,10 +769,12 @@ async function createTicket(
         departmentId
       ];
 
-    if (!department) {
+    const tag = department?.tags?.[tagId];
+
+    if (!department || !tag) {
       await replyError(
         interaction,
-        '❌ This ticket department no longer exists.',
+        '❌ This department/tag combination no longer exists. Please refresh the support panel.',
       );
       return;
     }
@@ -923,7 +926,7 @@ async function createTicket(
       `department=${departmentId}`,
       `staff=${department.staffRoleId ?? 'none'}`,
       `priority=${advancedSettings.ticketDefaults.priority}`,
-      `tags=${departmentId}`,
+      `tags=${tagId}`,
       'users=',
       'claimed_by=',
       `subject=${encodeURIComponent(
@@ -1023,6 +1026,7 @@ async function createTicket(
           guildId: guild.id,
           ticketNumber: String(number),
           departmentId,
+          tagId,
           ownerId: interaction.user.id,
           priority: advancedSettings.ticketDefaults.priority,
           createdAt: now,
