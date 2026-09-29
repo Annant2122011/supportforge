@@ -1178,79 +1178,35 @@ export async function handleSettingsInteraction(
   }
 
   if (interaction.isStringSelectMenu()) {
-    if (interaction.customId === 'sf:settings:tags:remove:select') {
-      const departmentId = interaction.values[0];
-      const config = await getGuildConfig(guild.id);
-      const department = config.departments[departmentId];
-
-      if (!department) {
-        await interaction.reply({ content: '❌ Routing tag not found.', flags: MessageFlags.Ephemeral });
-        return true;
-      }
-
-      const remaining = Object.values(config.departments).filter((item) => item.id !== departmentId);
-      if (remaining.length === 0) {
-        await interaction.reply({ content: '❌ At least one routing tag / department must remain configured.', flags: MessageFlags.Ephemeral });
-        return true;
-      }
-
-      const activeTickets = [...guild.channels.cache.values()].filter((channel) =>
-        channel.type === ChannelType.GuildText &&
-        channel.topic?.startsWith('supportforge:ticket') &&
-        getField(channel.topic, 'department') === departmentId &&
-        ['open', 'claimed', 'pending', 'reopened'].includes(getField(channel.topic, 'status') ?? ''),
-      );
-
-      if (activeTickets.length) {
-        await interaction.reply({
-          content: '❌ Cannot remove **' + department.name + '** while it has **' + activeTickets.length + '** active ticket(s). Reassign them first.',
-          flags: MessageFlags.Ephemeral,
-        });
-        return true;
-      }
-
+    if (interaction.customId === 'sf:settings:department:manage:select') {
       await interaction.deferUpdate();
-      await updateGuildConfig(guild.id, (current) => {
-        delete current.departments[departmentId];
-      });
-      await syncPanel(guild);
-      await refreshSettingsChannel(guild);
-      await showTags(interaction);
-      await auditSettingsAction(guild, interaction, 'TAG_REMOVED', 'Removed routing tag / department ' + department.name + '. Its Discord category was retained.');
+      await showDepartmentManager(interaction, interaction.values[0]);
       return true;
     }
 
-    if (interaction.customId === 'sf:settings:departments:remove:select') {
-      const departmentId = interaction.values[0];
+    if (interaction.customId.startsWith('sf:settings:tag:manage:select:')) {
+      const departmentId = interaction.customId.slice('sf:settings:tag:manage:select:'.length);
+      const tagId = interaction.values[0];
       const config = await getGuildConfig(guild.id);
       const department = config.departments[departmentId];
-
-      if (!department) {
-        await interaction.reply({ content: '❌ Department not found.', flags: MessageFlags.Ephemeral });
-        return true;
-      }
-
-      const active = Object.values(config.departments).filter((item) => item.id !== departmentId);
-      if (active.length === 0) {
-        await interaction.reply({
-          content: '❌ Keep at least one ticket department configured.',
-          flags: MessageFlags.Ephemeral,
-        });
-        return true;
-      }
-
-      await interaction.deferUpdate();
-      await updateGuildConfig(guild.id, (current) => {
-        delete current.departments[departmentId];
+      const tag = department?.tags?.[tagId];
+      if (!department || !tag) { await reject(interaction, '❌ Tag not found.'); return true; }
+      await interaction.reply({
+        content: 'Manage **' + tag.name + '** inside **' + department.name + '**.',
+        components: [
+          new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId('sf:settings:tag:edit:' + departmentId + ':' + tagId).setLabel('Edit Tag').setEmoji('✏️').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('sf:settings:tag:remove:' + departmentId + ':' + tagId).setLabel('Remove Tag').setEmoji('🗑️').setStyle(ButtonStyle.Danger).setDisabled(Object.keys(department.tags ?? {}).length <= 1),
+          ),
+          new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId('sf:settings:tag:manage:' + departmentId).setLabel('Back to Tags').setStyle(ButtonStyle.Secondary),
+          ),
+        ],
+        flags: MessageFlags.Ephemeral,
       });
-      await syncPanel(guild);
-      await refreshSettingsChannel(guild);
-      await showDepartments(interaction);
-      await auditSettingsAction(guild, interaction, 'DEPARTMENT_REMOVED', 'Removed department ' + department.name + '. Its Discord category was retained.');
       return true;
     }
   }
-
   if (interaction.isModalSubmit()) {
     if (interaction.customId === 'sf:settings:modal:panel') {
       const visual = Number(interaction.fields.getTextInputValue('visual'));
