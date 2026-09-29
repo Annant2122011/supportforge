@@ -845,6 +845,34 @@ export async function handleSettingsInteraction(
       return true;
     }
 
+    if (id.startsWith('sf:settings:tag:edit:')) {
+      const parts = id.split(':'); const departmentId = parts[4] ?? ''; const tagId = parts[5] ?? '';
+      const config = await getGuildConfig(guild.id); const tag = config.departments[departmentId]?.tags?.[tagId];
+      if (!tag) { await reject(interaction, '❌ Tag not found.'); return true; }
+      await openModal(interaction, 'sf:settings:modal:tag:edit:' + departmentId + ':' + tagId, 'Edit Tag', [
+        new TextInputBuilder().setCustomId('name').setLabel('Tag name').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(tag.name),
+      ]);
+      return true;
+    }
+
+    if (id.startsWith('sf:settings:tag:remove:')) {
+      const parts = id.split(':'); const departmentId = parts[4] ?? ''; const tagId = parts[5] ?? '';
+      const config = await getGuildConfig(guild.id); const department = config.departments[departmentId]; const tag = department?.tags?.[tagId];
+      if (!department || !tag) { await reject(interaction, '❌ Tag not found.'); return true; }
+      if (Object.keys(department.tags ?? {}).length <= 1) { await reject(interaction, '❌ Every department must keep at least one tag.'); return true; }
+      const remainingTag = Object.values(department.tags ?? {}).find((item) => item.id !== tagId);
+      if (!remainingTag) { await reject(interaction, '❌ A replacement tag could not be found.'); return true; }
+      const affected = [...guild.channels.cache.values()].filter((channel) => channel.type === ChannelType.GuildText && channel.topic?.startsWith('supportforge:ticket') && getField(channel.topic, 'department') === departmentId && getField(channel.topic, 'tag') === tagId);
+      await interaction.deferUpdate();
+      for (const channel of affected) {
+        const nextTopic = getField(channel.topic ?? '', 'tag') === tagId ? channel.topic!.replace(/(?:^|\\s)tag=[^\\s]*/, ' tag=' + remainingTag.id).replace(/(?:^|\\s)tags=[^\\s]*/, ' tags=' + remainingTag.id).replace(/\\s{2,}/g, ' ').trim() : channel.topic;
+        if (nextTopic && nextTopic !== channel.topic) { channel.topic = nextTopic; await channel.setTopic(nextTopic, 'SupportForge tag removal migration').catch(() => undefined); await updatePersistedTicketMetadata(channel.id, { tagId: remainingTag.id }); }
+      }
+      await updateGuildConfig(guild.id, (current) => { const item = current.departments[departmentId]; if (item) delete item.tags[tagId]; });
+      await syncPanel(guild); await refreshSettingsChannel(guild); await showTagManager(interaction, departmentId);
+      await auditSettingsAction(guild, interaction, 'TAG_REMOVED', 'Removed tag ' + tag.name + ' from department ' + department.name + '; affected tickets were moved to ' + remainingTag.name + '.');
+      return true;
+    }
     if (id.startsWith('sf:settings:department:remove:')) {
       const departmentId = id.slice('sf:settings:department:remove:'.length);
       const config = await getGuildConfig(guild.id);
