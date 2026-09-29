@@ -11,7 +11,6 @@ import {
 
 import { getGuildConfig } from './configService';
 import {
-  buildSettingsSummary,
   getAdvancedSettings,
 } from './advancedSettingsService';
 import { ensureChannelPurposeMessage } from './channelPurposeService';
@@ -41,7 +40,6 @@ export function buildSettingsDashboardComponents(): ActionRowBuilder<ButtonBuild
       settingsButton('sf:settings:panel', 'Panel', ButtonStyle.Primary, '🎛️'),
       settingsButton('sf:settings:defaults', 'Ticket Defaults', ButtonStyle.Secondary, '🎟️'),
       settingsButton('sf:settings:tags', 'Tags / Departments', ButtonStyle.Secondary, '🏷️'),
-      settingsButton('sf:settings:departments', 'Departments', ButtonStyle.Secondary, '📂'),
       settingsButton('sf:settings:usecases', 'Use Cases', ButtonStyle.Secondary, '🧩'),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -157,7 +155,7 @@ export async function ensureSettingsChannel(
   const currentSettings = await getAdvancedSettings(guild.id);
 
   const purposeMessage =
-    'This private channel is SupportForge’s administrative control center. Use the buttons here to configure tickets, departments, tags, retention, appearance, storage, rules, roles, repairs, and other server-level SupportForge settings.';
+    'This private channel is SupportForge’s administrative control center. Use the buttons here to configure tickets, routing tags/departments, retention, appearance, storage, rules, roles, repairs, and other server-level SupportForge settings.';
 
   await ensureChannelPurposeMessage(channel, purposeMessage);
 
