@@ -3339,7 +3339,7 @@ export async function handleTicketInteraction(
           return;
         }
 
-        await showTicketCreationModal(
+        await showTicketTagSelector(
           interaction,
           departmentId,
         );
@@ -3414,26 +3414,13 @@ export async function handleTicketInteraction(
        * ticket:modal:<departmentId>
        */
       if (
-        interaction.customId ===
-        'ticket:modal'
+        interaction.customId.startsWith('ticket:modal:')
       ) {
-        let departmentId =
-          '';
+        const parts = interaction.customId.split(':');
+        const departmentId = parts[2] ?? '';
+        const tagId = parts[3] ?? '';
 
-        try {
-          departmentId =
-            interaction.fields
-              .getTextInputValue(
-                'department',
-              );
-        } catch {
-          /*
-           * Some existing modal configurations encode the department
-           * in the custom ID instead.
-           */
-        }
-
-        if (!departmentId) {
+        if (!departmentId || !tagId) {
           await replyError(
             interaction,
             '❌ Ticket department could not be determined.',
@@ -3444,6 +3431,7 @@ export async function handleTicketInteraction(
         await createTicket(
           interaction,
           departmentId,
+          tagId,
         );
 
         return;
