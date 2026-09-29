@@ -710,6 +710,7 @@ function buildOpenOverwrites(
 async function createTicket(
   interaction: ModalSubmitInteraction,
   departmentId: string,
+  tagId: string,
 ): Promise<void> {
   if (
     !(await safeDeferReply(
@@ -767,8 +768,9 @@ async function createTicket(
       config.departments[
         departmentId
       ];
+    const tag = department?.tags?.[tagId];
 
-    if (!department) {
+    if (!department || !tag) {
       await replyError(
         interaction,
         '❌ This ticket department no longer exists.',
@@ -923,7 +925,8 @@ async function createTicket(
       `department=${departmentId}`,
       `staff=${department.staffRoleId ?? 'none'}`,
       `priority=${advancedSettings.ticketDefaults.priority}`,
-      `tags=${departmentId}`,
+      `tag=${tagId}`,
+      `tags=${tagId}`,
       'users=',
       'claimed_by=',
       `subject=${encodeURIComponent(
@@ -1023,6 +1026,7 @@ async function createTicket(
           guildId: guild.id,
           ticketNumber: String(number),
           departmentId,
+          tagId,
           ownerId: interaction.user.id,
           priority: advancedSettings.ticketDefaults.priority,
           createdAt: now,
@@ -2141,7 +2145,7 @@ async function showTicketCreationModal_LEGACY(
     const modal =
       new ModalBuilder()
         .setCustomId(
-          `ticket:modal:${departmentId}`,
+          `ticket:modal:${departmentId}:${tagId}`,
         )
         .setTitle(
           `${department.name} Support`,
@@ -2705,8 +2709,16 @@ export async function handleTicketInteraction(
 ): Promise<void> {
   try {
     if (interaction.isStringSelectMenu()) {
-      if (interaction.customId.startsWith('ticket:routing-tag:select:')) {
-        await changeTicketRoutingTag(interaction);
+      if (interaction.customId.startsWith('ticket:department:select:')) {
+        await changeTicketDepartment(interaction);
+        return;
+      }
+      if (interaction.customId.startsWith('ticket:tag:select:')) {
+        await changeTicketTag(interaction);
+        return;
+      }
+      if (interaction.customId.startsWith('ticket:create-tag:select:')) {
+        await handleTicketTagSelectionForCreation(interaction);
         return;
       }
     }
@@ -2744,10 +2756,7 @@ export async function handleTicketInteraction(
           return;
         }
 
-        await showTicketCreationModal(
-          interaction,
-          departmentId,
-        );
+        await showCreationTagSelector(interaction, departmentId);
 
         return;
       }
@@ -2818,12 +2827,10 @@ export async function handleTicketInteraction(
        *
        * ticket:modal:<departmentId>
        */
-      if (
-        interaction.customId ===
-        'ticket:modal'
-      ) {
-        let departmentId =
-          '';
+      if (interaction.customId.startsWith('ticket:modal:')) {
+        const parts = interaction.customId.split(':');
+        const departmentId = parts[2] ?? '';
+        const tagId = parts[3] ?? '';
 
         try {
           departmentId =
@@ -2849,6 +2856,7 @@ export async function handleTicketInteraction(
         await createTicket(
           interaction,
           departmentId,
+          tagId,
         );
 
         return;
