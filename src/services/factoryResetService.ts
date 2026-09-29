@@ -6,8 +6,8 @@ import {
 import { unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { resetConfigState } from './configService';
-import { resetAdvancedSettingsState } from './advancedSettingsService';
+import { getGuildConfig, resetConfigState } from './configService';
+import { getAdvancedSettings, resetAdvancedSettingsState } from './advancedSettingsService';
 import { resetTicketPersistenceState } from './ticketPersistenceService';
 import { resetAuditLogState } from './auditLogService';
 
@@ -27,6 +27,12 @@ const SUPPORTFORGE_CATEGORY_PREFIXES = [
   'SupportForge • Archive',
 ];
 
+const resettingGuilds = new Set<string>();
+
+export function isFactoryResetInProgress(guildId: string): boolean {
+  return resettingGuilds.has(guildId);
+}
+
 const TOPIC_PREFIXES = [
   'supportforge:ticket',
   'supportforge:panel',
@@ -35,7 +41,9 @@ const TOPIC_PREFIXES = [
   'supportforge:settings',
 ];
 
-function isSupportForgeChannel(channel: GuildBasedChannel): boolean {
+function isSupportForgeChannel(channel: GuildBasedChannel, configuredIds: Set<string>, configuredCategoryIds: Set<string>): boolean {
+  if (configuredIds.has(channel.id) || configuredCategoryIds.has(channel.id)) return true;
+
   if (KNOWN_NAMES.has(channel.name)) return true;
 
   if (
@@ -58,7 +66,42 @@ function isSupportForgeChannel(channel: GuildBasedChannel): boolean {
 }
 
 export async function performFactoryReset(guild: Guild): Promise<void> {
-  const targets = [...guild.channels.cache.values()].filter(isSupportForgeChannel);
+  resettingGuilds.add(guild.id);
+
+  try {
+    const config = await getGuildConfig(guild.id);
+    const settings = await getAdvancedSettings(guild.id);
+
+    const configuredCategoryIds = new Set(
+      [
+        config.supportCategoryId,
+        config.openCategoryId,
+        settings.closedCategoryId,
+        settings.archiveCategoryId,
+        settings.statusCategories.claimedCategoryId,
+        settings.statusCategories.pendingCategoryId,
+        ...Object.values(config.departments).map((department) => department.categoryId ?? null),
+      ].filter((id): id is string => Boolean(id)),
+    );
+
+    const configuredIds = new Set(
+      [
+        ...configuredCategoryIds,
+        config.panelChannelId,
+        config.transcriptChannelId,
+        config.auditChannelId,
+        settings.settingsChannelId,
+      ].filter((id): id is string => Boolean(id)),
+    );
+
+    /*
+     * Snapshot the entire managed scope before deleting anything. This is
+     * intentionally ID/config driven, so renaming a SupportForge category or
+     * its Settings/Audit channel cannot make it escape the reset.
+     */
+    const targets = [...guild.channels.cache.values()].filter((channel) =>
+      isSupportForgeChannel(channel, configuredIds, configuredCategoryIds),
+    );
 
   // Delete child channels first, then the categories containing them.
   const childChannels = targets.filter(
@@ -86,7 +129,11 @@ export async function performFactoryReset(guild: Guild): Promise<void> {
    * recovery and must survive so a later /supportforge setup can rebuild the
    * audit channel and its summaries.
    */
-  await resetAuditLogState();
+  /*
+   * Audit history is deliberately NOT reset. The Discord audit channel is
+   * deleted with the rest of SupportForge, but data/audit-log.json and its
+   * backup remain intact for future restoration and historical review.
+   */
 
   for (const filename of [
     'config.json',
@@ -95,5 +142,7 @@ export async function performFactoryReset(guild: Guild): Promise<void> {
   ]) {
     await unlink(join(DATA_DIR, filename)).catch(() => undefined);
   }
+  } finally {
+    resettingGuilds.delete(guild.id);
+  }
 }
-
