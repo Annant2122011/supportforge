@@ -44,6 +44,8 @@ export function buildTicketPanelEmbed(
   const ownerId = getField(topic, 'owner');
   const claimedBy = getField(topic, 'claimed_by');
   const priority = getField(topic, 'priority') ?? 'normal';
+  const tagId = getField(topic, 'tag');
+  const ticketTag = department?.tags?.[tagId ?? ''];
   const users = getField(topic, 'users') ?? '';
   const pendingSince = getField(topic, 'pending_since');
   const closedAt = getField(topic, 'closed_at');
@@ -65,8 +67,8 @@ export function buildTicketPanelEmbed(
       { name: '👤 Owner', value: ownerId ? `<@${ownerId}>` : 'Unknown', inline: true },
       { name: '🙋 Claimed by', value: claimedBy ? `<@${claimedBy}>` : 'Unclaimed', inline: true },
       {
-        name: '🏷️ Routing Tag',
-        value: department?.name ?? departmentId ?? 'Not configured',
+        name: '🏷️ Tag',
+        value: ticketTag?.name ?? tagId ?? 'Not configured',
         inline: true,
       },
       {
@@ -131,7 +133,8 @@ export function buildTicketPanelComponents(status: TicketStatus): ActionRowBuild
     tools.addComponents(
       new ButtonBuilder().setCustomId('ticket:panel:add-user').setLabel('Add User').setEmoji('👥').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('ticket:panel:priority').setLabel('Priority').setEmoji('⚡').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('ticket:panel:tag').setLabel('Routing Tag').setEmoji('🏷️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('ticket:panel:department').setLabel('Department').setEmoji('📂').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('ticket:panel:tag').setLabel('Tag').setEmoji('🏷️').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('ticket:panel:note').setLabel('Note').setEmoji('📝').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('ticket:panel:history').setLabel('History').setEmoji('📜').setStyle(ButtonStyle.Secondary),
     );
