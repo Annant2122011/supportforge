@@ -66,8 +66,8 @@ export function buildTicketPanelEmbed(
       { name: '👤 Owner', value: ownerId ? `<@${ownerId}>` : 'Unknown', inline: true },
       { name: '🙋 Claimed by', value: claimedBy ? `<@${claimedBy}>` : 'Unclaimed', inline: true },
       {
-        name: '🏷️ Tags',
-        value: tags ? tags.split(',').map((tag) => `\`${tag}\``).join(' ') : 'None',
+        name: '🏷️ Routing Tag',
+        value: department?.name ?? departmentId ?? 'Not configured',
         inline: true,
       },
       {
@@ -132,7 +132,7 @@ export function buildTicketPanelComponents(status: TicketStatus): ActionRowBuild
     tools.addComponents(
       new ButtonBuilder().setCustomId('ticket:panel:add-user').setLabel('Add User').setEmoji('👥').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('ticket:panel:priority').setLabel('Priority').setEmoji('⚡').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('ticket:panel:tag').setLabel('Tag').setEmoji('🏷️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('ticket:panel:tag').setLabel('Routing Tag').setEmoji('🏷️').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('ticket:panel:note').setLabel('Note').setEmoji('📝').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('ticket:panel:history').setLabel('History').setEmoji('📜').setStyle(ButtonStyle.Secondary),
     );
