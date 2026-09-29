@@ -14,6 +14,7 @@ export interface TicketFields {
   ownerId?: string;
   departmentId?: string;
   staffRoleId?: string;
+  tagId?: string;
   priority: string;
   tags: string[];
   users: string[];
