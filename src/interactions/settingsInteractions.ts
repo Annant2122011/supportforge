@@ -50,7 +50,7 @@ import {
 
 import { logSettingsEvent } from '../services/auditLogService';
 import { getField, getTicketStatus } from '../services/ticketStateService';
-import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
+import { getPersistedTicketStatus, updatePersistedTicketMetadata } from '../services/ticketPersistenceService';
 import { performFactoryReset } from '../services/factoryResetService';
 import {
   approveRetentionDeletion,
