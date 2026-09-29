@@ -68,7 +68,7 @@ import {
 
 const SETTINGS_TOPIC_PREFIX = 'supportforge:settings';
 
-type SettingsViewInteraction = ButtonInteraction | StringSelectMenuInteraction;
+type SettingsViewInteraction = ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction;
 
 function isAdministrator(interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction): boolean {
   return Boolean(
