@@ -9,7 +9,6 @@ import { join } from 'node:path';
 import { getGuildConfig, resetConfigState } from './configService';
 import { getAdvancedSettings, resetAdvancedSettingsState } from './advancedSettingsService';
 import { resetTicketPersistenceState } from './ticketPersistenceService';
-import { resetAuditLogState } from './auditLogService';
 
 const DATA_DIR = join(process.cwd(), 'data');
 
