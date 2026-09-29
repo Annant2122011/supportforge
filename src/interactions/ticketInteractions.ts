@@ -1630,14 +1630,6 @@ async function transition(
           );
 
         if (
-          !isPremiumOrHigher(
-            config.tier,
-          )
-        ) {
-          return;
-        }
-
-        if (
           !config.supportCategoryId
         ) {
           return;
