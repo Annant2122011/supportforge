@@ -40,6 +40,7 @@ import {
 } from './services/auditLogService';
 import { handleSettingsInteraction } from './interactions/settingsInteractions';
 import { ensureSettingsChannel } from './services/settingsChannelService';
+import { isFactoryResetInProgress } from './services/factoryResetService';
 import type { GuildBasedChannel, TextChannel } from 'discord.js';
 
 const token = process.env.DISCORD_TOKEN;
@@ -283,7 +284,7 @@ client.on('channelDelete', async (channel) => {
    * If the entire SupportForge structure was deleted, /supportforge setup
    * remains the explicit recovery path.
    */
-  if (deletedWasSettings) {
+  if (deletedWasSettings && !isFactoryResetInProgress(guildChannel.guild.id)) {
     const config = await getGuildConfig(guildChannel.guild.id);
     if (config.supportCategoryId) {
       const parent = guildChannel.guild.channels.cache.get(
