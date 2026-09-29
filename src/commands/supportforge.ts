@@ -721,22 +721,6 @@ export const data =
             ),
         )
 
-        // TAG
-        .addSubcommand((subcommand) =>
-          subcommand
-            .setName('tag')
-            .setDescription(
-              'Add a ticket tag',
-            )
-            .addStringOption((option) =>
-              option
-                .setName('name')
-                .setDescription('Tag')
-                .setRequired(true)
-                .setMaxLength(30),
-            ),
-        )
-
         // INTERNAL NOTE
         .addSubcommand((subcommand) =>
           subcommand
