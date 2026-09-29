@@ -409,35 +409,62 @@ async function showTags(interaction: SettingsViewInteraction): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
   const departments = Object.values(config.departments).sort((a, b) => a.name.localeCompare(b.name));
   const lines = departments.length
-    ? departments.map((department) =>
-        '🏷️ **' + department.name + '**' +
-        (department.staffRoleId ? ' • <@&' + department.staffRoleId + '>' : ' • Administrators only') +
-        (department.categoryId ? ' • <#' + department.categoryId + '>' : ' • Category pending'),
-      ).join('\n')
-    : 'No routing tags are configured yet.';
-
+    ? departments.map((d) => {
+        const tags = Object.values(d.tags ?? {}).map((t) => t.name).sort().join(', ') || 'No tags';
+        return '📂 **' + d.name + '** • ' + (d.categoryId ? '<#' + d.categoryId + '>' : 'Category pending') + '\n   🏷️ ' + tags;
+      }).join('\n')
+    : 'No departments configured.';
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🏷️ Ticket Routing Tags / Departments')
+      .setTitle('📂 Departments & Tags')
       .setDescription(lines.slice(0, 3900))
       .addFields(
-        {
-          name: 'One required tag per ticket',
-          value: 'Each ticket has exactly **one** routing tag. That tag is the department, determines the Discord category, and determines staff routing. There is no free-form routing-tag entry.',
-        },
-        {
-          name: 'Configured',
-          value: '**' + departments.length + '** predefined routing tag(s).',
-        },
-      )
-      .setFooter({ text: 'Routing tags and departments intentionally use the same underlying configuration.' }),
+        { name: 'Hierarchy', value: 'A **Department** owns one Discord category and optional staff role. **Tags are subcategories inside that department** and never create Discord categories. Tickets select one department and one tag.' },
+        { name: 'AI-ready design', value: 'Premium AI can classify a ticket into a department, then choose only from that department’s tags. The model never needs to invent categories or tags.' },
+      ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:tags:add').setLabel('Add Tag').setEmoji('➕').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('sf:settings:tags:remove').setLabel('Remove Tag').setEmoji('➖').setStyle(ButtonStyle.Danger).setDisabled(departments.length <= 1),
-      new ButtonBuilder().setCustomId('sf:settings:departments:add').setLabel('Add Department').setEmoji('📂').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sf:settings:departments:add').setLabel('Add Department').setEmoji('📂').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sf:settings:departments:manage').setLabel('Manage Departments').setEmoji('⚙️').setStyle(ButtonStyle.Primary).setDisabled(!departments.length),
       backButton(),
     ),
+  ]);
+}
+
+async function showDepartmentManager(interaction: SettingsViewInteraction, departmentId: string): Promise<void> {
+  const config = await getGuildConfig(interaction.guild!.id);
+  const d = config.departments[departmentId];
+  if (!d) { await reject(interaction, '❌ Department not found.'); return; }
+  const tags = Object.values(d.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('⚙️ ' + d.name)
+      .setDescription('**Category:** ' + (d.categoryId ? '<#' + d.categoryId + '>' : 'Pending') + '\n**Staff:** ' + (d.staffRoleId ? '<@&' + d.staffRoleId + '>' : 'Administrators only') + '\n\n**Tags:** ' + (tags.length ? tags.map((t) => '🏷️ ' + t.name).join(' • ') : 'None')),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:department:edit:' + d.id).setLabel('Edit Department').setEmoji('✏️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:tag:add:' + d.id).setLabel('Add Tag').setEmoji('➕').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sf:settings:tag:manage:' + d.id).setLabel('Manage Tags').setEmoji('🏷️').setStyle(ButtonStyle.Secondary).setDisabled(!tags.length),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:department:remove:' + d.id).setLabel('Remove Department').setEmoji('🗑️').setStyle(ButtonStyle.Danger).setDisabled(Object.keys(config.departments).length <= 1),
+      new ButtonBuilder().setCustomId('sf:settings:departments').setLabel('Back').setStyle(ButtonStyle.Secondary),
+    ),
+  ]);
+}
+
+async function showTagManager(interaction: SettingsViewInteraction, departmentId: string): Promise<void> {
+  const config = await getGuildConfig(interaction.guild!.id);
+  const d = config.departments[departmentId];
+  if (!d) { await reject(interaction, '❌ Department not found.'); return; }
+  const tags = Object.values(d.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
+  await renderSettingsView(interaction, [
+    new EmbedBuilder().setTitle('🏷️ Tags • ' + d.name).setDescription(tags.length ? 'Select a tag to edit or remove it.' : 'No tags configured.'),
+  ], [
+    ...(tags.length ? [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder().setCustomId('sf:settings:tag:select:' + d.id).setPlaceholder('Choose a tag').addOptions(tags.slice(0, 25).map((t) => ({ label: t.name.slice(0, 100), value: t.id, description: 'Subcategory of ' + d.name }))),
+    )] : []),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setCustomId('sf:settings:department:manage:' + d.id).setLabel('Back to Department').setStyle(ButtonStyle.Secondary)),
   ]);
 }
 
