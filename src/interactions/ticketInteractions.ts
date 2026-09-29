@@ -2684,6 +2684,355 @@ async function showTicketCreationModal(
 }
 
 async function handlePanelButton(
+  interaction: ButtonInteraction,
+): Promise<void> {
+  const id =
+    interaction.customId;
+
+    if (
+    id ===
+    'ticket:close'
+  ) {
+    await closeTicket(
+      interaction,
+    );
+    return;
+  }
+
+  if (
+    id ===
+    'ticket:closed'
+  ) {
+    await replyError(
+      interaction,
+      'ℹ️ This ticket is already closed.',
+    );
+    return;
+  }
+
+  if (
+    id ===
+    'ticket:claim'
+  ) {
+    await transition(
+      interaction,
+      'claimed',
+    );
+    return;
+  }
+
+  if (
+    id ===
+    'ticket:unclaim'
+  ) {
+    await transition(
+      interaction,
+      'open',
+    );
+    return;
+  }
+
+  if (
+    id ===
+    'ticket:pending'
+  ) {
+    await transition(
+      interaction,
+      'pending',
+    );
+    return;
+  }
+
+  if (
+    id ===
+    'ticket:resume'
+  ) {
+    await transition(
+      interaction,
+      'open',
+    );
+    return;
+  }
+
+  if (
+    id ===
+    'ticket:reopen'
+  ) {
+    await transition(
+      interaction,
+      'reopened',
+    );
+    return;
+  }
+
+  if (
+    id ===
+    'ticket:archive'
+  ) {
+    await transition(
+      interaction,
+      'archived',
+    );
+    return;
+  }
+
+  if (
+    id === 'ticket:panel:move-bottom' ||
+    id === 'ticket:panel:restore-move'
+  ) {
+    if (!(await safeDeferReply(interaction))) {
+      return;
+    }
+
+    if (
+      !interaction.guild ||
+      interaction.channel?.type !== ChannelType.GuildText
+    ) {
+      await replyError(
+        interaction,
+        '❌ Panel controls can only be used inside a ticket channel.',
+      );
+      return;
+    }
+
+    const channel = interaction.channel as TextChannel;
+    const topic = channel.topic ?? '';
+    const status =
+      (await getPersistedTicketStatus(channel.id)) ??
+      getTicketStatus(topic);
+
+    if (!ACTIVE_TICKET_STATUSES.includes(status)) {
+      await replyError(
+        interaction,
+        '❌ Only active tickets can have their panel repositioned.',
+      );
+      return;
+    }
+
+    const staff = getStaffContext(interaction, topic);
+    if (!staff.authorized) {
+      await replyError(
+        interaction,
+        '❌ Only configured staff or administrators can move the ticket panel.',
+      );
+      return;
+    }
+
+    try {
+      await moveTicketPanelToBottom(channel);
+      resetPanelActivity(
+        channel.id,
+        channel.lastMessageId ?? getField(topic, 'message') ?? 'unknown',
+      );
+
+      const panelMoveConfig = await getGuildConfig(channel.guild.id);
+      if (panelMoveConfig.supportCategoryId) {
+        await logTicketEvent(
+          channel.guild,
+          panelMoveConfig.supportCategoryId,
+          {
+            ticketNumber: getField(topic, 'number') ?? 'unknown',
+            event: 'ticket_panel_moved',
+            actor: interaction.user.tag,
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Ticket controls manually moved/restored to the bottom.',
+          },
+        );
+      }
+
+      await interaction.editReply(
+        '✅ Ticket controls were moved to the bottom. Automatic panel activity tracking is armed again.',
+      );
+    } catch (error) {
+      console.error('❌ Failed to move ticket panel manually:', error);
+      await replyError(
+        interaction,
+        '❌ SupportForge could not move the ticket panel.',
+      );
+    }
+
+    return;
+  }
+  if (id === 'ticket:panel:history') {
+    await showTicketHistory(interaction);
+    return;
+  }
+
+  /*
+   * Closed and archived tickets expose only their lifecycle controls.
+   * Reject stale/forged tool-button interactions even if an old panel
+   * message still contains one.
+   */
+  if (
+    id.startsWith('ticket:panel:') &&
+    interaction.channel?.type === ChannelType.GuildText
+  ) {
+    const panelChannel = interaction.channel as TextChannel;
+    const panelTopicStatus = getTicketStatus(panelChannel.topic ?? '');
+    const panelPersistedStatus = await getPersistedTicketStatus(panelChannel.id);
+    const panelStatus = panelPersistedStatus ?? panelTopicStatus;
+
+    if (!['open', 'claimed', 'pending', 'reopened'].includes(panelStatus)) {
+      await replyError(
+        interaction,
+        '❌ This ticket is closed or archived. Reopen it before using ticket tools.',
+      );
+      return;
+    }
+  }
+
+  /*
+   * Ticket panel tool buttons.
+   */
+  if (
+    id ===
+      'ticket:panel:add-user' ||
+    id ===
+      'ticket:panel:priority' ||
+    id ===
+      'ticket:panel:department' ||
+    id ===
+      'ticket:panel:tag' ||
+    id ===
+      'ticket:panel:note'
+  ) {
+    const modal =
+      new ModalBuilder();
+
+    if (
+      id ===
+      'ticket:panel:add-user'
+    ) {
+      modal
+        .setCustomId(
+          'ticket:panel-modal:add-user',
+        )
+        .setTitle(
+          'Add User to Ticket',
+        );
+
+      const input =
+        new TextInputBuilder()
+          .setCustomId(
+            'user',
+          )
+          .setLabel(
+            'User ID or mention',
+          )
+          .setPlaceholder(
+            '123456789012345678 or @user',
+          )
+          .setStyle(
+            TextInputStyle.Short,
+          )
+          .setRequired(
+            true,
+          )
+          .setMaxLength(
+            100,
+          );
+
+      modal.addComponents(
+        new ActionRowBuilder<TextInputBuilder>()
+          .addComponents(
+            input,
+          ),
+      );
+    } else if (
+      id ===
+      'ticket:panel:priority'
+    ) {
+      modal
+        .setCustomId(
+          'ticket:panel-modal:priority',
+        )
+        .setTitle(
+          'Change Priority',
+        );
+
+      const input =
+        new TextInputBuilder()
+          .setCustomId(
+            'priority',
+          )
+          .setLabel(
+            'Priority',
+          )
+          .setPlaceholder(
+            'low, normal, high, urgent',
+          )
+          .setStyle(
+            TextInputStyle.Short,
+          )
+          .setRequired(
+            true,
+          )
+          .setMaxLength(
+            20,
+          );
+
+      modal.addComponents(
+        new ActionRowBuilder<TextInputBuilder>()
+          .addComponents(
+            input,
+          ),
+      );
+    } else if (id === 'ticket:panel:department') {
+      await renderDepartmentSelector(interaction, 0);
+      return;
+    } else if (id === 'ticket:panel:tag') {
+      await renderTicketTagSelector(interaction, 0);
+      return;
+    } else {
+      modal
+        .setCustomId(
+          'ticket:panel-modal:note',
+        )
+        .setTitle(
+          'Add Internal Note',
+        );
+
+      const input =
+        new TextInputBuilder()
+          .setCustomId(
+            'note',
+          )
+          .setLabel(
+            'Internal note',
+          )
+          .setStyle(
+            TextInputStyle.Paragraph,
+          )
+          .setRequired(
+            true,
+          )
+          .setMaxLength(
+            1000,
+          );
+
+      modal.addComponents(
+        new ActionRowBuilder<TextInputBuilder>()
+          .addComponents(
+            input,
+          ),
+      );
+    }
+
+    try {
+      await interaction.showModal(
+        modal,
+      );
+    } catch (error) {
+      console.error(
+        '❌ Failed to show ticket panel modal:',
+        error,
+      );
+    }
+  }
+}
+
+
 /* -------------------------------------------------------------------------- */
 /* Utility                                                                    */
 /* -------------------------------------------------------------------------- */
