@@ -19,7 +19,6 @@ import {
 import {
   getGuildConfig,
   newDepartmentId,
-  newTagId,
   updateGuildConfig,
 } from '../services/configService';
 
@@ -50,7 +49,7 @@ import {
 
 import { logSettingsEvent } from '../services/auditLogService';
 import { getField, getTicketStatus } from '../services/ticketStateService';
-import { getPersistedTicketStatus, updatePersistedTicketMetadata } from '../services/ticketPersistenceService';
+import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
 import { performFactoryReset } from '../services/factoryResetService';
 import {
   approveRetentionDeletion,
@@ -68,7 +67,7 @@ import {
 
 const SETTINGS_TOPIC_PREFIX = 'supportforge:settings';
 
-type SettingsViewInteraction = ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction;
+type SettingsViewInteraction = ButtonInteraction | StringSelectMenuInteraction;
 
 function isAdministrator(interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction): boolean {
   return Boolean(
@@ -410,70 +409,34 @@ async function showTags(interaction: SettingsViewInteraction): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
   const departments = Object.values(config.departments).sort((a, b) => a.name.localeCompare(b.name));
   const lines = departments.length
-    ? departments.map((department) => {
-        const tags = Object.values(department.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
-        const tagText = tags.length ? tags.map((tag) => '🏷️ ' + tag.name).join(', ') : '⚠️ No tags';
-        return '📂 **' + department.name + '**' +
-          (department.staffRoleId ? ' • <@&' + department.staffRoleId + '>' : ' • Administrators only') +
-          (department.categoryId ? ' • <#' + department.categoryId + '>' : ' • Category pending') +
-          '\n   ' + tagText;
-      }).join('\n')
-    : 'No departments are configured yet.';
+    ? departments.map((department) =>
+        '🏷️ **' + department.name + '**' +
+        (department.staffRoleId ? ' • <@&' + department.staffRoleId + '>' : ' • Administrators only') +
+        (department.categoryId ? ' • <#' + department.categoryId + '>' : ' • Category pending'),
+      ).join('\n')
+    : 'No routing tags are configured yet.';
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('📂 Departments & Tags')
+      .setTitle('🏷️ Ticket Routing Tags / Departments')
       .setDescription(lines.slice(0, 3900))
       .addFields(
-        { name: 'Architecture', value: 'Departments own the Discord routing category and staff role. Tags are subcategories inside a department and never create categories. A ticket has one department and one tag.' },
-        { name: 'AI-ready', value: 'Future premium AI categorization can predict the department first and then a valid tag belonging to that department.' },
+        {
+          name: 'One required tag per ticket',
+          value: 'Each ticket has exactly **one** routing tag. That tag is the department, determines the Discord category, and determines staff routing. There is no free-form routing-tag entry.',
+        },
+        {
+          name: 'Configured',
+          value: '**' + departments.length + '** predefined routing tag(s).',
+        },
       )
-      .setFooter({ text: departments.length + ' department(s) • ' + departments.reduce((n, d) => n + Object.keys(d.tags ?? {}).length, 0) + ' tag(s)' }),
+      .setFooter({ text: 'Routing tags and departments intentionally use the same underlying configuration.' }),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:departments:add').setLabel('Add Department').setEmoji('📂').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('sf:settings:departments:manage').setLabel('Manage Department').setEmoji('⚙️').setStyle(ButtonStyle.Primary).setDisabled(!departments.length),
+      new ButtonBuilder().setCustomId('sf:settings:tags:add').setLabel('Add Tag').setEmoji('➕').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sf:settings:tags:remove').setLabel('Remove Tag').setEmoji('➖').setStyle(ButtonStyle.Danger).setDisabled(departments.length <= 1),
+      new ButtonBuilder().setCustomId('sf:settings:departments:add').setLabel('Add Department').setEmoji('📂').setStyle(ButtonStyle.Secondary),
       backButton(),
-    ),
-  ]);
-}
-
-async function showDepartmentManager(interaction: SettingsViewInteraction, departmentId: string): Promise<void> {
-  const config = await getGuildConfig(interaction.guild!.id);
-  const department = config.departments[departmentId];
-  if (!department) { await reject(interaction, '❌ Department not found.'); return; }
-  const tags = Object.values(department.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
-  await renderSettingsView(interaction, [
-    new EmbedBuilder()
-      .setTitle('⚙️ Manage Department • ' + department.name)
-      .setDescription('This department owns one Discord category. Its tags are subcategories only and never create categories.\n\n**Staff:** ' + (department.staffRoleId ? '<@&' + department.staffRoleId + '>' : 'Administrators only') + '\n**Category:** ' + (department.categoryId ? '<#' + department.categoryId + '>' : 'Pending') + '\n**Tags:** ' + (tags.length ? tags.map((tag) => '🏷️ ' + tag.name).join(' • ') : '⚠️ None')),
-  ], [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:department:edit:' + department.id).setLabel('Edit Department').setEmoji('✏️').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('sf:settings:tag:add:' + department.id).setLabel('Add Tag').setEmoji('🏷️').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('sf:settings:tag:manage:' + department.id).setLabel('Manage Tags').setEmoji('⚙️').setStyle(ButtonStyle.Secondary).setDisabled(!tags.length),
-    ),
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:department:remove:' + department.id).setLabel('Remove Department').setEmoji('🗑️').setStyle(ButtonStyle.Danger).setDisabled(Object.keys(config.departments).length <= 1),
-      new ButtonBuilder().setCustomId('sf:settings:departments').setLabel('Back to Departments').setStyle(ButtonStyle.Secondary),
-    ),
-  ]);
-}
-
-async function showTagManager(interaction: SettingsViewInteraction, departmentId: string): Promise<void> {
-  const config = await getGuildConfig(interaction.guild!.id);
-  const department = config.departments[departmentId];
-  if (!department) { await reject(interaction, '❌ Department not found.'); return; }
-  const tags = Object.values(department.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
-  if (!tags.length) { await reject(interaction, '❌ This department has no tags.'); return; }
-  await renderSettingsView(interaction, [
-    new EmbedBuilder().setTitle('🏷️ Manage Tags • ' + department.name).setDescription('Each tag belongs exclusively to this department. Editing a tag changes its name everywhere without changing the department category.'),
-  ], [
-    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-      new StringSelectMenuBuilder().setCustomId('sf:settings:tag:manage:select:' + department.id).setPlaceholder('Choose a tag').addOptions(tags.slice(0, 25).map((tag) => ({ label: tag.name.slice(0, 100), value: tag.id, description: 'Subcategory of ' + department.name }))),
-    ),
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:department:manage:' + department.id).setLabel('Back to Department').setStyle(ButtonStyle.Secondary),
     ),
   ]);
 }
@@ -481,6 +444,7 @@ async function showTagManager(interaction: SettingsViewInteraction, departmentId
 async function showDepartments(interaction: SettingsViewInteraction): Promise<void> {
   await showTags(interaction);
 }
+
 async function showRetention(interaction: ButtonInteraction): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
 
@@ -784,29 +748,35 @@ export async function handleSettingsInteraction(
       return true;
     }
 
-    if (id === 'sf:settings:tags' || id === 'sf:settings:departments') {
+    if (id === 'sf:settings:tags') {
       await showTags(interaction);
       return true;
     }
 
-    if (id === 'sf:settings:departments:add') {
-      await openModal(interaction, 'sf:settings:modal:department:add', 'Add Department', [
-        new TextInputBuilder().setCustomId('name').setLabel('Department name').setPlaceholder('Monetary Affairs, Technical Support...').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
+    if (id === 'sf:settings:tags:add') {
+      await openModal(interaction, 'sf:settings:modal:tag:add', 'Add Routing Tag / Department', [
+        new TextInputBuilder().setCustomId('name').setLabel('Routing tag name').setPlaceholder('Technical Support, Billing, Refunds...').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
         new TextInputBuilder().setCustomId('staff').setLabel('Staff role ID or mention (optional)').setPlaceholder('@Support or 123456789012345678').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100),
       ]);
       return true;
     }
 
-    if (id === 'sf:settings:departments:manage') {
+    if (id === 'sf:settings:tags:remove') {
       const config = await getGuildConfig(guild.id);
-      const departments = Object.values(config.departments).sort((a, b) => a.name.localeCompare(b.name));
+      const departments = Object.values(config.departments);
+
       await interaction.reply({
-        content: 'Select the department to manage.',
+        content: 'Select the routing tag / department to remove.',
         components: [
           new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-            new StringSelectMenuBuilder().setCustomId('sf:settings:department:manage:select').setPlaceholder('Choose a department').addOptions(departments.slice(0, 25).map((department) => ({
-              label: department.name.slice(0, 100), value: department.id, description: Object.keys(department.tags ?? {}).length + ' tag(s) • ' + (department.staffRoleId ? 'Staff routed' : 'Administrators'),
-            }))),
+            new StringSelectMenuBuilder()
+              .setCustomId('sf:settings:tags:remove:select')
+              .setPlaceholder('Choose a routing tag')
+              .addOptions(departments.slice(0, 25).map((department) => ({
+                label: department.name.slice(0, 100),
+                value: department.id,
+                description: department.staffRoleId ? 'Staff role configured' : 'Administrators only',
+              }))),
           ),
           new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()),
         ],
@@ -815,81 +785,45 @@ export async function handleSettingsInteraction(
       return true;
     }
 
-    if (id.startsWith('sf:settings:department:manage:')) {
-      await showDepartmentManager(interaction, id.slice('sf:settings:department:manage:'.length));
+    if (id === 'sf:settings:departments') {
+      await showDepartments(interaction);
       return true;
     }
 
-    if (id.startsWith('sf:settings:department:edit:')) {
-      const departmentId = id.slice('sf:settings:department:edit:'.length);
+    if (id === 'sf:settings:departments:add') {
+      await openModal(interaction, 'sf:settings:modal:tag:add', 'Add Routing Tag / Department', [
+        new TextInputBuilder().setCustomId('name').setLabel('Routing tag name').setPlaceholder('Technical Support, Billing, Refunds...').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
+        new TextInputBuilder().setCustomId('staff').setLabel('Staff role ID or mention (optional)').setPlaceholder('@Support or 123456789012345678').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100),
+      ]);
+      return true;
+    }
+
+    if (id === 'sf:settings:departments:remove') {
       const config = await getGuildConfig(guild.id);
-      const department = config.departments[departmentId];
-      if (!department) { await reject(interaction, '❌ Department not found.'); return true; }
-      await openModal(interaction, 'sf:settings:modal:department:edit:' + departmentId, 'Edit Department', [
-        new TextInputBuilder().setCustomId('name').setLabel('Department name').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(department.name),
-        new TextInputBuilder().setCustomId('staff').setLabel('Staff role ID or mention (optional)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100).setValue(department.staffRoleId ? '<@&' + department.staffRoleId + '>' : ''),
-      ]);
+      const departments = Object.values(config.departments);
+
+      await interaction.reply({
+        content: 'Select the department to remove.',
+        components: [
+          new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+            new StringSelectMenuBuilder()
+              .setCustomId('sf:settings:departments:remove:select')
+              .setPlaceholder('Choose a department')
+              .addOptions(
+                departments.slice(0, 25).map((department) => ({
+                  label: department.name.slice(0, 100),
+                  value: department.id,
+                  description: department.staffRoleId ? 'Staff role configured' : 'Administrators only',
+                })),
+              ),
+          ),
+          new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()),
+        ],
+        flags: MessageFlags.Ephemeral,
+      });
       return true;
     }
 
-    if (id.startsWith('sf:settings:tag:add:')) {
-      const departmentId = id.slice('sf:settings:tag:add:'.length);
-      await openModal(interaction, 'sf:settings:modal:tag:add:' + departmentId, 'Add Tag', [
-        new TextInputBuilder().setCustomId('name').setLabel('Tag name').setPlaceholder('Billing, Refund, Chargeback...').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
-      ]);
-      return true;
-    }
-
-    if (id.startsWith('sf:settings:tag:manage:')) {
-      await showTagManager(interaction, id.slice('sf:settings:tag:manage:'.length));
-      return true;
-    }
-
-    if (id.startsWith('sf:settings:tag:edit:')) {
-      const parts = id.split(':'); const departmentId = parts[4] ?? ''; const tagId = parts[5] ?? '';
-      const config = await getGuildConfig(guild.id); const tag = config.departments[departmentId]?.tags?.[tagId];
-      if (!tag) { await reject(interaction, '❌ Tag not found.'); return true; }
-      await openModal(interaction, 'sf:settings:modal:tag:edit:' + departmentId + ':' + tagId, 'Edit Tag', [
-        new TextInputBuilder().setCustomId('name').setLabel('Tag name').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(tag.name),
-      ]);
-      return true;
-    }
-
-    if (id.startsWith('sf:settings:tag:remove:')) {
-      const parts = id.split(':'); const departmentId = parts[4] ?? ''; const tagId = parts[5] ?? '';
-      const config = await getGuildConfig(guild.id); const department = config.departments[departmentId]; const tag = department?.tags?.[tagId];
-      if (!department || !tag) { await reject(interaction, '❌ Tag not found.'); return true; }
-      if (Object.keys(department.tags ?? {}).length <= 1) { await reject(interaction, '❌ Every department must keep at least one tag.'); return true; }
-      const remainingTag = Object.values(department.tags ?? {}).find((item) => item.id !== tagId);
-      if (!remainingTag) { await reject(interaction, '❌ A replacement tag could not be found.'); return true; }
-      const affected = [...guild.channels.cache.values()].filter((channel): channel is import('discord.js').TextChannel => channel.type === ChannelType.GuildText && Boolean(channel.topic?.startsWith('supportforge:ticket')) && getField(channel.topic, 'department') === departmentId && getField(channel.topic, 'tag') === tagId);
-      await interaction.deferUpdate();
-      for (const channel of affected) {
-        const nextTopic = getField(channel.topic ?? '', 'tag') === tagId ? channel.topic!.replace(/(?:^|\s)tag=[^\s]*/, ' tag=' + remainingTag.id).replace(/(?:^|\s)tags=[^\s]*/, ' tags=' + remainingTag.id).replace(/\s{2,}/g, ' ').trim() : channel.topic;
-        if (nextTopic && nextTopic !== channel.topic) { channel.topic = nextTopic; await channel.setTopic(nextTopic, 'SupportForge tag removal migration').catch(() => undefined); await updatePersistedTicketMetadata(channel.id, { tagId: remainingTag.id }); }
-      }
-      await updateGuildConfig(guild.id, (current) => { const item = current.departments[departmentId]; if (item) delete item.tags[tagId]; });
-      await syncPanel(guild); await refreshSettingsChannel(guild); await showTagManager(interaction, departmentId);
-      await auditSettingsAction(guild, interaction, 'TAG_REMOVED', 'Removed tag ' + tag.name + ' from department ' + department.name + '; affected tickets were moved to ' + remainingTag.name + '.');
-      return true;
-    }
-    if (id.startsWith('sf:settings:department:remove:')) {
-      const departmentId = id.slice('sf:settings:department:remove:'.length);
-      const config = await getGuildConfig(guild.id);
-      const department = config.departments[departmentId];
-      if (!department) { await reject(interaction, '❌ Department not found.'); return true; }
-      const remaining = Object.values(config.departments).filter((item) => item.id !== departmentId);
-      if (!remaining.length) { await reject(interaction, '❌ At least one department must remain configured.'); return true; }
-      const activeTickets = [...guild.channels.cache.values()].filter((channel) => channel.type === ChannelType.GuildText && channel.topic?.startsWith('supportforge:ticket') && getField(channel.topic, 'department') === departmentId && ['open', 'claimed', 'pending', 'reopened'].includes(getField(channel.topic, 'status') ?? ''));
-      if (activeTickets.length) { await reject(interaction, '❌ Cannot remove **' + department.name + '** while it has **' + activeTickets.length + '** active ticket(s). Reassign them first.'); return true; }
-      await interaction.deferUpdate();
-      await updateGuildConfig(guild.id, (current) => { delete current.departments[departmentId]; });
-      await syncPanel(guild);
-      await refreshSettingsChannel(guild);
-      await showTags(interaction);
-      await auditSettingsAction(guild, interaction, 'DEPARTMENT_REMOVED', 'Removed department ' + department.name + '. Its Discord category was retained.');
-      return true;
-    }
     if (id === 'sf:settings:retention') {
       await showRetention(interaction);
       return true;
@@ -951,8 +885,6 @@ export async function handleSettingsInteraction(
 
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const departmentId = newDepartmentId();
-      const tagId = newTagId();
-      const now = new Date().toISOString();
       const category = await ensureDepartmentCategory(guild, {
         name,
         staffRoleId: null,
@@ -965,10 +897,7 @@ export async function handleSettingsInteraction(
           name,
           staffRoleId: null,
           categoryId: category.id,
-          tags: {
-            [tagId]: { id: tagId, name: 'General', createdAt: now },
-          },
-          createdAt: now,
+          createdAt: new Date().toISOString(),
         };
       });
 
@@ -1211,35 +1140,79 @@ export async function handleSettingsInteraction(
   }
 
   if (interaction.isStringSelectMenu()) {
-    if (interaction.customId === 'sf:settings:department:manage:select') {
+    if (interaction.customId === 'sf:settings:tags:remove:select') {
+      const departmentId = interaction.values[0];
+      const config = await getGuildConfig(guild.id);
+      const department = config.departments[departmentId];
+
+      if (!department) {
+        await interaction.reply({ content: '❌ Routing tag not found.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+
+      const remaining = Object.values(config.departments).filter((item) => item.id !== departmentId);
+      if (remaining.length === 0) {
+        await interaction.reply({ content: '❌ At least one routing tag / department must remain configured.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+
+      const activeTickets = [...guild.channels.cache.values()].filter((channel) =>
+        channel.type === ChannelType.GuildText &&
+        channel.topic?.startsWith('supportforge:ticket') &&
+        getField(channel.topic, 'department') === departmentId &&
+        ['open', 'claimed', 'pending', 'reopened'].includes(getField(channel.topic, 'status') ?? ''),
+      );
+
+      if (activeTickets.length) {
+        await interaction.reply({
+          content: '❌ Cannot remove **' + department.name + '** while it has **' + activeTickets.length + '** active ticket(s). Reassign them first.',
+          flags: MessageFlags.Ephemeral,
+        });
+        return true;
+      }
+
       await interaction.deferUpdate();
-      await showDepartmentManager(interaction, interaction.values[0]);
+      await updateGuildConfig(guild.id, (current) => {
+        delete current.departments[departmentId];
+      });
+      await syncPanel(guild);
+      await refreshSettingsChannel(guild);
+      await showTags(interaction);
+      await auditSettingsAction(guild, interaction, 'TAG_REMOVED', 'Removed routing tag / department ' + department.name + '. Its Discord category was retained.');
       return true;
     }
 
-    if (interaction.customId.startsWith('sf:settings:tag:manage:select:')) {
-      const departmentId = interaction.customId.slice('sf:settings:tag:manage:select:'.length);
-      const tagId = interaction.values[0];
+    if (interaction.customId === 'sf:settings:departments:remove:select') {
+      const departmentId = interaction.values[0];
       const config = await getGuildConfig(guild.id);
       const department = config.departments[departmentId];
-      const tag = department?.tags?.[tagId];
-      if (!department || !tag) { await reject(interaction, '❌ Tag not found.'); return true; }
-      await interaction.reply({
-        content: 'Manage **' + tag.name + '** inside **' + department.name + '**.',
-        components: [
-          new ActionRowBuilder<ButtonBuilder>().addComponents(
-            new ButtonBuilder().setCustomId('sf:settings:tag:edit:' + departmentId + ':' + tagId).setLabel('Edit Tag').setEmoji('✏️').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('sf:settings:tag:remove:' + departmentId + ':' + tagId).setLabel('Remove Tag').setEmoji('🗑️').setStyle(ButtonStyle.Danger).setDisabled(Object.keys(department.tags ?? {}).length <= 1),
-          ),
-          new ActionRowBuilder<ButtonBuilder>().addComponents(
-            new ButtonBuilder().setCustomId('sf:settings:tag:manage:' + departmentId).setLabel('Back to Tags').setStyle(ButtonStyle.Secondary),
-          ),
-        ],
-        flags: MessageFlags.Ephemeral,
+
+      if (!department) {
+        await interaction.reply({ content: '❌ Department not found.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+
+      const active = Object.values(config.departments).filter((item) => item.id !== departmentId);
+      if (active.length === 0) {
+        await interaction.reply({
+          content: '❌ Keep at least one ticket department configured.',
+          flags: MessageFlags.Ephemeral,
+        });
+        return true;
+      }
+
+      await interaction.deferUpdate();
+      await updateGuildConfig(guild.id, (current) => {
+        delete current.departments[departmentId];
       });
+      await syncPanel(guild);
+      await refreshSettingsChannel(guild);
+      await showDepartments(interaction);
+      await auditSettingsAction(guild, interaction, 'DEPARTMENT_REMOVED', 'Removed department ' + department.name + '. Its Discord category was retained.');
       return true;
     }
   }
+
   if (interaction.isModalSubmit()) {
     if (interaction.customId === 'sf:settings:modal:panel') {
       const visual = Number(interaction.fields.getTextInputValue('visual'));
@@ -1290,92 +1263,116 @@ export async function handleSettingsInteraction(
       return true;
     }
 
-    if (interaction.customId === 'sf:settings:modal:department:add') {
+    if (interaction.customId === 'sf:settings:modal:tag:add') {
       const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
       const rawStaff = interaction.fields.getTextInputValue('staff').trim();
       const staffMention = rawStaff.match(/^<@&(\d+)>$/);
       const staffRoleId = staffMention?.[1] ?? (/^\d{15,25}$/.test(rawStaff) ? rawStaff : null);
-      if (!name) { await reject(interaction, '❌ Department name cannot be empty.'); return true; }
+
+      if (!name) {
+        await reject(interaction, '❌ Routing tag name cannot be empty.');
+        return true;
+      }
+
       const config = await getGuildConfig(guild.id);
-      if (Object.values(config.departments).some((department) => department.name.toLowerCase() === name.toLowerCase())) { await reject(interaction, '❌ A department with that name already exists.'); return true; }
+      if (Object.values(config.departments).some((department) => department.name.toLowerCase() === name.toLowerCase())) {
+        await reject(interaction, '❌ A routing tag / department with that name already exists.');
+        return true;
+      }
+
       if (staffRoleId) {
         const role = guild.roles.cache.get(staffRoleId);
-        if (!role || role.managed || role.id === guild.roles.everyone.id) { await reject(interaction, '❌ The supplied staff role is invalid.'); return true; }
+        if (!role || role.managed || role.id === guild.roles.everyone.id) {
+          await reject(interaction, '❌ The supplied staff role is invalid.');
+          return true;
+        }
       }
+
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
         const id = newDepartmentId();
-        const tagId = newTagId();
-        const now = new Date().toISOString();
         const category = await ensureDepartmentCategory(guild, { name, staffRoleId, categoryId: null });
+
         await updateGuildConfig(guild.id, (current) => {
-          current.departments[id] = { id, name, staffRoleId, categoryId: category.id, tags: { [tagId]: { id: tagId, name: 'General', createdAt: now } }, createdAt: now };
+          current.departments[id] = {
+            id,
+            name,
+            staffRoleId,
+            categoryId: category.id,
+            createdAt: new Date().toISOString(),
+          };
         });
+
         await syncPanel(guild);
         await refreshSettingsChannel(guild);
-        await interaction.editReply({ embeds: [new EmbedBuilder().setTitle('✅ Department Added').setDescription('**' + name + '** is ready with the default **General** tag.\n\nCategory: ' + category)], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())] });
-        await auditSettingsAction(guild, interaction, 'DEPARTMENT_ADDED', 'Added department ' + name + ' with category ' + category.name + ' and default tag General.');
-      } catch (error) { await interaction.editReply('❌ ' + (error instanceof Error ? error.message : 'Could not create department.')); }
+        await interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle('✅ Routing Tag Added')
+              .setDescription('**' + name + '** is now a predefined routing tag and department.\n\nCategory: ' + category),
+          ],
+          components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+        });
+        await auditSettingsAction(guild, interaction, 'TAG_ADDED', 'Added routing tag / department ' + name + ' with category ' + category.name + '.');
+      } catch (error) {
+        await interaction.editReply('❌ ' + (error instanceof Error ? error.message : 'Could not create routing tag.'));
+      }
       return true;
     }
 
-    if (interaction.customId.startsWith('sf:settings:modal:department:edit:')) {
-      const departmentId = interaction.customId.slice('sf:settings:modal:department:edit:'.length);
+    if (interaction.customId === 'sf:settings:modal:department:add') {
       const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
       const rawStaff = interaction.fields.getTextInputValue('staff').trim();
-      const staffMention = rawStaff.match(/^<@&(\d+)>$/);
-      const staffRoleId = staffMention?.[1] ?? (/^\d{15,25}$/.test(rawStaff) ? rawStaff : null);
+      const staffMention = rawStaff.match(/^<@&(\\d+)>$/);
+      const staffRoleId = staffMention?.[1] ?? (/^\\d{15,25}$/.test(rawStaff) ? rawStaff : null);
+
+      if (!name) {
+        await reject(interaction, '❌ Department name cannot be empty.');
+        return true;
+      }
+
       const config = await getGuildConfig(guild.id);
-      const department = config.departments[departmentId];
-      if (!department) { await reject(interaction, '❌ Department not found.'); return true; }
-      if (!name) { await reject(interaction, '❌ Department name cannot be empty.'); return true; }
-      if (Object.values(config.departments).some((item) => item.id !== departmentId && item.name.toLowerCase() === name.toLowerCase())) { await reject(interaction, '❌ Another department already uses that name.'); return true; }
-      if (staffRoleId) { const role = guild.roles.cache.get(staffRoleId); if (!role || role.managed || role.id === guild.roles.everyone.id) { await reject(interaction, '❌ The supplied staff role is invalid.'); return true; } }
+      if (Object.values(config.departments).some((department) => department.name.toLowerCase() === name.toLowerCase())) {
+        await reject(interaction, '❌ A department with that name already exists.');
+        return true;
+      }
+
+      if (staffRoleId) {
+        const role = guild.roles.cache.get(staffRoleId);
+        if (!role || role.managed || role.id === guild.roles.everyone.id) {
+          await reject(interaction, '❌ The supplied staff role is invalid.');
+          return true;
+        }
+      }
+
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      try {
-        const oldName = department.name;
-        const category = department.categoryId ? guild.channels.cache.get(department.categoryId) : undefined;
-        if (category?.type === ChannelType.GuildCategory) await category.edit({ name: ('SupportForge.' + name).slice(0, 100), reason: 'SupportForge department rename' });
-        await updateGuildConfig(guild.id, (current) => { const item = current.departments[departmentId]; if (item) { item.name = name; item.staffRoleId = staffRoleId; } });
-        await syncPanel(guild); await refreshSettingsChannel(guild); await showDepartmentManager(interaction, departmentId);
-        await auditSettingsAction(guild, interaction, 'DEPARTMENT_CHANGED', 'Renamed department ' + oldName + ' to ' + name + ' and updated its staff routing.');
-      } catch (error) { await interaction.editReply('❌ ' + (error instanceof Error ? error.message : 'Could not update department.')); }
+      const id = newDepartmentId();
+      const category = await ensureDepartmentCategory(guild, {
+        name,
+        staffRoleId,
+        categoryId: null,
+      });
+
+      await updateGuildConfig(guild.id, (current) => {
+        current.departments[id] = {
+          id,
+          name,
+          staffRoleId,
+          categoryId: category.id,
+          createdAt: new Date().toISOString(),
+        };
+      });
+
+      await syncPanel(guild);
+      await refreshSettingsChannel(guild);
+      await interaction.editReply({
+        embeds: [new EmbedBuilder().setTitle('✅ Department Added').setDescription('**' + name + '** is ready.\n\nCategory: ' + category + '\nTickets for this department will use its **SupportForge.** category.')],
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+      });
+      await auditSettingsAction(guild, interaction, 'DEPARTMENT_ADDED', 'Added department ' + name + ' with category ' + category.name + '.');
       return true;
     }
 
-    if (interaction.customId.startsWith('sf:settings:modal:tag:add:')) {
-      const departmentId = interaction.customId.slice('sf:settings:modal:tag:add:'.length);
-      const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
-      const config = await getGuildConfig(guild.id);
-      const department = config.departments[departmentId];
-      if (!department) { await reject(interaction, '❌ Department not found.'); return true; }
-      if (!name) { await reject(interaction, '❌ Tag name cannot be empty.'); return true; }
-      if (Object.values(department.tags ?? {}).some((tag) => tag.name.toLowerCase() === name.toLowerCase())) { await reject(interaction, '❌ A tag with that name already exists in this department.'); return true; }
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const tagId = newTagId();
-      await updateGuildConfig(guild.id, (current) => { const item = current.departments[departmentId]; if (item) { item.tags ??= {}; item.tags[tagId] = { id: tagId, name, createdAt: new Date().toISOString() }; } });
-      await syncPanel(guild); await refreshSettingsChannel(guild); await interaction.editReply({ embeds: [new EmbedBuilder().setTitle('✅ Tag Added').setDescription('**' + name + '** is now a subcategory of **' + department.name + '**. It does not create a Discord category.')], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())] });
-      await auditSettingsAction(guild, interaction, 'TAG_ADDED', 'Added tag ' + name + ' under department ' + department.name + '.');
-      return true;
-    }
-
-    if (interaction.customId.startsWith('sf:settings:modal:tag:edit:')) {
-      const parts = interaction.customId.split(':');
-      const departmentId = parts[5] ?? ''; const tagId = parts[6] ?? '';
-      const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
-      const config = await getGuildConfig(guild.id); const department = config.departments[departmentId]; const tag = department?.tags?.[tagId];
-      if (!department || !tag) { await reject(interaction, '❌ Tag not found.'); return true; }
-      if (!name) { await reject(interaction, '❌ Tag name cannot be empty.'); return true; }
-      if (Object.values(department.tags ?? {}).some((item) => item.id !== tagId && item.name.toLowerCase() === name.toLowerCase())) { await reject(interaction, '❌ Another tag in this department already uses that name.'); return true; }
-      const oldName = tag.name;
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      await updateGuildConfig(guild.id, (current) => { const item = current.departments[departmentId]?.tags?.[tagId]; if (item) item.name = name; });
-      await syncPanel(guild); await refreshSettingsChannel(guild); await showTagManager(interaction, departmentId);
-      await auditSettingsAction(guild, interaction, 'TAG_CHANGED', 'Renamed tag ' + oldName + ' to ' + name + ' under department ' + department.name + '.');
-      return true;
-    }
-
-    if (interaction.customId === 'sf:settings:modal:tag:add') { await reject(interaction, '❌ This old tag form is no longer valid. Use Departments & Tags.'); return true; }
     if (interaction.customId === 'sf:settings:modal:retention') {
       const closed = Number(interaction.fields.getTextInputValue('closed'));
       const archive = Number(interaction.fields.getTextInputValue('archive'));
