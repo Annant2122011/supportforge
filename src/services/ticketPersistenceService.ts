@@ -158,7 +158,7 @@ export async function updatePersistedTicketMetadata(
   updates: Partial<
     Pick<
       PersistedTicket,
-      'departmentId' | 'ownerId' | 'priority'
+      'departmentId' | 'ownerId' | 'priority' | 'tagId'
     >
   >,
 ): Promise<void> {
