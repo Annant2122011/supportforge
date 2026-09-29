@@ -405,6 +405,22 @@ async function showDefaults(interaction: ButtonInteraction): Promise<void> {
   ]);
 }
 
+async function showTagActions(interaction: SettingsViewInteraction, departmentId: string, tagId: string): Promise<void> {
+  const config = await getGuildConfig(interaction.guild!.id);
+  const department = config.departments[departmentId];
+  const tag = department?.tags?.[tagId];
+  if (!department || !tag) { await reject(interaction, '❌ Tag not found.'); return; }
+  await renderSettingsView(interaction, [
+    new EmbedBuilder().setTitle('🏷️ ' + tag.name).setDescription('Tag **' + tag.name + '** belongs to **' + department.name + '**. Tags are subcategories only and never create Discord categories.'),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:tag:edit:' + departmentId + ':' + tagId).setLabel('Edit Tag').setEmoji('✏️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:tag:remove:' + departmentId + ':' + tagId).setLabel('Remove Tag').setEmoji('🗑️').setStyle(ButtonStyle.Danger).setDisabled(Object.keys(department.tags).length <= 1),
+      new ButtonBuilder().setCustomId('sf:settings:tag:manage:' + departmentId).setLabel('Back').setStyle(ButtonStyle.Secondary),
+    ),
+  ]);
+}
+
 async function showTags(interaction: SettingsViewInteraction): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
   const departments = Object.values(config.departments).sort((a, b) => a.name.localeCompare(b.name));
@@ -1258,6 +1274,21 @@ export async function handleSettingsInteraction(
       await refreshSettingsChannel(guild);
       await showDepartments(interaction);
       await auditSettingsAction(guild, interaction, 'DEPARTMENT_REMOVED', 'Removed department ' + department.name + '. Its Discord category was retained.');
+      return true;
+    }
+  }
+
+  if (interaction.isStringSelectMenu()) {
+    if (interaction.customId === 'sf:settings:department:select') {
+      await interaction.deferUpdate();
+      await showDepartmentManager(interaction, interaction.values[0]);
+      return true;
+    }
+    if (interaction.customId.startsWith('sf:settings:tag:select:')) {
+      const departmentId = interaction.customId.slice('sf:settings:tag:select:'.length);
+      const tagId = interaction.values[0];
+      await interaction.deferUpdate();
+      await showTagActions(interaction, departmentId, tagId);
       return true;
     }
   }
