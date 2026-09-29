@@ -11,6 +11,7 @@ export interface PersistedTicket {
   createdAt: string;
   ticketNumber: string | null;
   departmentId: string | null;
+  tagId: string | null;
   ownerId: string | null;
   priority: TicketPriority | null;
   deletedAt: string | null;
@@ -51,6 +52,7 @@ async function loadState(): Promise<TicketStateFile> {
         createdAt: legacy.createdAt ?? legacy.updatedAt ?? new Date().toISOString(),
         ticketNumber: legacy.ticketNumber ?? null,
         departmentId: legacy.departmentId ?? null,
+        tagId: legacy.tagId ?? null,
         ownerId: legacy.ownerId ?? null,
         priority: legacy.priority ?? null,
         deletedAt: legacy.deletedAt ?? null,
@@ -102,6 +104,7 @@ export interface TicketRegistration {
   guildId: string;
   ticketNumber: string;
   departmentId: string;
+  tagId: string;
   ownerId: string;
   priority: TicketPriority;
   createdAt: string;
@@ -121,6 +124,7 @@ export async function registerTicket(
     createdAt: existing?.createdAt ?? registration.createdAt,
     ticketNumber: existing?.ticketNumber ?? registration.ticketNumber,
     departmentId: existing?.departmentId ?? registration.departmentId,
+    tagId: existing?.tagId ?? registration.tagId,
     ownerId: existing?.ownerId ?? registration.ownerId,
     priority: existing?.priority ?? registration.priority,
     deletedAt: existing?.deletedAt ?? null,
@@ -145,6 +149,7 @@ export async function setPersistedTicketStatus(
     createdAt: existing?.createdAt ?? now,
     ticketNumber: existing?.ticketNumber ?? null,
     departmentId: existing?.departmentId ?? null,
+    tagId: existing?.tagId ?? null,
     ownerId: existing?.ownerId ?? null,
     priority: existing?.priority ?? null,
     deletedAt: existing?.deletedAt ?? null,
@@ -158,7 +163,7 @@ export async function updatePersistedTicketMetadata(
   updates: Partial<
     Pick<
       PersistedTicket,
-      'departmentId' | 'ownerId' | 'priority'
+      'departmentId' | 'tagId' | 'ownerId' | 'priority'
     >
   >,
 ): Promise<void> {
@@ -174,6 +179,8 @@ export async function updatePersistedTicketMetadata(
     ticketNumber: existing?.ticketNumber ?? null,
     departmentId:
       updates.departmentId ?? existing?.departmentId ?? null,
+    tagId:
+      updates.tagId ?? existing?.tagId ?? null,
     ownerId:
       updates.ownerId ?? existing?.ownerId ?? null,
     priority:
