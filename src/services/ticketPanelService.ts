@@ -44,7 +44,6 @@ export function buildTicketPanelEmbed(
   const ownerId = getField(topic, 'owner');
   const claimedBy = getField(topic, 'claimed_by');
   const priority = getField(topic, 'priority') ?? 'normal';
-  const tags = getField(topic, 'tags') ?? '';
   const users = getField(topic, 'users') ?? '';
   const pendingSince = getField(topic, 'pending_since');
   const closedAt = getField(topic, 'closed_at');
