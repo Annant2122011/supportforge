@@ -2832,19 +2832,6 @@ export async function handleTicketInteraction(
         const departmentId = parts[2] ?? '';
         const tagId = parts[3] ?? '';
 
-        try {
-          departmentId =
-            interaction.fields
-              .getTextInputValue(
-                'department',
-              );
-        } catch {
-          /*
-           * Some existing modal configurations encode the department
-           * in the custom ID instead.
-           */
-        }
-
         if (!departmentId) {
           await replyError(
             interaction,
@@ -2860,27 +2847,6 @@ export async function handleTicketInteraction(
         );
 
         return;
-      }
-
-      if (
-        interaction.customId.startsWith(
-          'ticket:modal:',
-        )
-      ) {
-        const departmentId =
-          interaction.customId.slice(
-            'ticket:modal:'.length,
-          );
-
-        if (
-          departmentId
-        ) {
-          await createTicket(
-            interaction,
-            departmentId,
-          );
-          return;
-        }
       }
 
       /*
