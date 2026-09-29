@@ -40,7 +40,7 @@ export function buildSettingsDashboardComponents(): ActionRowBuilder<ButtonBuild
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       settingsButton('sf:settings:panel', 'Panel', ButtonStyle.Primary, '🎛️'),
       settingsButton('sf:settings:defaults', 'Ticket Defaults', ButtonStyle.Secondary, '🎟️'),
-      settingsButton('sf:settings:tags', 'Custom Tags', ButtonStyle.Secondary, '🏷️'),
+      settingsButton('sf:settings:tags', 'Tags / Departments', ButtonStyle.Secondary, '🏷️'),
       settingsButton('sf:settings:departments', 'Departments', ButtonStyle.Secondary, '📂'),
       settingsButton('sf:settings:usecases', 'Use Cases', ButtonStyle.Secondary, '🧩'),
     ),
@@ -182,7 +182,6 @@ export function buildSettingsDashboardEmbed(
   settings: Awaited<ReturnType<typeof getAdvancedSettings>>,
   departmentCount: number,
 ): EmbedBuilder {
-  const tagCount = Object.keys(settings.customTags).length;
   const priorityRoleCount = Object.keys(settings.priorityRoles).length;
 
   const closed =
@@ -226,8 +225,8 @@ export function buildSettingsDashboardEmbed(
         inline: true,
       },
       {
-        name: '🏷️ Custom tags',
-        value: '**' + tagCount + '** configured',
+        name: '🏷️ Routing tags',
+        value: '**' + departmentCount + '** configured',
         inline: true,
       },
       {
@@ -266,9 +265,9 @@ export function buildSettingsDashboardEmbed(
           '**Priority roles**: Explicitly created roles – ' +
           priorityRoleCount +
           '\n' +
-          '**Custom tags**: Configured tags – ' +
-          tagCount +
-          (tagCount ? '' : ' (none)') +
+          '**Routing tags**: Configured routing tags – ' +
+          departmentCount +
+          (departmentCount ? '' : ' (none)') +
           '\n' +
           '**Retention**: Closed – ' +
           closed +
