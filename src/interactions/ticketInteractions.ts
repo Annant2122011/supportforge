@@ -2777,7 +2777,7 @@ async function handlePanelButton(
       id ===
       'ticket:panel:tag'
     ) {
-      await showRoutingTagSelector(interaction, 0);
+      await renderRoutingTagSelector(interaction, 0);
       return;
     } else {
       modal
