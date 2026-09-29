@@ -4,11 +4,18 @@ import { randomBytes } from 'node:crypto';
 
 export type SupportForgeTier = 'free' | 'premium-demo' | 'pro-demo';
 
+export interface TagConfig {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
 export interface DepartmentConfig {
   id: string;
   name: string;
   staffRoleId: string | null;
   categoryId?: string | null;
+  tags: Record<string, TagConfig>;
   createdAt: string;
 }
 
@@ -104,6 +111,18 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
       department.categoryId = null;
       migrated = true;
     }
+
+    if (!department.tags) {
+      const legacyTagId = newDepartmentId();
+      department.tags = {
+        [legacyTagId]: {
+          id: legacyTagId,
+          name: 'General',
+          createdAt: department.createdAt ?? new Date().toISOString(),
+        },
+      };
+      migrated = true;
+    }
   }
 
   if (migrated) {
@@ -156,6 +175,10 @@ export function tierLabel(tier: SupportForgeTier): string {
 }
 
 export function newDepartmentId(): string {
+  return randomBytes(4).toString('hex');
+}
+
+export function newTagId(): string {
   return randomBytes(4).toString('hex');
 }
 
