@@ -927,6 +927,7 @@ async function createTicket(
       `department=${departmentId}`,
       `staff=${department.staffRoleId ?? 'none'}`,
       `priority=${advancedSettings.ticketDefaults.priority}`,
+      `tag=${tagId}`,
       `tags=${tagId}`,
       'users=',
       'claimed_by=',
