@@ -865,7 +865,7 @@ export async function handleSettingsInteraction(
       const affected = [...guild.channels.cache.values()].filter((channel) => channel.type === ChannelType.GuildText && channel.topic?.startsWith('supportforge:ticket') && getField(channel.topic, 'department') === departmentId && getField(channel.topic, 'tag') === tagId);
       await interaction.deferUpdate();
       for (const channel of affected) {
-        const nextTopic = getField(channel.topic ?? '', 'tag') === tagId ? channel.topic!.replace(/(?:^|\\s)tag=[^\\s]*/, ' tag=' + remainingTag.id).replace(/(?:^|\\s)tags=[^\\s]*/, ' tags=' + remainingTag.id).replace(/\\s{2,}/g, ' ').trim() : channel.topic;
+        const nextTopic = getField(channel.topic ?? '', 'tag') === tagId ? channel.topic!.replace(/(?:^|\s)tag=[^\s]*/, ' tag=' + remainingTag.id).replace(/(?:^|\s)tags=[^\s]*/, ' tags=' + remainingTag.id).replace(/\s{2,}/g, ' ').trim() : channel.topic;
         if (nextTopic && nextTopic !== channel.topic) { channel.topic = nextTopic; await channel.setTopic(nextTopic, 'SupportForge tag removal migration').catch(() => undefined); await updatePersistedTicketMetadata(channel.id, { tagId: remainingTag.id }); }
       }
       await updateGuildConfig(guild.id, (current) => { const item = current.departments[departmentId]; if (item) delete item.tags[tagId]; });
