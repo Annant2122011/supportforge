@@ -167,6 +167,69 @@ function priorityRoleLabel(priority: TicketPriority): string {
   return PRIORITY_ROLE_DEFINITIONS[priority].label;
 }
 
+const PRIORITY_ROLE_ORDER: TicketPriority[] = [
+  'critical',
+  'urgent',
+  'high',
+  'normal',
+  'low',
+];
+
+/**
+ * Keep SupportForge priority roles together at the top of the role hierarchy
+ * that the bot can manage. Higher priority always receives the higher Discord
+ * role position, regardless of the order in which roles were created.
+ */
+async function enforcePriorityRoleHierarchy(guild: Guild): Promise<void> {
+  const settings = await getAdvancedSettings(guild.id);
+  const configured = PRIORITY_ROLE_ORDER
+    .map((priority) => ({
+      priority,
+      roleId: settings.priorityRoles[priority],
+      role: settings.priorityRoles[priority]
+        ? guild.roles.cache.get(settings.priorityRoles[priority]!)
+        : undefined,
+    }))
+    .filter((entry): entry is {
+      priority: TicketPriority;
+      roleId: string;
+      role: NonNullable<typeof entry.role>;
+    } => Boolean(entry.roleId && entry.role));
+
+  if (configured.length === 0) return;
+
+  const botMember = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
+  const botHighestRole = botMember?.roles.highest;
+  if (!botHighestRole) {
+    throw new Error('SupportForge cannot determine its highest role.');
+  }
+
+  const orderedRoleIds = new Set(configured.map((entry) => entry.role.id));
+  if (orderedRoleIds.has(botHighestRole.id)) {
+    throw new Error('SupportForge priority roles cannot include the bot role.');
+  }
+
+  const highestTargetPosition = botHighestRole.position - 1;
+  const lowestTargetPosition = highestTargetPosition - configured.length + 1;
+
+  if (lowestTargetPosition < 1) {
+    throw new Error(
+      'There are not enough manageable role positions below the SupportForge bot role to order all configured priority roles.',
+    );
+  }
+
+  const positions = configured.map((entry, index) => ({
+    role: entry.role.id,
+    position: highestTargetPosition - index,
+  }));
+
+  await guild.roles.setPositions(positions);
+
+  // Discord can shift adjacent roles while applying a batch. Re-fetch so the
+  // in-memory role cache reflects the final hierarchy before the next action.
+  await guild.roles.fetch();
+}
+
 async function showManual(interaction: SettingsViewInteraction): Promise<void> {
   await renderSettingsView(interaction, [
     new EmbedBuilder()
@@ -195,6 +258,7 @@ async function showManualVersion(interaction: ButtonInteraction, detailed: boole
 }
 
 async function showPriorityRules(interaction: ButtonInteraction): Promise<void> {
+  await enforcePriorityRoleHierarchy(interaction.guild!);
   const settings = await getAdvancedSettings(interaction.guild!.id);
   const lines = (Object.keys(PRIORITY_ROLE_DEFINITIONS) as TicketPriority[]).map((priority) => {
     const roleId = settings.priorityRoles[priority];
@@ -252,6 +316,11 @@ async function createPriorityRole(interaction: ButtonInteraction, priority: Tick
     await updateAdvancedSettings(interaction.guild!.id, (settings) => {
       settings.priorityRoles[priority] = role.id;
     });
+
+    // Creation order must never determine hierarchy. Rebuild the complete
+    // priority stack after every new role so Critical > Urgent > High >
+    // Normal > Low even when an administrator creates them in a random order.
+    await enforcePriorityRoleHierarchy(interaction.guild!);
     await refreshSettingsChannel(interaction.guild!);
 
     await interaction.editReply({
@@ -297,10 +366,15 @@ async function restoreSettingsHome(
   if (!guild) return;
 
   /*
-   * A settings sub-view is disposable. Do not let the temporary response
-   * resurrect an older settings snapshot. Remove the response that triggered
-   * Restore to Settings, then refresh the single persistent dashboard.
+   * Restore can be clicked from either a persistent settings message or an
+   * ephemeral settings sub-view. A component interaction must be acknowledged
+   * within Discord's short interaction window, so acknowledge it first and do
+   * the slower channel refresh afterwards.
    */
+  if (!interaction.replied && !interaction.deferred) {
+    await interaction.deferUpdate();
+  }
+
   if (interaction.replied || interaction.deferred) {
     await interaction.deleteReply().catch(() => undefined);
   }
