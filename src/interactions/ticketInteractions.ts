@@ -710,7 +710,6 @@ function buildOpenOverwrites(
 async function createTicket(
   interaction: ModalSubmitInteraction,
   departmentId: string,
-  tagId: string,
 ): Promise<void> {
   if (
     !(await safeDeferReply(
@@ -768,9 +767,8 @@ async function createTicket(
       config.departments[
         departmentId
       ];
-    const tag = department?.tags?.[tagId];
 
-    if (!department || !tag) {
+    if (!department) {
       await replyError(
         interaction,
         '❌ This ticket department no longer exists.',
@@ -925,8 +923,7 @@ async function createTicket(
       `department=${departmentId}`,
       `staff=${department.staffRoleId ?? 'none'}`,
       `priority=${advancedSettings.ticketDefaults.priority}`,
-      `tag=${tagId}`,
-      `tags=${tagId}`,
+      `tags=${departmentId}`,
       'users=',
       'claimed_by=',
       `subject=${encodeURIComponent(
@@ -1026,7 +1023,6 @@ async function createTicket(
           guildId: guild.id,
           ticketNumber: String(number),
           departmentId,
-          tagId,
           ownerId: interaction.user.id,
           priority: advancedSettings.ticketDefaults.priority,
           createdAt: now,
@@ -2107,6 +2103,131 @@ async function closeTicket(
 /* Ticket creation modal                                                      */
 /* -------------------------------------------------------------------------- */
 
+async function showTicketCreationModal(
+  interaction: ButtonInteraction,
+  departmentId: string,
+): Promise<void> {
+  if (!interaction.guild) {
+    await replyError(
+      interaction,
+      '❌ This action can only be used inside a server.',
+    );
+    return;
+  }
+
+  try {
+    const config =
+      await withTimeout(
+        getGuildConfig(
+          interaction.guild.id,
+        ),
+        DISCORD_OPERATION_TIMEOUT_MS,
+        'Guild configuration load',
+      );
+
+    const department =
+      config.departments[
+        departmentId
+      ];
+
+    if (!department) {
+      await replyError(
+        interaction,
+        '❌ This ticket department no longer exists. Please refresh the support panel.',
+      );
+      return;
+    }
+
+    const modal =
+      new ModalBuilder()
+        .setCustomId(
+          `ticket:modal:${departmentId}`,
+        )
+        .setTitle(
+          `${department.name} Support`,
+        );
+
+    const subjectInput =
+      new TextInputBuilder()
+        .setCustomId(
+          'subject',
+        )
+        .setLabel(
+          'What do you need help with?',
+        )
+        .setPlaceholder(
+          'Briefly describe your issue',
+        )
+        .setStyle(
+          TextInputStyle.Short,
+        )
+        .setRequired(
+          true,
+        )
+        .setMaxLength(
+          100,
+        );
+
+    const descriptionInput =
+      new TextInputBuilder()
+        .setCustomId(
+          'description',
+        )
+        .setLabel(
+          'Describe your issue (up to 4000 characters)',
+        )
+        .setPlaceholder(
+          'Give us the details we need to help you...',
+        )
+        .setStyle(
+          TextInputStyle.Paragraph,
+        )
+        .setRequired(
+          true,
+        )
+        .setMaxLength(
+          4000,
+        );
+
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>()
+        .addComponents(
+          subjectInput,
+        ),
+
+      new ActionRowBuilder<TextInputBuilder>()
+        .addComponents(
+          descriptionInput,
+        ),
+    );
+
+    /*
+     * IMPORTANT:
+     *
+     * showModal() itself acknowledges the button interaction.
+     * We must NOT deferReply(), reply(), or editReply() afterwards.
+     */
+    await interaction.showModal(
+      modal,
+    );
+  } catch (error) {
+    console.error(
+      '❌ Failed to show ticket creation modal:',
+      error,
+    );
+
+    /*
+     * If showModal() failed before acknowledging the interaction,
+     * replyError() can still safely acknowledge it. If Discord already
+     * acknowledged it, replyError() will simply do nothing.
+     */
+    await replyError(
+      interaction,
+      '❌ SupportForge could not open the ticket creation form. Please try again.',
+    );
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /* Panel button handlers                                                      */
 /* -------------------------------------------------------------------------- */
@@ -2198,373 +2319,183 @@ async function showTicketHistory(
   }
 }
 
-async function renderDepartmentSelector(
+async function renderRoutingTagSelector(
   interaction: ButtonInteraction | StringSelectMenuInteraction,
   page: number,
 ): Promise<void> {
-  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
-    await replyError(interaction, '❌ Department controls can only be used inside a ticket.');
+  if (!interaction.guild) {
+    await replyError(interaction, '❌ This action must be used inside a server.');
+    return;
+  }
+
+  const channel =
+    interaction.channel?.type === ChannelType.GuildText
+      ? interaction.channel as TextChannel
+      : undefined;
+
+  if (!channel || !isTicketTopic(channel.topic ?? '')) {
+    await replyError(interaction, '❌ Routing tags can only be changed inside a ticket.');
     return;
   }
 
   const config = await getGuildConfig(interaction.guild.id);
-  const departments = Object.values(config.departments).sort((a, b) => a.name.localeCompare(b.name));
+  const departments = Object.values(config.departments)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
   if (!departments.length) {
-    await replyError(interaction, '❌ No departments are configured.');
+    await replyError(interaction, '❌ No routing tags/departments are configured.');
     return;
   }
 
   const pageSize = 25;
   const pageCount = Math.max(1, Math.ceil(departments.length / pageSize));
   const safePage = Math.min(Math.max(page, 0), pageCount - 1);
-  const currentDepartmentId = getField(interaction.channel.topic ?? '', 'department');
+  const currentDepartmentId = getField(channel.topic ?? '', 'department');
   const pageDepartments = departments.slice(safePage * pageSize, (safePage + 1) * pageSize);
 
   const selector = new StringSelectMenuBuilder()
-    .setCustomId('ticket:department:select:' + safePage)
-    .setPlaceholder('Choose a department')
+    .setCustomId('ticket:routing-tag:select:' + safePage)
+    .setPlaceholder('Choose the one routing tag for this ticket')
     .setMinValues(1)
     .setMaxValues(1)
     .addOptions(pageDepartments.map((department) => ({
       label: department.name.slice(0, 100),
       value: department.id,
-      description: (Object.keys(department.tags ?? {}).length || 0) + ' tag(s) • ' + (department.staffRoleId ? 'Staff routed' : 'Administrators'),
+      description: department.staffRoleId
+        ? 'Routes to ' + department.name + ' staff'
+        : 'Routes to ' + department.name + ' administrators',
       default: department.id === currentDepartmentId,
     })));
 
   const navigation = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId('ticket:department:page:' + (safePage - 1)).setLabel('Previous').setEmoji('⬅️').setStyle(ButtonStyle.Secondary).setDisabled(safePage === 0),
-    new ButtonBuilder().setCustomId('ticket:department:page:' + (safePage + 1)).setLabel('Next').setEmoji('➡️').setStyle(ButtonStyle.Secondary).setDisabled(safePage >= pageCount - 1),
-    new ButtonBuilder().setCustomId('ticket:department:cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('ticket:routing-tag:page:' + (safePage - 1)).setLabel('Previous').setEmoji('⬅️').setStyle(ButtonStyle.Secondary).setDisabled(safePage === 0),
+    new ButtonBuilder().setCustomId('ticket:routing-tag:page:' + (safePage + 1)).setLabel('Next').setEmoji('➡️').setStyle(ButtonStyle.Secondary).setDisabled(safePage >= pageCount - 1),
+    new ButtonBuilder().setCustomId('ticket:routing-tag:cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
   );
 
   const payload = {
-    content: '📂 **Change Department**\\nChoose the department that owns this ticket. The ticket will move to that department category and use that department\'s staff routing. Its first configured tag will be applied automatically.',
-    components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selector), navigation],
+    content:
+      '🏷️ **Routing Tag / Department**\n' +
+      'Every ticket has exactly **one** routing tag. Selecting one moves the ticket to that department and updates its staff routing.\n\n' +
+      `Page ${safePage + 1}/${pageCount} • ${departments.length} configured tag(s)`,
+    components: [
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selector),
+      navigation,
+    ],
   };
 
-  if (interaction.replied || interaction.deferred) await interaction.editReply(payload);
-  else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
+  if (interaction.replied || interaction.deferred) {
+    await interaction.editReply(payload);
+  } else {
+    await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
+  }
 }
 
-async function changeTicketDepartment(interaction: StringSelectMenuInteraction): Promise<void> {
+async function showRoutingTagSelector(interaction: ButtonInteraction): Promise<void> {
+  await renderRoutingTagSelector(interaction, 0);
+}
+
+async function changeTicketRoutingTag(interaction: StringSelectMenuInteraction): Promise<void> {
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
     await replyError(interaction, '❌ This action can only be used inside a ticket.');
     return;
   }
+
   const channel = interaction.channel as TextChannel;
   const topic = channel.topic ?? '';
   const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
+
   if (!isTicketTopic(topic) || !isActiveTicketStatus(status)) {
-    await replyError(interaction, '❌ Only active tickets can be moved between departments.');
-    return;
-  }
-  const staff = getStaffContext(interaction, topic);
-  if (!staff.authorized) {
-    await replyError(interaction, '❌ Only configured staff or administrators can change the department.');
+    await replyError(interaction, '❌ Only active tickets can have their routing tag changed.');
     return;
   }
 
-  const config = await getGuildConfig(interaction.guild.id);
-  const department = config.departments[interaction.values[0]];
-  if (!department) {
-    await replyError(interaction, '❌ That department no longer exists. Refresh the selector.');
+  const staff = getStaffContext(interaction, topic);
+  if (!staff.authorized) {
+    await replyError(interaction, '❌ Only configured staff or administrators can change the routing tag.');
     return;
   }
-  const tag = Object.values(department.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name))[0];
-  if (!tag) {
-    await replyError(interaction, '❌ That department has no tags. Add at least one tag before routing tickets to it.');
+
+  const departmentId = interaction.values[0];
+  const config = await getGuildConfig(interaction.guild.id);
+  const department = config.departments[departmentId];
+  if (!department) {
+    await replyError(interaction, '❌ That routing tag no longer exists. Refresh the selector and try again.');
     return;
   }
 
   const oldDepartmentId = getField(topic, 'department');
-  if (oldDepartmentId === department.id) {
-    await interaction.update({ content: 'ℹ️ This ticket is already in **' + department.name + '**.', components: [] });
+  if (oldDepartmentId === departmentId) {
+    await interaction.update({ content: 'ℹ️ This ticket is already routed to **' + department.name + '**.', components: [] });
     return;
   }
 
   await interaction.deferUpdate();
   try {
     const oldDepartment = oldDepartmentId ? config.departments[oldDepartmentId] : undefined;
-    const category = await ensureDepartmentCategory(interaction.guild, department);
-    const newTopic = setField(
-      setField(
-        setField(
-          setField(topic, 'department', department.id),
-          'staff',
-          department.staffRoleId ?? 'none',
-        ),
-        'tag',
-        tag.id,
-      ),
-      'tags',
-      tag.id,
-    );
+    const departmentCategory = await ensureDepartmentCategory(interaction.guild, department);
+    const newTopic = setField(setField(setField(topic, 'department', department.id), 'staff', department.staffRoleId ?? 'none'), 'tags', department.id);
 
-    await runChannelMutation(channel, 'Department routing change', async () => {
-      await setChannelParent(channel.id, category.id, 'Move ticket to department category');
+    await runChannelMutation(channel, 'Routing tag channel move', async () => {
+      await setChannelParent(channel.id, departmentCategory.id, 'Move ticket to routing tag category');
+
       if (oldDepartment?.staffRoleId && oldDepartment.staffRoleId !== department.staffRoleId) {
         await setChannelPermissionOverwrite(channel.id, oldDepartment.staffRoleId, [], [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory], 0, 'Remove previous department staff access');
       }
+
       if (department.staffRoleId) {
         await setChannelPermissionOverwrite(channel.id, department.staffRoleId, [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks], [], 0, 'Grant new department staff access');
       }
-      await setChannelTopic(channel.id, newTopic, 'Update department and tag metadata');
+
+      await setChannelTopic(channel.id, newTopic, 'Update ticket routing tag metadata');
     });
 
     channel.topic = newTopic;
     updateRuntimeTicketState(channel, newTopic, status);
-    await updatePersistedTicketMetadata(channel.id, { departmentId: department.id, tagId: tag.id });
+    await updatePersistedTicketMetadata(channel.id, {
+      departmentId: department.id,
+    });
     await updateGuildConfig(interaction.guild.id, (current) => {
       const currentDepartment = current.departments[department.id];
-      if (currentDepartment && !currentDepartment.categoryId) currentDepartment.categoryId = category.id;
+      if (currentDepartment && !currentDepartment.categoryId) currentDepartment.categoryId = departmentCategory.id;
     });
     await updateMainMessage(channel, getField(newTopic, 'message'), status, newTopic);
-    await interaction.editReply({ content: '✅ Department changed to **' + department.name + '** and tag set to **' + tag.name + '**. The ticket was moved to ' + category.toString() + '.', components: [] });
+    await interaction.editReply({ content: '✅ Routing tag changed to **' + department.name + '**. The ticket was moved to ' + departmentCategory.toString() + ' and staff routing was updated.', components: [] });
 
     if (config.supportCategoryId) {
       await logTicketEvent(interaction.guild, config.supportCategoryId, {
         ticketNumber: getField(newTopic, 'number') ?? 'unknown',
-        event: 'ticket_department_changed',
+        event: 'ticket_routing_tag_changed',
         actor: interaction.user.tag,
         actorId: interaction.user.id,
         actorName: interaction.user.tag,
-        detail: 'Department changed from ' + (oldDepartment?.name ?? oldDepartmentId ?? 'unknown') + ' to ' + department.name + '; tag=' + tag.name + '.',
+        detail: 'Routing tag changed from ' + (oldDepartment?.name ?? oldDepartmentId ?? 'unknown') + ' to ' + department.name + '. Ticket moved to ' + departmentCategory.name + '.',
       });
     }
   } catch (error) {
-    console.error('❌ Department change failed:', error);
-    await interaction.editReply({ content: '❌ The department could not be changed safely.', components: [] }).catch(() => undefined);
+    console.error('❌ Routing tag change failed:', error);
+    await interaction.editReply({ content: '❌ The routing tag could not be changed. The ticket was left unchanged where possible.', components: [] }).catch(() => undefined);
   }
 }
-
-async function renderTicketTagSelector(
-  interaction: ButtonInteraction | StringSelectMenuInteraction,
-  page: number,
-): Promise<void> {
-  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
-    await replyError(interaction, '❌ Tag controls can only be used inside a ticket.');
-    return;
-  }
-  const channel = interaction.channel as TextChannel;
-  const departmentId = getField(channel.topic ?? '', 'department');
-  const config = await getGuildConfig(interaction.guild.id);
-  const department = departmentId ? config.departments[departmentId] : undefined;
-  if (!department) {
-    await replyError(interaction, '❌ This ticket has no valid department.');
-    return;
-  }
-
-  const tags = Object.values(department.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
-  if (!tags.length) {
-    await replyError(interaction, '❌ This department has no tags configured.');
-    return;
-  }
-
-  const pageSize = 25;
-  const pageCount = Math.max(1, Math.ceil(tags.length / pageSize));
-  const safePage = Math.min(Math.max(page, 0), pageCount - 1);
-  const currentTagId = getField(channel.topic ?? '', 'tag');
-  const pageTags = tags.slice(safePage * pageSize, (safePage + 1) * pageSize);
-  const selector = new StringSelectMenuBuilder()
-    .setCustomId('ticket:tag:select:' + safePage)
-    .setPlaceholder('Choose a tag')
-    .setMinValues(1)
-    .setMaxValues(1)
-    .addOptions(pageTags.map((tag) => ({
-      label: tag.name.slice(0, 100),
-      value: tag.id,
-      default: tag.id === currentTagId,
-    })));
-
-  const navigation = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId('ticket:tag:page:' + (safePage - 1)).setLabel('Previous').setEmoji('⬅️').setStyle(ButtonStyle.Secondary).setDisabled(safePage === 0),
-    new ButtonBuilder().setCustomId('ticket:tag:page:' + (safePage + 1)).setLabel('Next').setEmoji('➡️').setStyle(ButtonStyle.Secondary).setDisabled(safePage >= pageCount - 1),
-    new ButtonBuilder().setCustomId('ticket:tag:cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
-  );
-
-  const payload = {
-    content: '🏷️ **Change Tag**\\nTags are subcategories of **' + department.name + '**. Changing a tag does not move the ticket to another Discord category.',
-    components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selector), navigation],
-  };
-  if (interaction.replied || interaction.deferred) await interaction.editReply(payload);
-  else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
-}
-
-async function changeTicketTag(interaction: StringSelectMenuInteraction): Promise<void> {
-  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
-    await replyError(interaction, '❌ This action can only be used inside a ticket.');
-    return;
-  }
-  const channel = interaction.channel as TextChannel;
-  const topic = channel.topic ?? '';
-  const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
-  if (!isTicketTopic(topic) || !isActiveTicketStatus(status)) {
-    await replyError(interaction, '❌ Only active tickets can have their tag changed.');
-    return;
-  }
-  const staff = getStaffContext(interaction, topic);
-  if (!staff.authorized) {
-    await replyError(interaction, '❌ Only configured staff or administrators can change the tag.');
-    return;
-  }
-  const departmentId = getField(topic, 'department');
-  const config = await getGuildConfig(interaction.guild.id);
-  const department = departmentId ? config.departments[departmentId] : undefined;
-  const tag = department?.tags?.[interaction.values[0]];
-  if (!department || !tag) {
-    await replyError(interaction, '❌ That tag is not valid for this department.');
-    return;
-  }
-  const oldTagId = getField(topic, 'tag');
-  if (oldTagId === tag.id) {
-    await interaction.update({ content: 'ℹ️ This ticket is already tagged **' + tag.name + '**.', components: [] });
-    return;
-  }
-
-  await interaction.deferUpdate();
-  const newTopic = setField(setField(topic, 'tag', tag.id), 'tags', tag.id);
-  try {
-    await runChannelMutation(channel, 'Ticket tag change', async () => {
-      await setChannelTopic(channel.id, newTopic, 'Update ticket tag metadata');
-    });
-    channel.topic = newTopic;
-    updateRuntimeTicketState(channel, newTopic, status);
-    await updatePersistedTicketMetadata(channel.id, { tagId: tag.id });
-    await updateMainMessage(channel, getField(newTopic, 'message'), status, newTopic);
-    await interaction.editReply({ content: '✅ Ticket tag changed to **' + tag.name + '**.', components: [] });
-    if (config.supportCategoryId) {
-      await logTicketEvent(interaction.guild, config.supportCategoryId, {
-        ticketNumber: getField(newTopic, 'number') ?? 'unknown',
-        event: 'ticket_tag_changed',
-        actor: interaction.user.tag,
-        actorId: interaction.user.id,
-        actorName: interaction.user.tag,
-        detail: 'Tag changed from ' + (department.tags?.[oldTagId ?? '']?.name ?? oldTagId ?? 'unknown') + ' to ' + tag.name + ' within department ' + department.name + '.',
-      });
-    }
-  } catch (error) {
-    console.error('❌ Ticket tag change failed:', error);
-    await interaction.editReply({ content: '❌ The ticket tag could not be changed.', components: [] }).catch(() => undefined);
-  }
-}
-
-async function showCreationTagSelector(interaction: ButtonInteraction, departmentId: string, page = 0): Promise<void> {
-  if (!interaction.guild) {
-    await replyError(interaction, '❌ This action must be used inside a server.');
-    return;
-  }
-  const config = await getGuildConfig(interaction.guild.id);
-  const department = config.departments[departmentId];
-  if (!department) {
-    await replyError(interaction, '❌ That department no longer exists.');
-    return;
-  }
-  const tags = Object.values(department.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
-  if (!tags.length) {
-    await replyError(interaction, '❌ This department has no tags configured. An administrator must add one first.');
-    return;
-  }
-  if (tags.length === 1) {
-    await showTicketCreationModal(interaction, departmentId, tags[0].id);
-    return;
-  }
-
-  const pageSize = 25;
-  const pageCount = Math.max(1, Math.ceil(tags.length / pageSize));
-  const safePage = Math.min(Math.max(page, 0), pageCount - 1);
-  const pageTags = tags.slice(safePage * pageSize, (safePage + 1) * pageSize);
-  const selector = new StringSelectMenuBuilder()
-    .setCustomId('ticket:create-tag:select:' + departmentId + ':' + safePage)
-    .setPlaceholder('Choose a ticket tag')
-    .setMinValues(1)
-    .setMaxValues(1)
-    .addOptions(pageTags.map((tag) => ({
-      label: tag.name.slice(0, 100),
-      value: tag.id,
-      description: 'Subcategory of ' + department.name,
-    })));
-
-  const navigation = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId('ticket:create-tag:page:' + departmentId + ':' + (safePage - 1)).setLabel('Previous').setEmoji('⬅️').setStyle(ButtonStyle.Secondary).setDisabled(safePage === 0),
-    new ButtonBuilder().setCustomId('ticket:create-tag:page:' + departmentId + ':' + (safePage + 1)).setLabel('Next').setEmoji('➡️').setStyle(ButtonStyle.Secondary).setDisabled(safePage >= pageCount - 1),
-    new ButtonBuilder().setCustomId('ticket:create-tag:cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
-  );
-  await interaction.reply({
-    content: '🏷️ **Choose a tag for your ' + department.name + ' ticket**\\nThe tag is a subcategory used for accurate routing and later AI categorization.',
-    components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selector), navigation],
-    flags: MessageFlags.Ephemeral,
-  });
-}
-
-async function handleTicketTagSelectionForCreation(interaction: StringSelectMenuInteraction): Promise<void> {
-  const parts = interaction.customId.split(':');
-  const departmentId = parts[2];
-  const tagId = interaction.values[0];
-  const config = interaction.guild ? await getGuildConfig(interaction.guild.id) : null;
-  if (!config?.departments[departmentId]?.tags?.[tagId]) {
-    await replyError(interaction, '❌ That ticket tag no longer exists.');
-    return;
-  }
-  await showTicketCreationModal(interaction, departmentId, tagId);
-}
-
-async function showTicketCreationModal(
-  interaction: ButtonInteraction | StringSelectMenuInteraction,
-  departmentId: string,
-  tagId: string,
-): Promise<void> {
-  if (!interaction.guild) {
-    await replyError(interaction, '❌ This action can only be used inside a server.');
-    return;
-  }
-  try {
-    const config = await withTimeout(getGuildConfig(interaction.guild.id), DISCORD_OPERATION_TIMEOUT_MS, 'Guild configuration load');
-    const department = config.departments[departmentId];
-    const tag = department?.tags?.[tagId];
-    if (!department || !tag) {
-      await replyError(interaction, '❌ This department/tag combination no longer exists. Please refresh the support panel.');
-      return;
-    }
-
-    const modal = new ModalBuilder()
-      .setCustomId('ticket:modal:' + departmentId + ':' + tagId)
-      .setTitle((department.name + ' • ' + tag.name).slice(0, 45));
-
-    const subjectInput = new TextInputBuilder()
-      .setCustomId('subject')
-      .setLabel('What do you need help with?')
-      .setPlaceholder('Briefly describe your issue')
-      .setStyle(TextInputStyle.Short)
-      .setRequired(true)
-      .setMaxLength(100);
-
-    const descriptionInput = new TextInputBuilder()
-      .setCustomId('description')
-      .setLabel('Describe your issue (up to 4000 characters)')
-      .setPlaceholder('Give us the details we need to help you...')
-      .setStyle(TextInputStyle.Paragraph)
-      .setRequired(true)
-      .setMaxLength(4000);
-
-    modal.addComponents(
-      new ActionRowBuilder<TextInputBuilder>().addComponents(subjectInput),
-      new ActionRowBuilder<TextInputBuilder>().addComponents(descriptionInput),
-    );
-    await interaction.showModal(modal);
-  } catch (error) {
-    console.error('❌ Failed to show ticket creation form:', error);
-    await replyError(interaction, '❌ SupportForge could not open the ticket creation form.');
-  }
-}
-
 async function handlePanelButton(
   interaction: ButtonInteraction,
 ): Promise<void> {
   const id =
     interaction.customId;
 
-    if (
+  if (id.startsWith('ticket:routing-tag:page:')) {
+    const page = Number(id.slice('ticket:routing-tag:page:'.length));
+    await interaction.deferUpdate();
+    await renderRoutingTagSelector(interaction, Number.isInteger(page) ? page : 0);
+    return;
+  }
+
+  if (id === 'ticket:routing-tag:cancel') {
+    await interaction.update({ content: 'Routing tag selection cancelled.', components: [] });
+    return;
+  }
+
+  if (
     id ===
     'ticket:close'
   ) {
@@ -2766,8 +2697,6 @@ async function handlePanelButton(
     id ===
       'ticket:panel:priority' ||
     id ===
-      'ticket:panel:department' ||
-    id ===
       'ticket:panel:tag' ||
     id ===
       'ticket:panel:note'
@@ -2853,11 +2782,11 @@ async function handlePanelButton(
             input,
           ),
       );
-    } else if (id === 'ticket:panel:department') {
-      await renderDepartmentSelector(interaction, 0);
-      return;
-    } else if (id === 'ticket:panel:tag') {
-      await renderTicketTagSelector(interaction, 0);
+    } else if (
+      id ===
+      'ticket:panel:tag'
+    ) {
+      await showRoutingTagSelector(interaction);
       return;
     } else {
       modal
@@ -2907,6 +2836,9 @@ async function handlePanelButton(
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/* Panel modal handlers                                                       */
+/* -------------------------------------------------------------------------- */
 
 async function handlePanelModal(
   interaction: ModalSubmitInteraction,
@@ -3200,6 +3132,10 @@ async function handlePanelModal(
     }
 
     /* ---------------------------------------------------------------------- */
+    /* Tag                                                                    */
+    /* ---------------------------------------------------------------------- */
+
+    /* ---------------------------------------------------------------------- */
     /* Internal note                                                          */
     /* ---------------------------------------------------------------------- */
 
@@ -3301,7 +3237,6 @@ async function handlePanelModal(
   }
 }
 
-
 /* -------------------------------------------------------------------------- */
 /* Utility                                                                    */
 /* -------------------------------------------------------------------------- */
@@ -3327,16 +3262,8 @@ export async function handleTicketInteraction(
 ): Promise<void> {
   try {
     if (interaction.isStringSelectMenu()) {
-      if (interaction.customId.startsWith('ticket:department:select:')) {
-        await changeTicketDepartment(interaction);
-        return;
-      }
-      if (interaction.customId.startsWith('ticket:tag:select:')) {
-        await changeTicketTag(interaction);
-        return;
-      }
-      if (interaction.customId.startsWith('ticket:create-tag:select:')) {
-        await handleTicketTagSelectionForCreation(interaction);
+      if (interaction.customId.startsWith('ticket:routing-tag:select:')) {
+        await changeTicketRoutingTag(interaction);
         return;
       }
     }
@@ -3374,7 +3301,10 @@ export async function handleTicketInteraction(
           return;
         }
 
-        await showCreationTagSelector(interaction, departmentId);
+        await showTicketCreationModal(
+          interaction,
+          departmentId,
+        );
 
         return;
       }
@@ -3445,10 +3375,25 @@ export async function handleTicketInteraction(
        *
        * ticket:modal:<departmentId>
        */
-      if (interaction.customId.startsWith('ticket:modal:')) {
-        const parts = interaction.customId.split(':');
-        const departmentId = parts[2] ?? '';
-        const tagId = parts[3] ?? '';
+      if (
+        interaction.customId ===
+        'ticket:modal'
+      ) {
+        let departmentId =
+          '';
+
+        try {
+          departmentId =
+            interaction.fields
+              .getTextInputValue(
+                'department',
+              );
+        } catch {
+          /*
+           * Some existing modal configurations encode the department
+           * in the custom ID instead.
+           */
+        }
 
         if (!departmentId) {
           await replyError(
@@ -3461,10 +3406,30 @@ export async function handleTicketInteraction(
         await createTicket(
           interaction,
           departmentId,
-          tagId,
         );
 
         return;
+      }
+
+      if (
+        interaction.customId.startsWith(
+          'ticket:modal:',
+        )
+      ) {
+        const departmentId =
+          interaction.customId.slice(
+            'ticket:modal:'.length,
+          );
+
+        if (
+          departmentId
+        ) {
+          await createTicket(
+            interaction,
+            departmentId,
+          );
+          return;
+        }
       }
 
       /*
