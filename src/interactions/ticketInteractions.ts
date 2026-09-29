@@ -2456,6 +2456,18 @@ async function handlePanelButton(
   const id =
     interaction.customId;
 
+  if (id.startsWith('ticket:department:page:')) {
+    const page = Number(id.slice('ticket:department:page:'.length));
+    await interaction.deferUpdate();
+    await renderDepartmentSelector(interaction, Number.isInteger(page) ? page : 0);
+    return;
+  }
+
+  if (id === 'ticket:department:cancel') {
+    await interaction.update({ content: 'Department selection cancelled.', components: [] });
+    return;
+  }
+
   if (id.startsWith('ticket:routing-tag:page:')) {
     const page = Number(id.slice('ticket:routing-tag:page:'.length));
     await interaction.deferUpdate();
