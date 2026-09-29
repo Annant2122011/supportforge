@@ -178,48 +178,56 @@ export async function ensureSettingsChannel(
   return channel;
 }
 
-async function refreshSettingsDashboard(
-  channel: TextChannel,
-  settings?: Awaited<ReturnType<typeof getAdvancedSettings>>,
-): Promise<void> {
-  const resolvedSettings = settings ?? (await getAdvancedSettings(channel.guild.id));
-  const config = await getGuildConfig(channel.guild.id);
-  const departmentCount = Object.keys(config.departments).length;
+export function buildSettingsDashboardEmbed(
+  settings: Awaited<ReturnType<typeof getAdvancedSettings>>,
+  departmentCount: number,
+): EmbedBuilder {
+  const tagCount = Object.keys(settings.customTags).length;
+  const priorityRoleCount = Object.keys(settings.priorityRoles).length;
 
-  const embed = new EmbedBuilder()
+  const closed =
+    settings.retention.closedDays === 0
+      ? 'Never'
+      : settings.retention.closedDays + ' days';
+  const archive =
+    settings.retention.archiveDays === 0
+      ? 'Never'
+      : settings.retention.archiveDays + ' days';
+
+  const claimed = settings.statusCategories.claimedCategoryId
+    ? 'Configured'
+    : 'Not configured';
+  const pending = settings.statusCategories.pendingCategoryId
+    ? 'Configured'
+    : 'Not configured';
+
+  return new EmbedBuilder()
     .setTitle(SETTINGS_TITLE)
     .setDescription(
-      'Administrative control center for SupportForge.\n\n' +
-        '**Button-driven configuration:** select a section, make a change, and return to this dashboard.\n' +
-        'Every saved Settings action records the administrator and timestamp in the audit log.\n\n' +
-        'Use **Refresh** when you want to re-read the latest persisted configuration.',
+      'Administrative control center for SupportForge.\n' +
+        'Button-driven configuration • saved actions are audited with administrator + timestamp.\n' +
+        'Use **Refresh** to re-read the latest persisted configuration.',
     )
     .addFields(
       {
         name: '🎛️ Panel',
         value:
-          (resolvedSettings.panelActivity.enabled ? 'Enabled' : 'Disabled') +
+          (settings.panelActivity.enabled ? 'Enabled' : 'Disabled') +
           ' • ' +
-          resolvedSettings.panelActivity.visualLineBudget +
-          ' visual lines • ' +
-          resolvedSettings.panelActivity.messageBudget +
-          ' message safety cap',
-        inline: false,
+          settings.panelActivity.visualLineBudget +
+          ' lines • ' +
+          settings.panelActivity.messageBudget +
+          ' message cap',
+        inline: true,
       },
       {
         name: '🎟️ Ticket defaults',
-        value:
-          'Default priority: **' +
-          resolvedSettings.ticketDefaults.priority +
-          '**',
+        value: 'Priority: **' + settings.ticketDefaults.priority + '**',
         inline: true,
       },
       {
         name: '🏷️ Custom tags',
-        value:
-          '**' +
-          Object.keys(resolvedSettings.customTags).length +
-          '** configured',
+        value: '**' + tagCount + '** configured',
         inline: true,
       },
       {
@@ -229,33 +237,48 @@ async function refreshSettingsDashboard(
       },
       {
         name: '🎨 Priority rules',
-        value:
-          '**' +
-          Object.keys(resolvedSettings.priorityRoles).length +
-          '** role(s) explicitly created',
+        value: '**' + priorityRoleCount + '** role(s) explicitly created',
         inline: true,
       },
       {
         name: '🧹 Retention',
-        value:
-          'Closed: **' +
-          (resolvedSettings.retention.closedDays || 'Never') +
-          '** • Archive: **' +
-          (resolvedSettings.retention.archiveDays || 'Never') +
-          '**',
-        inline: false,
+        value: 'Closed: **' + closed + '** • Archive: **' + archive + '**',
+        inline: true,
       },
       {
         name: '🎨 Appearance',
-        value:
-          'Panel title: **' +
-          resolvedSettings.appearance.panelTitle.slice(0, 80) +
-          '**',
+        value: 'Panel title: **' + settings.appearance.panelTitle.slice(0, 80) + '**',
         inline: false,
       },
       {
         name: '📋 Configuration snapshot',
-        value: buildSettingsSummary(resolvedSettings).slice(0, 1024),
+        value:
+          '**Panel**: Automatic repositioning – ' +
+          (settings.panelActivity.enabled ? 'Enabled' : 'Disabled') +
+          '; Visual budget – ' +
+          settings.panelActivity.visualLineBudget +
+          ' lines; Message safety cap – ' +
+          settings.panelActivity.messageBudget +
+          '\n' +
+          '**Ticket defaults**: Default priority – ' +
+          settings.ticketDefaults.priority +
+          '\n' +
+          '**Priority roles**: Explicitly created roles – ' +
+          priorityRoleCount +
+          '\n' +
+          '**Custom tags**: Configured tags – ' +
+          tagCount +
+          (tagCount ? '' : ' (none)') +
+          '\n' +
+          '**Retention**: Closed – ' +
+          closed +
+          '; Archived – ' +
+          archive +
+          '\n' +
+          '**Optional status categories**: Claimed tickets – ' +
+          claimed +
+          '; Pending tickets – ' +
+          pending,
         inline: false,
       },
     )
@@ -263,17 +286,89 @@ async function refreshSettingsDashboard(
       text: 'SupportForge • Advanced Ticket Configuration',
     })
     .setTimestamp();
+}
 
-  const recent = await channel.messages.fetch({ limit: 50 }).catch(() => null);
-  const dashboards = recent
-    ? [...recent.values()].filter(
-        (message) =>
-          message.author.id === channel.client.user?.id &&
-          message.embeds.some((item) => item.title === SETTINGS_TITLE),
+const SETTINGS_MESSAGE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function isSettingsDashboardMessage(message: {
+  author: { id: string };
+  embeds: readonly { title?: string | null; footer?: { text?: string | null } | null }[];
+  createdTimestamp: number;
+}, botId: string): boolean {
+  if (message.author.id !== botId) return false;
+
+  return message.embeds.some(
+    (embed) =>
+      embed.title === SETTINGS_TITLE ||
+      embed.footer?.text?.startsWith('SupportForge • Advanced Ticket Configuration'),
+  );
+}
+
+function isLegacySmallSettingsDashboard(message: {
+  embeds: readonly { title?: string | null; footer?: { text?: string | null } | null }[];
+}): boolean {
+  return message.embeds.some(
+    (embed) =>
+      embed.title === SETTINGS_TITLE &&
+      embed.footer?.text?.startsWith('SupportForge • Select a section to configure it'),
+  );
+}
+
+async function pruneSettingsHistory(channel: TextChannel): Promise<void> {
+  const botId = channel.client.user?.id;
+  if (!botId) return;
+
+  const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+  if (!messages) return;
+
+  /*
+   * Legacy small dashboards are intentionally replaced by the complete
+   * dashboard, so they may be removed immediately. Everything else is
+   * retained for seven days before cleanup. User-authored messages are never
+   * deleted by this maintenance task.
+   */
+  const now = Date.now();
+  const stale = [...messages.values()].filter(
+    (message) =>
+      isSettingsDashboardMessage(message, botId) &&
+      !isLegacySmallSettingsDashboard(message) &&
+      now - message.createdTimestamp >= SETTINGS_MESSAGE_MAX_AGE_MS,
+  );
+
+  await Promise.all(
+    stale.map((message) => message.delete().catch(() => undefined)),
+  );
+}
+
+async function refreshSettingsDashboard(
+  channel: TextChannel,
+  settings?: Awaited<ReturnType<typeof getAdvancedSettings>>,
+): Promise<void> {
+  const resolvedSettings =
+    settings ?? (await getAdvancedSettings(channel.guild.id));
+  const config = await getGuildConfig(channel.guild.id);
+  const departmentCount = Object.keys(config.departments).length;
+  const embed = buildSettingsDashboardEmbed(
+    resolvedSettings,
+    departmentCount,
+  );
+
+  const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+  const botId = channel.client.user?.id;
+
+  const dashboards = recent && botId
+    ? [...recent.values()].filter((message) =>
+        isSettingsDashboardMessage(message, botId),
       )
     : [];
 
-  const dashboard = dashboards[0];
+  /*
+   * The current dashboard is intentionally touched, so it is updated in
+   * place. We do not sweep unrelated messages merely because Refresh was
+   * pressed. That history remains available for up to a week.
+   */
+  const dashboard = dashboards
+    .sort((a, b) => b.createdTimestamp - a.createdTimestamp)[0];
 
   if (dashboard) {
     await dashboard.edit({
@@ -281,15 +376,27 @@ async function refreshSettingsDashboard(
       components: buildSettingsDashboardComponents(),
     });
 
-    for (const duplicate of dashboards.slice(1)) {
-      await duplicate.delete().catch(() => undefined);
-    }
+    /*
+     * The old compact dashboard format is explicitly obsolete. Remove only
+     * those legacy settings blocks now; ordinary history is left alone.
+     */
+    await Promise.all(
+      dashboards
+        .filter(
+          (message) =>
+            message.id !== dashboard.id &&
+            isLegacySmallSettingsDashboard(message),
+        )
+        .map((message) => message.delete().catch(() => undefined)),
+    );
   } else {
     await channel.send({
       embeds: [embed],
       components: buildSettingsDashboardComponents(),
     });
   }
+
+  await pruneSettingsHistory(channel);
 }
 
 export async function refreshSettingsChannel(guild: Guild): Promise<void> {

@@ -34,6 +34,7 @@ import {
   buildSettingsDashboardComponents,
   refreshSettingsChannel,
   ensureSettingsChannel,
+  buildSettingsDashboardEmbed,
 } from '../services/settingsChannelService';
 
 import {
@@ -284,9 +285,27 @@ async function reject(interaction: ButtonInteraction | StringSelectMenuInteracti
 function backButton(): ButtonBuilder {
   return new ButtonBuilder()
     .setCustomId('sf:settings:home')
-    .setLabel('Back to Settings')
+    .setLabel('Restore to Settings')
     .setEmoji('↩️')
     .setStyle(ButtonStyle.Secondary);
+}
+
+async function restoreSettingsHome(
+  interaction: SettingsViewInteraction,
+): Promise<void> {
+  const guild = interaction.guild;
+  if (!guild) return;
+
+  /*
+   * A settings sub-view is disposable. Do not let the temporary response
+   * resurrect an older settings snapshot. Remove the response that triggered
+   * Restore to Settings, then refresh the single persistent dashboard.
+   */
+  if (interaction.replied || interaction.deferred) {
+    await interaction.deleteReply().catch(() => undefined);
+  }
+
+  await refreshSettingsChannel(guild);
 }
 
 function isEphemeralSettingsMessage(interaction: ButtonInteraction): boolean {
@@ -339,28 +358,12 @@ async function auditSettingsAction(
 async function showHome(interaction: SettingsViewInteraction): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
   const config = await getGuildConfig(interaction.guild!.id);
-  const departments = Object.values(config.departments);
-  const routed = departments.filter((department) => Boolean(department.categoryId)).length;
 
-  await renderSettingsView(interaction, [
-    new EmbedBuilder()
-      .setTitle('⚙️ SupportForge Settings')
-      .setDescription(
-        '**Administrative control center**\n' +
-        'Use the buttons below to configure SupportForge without leaving Discord.\n\n' +
-        'Changes are saved immediately and this dashboard can be refreshed at any time.',
-      )
-      .addFields(
-        { name: '🎛️ Panel', value: (settings.panelActivity.enabled ? '🟢 Enabled' : '⚪ Disabled') + `\n${settings.panelActivity.visualLineBudget} visual lines • ${settings.panelActivity.messageBudget} message cap`, inline: true },
-        { name: '🎟️ Defaults', value: `Priority: **${settings.ticketDefaults.priority}**`, inline: true },
-        { name: '🏷️ Tags', value: `**${Object.keys(settings.customTags).length}** configured`, inline: true },
-        { name: '📂 Departments', value: `**${departments.length}** configured\n${routed} with category`, inline: true },
-        { name: '🧹 Retention', value: `Closed: **${settings.retention.closedDays || 'Never'}**\nArchive: **${settings.retention.archiveDays || 'Never'}**`, inline: true },
-        { name: '🗄️ Storage', value: `Closed: ${settings.closedCategoryId ? '✅' : '❌'}\nArchive: ${settings.archiveCategoryId ? '✅' : '❌'}`, inline: true },
-      )
-      .setFooter({ text: 'SupportForge • Select a section to configure it' })
-      .setTimestamp(),
-  ], buildSettingsDashboardComponents());
+  await renderSettingsView(
+    interaction,
+    [buildSettingsDashboardEmbed(settings, Object.keys(config.departments).length)],
+    buildSettingsDashboardComponents(),
+  );
 }
 
 async function showPanelSettings(interaction: ButtonInteraction): Promise<void> {
@@ -651,7 +654,7 @@ export async function handleSettingsInteraction(
     const id = interaction.customId;
 
     if (id === 'sf:settings:home') {
-      await showHome(interaction);
+      await restoreSettingsHome(interaction);
       return true;
     }
 
