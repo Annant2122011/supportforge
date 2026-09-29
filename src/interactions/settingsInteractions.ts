@@ -862,7 +862,7 @@ export async function handleSettingsInteraction(
       if (Object.keys(department.tags ?? {}).length <= 1) { await reject(interaction, '❌ Every department must keep at least one tag.'); return true; }
       const remainingTag = Object.values(department.tags ?? {}).find((item) => item.id !== tagId);
       if (!remainingTag) { await reject(interaction, '❌ A replacement tag could not be found.'); return true; }
-      const affected = [...guild.channels.cache.values()].filter((channel) => channel.type === ChannelType.GuildText && channel.topic?.startsWith('supportforge:ticket') && getField(channel.topic, 'department') === departmentId && getField(channel.topic, 'tag') === tagId);
+      const affected = [...guild.channels.cache.values()].filter((channel): channel is import('discord.js').TextChannel => channel.type === ChannelType.GuildText && channel.topic?.startsWith('supportforge:ticket') && getField(channel.topic, 'department') === departmentId && getField(channel.topic, 'tag') === tagId);
       await interaction.deferUpdate();
       for (const channel of affected) {
         const nextTopic = getField(channel.topic ?? '', 'tag') === tagId ? channel.topic!.replace(/(?:^|\s)tag=[^\s]*/, ' tag=' + remainingTag.id).replace(/(?:^|\s)tags=[^\s]*/, ' tags=' + remainingTag.id).replace(/\s{2,}/g, ' ').trim() : channel.topic;
