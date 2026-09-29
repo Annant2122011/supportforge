@@ -4,12 +4,14 @@ import {
   EmbedBuilder,
   MessageFlags,
   ModalBuilder,
+  StringSelectMenuBuilder,
   type Message,
   PermissionFlagsBits,
   TextInputBuilder,
   TextInputStyle,
   type ButtonInteraction,
   type ModalSubmitInteraction,
+  type StringSelectMenuInteraction,
   type TextChannel,
 } from 'discord.js';
 
@@ -23,6 +25,7 @@ import {
 import { generateTranscript } from '../services/transcriptService';
 
 import {
+  setChannelParent,
   setChannelPermissionOverwrite,
   setChannelTopic,
 } from '../services/discordChannelService';
@@ -299,6 +302,7 @@ function clearRuntimeTicketState(
 function isAdmin(
   interaction:
     | ButtonInteraction
+    | StringSelectMenuInteraction
     | ModalSubmitInteraction,
 ): boolean {
   return Boolean(
@@ -311,6 +315,7 @@ function isAdmin(
 function getStaffContext(
   interaction:
     | ButtonInteraction
+    | StringSelectMenuInteraction
     | ModalSubmitInteraction,
   topic: string,
 ) {
@@ -380,6 +385,7 @@ function getStaffContext(
 async function replyError(
   interaction:
     | ButtonInteraction
+    | StringSelectMenuInteraction
     | ModalSubmitInteraction,
   content: string,
 ): Promise<void> {
@@ -415,6 +421,7 @@ async function replyError(
 async function safeDeferReply(
   interaction:
     | ButtonInteraction
+    | StringSelectMenuInteraction
     | ModalSubmitInteraction,
 ): Promise<boolean> {
   if (
@@ -913,7 +920,7 @@ async function createTicket(
       `department=${departmentId}`,
       `staff=${department.staffRoleId ?? 'none'}`,
       `priority=${advancedSettings.ticketDefaults.priority}`,
-      'tags=',
+      `tags=${departmentId}`,
       'users=',
       'claimed_by=',
       `subject=${encodeURIComponent(
@@ -2309,11 +2316,178 @@ async function showTicketHistory(
   }
 }
 
+async function renderRoutingTagSelector(
+  interaction: ButtonInteraction | StringSelectMenuInteraction,
+  page: number,
+): Promise<void> {
+  if (!interaction.guild) {
+    await replyError(interaction, '❌ This action must be used inside a server.');
+    return;
+  }
+
+  const channel =
+    interaction.channel?.type === ChannelType.GuildText
+      ? interaction.channel as TextChannel
+      : undefined;
+
+  if (!channel || !isTicketTopic(channel.topic ?? '')) {
+    await replyError(interaction, '❌ Routing tags can only be changed inside a ticket.');
+    return;
+  }
+
+  const config = await getGuildConfig(interaction.guild.id);
+  const departments = Object.values(config.departments)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  if (!departments.length) {
+    await replyError(interaction, '❌ No routing tags/departments are configured.');
+    return;
+  }
+
+  const pageSize = 25;
+  const pageCount = Math.max(1, Math.ceil(departments.length / pageSize));
+  const safePage = Math.min(Math.max(page, 0), pageCount - 1);
+  const currentDepartmentId = getField(channel.topic ?? '', 'department');
+  const pageDepartments = departments.slice(safePage * pageSize, (safePage + 1) * pageSize);
+
+  const selector = new StringSelectMenuBuilder()
+    .setCustomId('ticket:routing-tag:select:' + safePage)
+    .setPlaceholder('Choose the one routing tag for this ticket')
+    .setMinValues(1)
+    .setMaxValues(1)
+    .addOptions(pageDepartments.map((department) => ({
+      label: department.name.slice(0, 100),
+      value: department.id,
+      description: department.staffRoleId
+        ? 'Routes to ' + department.name + ' staff'
+        : 'Routes to ' + department.name + ' administrators',
+      default: department.id === currentDepartmentId,
+    })));
+
+  const navigation = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('ticket:routing-tag:page:' + (safePage - 1)).setLabel('Previous').setEmoji('⬅️').setStyle(ButtonStyle.Secondary).setDisabled(safePage === 0),
+    new ButtonBuilder().setCustomId('ticket:routing-tag:page:' + (safePage + 1)).setLabel('Next').setEmoji('➡️').setStyle(ButtonStyle.Secondary).setDisabled(safePage >= pageCount - 1),
+    new ButtonBuilder().setCustomId('ticket:routing-tag:cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+  );
+
+  const payload = {
+    content:
+      '🏷️ **Routing Tag / Department**\n' +
+      'Every ticket has exactly **one** routing tag. Selecting one moves the ticket to that department and updates its staff routing.\n\n' +
+      `Page ${safePage + 1}/${pageCount} • ${departments.length} configured tag(s)`,
+    components: [
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selector),
+      navigation,
+    ],
+  };
+
+  if (interaction.replied || interaction.deferred) {
+    await interaction.editReply(payload);
+  } else {
+    await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
+  }
+}
+
+async function showRoutingTagSelector(interaction: ButtonInteraction): Promise<void> {
+  await renderRoutingTagSelector(interaction, 0);
+}
+
+async function changeTicketRoutingTag(interaction: StringSelectMenuInteraction): Promise<void> {
+  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
+    await replyError(interaction, '❌ This action can only be used inside a ticket.');
+    return;
+  }
+
+  const channel = interaction.channel as TextChannel;
+  const topic = channel.topic ?? '';
+  const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
+
+  if (!isTicketTopic(topic) || !isActiveTicketStatus(status)) {
+    await replyError(interaction, '❌ Only active tickets can have their routing tag changed.');
+    return;
+  }
+
+  const staff = getStaffContext(interaction, topic);
+  if (!staff.authorized) {
+    await replyError(interaction, '❌ Only configured staff or administrators can change the routing tag.');
+    return;
+  }
+
+  const departmentId = interaction.values[0];
+  const config = await getGuildConfig(interaction.guild.id);
+  const department = config.departments[departmentId];
+  if (!department) {
+    await replyError(interaction, '❌ That routing tag no longer exists. Refresh the selector and try again.');
+    return;
+  }
+
+  const oldDepartmentId = getField(topic, 'department');
+  if (oldDepartmentId === departmentId) {
+    await interaction.update({ content: 'ℹ️ This ticket is already routed to **' + department.name + '**.', components: [] });
+    return;
+  }
+
+  await interaction.deferUpdate();
+  try {
+    const oldDepartment = oldDepartmentId ? config.departments[oldDepartmentId] : undefined;
+    const departmentCategory = await ensureDepartmentCategory(interaction.guild, department);
+    const newTopic = setField(setField(setField(topic, 'department', department.id), 'staff', department.staffRoleId ?? 'none'), 'tags', department.id);
+
+    await runChannelMutation(channel, 'Routing tag channel move', async () => {
+      await setChannelParent(channel.id, departmentCategory.id, 'Move ticket to routing tag category');
+
+      if (oldDepartment?.staffRoleId && oldDepartment.staffRoleId !== department.staffRoleId) {
+        await setChannelPermissionOverwrite(channel.id, oldDepartment.staffRoleId, [], [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory], 0, 'Remove previous department staff access');
+      }
+
+      if (department.staffRoleId) {
+        await setChannelPermissionOverwrite(channel.id, department.staffRoleId, [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks], [], 0, 'Grant new department staff access');
+      }
+
+      await setChannelTopic(channel.id, newTopic, 'Update ticket routing tag metadata');
+    });
+
+    channel.topic = newTopic;
+    updateRuntimeTicketState(channel, newTopic, status);
+    await updateGuildConfig(interaction.guild.id, (current) => {
+      const currentDepartment = current.departments[department.id];
+      if (currentDepartment && !currentDepartment.categoryId) currentDepartment.categoryId = departmentCategory.id;
+    });
+    await updateMainMessage(channel, getField(newTopic, 'message'), status, newTopic);
+    await interaction.editReply({ content: '✅ Routing tag changed to **' + department.name + '**. The ticket was moved to ' + departmentCategory.toString() + ' and staff routing was updated.', components: [] });
+
+    if (config.supportCategoryId) {
+      await logTicketEvent(interaction.guild, config.supportCategoryId, {
+        ticketNumber: getField(newTopic, 'number') ?? 'unknown',
+        event: 'ticket_department_changed',
+        actor: interaction.user.tag,
+        actorId: interaction.user.id,
+        actorName: interaction.user.tag,
+        detail: 'Routing tag changed from ' + (oldDepartment?.name ?? oldDepartmentId ?? 'unknown') + ' to ' + department.name + '. Ticket moved to ' + departmentCategory.name + '.',
+      });
+    }
+  } catch (error) {
+    console.error('❌ Routing tag change failed:', error);
+    await interaction.editReply({ content: '❌ The routing tag could not be changed. The ticket was left unchanged where possible.', components: [] }).catch(() => undefined);
+  }
+}
 async function handlePanelButton(
   interaction: ButtonInteraction,
 ): Promise<void> {
   const id =
     interaction.customId;
+
+  if (id.startsWith('ticket:routing-tag:page:')) {
+    const page = Number(id.slice('ticket:routing-tag:page:'.length));
+    await interaction.deferUpdate();
+    await renderRoutingTagSelector(interaction, Number.isInteger(page) ? page : 0);
+    return;
+  }
+
+  if (id === 'ticket:routing-tag:cancel') {
+    await interaction.update({ content: 'Routing tag selection cancelled.', components: [] });
+    return;
+  }
 
   if (
     id ===
@@ -2606,41 +2780,8 @@ async function handlePanelButton(
       id ===
       'ticket:panel:tag'
     ) {
-      modal
-        .setCustomId(
-          'ticket:panel-modal:tag',
-        )
-        .setTitle(
-          'Add Ticket Tag',
-        );
-
-      const input =
-        new TextInputBuilder()
-          .setCustomId(
-            'tag',
-          )
-          .setLabel(
-            'Tag',
-          )
-          .setPlaceholder(
-            'billing, bug, refund...',
-          )
-          .setStyle(
-            TextInputStyle.Short,
-          )
-          .setRequired(
-            true,
-          )
-          .setMaxLength(
-            40,
-          );
-
-      modal.addComponents(
-        new ActionRowBuilder<TextInputBuilder>()
-          .addComponents(
-            input,
-          ),
-      );
+      await showRoutingTagSelector(interaction);
+      return;
     } else {
       modal
         .setCustomId(
@@ -2988,105 +3129,6 @@ async function handlePanelModal(
     /* Tag                                                                    */
     /* ---------------------------------------------------------------------- */
 
-    if (
-      id ===
-      'ticket:panel-modal:tag'
-    ) {
-      const tag =
-        interaction.fields
-          .getTextInputValue(
-            'tag',
-          )
-          .trim()
-          .toLowerCase();
-
-      if (!tag) {
-        await interaction.editReply(
-          '❌ Tag cannot be empty.',
-        );
-        return;
-      }
-
-      const tags =
-        (
-          getField(
-            state.topic,
-            'tags',
-          ) ?? ''
-        )
-          .split(',')
-          .map((value) =>
-            value.trim(),
-          )
-          .filter(Boolean);
-
-      if (
-        !tags.includes(
-          tag,
-        )
-      ) {
-        tags.push(tag);
-      }
-
-      newTopic =
-        setField(
-          newTopic,
-          'tags',
-          tags.join(','),
-        );
-
-      await runChannelMutation(
-        channel,
-        'Tag update',
-        async () => {
-          await setChannelTopic(
-            channel.id,
-            newTopic,
-            `SupportForge: tag update`,
-          );
-          channel.topic = newTopic;
-        },
-      );
-
-      updateRuntimeTicketState(
-        channel,
-        newTopic,
-        state.status,
-      );
-
-      await interaction.editReply(
-        `✅ Added ticket tag **${tag}**.`,
-      );
-
-      const tagConfig = await getGuildConfig(channel.guild.id);
-      if (tagConfig.supportCategoryId) {
-        await logTicketEvent(
-          channel.guild,
-          tagConfig.supportCategoryId,
-          {
-            ticketNumber: getField(newTopic, 'number') ?? 'unknown',
-            event: 'ticket_tag_added',
-            actor: interaction.user.tag,
-            actorId: interaction.user.id,
-            actorName: interaction.user.tag,
-            detail: 'Added ticket tag ' + tag + '.',
-          },
-        );
-      }
-
-      void updateMainMessage(
-        channel,
-        getField(
-          newTopic,
-          'message',
-        ),
-        state.status,
-        newTopic,
-      );
-
-      return;
-    }
-
     /* ---------------------------------------------------------------------- */
     /* Internal note                                                          */
     /* ---------------------------------------------------------------------- */
@@ -3209,9 +3251,17 @@ function capitalize(
 export async function handleTicketInteraction(
   interaction:
     | ButtonInteraction
+    | StringSelectMenuInteraction
     | ModalSubmitInteraction,
 ): Promise<void> {
   try {
+    if (interaction.isStringSelectMenu()) {
+      if (interaction.customId.startsWith('ticket:routing-tag:select:')) {
+        await changeTicketRoutingTag(interaction);
+        return;
+      }
+    }
+
     if (
       interaction.isButton()
     ) {
