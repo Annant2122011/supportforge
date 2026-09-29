@@ -52,6 +52,8 @@ function isSupportForgeChannel(channel: GuildBasedChannel, configuredIds: Set<st
     return true;
   }
 
+  if (channel.parentId && configuredCategoryIds.has(channel.parentId)) return true;
+
   if (
     channel.type === ChannelType.GuildCategory &&
     SUPPORTFORGE_CATEGORY_PREFIXES.some((prefix) =>
@@ -102,16 +104,16 @@ export async function performFactoryReset(guild: Guild): Promise<void> {
       isSupportForgeChannel(channel, configuredIds, configuredCategoryIds),
     );
 
-  // Delete child channels first, then the categories containing them.
-  const childChannels = targets.filter(
+    // Delete child channels first, then the categories containing them.
+    const childChannels = targets.filter(
     (channel) => channel.type !== ChannelType.GuildCategory,
   );
 
-  const categories = targets.filter(
+    const categories = targets.filter(
     (channel) => channel.type === ChannelType.GuildCategory,
   );
 
-  for (const channel of [...childChannels, ...categories]) {
+    for (const channel of [...childChannels, ...categories]) {
     await channel
       .delete('SupportForge factory reset: remove all SupportForge channels and messages')
       .catch((error) => {
@@ -119,22 +121,16 @@ export async function performFactoryReset(guild: Guild): Promise<void> {
       });
   }
 
-  await resetConfigState();
-  await resetAdvancedSettingsState();
-  await resetTicketPersistenceState();
-  /*
-   * Keep the audit database intact. A factory reset removes the Discord
-   * surface and configuration, but historical audit evidence is useful for
-   * recovery and must survive so a later /supportforge setup can rebuild the
-   * audit channel and its summaries.
-   */
+    await resetConfigState();
+    await resetAdvancedSettingsState();
+    await resetTicketPersistenceState();
   /*
    * Audit history is deliberately NOT reset. The Discord audit channel is
    * deleted with the rest of SupportForge, but data/audit-log.json and its
    * backup remain intact for future restoration and historical review.
    */
 
-  for (const filename of [
+    for (const filename of [
     'config.json',
     'advanced-settings.json',
     'tickets.json',
