@@ -10,6 +10,12 @@ export interface TagConfig {
   createdAt: string;
 }
 
+export interface TagConfig {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
 export interface DepartmentConfig {
   id: string;
   name: string;
@@ -109,6 +115,17 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
   for (const department of Object.values(current.guilds[guildId].departments)) {
     if (department.categoryId === undefined) {
       department.categoryId = null;
+      migrated = true;
+    }
+    if (!department.tags) {
+      const tagId = newTagId();
+      department.tags = {
+        [tagId]: {
+          id: tagId,
+          name: 'General',
+          createdAt: department.createdAt ?? new Date().toISOString(),
+        },
+      };
       migrated = true;
     }
 
