@@ -23,9 +23,7 @@ import {
 } from '../services/configService';
 
 import {
-  addCustomTag,
   getAdvancedSettings,
-  removeCustomTag,
   updateAdvancedSettings,
   type TicketPriority,
 } from '../services/advancedSettingsService';
@@ -50,7 +48,8 @@ import {
 } from '../services/departmentCategoryService';
 
 import { logSettingsEvent } from '../services/auditLogService';
-import { getField } from '../services/ticketStateService';
+import { getField, getTicketStatus } from '../services/ticketStateService';
+import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
 import { performFactoryReset } from '../services/factoryResetService';
 import {
   approveRetentionDeletion,
@@ -443,25 +442,7 @@ async function showTags(interaction: SettingsViewInteraction): Promise<void> {
 }
 
 async function showDepartments(interaction: SettingsViewInteraction): Promise<void> {
-  const config = await getGuildConfig(interaction.guild!.id);
-  const departments = Object.values(config.departments).sort((a, b) => a.name.localeCompare(b.name));
-  const lines = departments.length
-    ? departments.map((department) => `• **${department.name}** — ${department.staffRoleId ? '<@&' + department.staffRoleId + '>' : 'Administrators only'} — ${department.categoryId ? '<#' + department.categoryId + '>' : 'Category pending'}`).join('\n')
-    : 'No departments configured.';
-
-  await renderSettingsView(interaction, [
-    new EmbedBuilder()
-      .setTitle('📂 Ticket Departments')
-      .setDescription(lines.slice(0, 3900))
-      .addFields({ name: 'Department categories', value: 'New departments automatically receive a **SupportForge.** category.' })
-      .setFooter({ text: 'Categories are retained when departments are removed to avoid destructive history cleanup.' }),
-  ], [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:departments:add').setLabel('Add Department').setEmoji('➕').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('sf:settings:departments:remove').setLabel('Remove Department').setEmoji('➖').setStyle(ButtonStyle.Danger).setDisabled(departments.length <= 1),
-      backButton(),
-    ),
-  ]);
+  await showTags(interaction);
 }
 
 async function showRetention(interaction: ButtonInteraction): Promise<void> {
@@ -810,8 +791,8 @@ export async function handleSettingsInteraction(
     }
 
     if (id === 'sf:settings:departments:add') {
-      await openModal(interaction, 'sf:settings:modal:department:add', 'Add Department', [
-        new TextInputBuilder().setCustomId('name').setLabel('Department name').setPlaceholder('Technical Support, Sales, Partnerships...').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
+      await openModal(interaction, 'sf:settings:modal:tag:add', 'Add Routing Tag / Department', [
+        new TextInputBuilder().setCustomId('name').setLabel('Routing tag name').setPlaceholder('Technical Support, Billing, Refunds...').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
         new TextInputBuilder().setCustomId('staff').setLabel('Staff role ID or mention (optional)').setPlaceholder('@Support or 123456789012345678').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100),
       ]);
       return true;
