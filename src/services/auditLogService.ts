@@ -176,6 +176,21 @@ function dateKey(timestamp: string): string {
   return timestamp.slice(0, 10);
 }
 
+function currentUtcDateKey(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function previousCompletedUtcDateKey(): string {
+  const now = new Date();
+  return new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() - 1,
+    ),
+  ).toISOString().slice(0, 10);
+}
+
 function timeLabel(timestamp: string): string {
   return new Date(timestamp).toISOString().slice(11, 16);
 }
@@ -1258,6 +1273,15 @@ async function publishDailySummary(
   guild: Guild,
   date: string,
 ): Promise<void> {
+  /*
+   * A daily summary is only valid for a completed UTC calendar day.
+   * This guard is deliberately inside the publisher as a second line of
+   * defence, so no caller can accidentally publish today's partial data.
+   */
+  if (date >= currentUtcDateKey()) {
+    return;
+  }
+
   const current = await load();
   const store = getGuildStore(current, guild.id);
 
@@ -1282,19 +1306,72 @@ async function publishDailySummary(
   await persist();
 }
 
+async function removeInvalidCurrentDaySummaries(
+  guild: Guild,
+  currentDate: string,
+): Promise<void> {
+  const current = await load();
+  const store = getGuildStore(current, guild.id);
+  let stateChanged = false;
+
+  /*
+   * Older SupportForge versions could leave behind a summary for the
+   * current UTC day. That message is permanently invalid because that
+   * calendar day has not finished yet. Remove the stale visible message
+   * and its persisted marker so the completed-day scheduler can recreate
+   * the correct summary tomorrow.
+   */
+  for (const date of Object.keys(store.summaries)) {
+    if (date >= currentDate) {
+      delete store.summaries[date];
+      stateChanged = true;
+    }
+  }
+
+  const channel = await findAuditChannel(guild);
+  if (channel) {
+    const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+
+    if (recent) {
+      const invalidSummaries = recent.filter((message) => {
+        if (message.author.id !== channel.client.user?.id) return false;
+
+        const embed = message.embeds[0];
+        const title = embed?.title ?? '';
+        const footer = embed?.footer?.text ?? '';
+
+        const match = title.match(
+          /^📊 Daily Audit(?: Summary)? • (\d{4}-\d{2}-\d{2})$/,
+        );
+
+        return Boolean(
+          match &&
+          match[1] >= currentDate &&
+          (
+            footer === 'SupportForge • Daily audit summary (UTC)' ||
+            footer === 'SupportForge • Daily audit marker (UTC)'
+          ),
+        );
+      });
+
+      for (const message of invalidSummaries.values()) {
+        await message.delete().catch(() => undefined);
+      }
+    }
+  }
+
+  if (stateChanged) {
+    await persist();
+  }
+}
+
 async function runDailySummarySweep(client: Client): Promise<void> {
-  const now = new Date();
-  const previous = new Date(
-    Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate() - 1,
-    ),
-  );
-  const previousDate = previous.toISOString().slice(0, 10);
+  const currentDate = currentUtcDateKey();
+  const previousDate = previousCompletedUtcDateKey();
 
   for (const guild of client.guilds.cache.values()) {
     try {
+      await removeInvalidCurrentDaySummaries(guild, currentDate);
       await publishDailySummary(guild, previousDate);
     } catch (error) {
       console.warn(`⚠️ Daily audit summary skipped for ${guild.id}:`, error);
@@ -1319,8 +1396,9 @@ export function startAuditDailySummaryScheduler(client: Client): void {
   if (dailyScheduler) return;
 
   /*
-   * Backfill one completed calendar day on startup. There is no "today"
-   * summary and normal message traffic can never trigger this scheduler.
+   * Reconcile any stale current-day summary left by an older build, then
+   * backfill exactly one completed UTC calendar day. There is never a
+   * summary for the currently active UTC date.
    */
   void runDailySummarySweep(client);
 
