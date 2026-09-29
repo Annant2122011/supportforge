@@ -20,6 +20,7 @@ import {
 import {
   allocateTicketNumber,
   getGuildConfig,
+  type DepartmentConfig,
   isPremiumOrHigher,
   updateGuildConfig,
 } from '../services/configService';
@@ -2416,7 +2417,7 @@ async function renderRoutingTagSelector(interaction: ButtonInteraction | StringS
   if (interaction.replied || interaction.deferred) await interaction.editReply(payload); else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
 }
 
-async function applyTicketRouting(interaction: StringSelectMenuInteraction, department: import('discord.js').DepartmentConfig extends never ? never : any, tagId: string, status: TicketStatus, topic: string): Promise<void> {
+async function applyTicketRouting(interaction: StringSelectMenuInteraction, department: DepartmentConfig, tagId: string, status: TicketStatus, topic: string): Promise<void> {
   const channel = interaction.channel as TextChannel; const config = await getGuildConfig(interaction.guild!.id);
   const oldDepartmentId = getField(topic, 'department'); const oldDepartment = oldDepartmentId ? config.departments[oldDepartmentId] : undefined;
   const category = await ensureDepartmentCategory(interaction.guild!, department);
