@@ -951,6 +951,8 @@ export async function handleSettingsInteraction(
 
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const departmentId = newDepartmentId();
+      const tagId = newTagId();
+      const now = new Date().toISOString();
       const category = await ensureDepartmentCategory(guild, {
         name,
         staffRoleId: null,
@@ -963,7 +965,10 @@ export async function handleSettingsInteraction(
           name,
           staffRoleId: null,
           categoryId: category.id,
-          createdAt: new Date().toISOString(),
+          tags: {
+            [tagId]: { id: tagId, name: 'General', createdAt: now },
+          },
+          createdAt: now,
         };
       });
 
