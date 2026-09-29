@@ -2670,6 +2670,8 @@ async function handlePanelButton(
     id ===
       'ticket:panel:priority' ||
     id ===
+      'ticket:panel:department' ||
+    id ===
       'ticket:panel:tag' ||
     id ===
       'ticket:panel:note'
@@ -2755,11 +2757,14 @@ async function handlePanelButton(
             input,
           ),
       );
+    } else if (id === 'ticket:panel:department') {
+      await renderDepartmentSelector(interaction, 0);
+      return;
     } else if (
       id ===
       'ticket:panel:tag'
     ) {
-      await showRoutingTagSelector(interaction);
+      await showRoutingTagSelector(interaction, 0);
       return;
     } else {
       modal
