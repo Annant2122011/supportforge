@@ -111,16 +111,19 @@ export async function ensureChannelPurposeMessage(
         ),
     );
 
+    /*
+     * The purpose message is an onboarding marker, not a live status panel.
+     * Once present, leave the original message in place.
+     */
+    if (existing) {
+      return;
+    }
+
     const embed = new EmbedBuilder()
       .setTitle(PURPOSE_TITLE)
       .setDescription(purpose)
       .setFooter({ text: PURPOSE_FOOTER })
       .setTimestamp();
-
-    if (existing) {
-      await existing.edit({ embeds: [embed] });
-      return;
-    }
 
     await channel.send({
       embeds: [embed],

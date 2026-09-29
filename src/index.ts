@@ -106,13 +106,19 @@ client.on('channelCreate', async (channel) => {
     });
   }
 
+  const createdTicketChannel =
+    guildChannel.type === ChannelType.GuildText &&
+    isTicketTopic(guildChannel.topic ?? '');
+
   void logDiscordMutation(
     guildChannel.guild,
     guildChannel,
     guildChannel.type === ChannelType.GuildCategory
       ? 'CATEGORY_CREATED'
       : 'CHANNEL_CREATED',
-    `Created SupportForge-managed ${guildChannel.type === ChannelType.GuildCategory ? 'category' : 'channel'} ${guildChannel.name} (${guildChannel.id}).`,
+    guildChannel.type === ChannelType.GuildCategory
+      ? `Created SupportForge category ${guildChannel.name} (${guildChannel.id}).`
+      : `Created SupportForge-managed channel ${guildChannel.name} (${guildChannel.id}). Ticket channel: ${createdTicketChannel ? 'yes' : 'no'}.`,
     AuditLogEvent.ChannelCreate,
   );
 });
@@ -193,24 +199,45 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
 
   if (!changes.length) return;
 
+  const topicChanged = changes.some((change) =>
+    change.startsWith('topic/'),
+  );
+  const visibleChanges = changes.filter(
+    (change) => !change.startsWith('topic/'),
+  );
+
+  /*
+   * Topic metadata is useful to SupportForge but not useful to users. Store
+   * it as an internal audit event while keeping it out of visible reports.
+   */
+  if (topicChanged) {
+    void logDiscordMutation(
+      newGuildChannel.guild,
+      newGuildChannel,
+      'CHANNEL_TOPIC_CHANGED',
+      'SupportForge internal channel metadata changed.',
+      AuditLogEvent.ChannelUpdate,
+    );
+  }
+
+  if (!visibleChanges.length) return;
+
   const event =
-    changes.some((change) => change.startsWith('name:'))
+    visibleChanges.some((change) => change.startsWith('name:'))
       ? 'CHANNEL_RENAMED'
-      : changes.some((change) => change.startsWith('parent:'))
+      : visibleChanges.some((change) => change.startsWith('parent:'))
         ? 'CHANNEL_MOVED'
-        : changes.some((change) => change.startsWith('position:'))
+        : visibleChanges.some((change) => change.startsWith('position:'))
           ? 'CHANNEL_REORDERED'
-          : changes.some((change) => change.startsWith('topic/'))
-            ? 'CHANNEL_TOPIC_CHANGED'
-            : changes.some((change) => change.startsWith('permission'))
-              ? 'CHANNEL_PERMISSIONS_CHANGED'
-              : 'CHANNEL_SETTINGS_CHANGED';
+          : visibleChanges.some((change) => change.startsWith('permission'))
+            ? 'CHANNEL_PERMISSIONS_CHANGED'
+            : 'CHANNEL_SETTINGS_CHANGED';
 
   void logDiscordMutation(
     newGuildChannel.guild,
     newGuildChannel,
     event,
-    changes.join(' • '),
+    visibleChanges.join(' • '),
     AuditLogEvent.ChannelUpdate,
   );
 });
@@ -239,7 +266,14 @@ client.on('channelDelete', async (channel) => {
     guildChannel.type === ChannelType.GuildCategory
       ? 'CATEGORY_DELETED'
       : 'CHANNEL_DELETED',
-    `Deleted SupportForge-managed ${guildChannel.type === ChannelType.GuildCategory ? 'category' : 'channel'} ${guildChannel.name} (${guildChannel.id}).`,
+    guildChannel.type === ChannelType.GuildCategory
+      ? `Deleted SupportForge category ${guildChannel.name} (${guildChannel.id}).`
+      : `Deleted SupportForge-managed channel ${guildChannel.name} (${guildChannel.id}). Ticket channel: ${
+          guildChannel.type === ChannelType.GuildText &&
+          isTicketTopic(guildChannel.topic ?? '')
+            ? 'yes'
+            : 'no'
+        }.`,
     AuditLogEvent.ChannelDelete,
   );
 

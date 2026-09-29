@@ -573,6 +573,14 @@ export const data =
         ),
     )
 
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('restore')
+        .setDescription(
+          'Restore SupportForge after accidental deletion',
+        ),
+    )
+
     // ─────────────────────────────────────────────
     // CATEGORY MANAGEMENT
     // ─────────────────────────────────────────────
@@ -888,7 +896,8 @@ export async function execute(
 
   // Administrative commands
   if (
-    (!group && subcommand === 'setup') ||
+    (!group &&
+      (subcommand === 'setup' || subcommand === 'restore')) ||
     group === 'category' ||
     group === 'premium'
   ) {
@@ -910,7 +919,7 @@ export async function execute(
 
     if (
       !group &&
-      subcommand === 'setup'
+      (subcommand === 'setup' || subcommand === 'restore')
     ) {
       await interaction.deferReply({
         flags: MessageFlags.Ephemeral,
@@ -973,11 +982,16 @@ export async function execute(
 
           await syncPanel(guild);
 
+      const restoreMode = subcommand === 'restore';
+
       await logSystemEvent(
         guild,
         supportCategory.id,
-        'SETUP_COMPLETED',
-        'SupportForge setup/repair completed. Support Forge=' +
+        restoreMode ? 'SUPPORTFORGE_RESTORED' : 'SETUP_COMPLETED',
+        (restoreMode
+          ? 'SupportForge restore completed.'
+          : 'SupportForge setup/repair completed.') +
+          ' Support Forge=' +
           supportCategory.id +
           '; Open=' +
           openCategory.id +
@@ -987,8 +1001,10 @@ export async function execute(
       );
 
       await interaction.editReply(
-        `✅ **SupportForge setup complete.**\n\n` +
-          `📁 Container: ${supportCategory}\n` +
+        (restoreMode
+          ? `✅ **SupportForge restored successfully.**`
+          : `✅ **SupportForge setup complete.**`) +
+          `\n\n📁 Container: ${supportCategory}\n` +
           `🟢 Open tickets: ${openCategory}\n` +
           `📋 Departments: **${Object.keys(
             config.departments,

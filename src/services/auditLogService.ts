@@ -188,6 +188,15 @@ function actionLabel(action: string): string {
     .join(' ');
 }
 
+const NON_USER_AUDIT_ACTIONS = new Set([
+  'CHANNEL_TOPIC_CHANGED',
+  'TICKET_PANEL_AUTO_MOVED',
+  'SETTINGS_REFRESH',
+]);
+
+function isReportableAuditEvent(event: PersistedAuditEntry): boolean {
+  return !NON_USER_AUDIT_ACTIONS.has(event.action);
+}
 
 const SUPPORTFORGE_NAME_PREFIXES = [
   'SupportForge.',
@@ -233,13 +242,10 @@ export async function isSupportForgeManagedChannel(
   const config = await getGuildConfig(guild.id);
   const settings = await getAdvancedSettings(guild.id);
 
-  const configuredIds = new Set(
+  const configuredCategoryIds = new Set(
     [
       config.supportCategoryId,
       config.openCategoryId,
-      config.panelChannelId,
-      config.transcriptChannelId,
-      config.auditChannelId,
       settings.closedCategoryId,
       settings.archiveCategoryId,
       settings.statusCategories.claimedCategoryId,
@@ -250,7 +256,29 @@ export async function isSupportForgeManagedChannel(
     ].filter((id): id is string => Boolean(id)),
   );
 
+  const configuredIds = new Set([
+    ...configuredCategoryIds,
+    config.panelChannelId,
+    config.transcriptChannelId,
+    config.auditChannelId,
+  ].filter((id): id is string => Boolean(id)));
+
   if (configuredIds.has(channel.id)) {
+    return true;
+  }
+
+  /*
+   * Any channel directly inside a SupportForge-managed category is part of
+   * the managed scope, even when it has no SupportForge topic of its own.
+   */
+  if (channel.parentId && configuredCategoryIds.has(channel.parentId)) {
+    return true;
+  }
+
+  if (
+    channel.type === ChannelType.GuildCategory &&
+    channel.name.toLowerCase() === 'support forge'
+  ) {
     return true;
   }
 
@@ -536,7 +564,14 @@ async function sendAuditEntry(
       new EmbedBuilder()
         .setTitle(`SupportForge Audit • ${actionLabel(event.action)}`)
         .setDescription(description)
-        .setFooter({ text: event.category === 'settings' ? 'Settings action' : 'Ticket action' })
+        .setFooter({
+        text:
+          event.category === 'settings'
+            ? 'Settings action'
+            : event.category === 'system'
+              ? 'System action'
+              : 'Ticket action',
+      })
         .setTimestamp(new Date(event.timestamp)),
     ],
   });
@@ -784,17 +819,42 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
     ticketCreationEvents,
   );
 
+  const managedCategoryIds = new Set(
+    [
+      config.supportCategoryId,
+      config.openCategoryId,
+      settings.closedCategoryId,
+      settings.archiveCategoryId,
+      settings.statusCategories.claimedCategoryId,
+      settings.statusCategories.pendingCategoryId,
+      ...Object.values(config.departments).map(
+        (department) => department.categoryId ?? null,
+      ),
+    ].filter((id): id is string => Boolean(id)),
+  );
+
+  const nonCategoryChannels = guild.channels.cache.filter(
+    (channel) => channel.type !== ChannelType.GuildCategory,
+  ).size;
+
+  const categoriesCurrentlyInServer = guild.channels.cache.filter(
+    (channel) => channel.type === ChannelType.GuildCategory,
+  ).size;
+
   const managedChannels = guild.channels.cache.filter(
     (channel) =>
-      (channel.type === ChannelType.GuildText &&
-        channel.topic?.startsWith('supportforge:')) ||
-      channel.name === 'Support Forge' ||
-      channel.name === '📄 support-transcripts' ||
-      channel.name === '📒 supportforge-audit-log' ||
-      channel.name === 'supportforge-settings' ||
-      channel.name.startsWith('SupportForge.') ||
-      channel.name.startsWith('SupportForge • Closed') ||
-      channel.name.startsWith('SupportForge • Archive'),
+      channel.type !== ChannelType.GuildCategory &&
+      (
+        (channel.type === ChannelType.GuildText &&
+          channel.topic?.startsWith('supportforge:')) ||
+        channel.name === '📄 support-transcripts' ||
+        channel.name === '📒 supportforge-audit-log' ||
+        channel.name === 'supportforge-settings' ||
+        channel.name.startsWith('SupportForge.') ||
+        channel.name.startsWith('SupportForge • Closed') ||
+        channel.name.startsWith('SupportForge • Archive') ||
+        (channel.parentId && managedCategoryIds.has(channel.parentId))
+      ),
   ).size;
 
   const tags = Object.values(settings.customTags).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -820,9 +880,10 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
 
   const tagCreationEvents = store.events.filter((event) => event.action === 'TAG_ADDED');
   const tagCreations = tagCreationEvents.length;
-  const settingsActions = store.events.filter((event) => event.category === 'settings').length;
-  const ticketActions = store.events.filter((event) => event.category === 'ticket').length;
-  const priorityRolesCreated = store.events.filter((event) => event.action === 'PRIORITY_ROLE_CREATED').length;
+  const reportableEvents = store.events.filter(isReportableAuditEvent);
+  const settingsActions = reportableEvents.filter((event) => event.category === 'settings').length;
+  const ticketActions = reportableEvents.filter((event) => event.category === 'ticket').length;
+  const priorityRolesCreated = reportableEvents.filter((event) => event.action === 'PRIORITY_ROLE_CREATED').length;
   const retentionEligible = ticketRecords.filter((ticket) => ticket.deletedAt !== null).length;
 
   const summaryLines = [
@@ -842,7 +903,8 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
     '**Closed chats to date:** ' + lifetimeClosed + ' *(includes ' + lifetimeArchived + ' archived)*',
     '**Archived chats to date:** ' + lifetimeArchived,
     '',
-    '**Channels currently in server:** ' + guild.channels.cache.size,
+    '**Channels currently in server:** ' + nonCategoryChannels,
+    '**Categories currently in server:** ' + categoriesCurrentlyInServer,
     '**SupportForge-managed channels currently present:** ' + managedChannels,
     '**Ticket channels created to date:** ' + ticketsCreatedToDate,
     '',
@@ -880,7 +942,7 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
     : ['• None configured.'];
 
   const actionCounts = new Map<string, number>();
-  for (const event of store.events) {
+  for (const event of reportableEvents) {
     actionCounts.set(
       event.action,
       (actionCounts.get(event.action) ?? 0) + 1,
@@ -1002,10 +1064,33 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
     detailEmbeds.push(embed);
   }
 
+  const recentAuditLines = reportableEvents
+    .slice(-8)
+    .reverse()
+    .map((event) => {
+      const detail = event.detail?.replace(/\s+/g, ' ').trim();
+      return '• <t:' +
+        Math.floor(new Date(event.timestamp).getTime() / 1000) +
+        ':R> • **' +
+        actionLabel(event.action) +
+        '** • ' +
+        event.actorName +
+        (event.ticketNumber ? ' • Ticket #' + event.ticketNumber : '') +
+        (detail ? ' • ' + detail.slice(0, 140) : '');
+    });
+
   const first = new EmbedBuilder()
     .setTitle('📊 SupportForge Overall Audit Summary • ' + guild.name)
     .setDescription(summaryLines.join('\n'))
-    .addFields({ name: 'Priority distribution', value: priorityLines.join('\n') })
+    .addFields(
+      {
+        name: 'Recent Audits',
+        value: recentAuditLines.length
+          ? recentAuditLines.join('\n').slice(0, 1024)
+          : '• No significant changes have been recorded.',
+      },
+      { name: 'Priority distribution', value: priorityLines.join('\n') },
+    )
     .setFooter({ text: 'Persisted audit history + current live ticket snapshot' })
     .setTimestamp();
 
@@ -1035,6 +1120,14 @@ async function recordAndPublish(
   };
 
   await appendAuditRecord(guild, record);
+
+  /*
+   * Store every event, but only publish user-significant events to the visible
+   * audit channel. Internal metadata changes stay in the durable audit store.
+   */
+  if (!isReportableAuditEvent(record)) {
+    return;
+  }
 
   try {
     const channel = await getOrCreateAuditChannel(guild, parentCategoryId);
@@ -1077,72 +1170,82 @@ export async function logSettingsEvent(
   }
 }
 
+function buildNoActivityDailySummaryEmbed(
+  guild: Guild,
+  date: string,
+): EmbedBuilder {
+  return new EmbedBuilder()
+    .setTitle(`📊 Daily Audit • ${date}`)
+    .setDescription(
+      `**Date:** ${date} (UTC)\n\nNo SupportForge audit data was recorded for this day. No significant SupportForge changes were detected.`,
+    )
+    .setFooter({ text: 'SupportForge • Daily audit marker (UTC)' })
+    .setTimestamp();
+}
+
 function buildDailySummaryEmbed(
   guild: Guild,
   date: string,
   events: PersistedAuditEntry[],
 ): EmbedBuilder {
   const counts = new Map<string, number>();
+
   for (const event of events) {
     counts.set(event.action, (counts.get(event.action) ?? 0) + 1);
   }
 
   const count = (action: string): number => counts.get(action) ?? 0;
 
+  const recent = events
+    .slice(-8)
+    .reverse()
+    .map((event) => {
+      const detail = event.detail?.replace(/\s+/g, ' ').trim();
+      return '• <t:' +
+        Math.floor(new Date(event.timestamp).getTime() / 1000) +
+        ':R> • **' +
+        actionLabel(event.action) +
+        '** • ' +
+        event.actorName +
+        (event.ticketNumber ? ' • Ticket #' + event.ticketNumber : '') +
+        (detail ? ' • ' + detail.slice(0, 160) : '');
+    });
+
   const lines = [
     `**Date:** ${date} (UTC)`,
-    `**Total actions:** ${events.length}`,
+    `**Significant actions:** ${events.length}`,
     '',
-    '**Tags**',
-    `• Added: ${count('TAG_ADDED')}`,
-    `• Removed: ${count('TAG_REMOVED')}`,
+    '**Tickets**',
+    `• Created: ${count('TICKET_CREATED')}`,
+    `• Closed: ${count('TICKET_CLOSED')}`,
+    `• Panel moves: ${count('TICKET_PANEL_MOVED')}`,
+    `• User changes: ${count('TICKET_USER_ADDED')}`,
+    `• Priority changes: ${count('TICKET_PRIORITY_CHANGED')}`,
+    `• Tag changes: ${count('TICKET_TAG_ADDED')}`,
+    `• Internal notes: ${count('INTERNAL_NOTE')}`,
     '',
-    '**Departments**',
-    `• Added: ${count('DEPARTMENT_ADDED') + count('USE_CASE_ADDED')}`,
-    `• Removed: ${count('DEPARTMENT_REMOVED')}`,
-    '',
-    '**Settings**',
-    `• Panel changes: ${count('PANEL_TOGGLE') + count('PANEL_SETTINGS_CHANGED')}`,
+    '**Configuration**',
+    `• Departments added/removed: ${count('DEPARTMENT_ADDED') + count('DEPARTMENT_REMOVED')}`,
+    `• Tier changes: ${count('TIER_CHANGED')}`,
+    `• Panel/settings changes: ${count('PANEL_TOGGLE') + count('PANEL_SETTINGS_CHANGED')}`,
     `• Ticket defaults: ${count('TICKET_DEFAULTS_CHANGED')}`,
     `• Retention changes: ${count('RETENTION_CHANGED')}`,
     `• Appearance changes: ${count('APPEARANCE_CHANGED')}`,
-    '',
-    '**Repairs**',
-    `• Normal Repair: ${count('NORMAL_REPAIR')}`,
-    `• Storage Repair: ${count('STORAGE_REPAIR')}`,
+    `• Tags added/removed: ${count('TAG_ADDED') + count('TAG_REMOVED')}`,
     '',
     '**Infrastructure**',
-    `• Categories created: ${count('CATEGORY_CREATED')}`,
-    `• Categories deleted: ${count('CATEGORY_DELETED')}`,
+    `• Categories created/deleted: ${count('CATEGORY_CREATED') + count('CATEGORY_DELETED')}`,
     `• Channels created: ${count('CHANNEL_CREATED')}`,
     `• Channels renamed: ${count('CHANNEL_RENAMED')}`,
     `• Channels moved/reordered: ${count('CHANNEL_MOVED') + count('CHANNEL_REORDERED')}`,
-    `• Channel permission changes: ${count('CHANNEL_PERMISSIONS_CHANGED')}`,
+    `• Permission changes: ${count('CHANNEL_PERMISSIONS_CHANGED')}`,
     `• Channel settings changes: ${count('CHANNEL_SETTINGS_CHANGED')}`,
     `• Channel deletions: ${count('CHANNEL_DELETED')}`,
     `• Roles created/updated/deleted: ${count('ROLE_CREATED') + count('ROLE_UPDATED') + count('ROLE_DELETED')}`,
     '',
-    '**Ticket controls**',
-    `• Panel moves: ${count('TICKET_PANEL_MOVED') + count('TICKET_PANEL_AUTO_MOVED')}`,
-    `• User changes: ${count('TICKET_USER_ADDED')}`,
-    `• Priority changes: ${count('TICKET_PRIORITY_CHANGED')}`,
-    `• Tag changes: ${count('TICKET_TAG_ADDED') + count('TAG_ADDED') + count('TAG_REMOVED')}`,
-    `• Internal notes: ${count('INTERNAL_NOTE')}`,
-    '',
-    '**Other**',
-    `• Use-case actions: ${count('USE_CASE_ADDED')}`,
-    `• Refresh: ${count('SETTINGS_REFRESH')}`,
+    '**Recent Audits**',
+    ...(recent.length ? recent : ['• No significant changes have been recorded.']),
   ];
-
-  const recent = events
-    .slice(-5)
-    .reverse()
-    .map(
-      (event) =>
-        `• ${timeLabel(event.timestamp)} • ${event.actorName} • ${actionLabel(event.action)}${event.detail ? ` • ${event.detail.slice(0, 100)}` : ''}`,
-    );
-
-  lines.push('', '**Recent actions**', ...(recent.length ? recent : ['• No actions recorded.']));
 
   return new EmbedBuilder()
     .setTitle(`📊 Daily Audit Summary • ${date}`)
@@ -1164,10 +1267,15 @@ async function publishDailySummary(
   if (!config.supportCategoryId) return;
 
   const events = store.events.filter((event) => dateKey(event.timestamp) === date);
+  const reportableEvents = events.filter(isReportableAuditEvent);
   const channel = await getOrCreateAuditChannel(guild, config.supportCategoryId);
 
   await channel.send({
-    embeds: [buildDailySummaryEmbed(guild, date, events)],
+    embeds: [
+      reportableEvents.length
+        ? buildDailySummaryEmbed(guild, date, reportableEvents)
+        : buildNoActivityDailySummaryEmbed(guild, date),
+    ],
   });
 
   store.summaries[date] = new Date().toISOString();
@@ -1176,55 +1284,56 @@ async function publishDailySummary(
 
 async function runDailySummarySweep(client: Client): Promise<void> {
   const now = new Date();
-  const today = now.toISOString().slice(0, 10);
-  const previousDate = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-    .toISOString()
-    .slice(0, 10);
+  const previous = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() - 1,
+    ),
+  );
+  const previousDate = previous.toISOString().slice(0, 10);
 
   for (const guild of client.guilds.cache.values()) {
     try {
-      const current = await load();
-      const store = getGuildStore(current, guild.id);
-      const previousEvents = store.events.filter(
-        (event) => dateKey(event.timestamp) === previousDate,
-      );
-      const todayEvents = store.events.filter(
-        (event) => dateKey(event.timestamp) === today,
-      );
-
-      /*
-       * Do not post an empty "yesterday" summary when the bot was first
-       * configured today. Prefer the current setup/activity day whenever
-       * the previous day has no recorded actions.
-       */
-      if (previousEvents.length === 0 && todayEvents.length === 0) {
-        continue;
-      }
-
-          const summaryDate =
-        store.lastSetupDate === today
-          ? today
-          : previousEvents.length > 0
-            ? previousDate
-            : today;
-
-      await publishDailySummary(guild, summaryDate);
+      await publishDailySummary(guild, previousDate);
     } catch (error) {
       console.warn(`⚠️ Daily audit summary skipped for ${guild.id}:`, error);
     }
   }
 }
 
+function nextUtcMidnightDelay(): number {
+  const now = new Date();
+  const next = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() + 1,
+    ),
+  );
+
+  return Math.max(1_000, next.getTime() - now.getTime());
+}
+
 export function startAuditDailySummaryScheduler(client: Client): void {
   if (dailyScheduler) return;
 
+  /*
+   * Backfill one completed calendar day on startup. There is no "today"
+   * summary and normal message traffic can never trigger this scheduler.
+   */
   void runDailySummarySweep(client);
 
-  dailyScheduler = setInterval(() => {
-    void runDailySummarySweep(client);
-  }, 15 * 60 * 1000);
+  const scheduleNext = (): void => {
+    dailyScheduler = setTimeout(() => {
+      void runDailySummarySweep(client);
+      scheduleNext();
+    }, nextUtcMidnightDelay());
 
-  dailyScheduler.unref();
+    dailyScheduler.unref();
+  };
+
+  scheduleNext();
 }
 
 export async function handleAuditInteraction(interaction: ButtonInteraction): Promise<boolean> {
