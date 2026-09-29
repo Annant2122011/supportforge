@@ -19,6 +19,7 @@ import {
 import {
   getGuildConfig,
   newDepartmentId,
+  newTagId,
   updateGuildConfig,
 } from '../services/configService';
 
