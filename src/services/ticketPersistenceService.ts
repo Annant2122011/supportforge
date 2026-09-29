@@ -179,6 +179,8 @@ export async function updatePersistedTicketMetadata(
     ticketNumber: existing?.ticketNumber ?? null,
     departmentId:
       updates.departmentId ?? existing?.departmentId ?? null,
+    tagId:
+      updates.tagId ?? existing?.tagId ?? null,
     ownerId:
       updates.ownerId ?? existing?.ownerId ?? null,
     priority:
