@@ -2107,131 +2107,6 @@ async function closeTicket(
 /* Ticket creation modal                                                      */
 /* -------------------------------------------------------------------------- */
 
-async function showTicketCreationModal_LEGACY(
-  interaction: ButtonInteraction,
-  departmentId: string,
-): Promise<void> {
-  if (!interaction.guild) {
-    await replyError(
-      interaction,
-      '❌ This action can only be used inside a server.',
-    );
-    return;
-  }
-
-  try {
-    const config =
-      await withTimeout(
-        getGuildConfig(
-          interaction.guild.id,
-        ),
-        DISCORD_OPERATION_TIMEOUT_MS,
-        'Guild configuration load',
-      );
-
-    const department =
-      config.departments[
-        departmentId
-      ];
-
-    if (!department) {
-      await replyError(
-        interaction,
-        '❌ This ticket department no longer exists. Please refresh the support panel.',
-      );
-      return;
-    }
-
-    const modal =
-      new ModalBuilder()
-        .setCustomId(
-          `ticket:modal:${departmentId}:${tagId}`,
-        )
-        .setTitle(
-          `${department.name} Support`,
-        );
-
-    const subjectInput =
-      new TextInputBuilder()
-        .setCustomId(
-          'subject',
-        )
-        .setLabel(
-          'What do you need help with?',
-        )
-        .setPlaceholder(
-          'Briefly describe your issue',
-        )
-        .setStyle(
-          TextInputStyle.Short,
-        )
-        .setRequired(
-          true,
-        )
-        .setMaxLength(
-          100,
-        );
-
-    const descriptionInput =
-      new TextInputBuilder()
-        .setCustomId(
-          'description',
-        )
-        .setLabel(
-          'Describe your issue (up to 4000 characters)',
-        )
-        .setPlaceholder(
-          'Give us the details we need to help you...',
-        )
-        .setStyle(
-          TextInputStyle.Paragraph,
-        )
-        .setRequired(
-          true,
-        )
-        .setMaxLength(
-          4000,
-        );
-
-    modal.addComponents(
-      new ActionRowBuilder<TextInputBuilder>()
-        .addComponents(
-          subjectInput,
-        ),
-
-      new ActionRowBuilder<TextInputBuilder>()
-        .addComponents(
-          descriptionInput,
-        ),
-    );
-
-    /*
-     * IMPORTANT:
-     *
-     * showModal() itself acknowledges the button interaction.
-     * We must NOT deferReply(), reply(), or editReply() afterwards.
-     */
-    await interaction.showModal(
-      modal,
-    );
-  } catch (error) {
-    console.error(
-      '❌ Failed to show ticket creation modal:',
-      error,
-    );
-
-    /*
-     * If showModal() failed before acknowledging the interaction,
-     * replyError() can still safely acknowledge it. If Discord already
-     * acknowledged it, replyError() will simply do nothing.
-     */
-    await replyError(
-      interaction,
-      '❌ SupportForge could not open the ticket creation form. Please try again.',
-    );
-  }
-}
-
 /* -------------------------------------------------------------------------- */
 /* Panel button handlers                                                      */
 /* -------------------------------------------------------------------------- */
@@ -3029,6 +2904,400 @@ async function handlePanelButton(
         error,
       );
     }
+  }
+}
+
+
+async function handlePanelModal(
+  interaction: ModalSubmitInteraction,
+): Promise<void> {
+  if (!(await safeDeferReply(interaction))) {
+    return;
+  }
+
+  if (
+    !interaction.guild ||
+    interaction.channel?.type !==
+      ChannelType.GuildText
+  ) {
+    await replyError(
+      interaction,
+      '❌ This action can only be used inside a ticket.',
+    );
+    return;
+  }
+
+  const channel =
+    interaction.channel as TextChannel;
+
+  const state =
+    getRuntimeTicketState(
+      channel,
+    );
+
+  const persistedStatus =
+    await getPersistedTicketStatus(
+      channel.id,
+    );
+
+  if (persistedStatus && persistedStatus !== state.status) {
+    state.status = persistedStatus;
+  }
+
+  if (
+    !isTicketTopic(
+      state.topic,
+    )
+  ) {
+    await replyError(
+      interaction,
+      '❌ This is not a valid SupportForge ticket.',
+    );
+    return;
+  }
+
+  if (
+    isTerminalTicketStatus(
+      state.status,
+    )
+  ) {
+    await replyError(
+      interaction,
+      `❌ This ticket is already **${state.status}**.`,
+    );
+    return;
+  }
+
+  const staff =
+    getStaffContext(
+      interaction,
+      state.topic,
+    );
+
+  if (
+    !staff.authorized
+  ) {
+    await replyError(
+      interaction,
+      '❌ Only configured staff or administrators can modify ticket details.',
+    );
+    return;
+  }
+
+  try {
+    let newTopic =
+      state.topic;
+
+    const id =
+      interaction.customId;
+
+    /* ---------------------------------------------------------------------- */
+    /* Add user                                                               */
+    /* ---------------------------------------------------------------------- */
+
+    if (
+      id ===
+      'ticket:panel-modal:add-user'
+    ) {
+      const raw =
+        interaction.fields
+          .getTextInputValue(
+            'user',
+          )
+          .trim();
+
+      const userId =
+        parseUserId(raw);
+
+      if (!userId) {
+        await interaction.editReply(
+          '❌ Please provide a valid Discord user ID or mention.',
+        );
+        return;
+      }
+
+      const users =
+        (
+          getField(
+            state.topic,
+            'users',
+          ) ?? ''
+        )
+          .split(',')
+          .map((value) =>
+            value.trim(),
+          )
+          .filter(Boolean);
+
+      if (
+        users.includes(
+          userId,
+        )
+      ) {
+        await interaction.editReply(
+          'ℹ️ That user is already on this ticket.',
+        );
+        return;
+      }
+
+      users.push(
+        userId,
+      );
+
+      newTopic =
+        setField(
+          newTopic,
+          'users',
+          users.join(','),
+        );
+
+      await setChannelPermissionOverwrite(
+        channel.id,
+        userId,
+        [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+          PermissionFlagsBits.AttachFiles,
+          PermissionFlagsBits.EmbedLinks,
+        ],
+        [],
+        1,
+        'Add ticket user permissions',
+      );
+
+      await setChannelTopic(
+        channel.id,
+        newTopic,
+        'Add ticket user topic update',
+      );
+
+      channel.topic = newTopic;
+
+      updateRuntimeTicketState(
+        channel,
+        newTopic,
+        state.status,
+      );
+
+      await interaction.editReply(
+        `✅ <@${userId}> has been added to the ticket.`,
+      );
+
+      const userConfig = await getGuildConfig(channel.guild.id);
+      if (userConfig.supportCategoryId) {
+        await logTicketEvent(
+          channel.guild,
+          userConfig.supportCategoryId,
+          {
+            ticketNumber: getField(channel.topic ?? '', 'number') ?? 'unknown',
+            event: 'ticket_user_added',
+            actor: interaction.user.tag,
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Added user <@' + userId + '> to the ticket.',
+          },
+        );
+      }
+
+      return;
+    }
+
+    /* ---------------------------------------------------------------------- */
+    /* Priority                                                               */
+    /* ---------------------------------------------------------------------- */
+
+    if (
+      id ===
+      'ticket:panel-modal:priority'
+    ) {
+      const priority =
+        interaction.fields
+          .getTextInputValue(
+            'priority',
+          )
+          .trim()
+          .toLowerCase();
+
+      const parsedPriority = parseTicketPriority(priority);
+
+      if (!parsedPriority) {
+        await interaction.editReply(
+          '❌ Priority must be `low`, `normal`, `high`, `urgent`, or `critical`.',
+        );
+        return;
+      }
+
+      newTopic =
+        setField(
+          newTopic,
+          'priority',
+          parsedPriority,
+        );
+
+      await runChannelMutation(
+        channel,
+        'Priority update',
+        async () => {
+          await setChannelTopic(
+            channel.id,
+            newTopic,
+            `SupportForge: priority update`,
+          );
+          channel.topic = newTopic;
+        },
+      );
+
+      updateRuntimeTicketState(
+        channel,
+        newTopic,
+        state.status,
+      );
+
+      void queueTicketChannelRename(
+        channel,
+        getTicketChannelName(
+          getField(newTopic, 'number') ?? 'unknown',
+          state.status,
+          parsedPriority,
+        ),
+        `Ticket priority changed to ${parsedPriority}`,
+      ).catch((error) => {
+        console.error('⚠️ Failed to rename ticket for priority change:', error);
+      });
+
+      await interaction.editReply(
+        `✅ Ticket priority changed to **${parsedPriority}**.`,
+      );
+
+      const priorityConfig = await getGuildConfig(channel.guild.id);
+      if (priorityConfig.supportCategoryId) {
+        await logTicketEvent(
+          channel.guild,
+          priorityConfig.supportCategoryId,
+          {
+            ticketNumber: getField(newTopic, 'number') ?? 'unknown',
+            event: 'ticket_priority_changed',
+            actor: interaction.user.tag,
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Priority changed to ' + parsedPriority + '.',
+          },
+        );
+      }
+
+      void updateMainMessage(
+        channel,
+        getField(
+          newTopic,
+          'message',
+        ),
+        state.status,
+        newTopic,
+      );
+
+      return;
+    }
+
+    /* ---------------------------------------------------------------------- */
+    /* Internal note                                                          */
+    /* ---------------------------------------------------------------------- */
+
+    if (
+      id ===
+      'ticket:panel-modal:note'
+    ) {
+      const note =
+        interaction.fields
+          .getTextInputValue(
+            'note',
+          )
+          .trim();
+
+      if (!note) {
+        await interaction.editReply(
+          '❌ Note cannot be empty.',
+        );
+        return;
+      }
+
+      await withTimeout(
+        channel.send({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle(
+                '📝 Internal Note',
+              )
+              .setDescription(
+                note,
+              )
+              .setFooter({
+                text:
+                  `Added by ${interaction.user.tag}`,
+              })
+              .setTimestamp(),
+          ],
+        }),
+        DISCORD_OPERATION_TIMEOUT_MS,
+        'Internal note creation',
+      );
+
+      /*
+       * Also record the note in the staff-only audit history so the History
+       * control can show it alongside lifecycle events.
+       */
+      try {
+        const config = await getGuildConfig(
+          channel.guild.id,
+        );
+
+        if (config.supportCategoryId) {
+          await logTicketEvent(
+            channel.guild,
+            config.supportCategoryId,
+            {
+              ticketNumber:
+                getField(channel.topic ?? '', 'number') ?? 'unknown',
+              event:
+                'internal_note',
+              actor:
+                interaction.user.tag,
+              detail:
+                note,
+            },
+          );
+        }
+      } catch (error) {
+        console.error(
+          '⚠️ Internal note audit failed:',
+          error,
+        );
+      }
+
+      await interaction.editReply(
+        '✅ Internal note added.',
+      );
+
+      return;
+    }
+
+    await interaction.editReply(
+      '❌ Unknown ticket action.',
+    );
+  } catch (error) {
+    console.error(
+      '❌ Ticket modal action failed:',
+      error,
+    );
+
+    clearRuntimeTicketState(
+      channel.id,
+    );
+
+    await replyError(
+      interaction,
+      '❌ The ticket update could not be completed.',
+    );
   }
 }
 
