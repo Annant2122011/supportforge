@@ -3300,6 +3300,10 @@ export async function handleTicketInteraction(
 ): Promise<void> {
   try {
     if (interaction.isStringSelectMenu()) {
+      if (interaction.customId === 'ticket:create-tag:select') {
+        await handleTicketTagSelection(interaction);
+        return;
+      }
       if (interaction.customId.startsWith('ticket:routing-tag:select:')) {
         await changeTicketRoutingTag(interaction);
         return;
