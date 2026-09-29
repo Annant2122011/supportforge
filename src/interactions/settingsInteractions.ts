@@ -849,7 +849,7 @@ export async function handleSettingsInteraction(
 
     if (id.startsWith('sf:settings:tag:edit:')) {
       const parts = id.split(':');
-      const departmentId = parts[4] ?? ''; const tagId = parts[5] ?? '';
+      const departmentId = parts[5] ?? ''; const tagId = parts[6] ?? '';
       const tag = (await getGuildConfig(guild.id)).departments[departmentId]?.tags?.[tagId];
       if (!tag) { await reject(interaction, '❌ Tag not found.'); return true; }
       await openModal(interaction, 'sf:settings:modal:tag:edit:' + departmentId + ':' + tagId, 'Edit Tag', [
