@@ -80,8 +80,8 @@ function isAdministrator(interaction: ButtonInteraction | StringSelectMenuIntera
 const PRIORITY_ROLE_DEFINITIONS: Record<TicketPriority, { label: string; emoji: string; color: number }> = {
   low: { label: 'Low', emoji: '🟢', color: 0x2ecc71 },
   normal: { label: 'Normal', emoji: '🟡', color: 0xf1c40f },
-  high: { label: 'High', emoji: '🔴', color: 0xe74c3c },
-  urgent: { label: 'Urgent', emoji: '🟠', color: 0xe67e22 },
+  high: { label: 'High', emoji: '🟠', color: 0xe67e22 },
+  urgent: { label: 'Urgent', emoji: '🔴', color: 0xe74c3c },
   critical: { label: 'Critical', emoji: '🟣', color: 0x9b59b6 },
 };
 
@@ -107,7 +107,7 @@ function manualQuickEmbed(): EmbedBuilder {
       '**2. Main staff controls**\n' +
       'Claim a ticket when you take ownership. Pending means you are waiting for information. Resume returns it to Open. Close creates the transcript and makes the ticket read-only.\n\n' +
       '**3. Priority**\n' +
-      '🟢 Low • 🟡 Normal • 🔴 High • 🟠 Urgent • 🟣 Critical. Priority is shown in the ticket name and panel.\n\n' +
+      '🟣 Critical • 🔴 Urgent • 🟠 High • 🟡 Normal • 🟢 Low. Priority is shown in the ticket name and panel.\n\n' +
       '**4. Ticket tools**\n' +
       'Use Add User, Priority, Tag, Note and History from the ticket panel.\n\n' +
       '**5. Audit & Settings**\n' +
