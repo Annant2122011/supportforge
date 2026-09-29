@@ -104,6 +104,7 @@ export interface TicketRegistration {
   guildId: string;
   ticketNumber: string;
   departmentId: string;
+  tagId: string;
   ownerId: string;
   priority: TicketPriority;
   createdAt: string;
@@ -123,6 +124,7 @@ export async function registerTicket(
     createdAt: existing?.createdAt ?? registration.createdAt,
     ticketNumber: existing?.ticketNumber ?? registration.ticketNumber,
     departmentId: existing?.departmentId ?? registration.departmentId,
+    tagId: existing?.tagId ?? registration.tagId,
     ownerId: existing?.ownerId ?? registration.ownerId,
     priority: existing?.priority ?? registration.priority,
     deletedAt: existing?.deletedAt ?? null,
@@ -147,6 +149,7 @@ export async function setPersistedTicketStatus(
     createdAt: existing?.createdAt ?? now,
     ticketNumber: existing?.ticketNumber ?? null,
     departmentId: existing?.departmentId ?? null,
+    tagId: existing?.tagId ?? null,
     ownerId: existing?.ownerId ?? null,
     priority: existing?.priority ?? null,
     deletedAt: existing?.deletedAt ?? null,
