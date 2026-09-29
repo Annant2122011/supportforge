@@ -182,19 +182,12 @@ const PRIORITY_ROLE_ORDER: TicketPriority[] = [
  */
 async function enforcePriorityRoleHierarchy(guild: Guild): Promise<void> {
   const settings = await getAdvancedSettings(guild.id);
-  const configured = PRIORITY_ROLE_ORDER
-    .map((priority) => ({
-      priority,
-      roleId: settings.priorityRoles[priority],
-      role: settings.priorityRoles[priority]
-        ? guild.roles.cache.get(settings.priorityRoles[priority]!)
-        : undefined,
-    }))
-    .filter((entry): entry is {
-      priority: TicketPriority;
-      roleId: string;
-      role: NonNullable<typeof entry.role>;
-    } => Boolean(entry.roleId && entry.role));
+  const configured = PRIORITY_ROLE_ORDER.flatMap((priority) => {
+    const roleId = settings.priorityRoles[priority];
+    const role = roleId ? guild.roles.cache.get(roleId) : undefined;
+
+    return roleId && role ? [{ priority, roleId, role }] : [];
+  });
 
   if (configured.length === 0) return;
 
