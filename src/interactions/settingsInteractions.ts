@@ -1343,113 +1343,98 @@ export async function handleSettingsInteraction(
       return true;
     }
 
-    if (interaction.customId === 'sf:settings:modal:tag:add') {
+    if (interaction.customId.startsWith('sf:settings:modal:tag:add:')) {
+      const departmentId = interaction.customId.slice('sf:settings:modal:tag:add:'.length);
       const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
-      const rawStaff = interaction.fields.getTextInputValue('staff').trim();
-      const staffMention = rawStaff.match(/^<@&(\d+)>$/);
-      const staffRoleId = staffMention?.[1] ?? (/^\d{15,25}$/.test(rawStaff) ? rawStaff : null);
-
-      if (!name) {
-        await reject(interaction, '❌ Routing tag name cannot be empty.');
-        return true;
-      }
-
       const config = await getGuildConfig(guild.id);
-      if (Object.values(config.departments).some((department) => department.name.toLowerCase() === name.toLowerCase())) {
-        await reject(interaction, '❌ A routing tag / department with that name already exists.');
-        return true;
+      const department = config.departments[departmentId];
+      if (!department) { await reject(interaction, '❌ Department not found.'); return true; }
+      if (!name) { await reject(interaction, '❌ Tag name cannot be empty.'); return true; }
+      if (Object.values(department.tags ?? {}).some((tag) => tag.name.toLowerCase() === name.toLowerCase())) {
+        await reject(interaction, '❌ A tag with that name already exists in this department.'); return true;
       }
-
-      if (staffRoleId) {
-        const role = guild.roles.cache.get(staffRoleId);
-        if (!role || role.managed || role.id === guild.roles.everyone.id) {
-          await reject(interaction, '❌ The supplied staff role is invalid.');
-          return true;
-        }
-      }
-
+      const tagId = newTagId();
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      try {
-        const id = newDepartmentId();
-        const category = await ensureDepartmentCategory(guild, { name, staffRoleId, categoryId: null });
+      await updateGuildConfig(guild.id, (current) => {
+        const d = current.departments[departmentId];
+        if (d) {
+          d.tags ??= {};
+          d.tags[tagId] = { id: tagId, name, createdAt: new Date().toISOString() };
+        }
+      });
+      await syncPanel(guild); await refreshSettingsChannel(guild);
+      await interaction.editReply({
+        embeds: [new EmbedBuilder().setTitle('✅ Tag Added').setDescription('**' + name + '** is now a subcategory of **' + department.name + '**. No Discord category was created.')],
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+      });
+      await auditSettingsAction(guild, interaction, 'TAG_ADDED', 'Added tag ' + name + ' under department ' + department.name + '.');
+      return true;
+    }
 
-        await updateGuildConfig(guild.id, (current) => {
-          current.departments[id] = {
-            id,
-            name,
-            staffRoleId,
-            categoryId: category.id,
-            createdAt: new Date().toISOString(),
-          };
-        });
-
-        await syncPanel(guild);
-        await refreshSettingsChannel(guild);
-        await interaction.editReply({
-          embeds: [
-            new EmbedBuilder()
-              .setTitle('✅ Routing Tag Added')
-              .setDescription('**' + name + '** is now a predefined routing tag and department.\n\nCategory: ' + category),
-          ],
-          components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
-        });
-        await auditSettingsAction(guild, interaction, 'TAG_ADDED', 'Added routing tag / department ' + name + ' with category ' + category.name + '.');
-      } catch (error) {
-        await interaction.editReply('❌ ' + (error instanceof Error ? error.message : 'Could not create routing tag.'));
-      }
+    if (interaction.customId.startsWith('sf:settings:modal:tag:edit:')) {
+      const parts = interaction.customId.split(':');
+      const departmentId = parts[4] ?? ''; const tagId = parts[5] ?? '';
+      const config = await getGuildConfig(guild.id);
+      const department = config.departments[departmentId]; const tag = department?.tags?.[tagId];
+      if (!department || !tag) { await reject(interaction, '❌ Tag not found.'); return true; }
+      const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
+      if (!name) { await reject(interaction, '❌ Tag name cannot be empty.'); return true; }
+      if (Object.values(department.tags).some((item) => item.id !== tagId && item.name.toLowerCase() === name.toLowerCase())) { await reject(interaction, '❌ Another tag in this department already uses that name.'); return true; }
+      const oldName = tag.name;
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await updateGuildConfig(guild.id, (current) => { const item = current.departments[departmentId]?.tags?.[tagId]; if (item) item.name = name; });
+      await syncPanel(guild); await refreshSettingsChannel(guild);
+      await interaction.editReply({ embeds: [new EmbedBuilder().setTitle('✅ Tag Updated').setDescription('Renamed **' + oldName + '** to **' + name + '**.')], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())] });
+      await auditSettingsAction(guild, interaction, 'TAG_CHANGED', 'Renamed tag ' + oldName + ' to ' + name + ' under department ' + department.name + '.');
       return true;
     }
 
     if (interaction.customId === 'sf:settings:modal:department:add') {
       const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
       const rawStaff = interaction.fields.getTextInputValue('staff').trim();
-      const staffMention = rawStaff.match(/^<@&(\\d+)>$/);
-      const staffRoleId = staffMention?.[1] ?? (/^\\d{15,25}$/.test(rawStaff) ? rawStaff : null);
-
-      if (!name) {
-        await reject(interaction, '❌ Department name cannot be empty.');
-        return true;
-      }
-
+      const staffMention = rawStaff.match(/^<@&(\d+)>$/);
+      const staffRoleId = staffMention?.[1] ?? (/^\d{15,25}$/.test(rawStaff) ? rawStaff : null);
       const config = await getGuildConfig(guild.id);
-      if (Object.values(config.departments).some((department) => department.name.toLowerCase() === name.toLowerCase())) {
-        await reject(interaction, '❌ A department with that name already exists.');
-        return true;
-      }
-
+      if (!name) { await reject(interaction, '❌ Department name cannot be empty.'); return true; }
+      if (Object.values(config.departments).some((d) => d.name.toLowerCase() === name.toLowerCase())) { await reject(interaction, '❌ A department with that name already exists.'); return true; }
       if (staffRoleId) {
         const role = guild.roles.cache.get(staffRoleId);
-        if (!role || role.managed || role.id === guild.roles.everyone.id) {
-          await reject(interaction, '❌ The supplied staff role is invalid.');
-          return true;
-        }
+        if (!role || role.managed || role.id === guild.roles.everyone.id) { await reject(interaction, '❌ The supplied staff role is invalid.'); return true; }
       }
-
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const id = newDepartmentId();
-      const category = await ensureDepartmentCategory(guild, {
-        name,
-        staffRoleId,
-        categoryId: null,
-      });
-
+      const id = newDepartmentId(); const tagId = newTagId(); const now = new Date().toISOString();
+      const category = await ensureDepartmentCategory(guild, { name, staffRoleId, categoryId: null });
       await updateGuildConfig(guild.id, (current) => {
-        current.departments[id] = {
-          id,
-          name,
-          staffRoleId,
-          categoryId: category.id,
-          createdAt: new Date().toISOString(),
-        };
+        current.departments[id] = { id, name, staffRoleId, categoryId: category.id, tags: { [tagId]: { id: tagId, name: 'General', createdAt: now } }, createdAt: now };
       });
+      await syncPanel(guild); await refreshSettingsChannel(guild);
+      await interaction.editReply({ embeds: [new EmbedBuilder().setTitle('✅ Department Added').setDescription('**' + name + '** now owns one Discord category and a default **General** tag.')], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())] });
+      await auditSettingsAction(guild, interaction, 'DEPARTMENT_ADDED', 'Added department ' + name + ' with default tag General and category ' + category.name + '.');
+      return true;
+    }
 
-      await syncPanel(guild);
-      await refreshSettingsChannel(guild);
-      await interaction.editReply({
-        embeds: [new EmbedBuilder().setTitle('✅ Department Added').setDescription('**' + name + '** is ready.\n\nCategory: ' + category + '\nTickets for this department will use its **SupportForge.** category.')],
-        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
-      });
-      await auditSettingsAction(guild, interaction, 'DEPARTMENT_ADDED', 'Added department ' + name + ' with category ' + category.name + '.');
+    if (interaction.customId.startsWith('sf:settings:modal:department:edit:')) {
+      const departmentId = interaction.customId.slice('sf:settings:modal:department:edit:'.length);
+      const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
+      const rawStaff = interaction.fields.getTextInputValue('staff').trim();
+      const staffMention = rawStaff.match(/^<@&(\d+)>$/);
+      const staffRoleId = staffMention?.[1] ?? (/^\d{15,25}$/.test(rawStaff) ? rawStaff : null);
+      const config = await getGuildConfig(guild.id); const department = config.departments[departmentId];
+      if (!department) { await reject(interaction, '❌ Department not found.'); return true; }
+      if (!name) { await reject(interaction, '❌ Department name cannot be empty.'); return true; }
+      if (Object.values(config.departments).some((d) => d.id !== departmentId && d.name.toLowerCase() === name.toLowerCase())) { await reject(interaction, '❌ Another department already uses that name.'); return true; }
+      if (staffRoleId) {
+        const role = guild.roles.cache.get(staffRoleId);
+        if (!role || role.managed || role.id === guild.roles.everyone.id) { await reject(interaction, '❌ The supplied staff role is invalid.'); return true; }
+      }
+      const oldName = department.name;
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const category = department.categoryId ? guild.channels.cache.get(department.categoryId) : null;
+      if (category?.type === ChannelType.GuildCategory) await category.edit({ name: ('SupportForge.' + name).slice(0, 100), reason: 'SupportForge department rename' });
+      await updateGuildConfig(guild.id, (current) => { const d = current.departments[departmentId]; if (d) { d.name = name; d.staffRoleId = staffRoleId; } });
+      await syncPanel(guild); await refreshSettingsChannel(guild);
+      await interaction.editReply({ embeds: [new EmbedBuilder().setTitle('✅ Department Updated').setDescription('Renamed **' + oldName + '** to **' + name + '**. Its category and tags remain attached.')], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())] });
+      await auditSettingsAction(guild, interaction, 'DEPARTMENT_CHANGED', 'Renamed department ' + oldName + ' to ' + name + '.');
       return true;
     }
 
