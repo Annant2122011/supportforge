@@ -3399,20 +3399,24 @@ export async function handleTicketInteraction(
           'ticket:modal:',
         )
       ) {
-        const departmentId =
-          interaction.customId.slice(
-            'ticket:modal:'.length,
-          );
+        const parts = interaction.customId.split(':');
+        const departmentId = parts[2] ?? '';
+        const tagId = parts[3] ?? '';
 
-        if (
-          departmentId
-        ) {
-          await createTicket(
+        if (!departmentId || !tagId) {
+          await replyError(
             interaction,
-            departmentId,
+            '❌ Ticket department/tag could not be determined.',
           );
           return;
         }
+
+        await createTicket(
+          interaction,
+          departmentId,
+          tagId,
+        );
+        return;
       }
 
       /*
