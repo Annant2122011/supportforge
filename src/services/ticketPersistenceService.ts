@@ -11,6 +11,7 @@ export interface PersistedTicket {
   createdAt: string;
   ticketNumber: string | null;
   departmentId: string | null;
+  tagId: string | null;
   ownerId: string | null;
   priority: TicketPriority | null;
   deletedAt: string | null;
@@ -51,6 +52,7 @@ async function loadState(): Promise<TicketStateFile> {
         createdAt: legacy.createdAt ?? legacy.updatedAt ?? new Date().toISOString(),
         ticketNumber: legacy.ticketNumber ?? null,
         departmentId: legacy.departmentId ?? null,
+        tagId: legacy.tagId ?? null,
         ownerId: legacy.ownerId ?? null,
         priority: legacy.priority ?? null,
         deletedAt: legacy.deletedAt ?? null,
