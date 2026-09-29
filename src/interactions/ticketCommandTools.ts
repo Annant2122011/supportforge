@@ -277,7 +277,6 @@ export async function executeTicketCommand(
     if (
       [
         'priority',
-        'tag',
         'note',
         'history',
       ].includes(subcommand) &&
@@ -1043,78 +1042,6 @@ export async function executeTicketCommand(
 
       await interaction.editReply(
         `✅ Ticket #${context.ticketNumber} priority is now **${level}**.`,
-      );
-
-      return;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Tag                                                                */
-    /* ------------------------------------------------------------------ */
-
-    if (subcommand === 'tag') {
-      const value =
-        interaction.options
-          .getString(
-            'name',
-            true,
-          )
-          .trim()
-          .toLowerCase()
-          .replace(/\s+/g, '-');
-
-      if (!value) {
-        await interaction.editReply(
-          '❌ Tag cannot be empty.',
-        );
-        return;
-      }
-
-      const tags =
-        new Set(
-          (
-            getField(
-              context.topic,
-              'tags',
-            ) ?? ''
-          )
-            .split(',')
-            .filter(Boolean),
-        );
-
-      if (tags.has(value)) {
-        await interaction.editReply(
-          `ℹ️ Tag \`${value}\` is already on this ticket.`,
-        );
-        return;
-      }
-
-      tags.add(value);
-
-      const topic =
-        setField(
-          context.topic,
-          'tags',
-          [...tags].join(','),
-        );
-
-      await saveTopic(
-        context,
-        topic,
-      );
-
-      await context.channel.send(
-        `🏷️ Tag \`${value}\` added by ${interaction.user}.`,
-      );
-
-      await audit(
-        interaction,
-        context,
-        `Tag added: ${value}`,
-      );
-
-      await interaction.editReply(
-        `✅ Added tag \`${value}\`.`,
       );
 
       return;
