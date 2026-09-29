@@ -153,6 +153,38 @@ export async function setPersistedTicketStatus(
 
   await persistState();
 }
+export async function updatePersistedTicketMetadata(
+  channelId: string,
+  updates: Partial<
+    Pick<
+      PersistedTicket,
+      'departmentId' | 'ownerId' | 'priority'
+    >
+  >,
+): Promise<void> {
+  const current = await loadState();
+  const existing = current.tickets[channelId];
+  const now = new Date().toISOString();
+
+  current.tickets[channelId] = {
+    guildId: existing?.guildId ?? null,
+    status: existing?.status ?? 'open',
+    updatedAt: now,
+    createdAt: existing?.createdAt ?? now,
+    ticketNumber: existing?.ticketNumber ?? null,
+    departmentId:
+      updates.departmentId ?? existing?.departmentId ?? null,
+    ownerId:
+      updates.ownerId ?? existing?.ownerId ?? null,
+    priority:
+      updates.priority ?? existing?.priority ?? null,
+    deletedAt: existing?.deletedAt ?? null,
+    deletionReason: existing?.deletionReason ?? null,
+  };
+
+  await persistState();
+}
+
 
 export async function getPersistedTicketRecords(guildId?: string): Promise<PersistedTicket[]> {
   const current = await loadState();
