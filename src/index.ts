@@ -508,7 +508,11 @@ client.on(
           return;
         }
 
-        if (interaction.isButton() || interaction.isModalSubmit()) {
+        if (
+          interaction.isButton() ||
+          interaction.isStringSelectMenu() ||
+          interaction.isModalSubmit()
+        ) {
           await handleTicketInteraction(interaction);
         }
       }
