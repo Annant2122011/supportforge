@@ -428,8 +428,8 @@ export function priorityIndicator(priority: string): string {
   return {
     low: '🟢',
     normal: '🟡',
-    high: '🔴',
-    urgent: '🟠',
+    high: '🟠',
+    urgent: '🔴',
     critical: '🟣',
   }[normalizedPriority(priority)];
 }
@@ -449,8 +449,8 @@ function priorityLabel(priority: string): string {
   const labels: Record<TicketPriority, string> = {
     low: '🟢 Low',
     normal: '🟡 Normal',
-    high: '🔴 High',
-    urgent: '🟠 Urgent',
+    high: '🟠 High',
+    urgent: '🔴 Urgent',
     critical: '🟣 Critical',
   };
   return labels[normalized];
