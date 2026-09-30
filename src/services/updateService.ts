@@ -2,7 +2,7 @@ import type { Client, Guild } from 'discord.js';
 import { getGuildConfig } from './configService';
 import { refreshSettingsChannel } from './settingsChannelService';
 import { refreshTicketPanelControls } from './ticketPanelService';
-import { refreshAuditPanel } from './auditLogService';
+import { getOrCreateAuditChannel } from './auditLogService';
 
 const UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 const UPDATE_URL = 'https://api.github.com/repos/Annant2122011/supportforge/commits/main';
@@ -18,7 +18,7 @@ async function fetchLatestSha(): Promise<string | null> {
         Accept: 'application/vnd.github+json',
         'User-Agent': 'SupportForge',
       },
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(20_000),
     });
 
     if (!response.ok) return null;
@@ -37,7 +37,7 @@ async function refreshGuildUi(guild: Guild): Promise<void> {
 
   await Promise.allSettled([
     refreshSettingsChannel(guild),
-    refreshAuditPanel(guild),
+    getOrCreateAuditChannel(guild, config.supportCategoryId),
     refreshTicketPanelControls(guild),
   ]);
 }
