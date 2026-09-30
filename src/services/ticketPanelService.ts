@@ -139,7 +139,6 @@ export function buildTicketPanelComponents(status: TicketStatus): ActionRowBuild
       new ButtonBuilder().setCustomId('ticket:panel:department').setLabel('Department').setEmoji('📂').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('ticket:panel:tag').setLabel('Tag').setEmoji('🏷️').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('ticket:panel:note').setLabel('Note').setEmoji('📝').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('ticket:panel:history').setLabel('History').setEmoji('📜').setStyle(ButtonStyle.Secondary),
     );
   }
 
@@ -149,6 +148,11 @@ export function buildTicketPanelComponents(status: TicketStatus): ActionRowBuild
         .setCustomId('ticket:panel:move-bottom')
         .setLabel('Move Controls Here')
         .setEmoji('⬇️')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('ticket:panel:history')
+        .setLabel('History')
+        .setEmoji('📜')
         .setStyle(ButtonStyle.Secondary),
     );
 
