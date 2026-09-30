@@ -707,8 +707,11 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
   if (store.panelMessageId) {
     const panel = channel.messages.cache.get(store.panelMessageId);
     if (panel?.embeds.some((embed) => embed.title === AUDIT_PANEL_TITLE)) {
+      const visibleEventCount = store.events.filter(
+        (event) => isReportableAuditEvent(event) && (store.developerMode || event.category === 'ticket'),
+      ).length;
       const canCollapse =
-        store.events.length - store.panelEventCheckpoint >= AUDIT_COLLAPSE_AFTER;
+        visibleEventCount - store.panelEventCheckpoint >= AUDIT_COLLAPSE_AFTER;
       const hasCollapse = panel.components.some(
         (row) =>
           row.type === ComponentType.ActionRow &&
@@ -759,8 +762,11 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
     );
     if (existingPanel) {
       store.panelMessageId = existingPanel.id;
+      const visibleEventCount = store.events.filter(
+        (event) => isReportableAuditEvent(event) && (store.developerMode || event.category === 'ticket'),
+      ).length;
       const canCollapse =
-        store.events.length - store.panelEventCheckpoint >= AUDIT_COLLAPSE_AFTER;
+        visibleEventCount - store.panelEventCheckpoint >= AUDIT_COLLAPSE_AFTER;
       await existingPanel
         .edit({ components: auditPanelComponents(canCollapse) })
         .catch(() => undefined);
