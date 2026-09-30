@@ -1,6 +1,6 @@
 import type { Client, Guild } from 'discord.js';
 import { getGuildConfig } from './configService';
-import { ensureSettingsChannel, refreshSettingsChannel } from './settingsChannelService';
+import { refreshSettingsChannel } from './settingsChannelService';
 import { refreshTicketPanelControls } from './ticketPanelService';
 import { refreshAuditPanel } from './auditLogService';
 
