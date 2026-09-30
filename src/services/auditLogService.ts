@@ -488,6 +488,14 @@ export async function getOrCreateAuditChannel(
 ): Promise<TextChannel> {
   const existing = await findAuditChannel(guild);
   if (existing) {
+    if (existing.parentId !== parentCategoryId) {
+      await existing
+        .setParent(parentCategoryId, { lockPermissions: false })
+        .catch((error) => {
+          console.warn('⚠️ Could not move the SupportForge audit channel into its container:', error);
+        });
+    }
+
     await ensureChannelPurposeMessage(
       existing,
       'This private channel stores SupportForge’s durable operational audit history. It records important ticket lifecycle actions, configuration changes, retention decisions, repairs, and other administrative events with responsible users and timestamps.',
