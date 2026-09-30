@@ -1039,7 +1039,7 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
         (actionCounts.get('TICKET_PRIORITY_CHANGED') ?? 0) +
         (actionCounts.get('TICKET_TAG_ADDED') ?? 0)),
     '**Retention-deleted ticket records:** ' + retentionEligible,
-    '**Retention policy:** closed ' + (settings.retention.closedDays || 'never') + ' days • archive ' + (settings.retention.archiveDays || 'never') + ' days',
+    '**Retention policy:** closed ' + (settings.retention.closedDays === 0 ? 'unlimited' : settings.retention.closedDays + ' days') + ' • archive ' + (settings.retention.archiveDays === 0 ? 'unlimited' : settings.retention.archiveDays + ' days'),
     oldestActive
       ? '**Oldest active ticket:** #' + oldestActive.ticket.number + ' • opened ' + formatAuditDate(oldestActive.ticket.openedAt ?? new Date(oldestActive.timestamp).toISOString())
       : '**Oldest active ticket:** none',
