@@ -4,9 +4,11 @@ import {
   ButtonStyle,
   ComponentType,
   EmbedBuilder,
+  ChannelType,
   type ButtonInteraction,
   type Message,
   type TextChannel,
+  type Guild,
 } from 'discord.js';
 import { getGuildConfig, type GuildConfig } from './configService';
 import type { TicketPriority } from './advancedSettingsService';
@@ -14,6 +16,7 @@ import { setChannelName } from './discordChannelService';
 import {
   getField,
   getTicketStatus,
+  isTicketTopic,
   type TicketStatus,
 } from './ticketStateService';
 
