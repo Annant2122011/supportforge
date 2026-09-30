@@ -39,7 +39,7 @@ async function refreshGuildUi(guild: Guild): Promise<void> {
     refreshSettingsChannel(guild),
     refreshAuditPanel(guild),
     config.panelChannelId
-      ? refreshTicketPanel(guild, config.panelChannelId)
+      ? refreshTicketPanel(guild.channels.cache.get(config.panelChannelId) as import('discord.js').TextChannel)
       : Promise.resolve(),
   ]);
 }
