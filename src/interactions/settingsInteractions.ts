@@ -34,6 +34,7 @@ import {
   refreshSettingsChannel,
   ensureSettingsChannel,
   buildSettingsDashboardEmbed,
+  restoreSettingsChannelToBottom,
 } from '../services/settingsChannelService';
 
 import {
@@ -374,7 +375,7 @@ async function restoreSettingsHome(
     await interaction.deleteReply().catch(() => undefined);
   }
 
-  await refreshSettingsChannel(guild);
+  await restoreSettingsChannelToBottom(guild);
 }
 
 function isEphemeralSettingsMessage(interaction: ButtonInteraction): boolean {
