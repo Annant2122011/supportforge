@@ -315,12 +315,12 @@ export function buildSettingsSummary(
 ): string {
   const closed =
     settings.retention.closedDays === 0
-      ? 'Never delete'
+      ? 'Unlimited'
       : settings.retention.closedDays + ' days';
 
   const archived =
     settings.retention.archiveDays === 0
-      ? 'Never delete'
+      ? 'Unlimited'
       : settings.retention.archiveDays + ' days';
 
   const claimedCategory = settings.statusCategories.claimedCategoryId
