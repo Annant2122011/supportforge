@@ -42,7 +42,7 @@ import {
   ensureDepartmentCategory,
 } from '../services/departmentCategoryService';
 
-import { logSettingsEvent, logSystemEvent } from '../services/auditLogService';
+import { getOrCreateAuditChannel, logSettingsEvent, logSystemEvent } from '../services/auditLogService';
 
 import {
   ensureSettingsChannel,
@@ -912,6 +912,13 @@ export async function execute(
       const supportCategory =
         await ensureContainer(guild);
 
+      // The audit channel is core SupportForge infrastructure. Create/repair
+      // it during setup instead of waiting for a later ticket event.
+      await getOrCreateAuditChannel(
+        guild,
+        supportCategory.id,
+      );
+
       await ensureTranscriptChannel(
         guild,
         supportCategory.id,
@@ -1076,13 +1083,6 @@ export async function execute(
       const id =
         newDepartmentId();
 
-      const category = await ensureDepartmentCategory(guild, {
-        id,
-        name,
-        staffRoleId: role?.id ?? null,
-        categoryId: null,
-      });
-
       await updateGuildConfig(
         guild.id,
         (current) => {
@@ -1093,7 +1093,7 @@ export async function execute(
             name,
             staffRoleId:
               role?.id ?? null,
-            categoryId: category.id,
+            categoryId: null,
             tags: {
               [tagId]: {
                 id: tagId,
@@ -1123,7 +1123,7 @@ export async function execute(
           role
             ? ` for ${role}`
             : ''
-        } with category ${category}.`,
+        }. Its Discord category will be created when the first ticket is opened in this department.`,
       );
 
       void logSettingsEvent(
@@ -1133,7 +1133,7 @@ export async function execute(
           action: 'DEPARTMENT_ADDED',
           actorId: interaction.user.id,
           actorName: interaction.user.tag,
-          detail: 'Added department ' + name + ' with category ' + category.name + '.',
+          detail: 'Added department ' + name + '. Its Discord category will be provisioned when the first ticket is created.',
         },
       ).catch((error) => console.warn('⚠️ Category command audit failed:', error));
       return;
