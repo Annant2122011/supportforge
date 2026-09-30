@@ -41,6 +41,7 @@ import {
 import { handleSettingsInteraction } from './interactions/settingsInteractions';
 import { ensureSettingsChannel } from './services/settingsChannelService';
 import { isFactoryResetInProgress } from './services/factoryResetService';
+import { startSupportForgeUpdateMonitor } from './services/updateService';
 import type { GuildBasedChannel, TextChannel } from 'discord.js';
 
 const token = process.env.DISCORD_TOKEN;
@@ -69,6 +70,7 @@ client.once('clientReady', (readyClient) => {
   );
   startTicketRetentionScheduler(client);
   startAuditDailySummaryScheduler(client);
+  startSupportForgeUpdateMonitor(client);
   void Promise.all(
     client.guilds.cache.map((guild) => removeLegacyCustomCommands(guild)),
   ).catch((error) => console.warn('⚠️ Legacy settings command cleanup failed:', error));
