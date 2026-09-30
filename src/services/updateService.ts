@@ -1,4 +1,4 @@
-import type { Client, Guild } from 'discord.js';
+import { ChannelType, type Client, type Guild } from 'discord.js';
 import { getGuildConfig } from './configService';
 import { ensureSettingsChannel, refreshSettingsChannel } from './settingsChannelService';
 import { refreshTicketPanel } from './ticketPanelService';
@@ -39,7 +39,7 @@ async function refreshGuildUi(guild: Guild): Promise<void> {
     refreshSettingsChannel(guild),
     refreshAuditPanel(guild),
     config.panelChannelId
-      ? refreshTicketPanel(guild.channels.cache.get(config.panelChannelId) as import('discord.js').TextChannel)
+      ? (() => { const channel = guild.channels.cache.get(config.panelChannelId); return channel?.type === ChannelType.GuildText ? refreshTicketPanel(channel) : Promise.resolve(); })()
       : Promise.resolve(),
   ]);
 }
