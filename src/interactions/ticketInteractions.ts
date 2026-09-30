@@ -1103,21 +1103,37 @@ async function createTicket(
         })();
       }
     } catch (error) {
+      /*
+       * A ticket channel is a real user-facing record as soon as Discord
+       * creates it. Never delete it merely because a later initialization
+       * step failed. The old cleanup behavior made a valid ticket appear for
+       * a moment and then silently destroyed it, especially when a topic,
+       * persistence, or message operation was temporarily unavailable.
+       *
+       * Keep the channel so the next repair/refresh can recover it and so the
+       * user never loses the support request they just submitted.
+       */
       if (ticketChannel) {
-        try {
-          await withTimeout(
-            ticketChannel.delete(
-              'SupportForge ticket initialization failed',
-            ),
-            DISCORD_OPERATION_TIMEOUT_MS,
-            'Ticket cleanup',
-          );
-        } catch (deleteError) {
+        console.error(
+          `⚠️ Ticket #${getField(ticketChannel.topic ?? '', 'number') ?? 'unknown'} was created but initialization did not complete. The channel has been preserved for recovery.`,
+          error,
+        );
+
+        await ticketChannel.send({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle('⚠️ SupportForge Ticket Recovery')
+              .setDescription(
+                'The ticket channel was created successfully, but one initialization step did not complete. The ticket has **not** been deleted. An administrator can use **Repair System** or refresh the ticket panel to complete recovery.',
+              )
+              .setTimestamp(),
+          ],
+        }).catch((recoveryError) => {
           console.error(
-            '⚠️ Failed to clean up ticket channel:',
-            deleteError,
+            '⚠️ Could not post the ticket recovery notice:',
+            recoveryError,
           );
-        }
+        });
       }
 
       throw error;
