@@ -104,7 +104,13 @@ async function persist(): Promise<void> {
 
   writeQueue = writeQueue.then(async () => {
     await mkdir(DATA_DIR, { recursive: true });
-    const serialized = JSON.stringify(state, null, 2);
+    const persistedState = JSON.parse(JSON.stringify(state)) as AuditStore;
+    for (const store of Object.values(persistedState.guilds)) {
+      if (!store.accumulationEnabled) {
+        store.events = [];
+      }
+    }
+    const serialized = JSON.stringify(persistedState, null, 2);
 
     /*
      * Keep a second local copy so a damaged/missing primary audit file does
@@ -548,7 +554,7 @@ async function appendAuditRecord(
   const current = await load();
   const store = getGuildStore(current, guild.id);
 
-  if (store.accumulationEnabled) store.events.push(event);
+  store.events.push(event);
 
   if (event.action === 'SETUP_COMPLETED') {
     store.lastSetupDate = dateKey(event.timestamp);
