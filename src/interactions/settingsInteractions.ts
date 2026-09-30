@@ -46,7 +46,6 @@ import {
 
 import {
   ensureAllDepartmentCategories,
-  ensureDepartmentCategory,
 } from '../services/departmentCategoryService';
 
 import { logSettingsEvent } from '../services/auditLogService';
@@ -189,41 +188,83 @@ async function enforcePriorityRoleHierarchy(guild: Guild): Promise<void> {
     const roleId = settings.priorityRoles[priority];
     const role = roleId ? guild.roles.cache.get(roleId) : undefined;
 
-    return roleId && role ? [{ priority, roleId, role }] : [];
+    return roleId && role && !role.managed
+      ? [{ priority, role }]
+      : [];
   });
 
   if (configured.length === 0) return;
 
-  const botMember = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
+  const botMember =
+    guild.members.me ??
+    await guild.members.fetchMe().catch(() => null);
+
   const botHighestRole = botMember?.roles.highest;
   if (!botHighestRole) {
-    throw new Error('SupportForge cannot determine its highest role.');
+    console.warn('⚠️ SupportForge could not determine its highest role; priority role ordering was skipped.');
+    return;
   }
 
-  const orderedRoleIds = new Set(configured.map((entry) => entry.role.id));
-  if (orderedRoleIds.has(botHighestRole.id)) {
-    throw new Error('SupportForge priority roles cannot include the bot role.');
-  }
+  /*
+   * Discord only lets a bot manage roles below its highest role. A hierarchy
+   * preference must never make the underlying priority-rule creation fail.
+   * Skip roles the bot cannot edit and treat a Discord 50013 as a warning.
+   */
+  const manageable = configured.filter(
+    (entry) =>
+      entry.role.editable &&
+      entry.role.position < botHighestRole.position,
+  );
+
+  if (manageable.length === 0) return;
 
   const highestTargetPosition = botHighestRole.position - 1;
-  const lowestTargetPosition = highestTargetPosition - configured.length + 1;
+  const lowestTargetPosition =
+    highestTargetPosition - manageable.length + 1;
 
   if (lowestTargetPosition < 1) {
-    throw new Error(
-      'There are not enough manageable role positions below the SupportForge bot role to order all configured priority roles.',
+    console.warn(
+      '⚠️ Not enough manageable role positions below the SupportForge bot role; priority role ordering was skipped.',
     );
+    return;
   }
 
-  const positions = configured.map((entry, index) => ({
+  const positions = manageable.map((entry, index) => ({
     role: entry.role.id,
     position: highestTargetPosition - index,
   }));
 
-  await guild.roles.setPositions(positions);
+  try {
+    await guild.roles.setPositions(positions);
+    await guild.roles.fetch();
+  } catch (error) {
+    console.warn(
+      '⚠️ Could not reorder SupportForge priority roles. Role creation/deletion will continue normally:',
+      error,
+    );
+  }
+}
 
-  // Discord can shift adjacent roles while applying a batch. Re-fetch so the
-  // in-memory role cache reflects the final hierarchy before the next action.
-  await guild.roles.fetch();
+function findPriorityRole(
+  guild: Guild,
+  priority: TicketPriority,
+  configuredRoleId?: string,
+) {
+  const configured =
+    configuredRoleId
+      ? guild.roles.cache.get(configuredRoleId)
+      : undefined;
+
+  if (configured) return configured;
+
+  const expectedName =
+    'SupportForge • ' + PRIORITY_ROLE_DEFINITIONS[priority].label + ' Tickets';
+
+  return guild.roles.cache.find(
+    (role) =>
+      !role.managed &&
+      role.name === expectedName,
+  );
 }
 
 async function showManual(interaction: SettingsViewInteraction): Promise<void> {
@@ -254,31 +295,61 @@ async function showManualVersion(interaction: ButtonInteraction, detailed: boole
 }
 
 async function showPriorityRules(interaction: ButtonInteraction): Promise<void> {
-  await enforcePriorityRoleHierarchy(interaction.guild!);
   const settings = await getAdvancedSettings(interaction.guild!.id);
-  const lines = (Object.keys(PRIORITY_ROLE_DEFINITIONS) as TicketPriority[]).map((priority) => {
-    const roleId = settings.priorityRoles[priority];
-    const role = roleId ? interaction.guild!.roles.cache.get(roleId) : undefined;
-    return PRIORITY_ROLE_DEFINITIONS[priority].emoji + ' **' + PRIORITY_ROLE_DEFINITIONS[priority].label + '** • ' + (role ? role.toString() : roleId ? 'Role missing, recreate' : 'No role created');
+  const priorities = Object.keys(PRIORITY_ROLE_DEFINITIONS) as TicketPriority[];
+
+  const lines = priorities.map((priority) => {
+    const role = findPriorityRole(
+      interaction.guild!,
+      priority,
+      settings.priorityRoles[priority],
+    );
+
+    return (
+      PRIORITY_ROLE_DEFINITIONS[priority].emoji +
+      ' **' +
+      PRIORITY_ROLE_DEFINITIONS[priority].label +
+      '** • ' +
+      (role
+        ? role.toString()
+        : 'No role created')
+    );
+  });
+
+  const controls = priorities.map((priority) => {
+    const role = findPriorityRole(
+      interaction.guild!,
+      priority,
+      settings.priorityRoles[priority],
+    );
+
+    return new ButtonBuilder()
+      .setCustomId(
+        'sf:settings:rules:' +
+          (role ? 'delete:' : 'create:') +
+          priority,
+      )
+      .setLabel(
+        (role ? 'Delete ' : 'Create ') +
+          PRIORITY_ROLE_DEFINITIONS[priority].label +
+          ' Role',
+      )
+      .setEmoji(PRIORITY_ROLE_DEFINITIONS[priority].emoji)
+      .setStyle(role ? ButtonStyle.Danger : ButtonStyle.Secondary);
   });
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
       .setTitle('🎨 Priority Rules & Roles')
       .setDescription(
-        'Priority roles are optional server rules. **Nothing is created by default.** An administrator must explicitly choose a priority below to create its role. Claimed and Pending are intentionally excluded because they are workflow states, not new priority-role types.',
+        'Priority roles are optional server rules. **Nothing is created automatically.** Choose a priority to create its role, or delete an existing SupportForge priority role. SupportForge will not fail the whole rule operation just because Discord refuses a role-hierarchy reorder.',
       )
-      .addFields({ name: 'Current priority rules', value: lines.join('\n') }),
+      .addFields({
+        name: 'Current priority rules',
+        value: lines.join('\n'),
+      }),
   ], [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      ...(Object.keys(PRIORITY_ROLE_DEFINITIONS) as TicketPriority[]).map((priority) =>
-        new ButtonBuilder()
-          .setCustomId('sf:settings:rules:create:' + priority)
-          .setLabel('Create ' + PRIORITY_ROLE_DEFINITIONS[priority].label + ' Role')
-          .setEmoji(PRIORITY_ROLE_DEFINITIONS[priority].emoji)
-          .setStyle(priority === 'high' || priority === 'urgent' || priority === 'critical' ? ButtonStyle.Danger : ButtonStyle.Secondary),
-      ),
-    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(...controls),
     new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()),
   ]);
 }
@@ -289,12 +360,35 @@ async function createPriorityRole(interaction: ButtonInteraction, priority: Tick
     return;
   }
 
+  const botMember =
+    interaction.guild!.members.me ??
+    await interaction.guild!.members.fetchMe().catch(() => null);
+
+  if (!botMember?.permissions.has(PermissionFlagsBits.ManageRoles)) {
+    await reject(
+      interaction,
+      '❌ SupportForge needs **Manage Roles** to create priority roles. Discord does not allow a bot to grant itself that permission.',
+    );
+    return;
+  }
+
   const existingSettings = await getAdvancedSettings(interaction.guild!.id);
   const configuredRoleId = existingSettings.priorityRoles[priority];
-  const configuredRole = configuredRoleId ? interaction.guild!.roles.cache.get(configuredRoleId) : undefined;
+  const existingRole = findPriorityRole(
+    interaction.guild!,
+    priority,
+    configuredRoleId,
+  );
 
-  if (configuredRole) {
-    await interaction.reply({ content: 'ℹ️ The ' + priorityRoleLabel(priority) + ' priority role already exists: ' + configuredRole.toString(), flags: MessageFlags.Ephemeral });
+  if (existingRole) {
+    await interaction.reply({
+      content:
+        'ℹ️ The ' +
+        priorityRoleLabel(priority) +
+        ' priority role already exists: ' +
+        existingRole.toString(),
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
 
@@ -304,7 +398,9 @@ async function createPriorityRole(interaction: ButtonInteraction, priority: Tick
     const definition = PRIORITY_ROLE_DEFINITIONS[priority];
     const role = await interaction.guild!.roles.create({
       name: 'SupportForge • ' + definition.label + ' Tickets',
-      color: definition.color,
+      colors: {
+        primaryColor: definition.color,
+      },
       mentionable: false,
       reason: 'SupportForge administrator-created priority rule',
     });
@@ -313,21 +409,131 @@ async function createPriorityRole(interaction: ButtonInteraction, priority: Tick
       settings.priorityRoles[priority] = role.id;
     });
 
-    // Creation order must never determine hierarchy. Rebuild the complete
-    // priority stack after every new role so Critical > Urgent > High >
-    // Normal > Low even when an administrator creates them in a random order.
+    // Reordering is useful but not required for the rule itself. Discord may
+    // reject hierarchy changes with 50013 even though role creation succeeds.
     await enforcePriorityRoleHierarchy(interaction.guild!);
+
     await refreshSettingsChannel(interaction.guild!);
 
     await interaction.editReply({
-      embeds: [new EmbedBuilder().setTitle('✅ Priority Role Created').setDescription(definition.emoji + ' **' + definition.label + '** tickets can now use ' + role.toString() + '.\n\nThe role was created only because an administrator explicitly requested it. SupportForge did not create any default priority roles.')],
-      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+      embeds: [
+        new EmbedBuilder()
+          .setTitle('✅ Priority Role Created')
+          .setDescription(
+            definition.emoji +
+              ' **' +
+              definition.label +
+              '** tickets can now use ' +
+              role.toString() +
+              '.',
+          ),
+      ],
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()),
+      ],
     });
 
-    await auditSettingsAction(interaction.guild!, interaction, 'PRIORITY_ROLE_CREATED', 'Created ' + role.name + ' for ' + priority + ' priority.');
+    await auditSettingsAction(
+      interaction.guild!,
+      interaction,
+      'PRIORITY_ROLE_CREATED',
+      'Created ' + role.name + ' for ' + priority + ' priority.',
+    );
   } catch (error) {
     console.error('❌ Priority role creation failed:', error);
-    await interaction.editReply('❌ SupportForge could not create that priority role. Check that the bot can Manage Roles and that its role is above the new role.');
+    await interaction.editReply(
+      '❌ SupportForge could not create that priority role. Check that the bot can Manage Roles and that its role is above the target role.',
+    );
+  }
+}
+
+async function deletePriorityRole(
+  interaction: ButtonInteraction,
+  priority: TicketPriority,
+): Promise<void> {
+  if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+    await reject(
+      interaction,
+      '❌ Deleting priority roles requires the **Administrator** permission.',
+    );
+    return;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  try {
+    const settings = await getAdvancedSettings(interaction.guild!.id);
+    const role = findPriorityRole(
+      interaction.guild!,
+      priority,
+      settings.priorityRoles[priority],
+    );
+
+    if (!role) {
+      await updateAdvancedSettings(interaction.guild!.id, (current) => {
+        delete current.priorityRoles[priority];
+      });
+      await interaction.editReply(
+        'ℹ️ No ' +
+          priorityRoleLabel(priority) +
+          ' priority role exists. The stale SupportForge configuration was cleared.',
+      );
+      await auditSettingsAction(
+        interaction.guild!,
+        interaction,
+        'PRIORITY_ROLE_CLEANED',
+        'Cleared stale configuration for missing ' + priority + ' priority role.',
+      );
+      return;
+    }
+
+    const botMember =
+      interaction.guild!.members.me ??
+      await interaction.guild!.members.fetchMe().catch(() => null);
+
+    if (!role.editable || role.managed || !botMember?.permissions.has(PermissionFlagsBits.ManageRoles)) {
+      await auditSettingsAction(
+        interaction.guild!,
+        interaction,
+        'PRIORITY_ROLE_DELETE_FAILED',
+        'Could not delete ' +
+          role.name +
+          ' because Discord role hierarchy/permissions do not permit the bot to manage it.',
+      );
+      await interaction.editReply(
+        '❌ Discord will not let SupportForge delete ' +
+          role.toString() +
+          '. Move the SupportForge bot role above this role and ensure it has **Manage Roles**, then try again.',
+      );
+      return;
+    }
+
+    await role.delete('SupportForge administrator deleted priority rule role');
+
+    await updateAdvancedSettings(interaction.guild!.id, (current) => {
+      delete current.priorityRoles[priority];
+    });
+
+    await refreshSettingsChannel(interaction.guild!);
+    await enforcePriorityRoleHierarchy(interaction.guild!);
+
+    await interaction.editReply(
+      '✅ Deleted the ' +
+        priorityRoleLabel(priority) +
+        ' priority role.',
+    );
+
+    await auditSettingsAction(
+      interaction.guild!,
+      interaction,
+      'PRIORITY_ROLE_DELETED',
+      'Deleted ' + role.name + ' for ' + priority + ' priority.',
+    );
+  } catch (error) {
+    console.error('❌ Priority role deletion failed:', error);
+    await interaction.editReply(
+      '❌ SupportForge could not delete that priority role. Discord may be preventing the bot from managing it because of the role hierarchy.',
+    );
   }
 }
 function isSettingsChannel(interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction): boolean {
@@ -565,10 +771,10 @@ async function showRetention(interaction: ButtonInteraction): Promise<void> {
   await renderSettingsView(interaction, [
     new EmbedBuilder()
       .setTitle('🧹 Retention')
-      .setDescription('Set how long closed and archived tickets remain before automatic deletion. **0 means never delete.**')
+      .setDescription('Set how long closed and archived tickets remain before automatic deletion. **0 means unlimited retention (never automatically delete).**')
       .addFields(
-        { name: 'Closed', value: settings.retention.closedDays === 0 ? 'Never delete' : settings.retention.closedDays + ' days', inline: true },
-        { name: 'Archived', value: settings.retention.archiveDays === 0 ? 'Never delete' : settings.retention.archiveDays + ' days', inline: true },
+        { name: 'Closed', value: settings.retention.closedDays === 0 ? 'Unlimited' : settings.retention.closedDays + ' days', inline: true },
+        { name: 'Archived', value: settings.retention.archiveDays === 0 ? 'Unlimited' : settings.retention.archiveDays + ' days', inline: true },
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -792,13 +998,26 @@ export async function handleSettingsInteraction(
       return true;
     }
 
-    if (id.startsWith('sf:settings:rules:create:')) {
-      const priority = id.slice('sf:settings:rules:create:'.length);
+    if (
+      id.startsWith('sf:settings:rules:create:') ||
+      id.startsWith('sf:settings:rules:delete:')
+    ) {
+      const deleting = id.startsWith('sf:settings:rules:delete:');
+      const prefix = deleting
+        ? 'sf:settings:rules:delete:'
+        : 'sf:settings:rules:create:';
+      const priority = id.slice(prefix.length);
+
       if (!Object.prototype.hasOwnProperty.call(PRIORITY_ROLE_DEFINITIONS, priority)) {
         await reject(interaction, '❌ Unknown priority rule.');
         return true;
       }
-      await createPriorityRole(interaction, priority as TicketPriority);
+
+      if (deleting) {
+        await deletePriorityRole(interaction, priority as TicketPriority);
+      } else {
+        await createPriorityRole(interaction, priority as TicketPriority);
+      }
       return true;
     }
 
@@ -979,8 +1198,8 @@ export async function handleSettingsInteraction(
     if (id === 'sf:settings:retention:edit') {
       const settings = await getAdvancedSettings(guild.id);
       await openModal(interaction, 'sf:settings:modal:retention', 'Ticket Retention', [
-        new TextInputBuilder().setCustomId('closed').setLabel('Closed ticket days (0 = never)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.retention.closedDays)),
-        new TextInputBuilder().setCustomId('archive').setLabel('Archived ticket days (0 = never)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.retention.archiveDays)),
+        new TextInputBuilder().setCustomId('closed').setLabel('Closed ticket days (0 = unlimited)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.retention.closedDays)),
+        new TextInputBuilder().setCustomId('archive').setLabel('Archived ticket days (0 = unlimited)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.retention.archiveDays)),
       ]);
       return true;
     }
@@ -1034,19 +1253,12 @@ export async function handleSettingsInteraction(
       const departmentId = newDepartmentId();
       const tagId = newTagId();
       const now = new Date().toISOString();
-      const category = await ensureDepartmentCategory(guild, {
-        id: departmentId,
-        name,
-        staffRoleId: null,
-        categoryId: null,
-      });
-
       await updateGuildConfig(guild.id, (current) => {
         current.departments[departmentId] = {
           id: departmentId,
           name,
           staffRoleId: null,
-          categoryId: category.id,
+          categoryId: null,
           tags: {
             [tagId]: { id: tagId, name: 'General', createdAt: now },
           },
@@ -1057,10 +1269,14 @@ export async function handleSettingsInteraction(
       await syncPanel(guild);
       await refreshSettingsChannel(guild);
       await interaction.editReply({
-        embeds: [new EmbedBuilder().setTitle('✅ Use Case Added').setDescription('Added **' + name + '** with category ' + category + '.')],
+        embeds: [
+          new EmbedBuilder()
+            .setTitle('✅ Use Case Added')
+            .setDescription('Added **' + name + '**. Its Discord category will be created when the first ticket is opened in this department.'),
+        ],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
-      await auditSettingsAction(guild, interaction, 'USE_CASE_ADDED', 'Added use case department ' + name + ' with category ' + category.name + '.');
+      await auditSettingsAction(guild, interaction, 'USE_CASE_ADDED', 'Added use case department ' + name + '. Its Discord category will be provisioned when the first ticket is created.');
       return true;
     }
 
@@ -1152,13 +1368,13 @@ export async function handleSettingsInteraction(
       await openModal(interaction, 'sf:settings:modal:retention', 'Ticket Retention', [
         new TextInputBuilder()
           .setCustomId('closed')
-          .setLabel('Closed ticket days (0 = never)')
+          .setLabel('Closed ticket days (0 = unlimited)')
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
           .setValue(String(settings.retention.closedDays)),
         new TextInputBuilder()
           .setCustomId('archive')
-          .setLabel('Archived ticket days (0 = never)')
+          .setLabel('Archived ticket days (0 = unlimited)')
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
           .setValue(String(settings.retention.archiveDays)),
@@ -1491,13 +1707,19 @@ export async function handleSettingsInteraction(
       }
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const id = newDepartmentId(); const tagId = newTagId(); const now = new Date().toISOString();
-      const category = await ensureDepartmentCategory(guild, { id, name, staffRoleId, categoryId: null });
       await updateGuildConfig(guild.id, (current) => {
-        current.departments[id] = { id, name, staffRoleId, categoryId: category.id, tags: { [tagId]: { id: tagId, name: 'General', createdAt: now } }, createdAt: now };
+        current.departments[id] = { id, name, staffRoleId, categoryId: null, tags: { [tagId]: { id: tagId, name: 'General', createdAt: now } }, createdAt: now };
       });
       await syncPanel(guild); await refreshSettingsChannel(guild);
-      await interaction.editReply({ embeds: [new EmbedBuilder().setTitle('✅ Department Added').setDescription('**' + name + '** now owns one Discord category and a default **General** tag.')], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())] });
-      await auditSettingsAction(guild, interaction, 'DEPARTMENT_ADDED', 'Added department ' + name + ' with default tag General and category ' + category.name + '.');
+      await interaction.editReply({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle('✅ Department Added')
+            .setDescription('**' + name + '** was added. Its Discord category will be created when the first ticket is opened in this department.'),
+        ],
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+      });
+      await auditSettingsAction(guild, interaction, 'DEPARTMENT_ADDED', 'Added department ' + name + '. Its Discord category will be provisioned when the first ticket is created.');
       return true;
     }
 
@@ -1549,7 +1771,7 @@ export async function handleSettingsInteraction(
       });
       await refreshSettingsChannel(guild);
       await interaction.editReply({
-        embeds: [new EmbedBuilder().setTitle('✅ Retention Updated').setDescription('Closed: **' + (closed || 'Never') + '** days • Archive: **' + (archive || 'Never') + '** days.')],
+        embeds: [new EmbedBuilder().setTitle('✅ Retention Updated').setDescription('Closed: **' + (closed === 0 ? 'Unlimited' : closed) + '** days • Archive: **' + (archive === 0 ? 'Unlimited' : archive) + '** days.')],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
       await auditSettingsAction(guild, interaction, 'RETENTION_CHANGED', 'Closed retention=' + closed + ' days; archive retention=' + archive + ' days.');
