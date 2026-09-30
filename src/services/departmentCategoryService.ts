@@ -228,10 +228,16 @@ export async function ensureAllDepartmentCategories(
 
   for (const department of Object.values(config.departments)) {
     /*
-     * Every configured department owns a real Discord category. Missing
-     * category IDs are repaired here instead of falling back to a global
-     * Open bucket.
+     * A department may exist without a Discord category. That is intentional:
+     * SupportForge provisions the category lazily when the first ticket is
+     * actually created for that department.
+     *
+     * Repair/setup only reconciles categories that have already been
+     * provisioned. It must never create empty categories for unused
+     * departments.
      */
+    if (!department.categoryId) continue;
+
     const category = await ensureDepartmentCategory(guild, department);
 
     if (department.categoryId !== category.id) {
