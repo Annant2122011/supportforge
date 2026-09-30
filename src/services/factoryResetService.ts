@@ -7,6 +7,7 @@ import { unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { getGuildConfig, resetConfigState } from './configService';
+import { prepareFactoryResetAuditRetention } from './auditLogService';
 import { getAdvancedSettings, resetAdvancedSettingsState } from './advancedSettingsService';
 import { resetTicketPersistenceState } from './ticketPersistenceService';
 
@@ -66,10 +67,12 @@ function isSupportForgeChannel(channel: GuildBasedChannel, configuredIds: Set<st
   return false;
 }
 
-export async function performFactoryReset(guild: Guild): Promise<void> {
+export async function performFactoryReset(guild: Guild, accumulateAuditData = false): Promise<void> {
   resettingGuilds.add(guild.id);
 
   try {
+    await prepareFactoryResetAuditRetention(guild, accumulateAuditData);
+
     const config = await getGuildConfig(guild.id);
     const settings = await getAdvancedSettings(guild.id);
 
