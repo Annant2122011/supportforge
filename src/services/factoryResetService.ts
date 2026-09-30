@@ -107,6 +107,30 @@ export async function performFactoryReset(guild: Guild, accumulateAuditData = fa
       isSupportForgeChannel(channel, configuredIds, configuredCategoryIds),
     );
 
+    /*
+     * Priority roles are SupportForge-managed infrastructure too. Remove them
+     * before resetting advanced settings so a factory reset cannot leave
+     * orphaned "SupportForge • ... Tickets" roles behind.
+     */
+    const managedPriorityRoles = [
+      ...guild.roles.cache.values(),
+    ].filter(
+      (role) =>
+        !role.managed &&
+        role.name.toLowerCase().startsWith('supportforge •'),
+    );
+
+    for (const role of managedPriorityRoles) {
+      await role
+        .delete('SupportForge factory reset: remove managed priority role')
+        .catch((error) => {
+          console.warn(
+            `⚠️ Factory reset could not delete SupportForge role ${role.name} (${role.id}):`,
+            error,
+          );
+        });
+    }
+
     // Delete child channels first, then the categories containing them.
     const childChannels = targets.filter(
     (channel) => channel.type !== ChannelType.GuildCategory,
