@@ -788,23 +788,6 @@ async function createTicket(
       return;
     }
 
-    /*
-     * Department categories are lazy-provisioned. This call is intentionally
-     * made for every ticket, including departments whose categoryId is null.
-     * That makes the first ticket the event that creates the category.
-     */
-    const departmentCategory =
-      await ensureDepartmentCategory(guild, department);
-
-    if (department.categoryId !== departmentCategory.id) {
-      await updateGuildConfig(guild.id, (current) => {
-        const currentDepartment = current.departments[departmentId];
-        if (currentDepartment) {
-          currentDepartment.categoryId = departmentCategory.id;
-        }
-      });
-    }
-
     const openCategory =
       departmentCategory?.type === ChannelType.GuildCategory
         ? null
@@ -868,6 +851,23 @@ async function createTicket(
         `❌ You already have an active **${department.name}** ticket: ${existing}`,
       );
       return;
+    }
+
+    /*
+     * Provision the department category only after the ticket request has
+     * passed duplicate checks. Thus an unused department stays category-free
+     * until the first real ticket is actually being created.
+     */
+    const departmentCategory =
+      await ensureDepartmentCategory(guild, department);
+
+    if (department.categoryId !== departmentCategory.id) {
+      await updateGuildConfig(guild.id, (current) => {
+        const currentDepartment = current.departments[departmentId];
+        if (currentDepartment) {
+          currentDepartment.categoryId = departmentCategory.id;
+        }
+      });
     }
 
     const subject =
