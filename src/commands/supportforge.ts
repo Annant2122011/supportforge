@@ -39,7 +39,6 @@ import {
 
 import {
   ensureAllDepartmentCategories,
-  ensureDepartmentCategory,
 } from '../services/departmentCategoryService';
 
 import { getOrCreateAuditChannel, logSettingsEvent, logSystemEvent } from '../services/auditLogService';
