@@ -405,3 +405,56 @@ export async function refreshSettingsChannel(guild: Guild): Promise<void> {
 
   await refreshSettingsDashboard(channel, settings);
 }
+
+/**
+ * Restore the live settings dashboard to the bottom of the settings channel.
+ *
+ * A settings sub-view can leave an older dashboard near the top of the
+ * channel. Restore should not merely edit that old message in place because
+ * that leaves the administrative UI stranded above newer content.
+ *
+ * Keep the channel-purpose message because it explains what the channel is
+ * for. Remove SupportForge's old dashboard messages, then post one fresh
+ * dashboard at the bottom. User-authored messages are never deleted here.
+ */
+export async function restoreSettingsChannelToBottom(guild: Guild): Promise<void> {
+  const settings = await getAdvancedSettings(guild.id);
+  if (!settings.settingsChannelId) return;
+
+  const channel = guild.channels.cache.get(settings.settingsChannelId);
+  if (channel?.type !== ChannelType.GuildText) return;
+
+  const botId = channel.client.user?.id;
+  if (!botId) return;
+
+  const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+  if (recent) {
+    const dashboardMessages = [...recent.values()].filter(
+      (message) =>
+        message.author.id === botId &&
+        isSettingsDashboardMessage(message, botId),
+    );
+
+    await Promise.all(
+      dashboardMessages.map((message) =>
+        message.delete().catch(() => undefined),
+      ),
+    );
+  }
+
+  const resolvedSettings = await getAdvancedSettings(guild.id);
+  const config = await getGuildConfig(guild.id);
+  const departmentCount = Object.keys(config.departments).length;
+
+  await channel.send({
+    embeds: [
+      buildSettingsDashboardEmbed(
+        resolvedSettings,
+        departmentCount,
+      ),
+    ],
+    components: buildSettingsDashboardComponents(),
+  });
+
+  await pruneSettingsHistory(channel);
+}
