@@ -1559,17 +1559,27 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
 
   if (interaction.customId === AUDIT_SUMMARY_CUSTOM_ID) {
     await interaction.deferReply();
-    const current = await load();
-    const store = getGuildStore(current, interaction.guild.id);
-    if (store.overallSummary) {
-      try {
-        const embeds = JSON.parse(store.overallSummary).map((item: unknown) => EmbedBuilder.from(item as Parameters<typeof EmbedBuilder.from>[0]));
-        await interaction.editReply({ embeds });
-      } catch {
-        await interaction.editReply({ embeds: await generateOverallAuditSummary(interaction.guild) });
-      }
+    const config = await getGuildConfig(interaction.guild.id);
+    if (config.supportCategoryId) {
+      const embeds = await generateOverallAuditSummary(interaction.guild);
+      const current = await load();
+      const store = getGuildStore(current, interaction.guild.id);
+      store.overallSummary = JSON.stringify(embeds.map((embed) => embed.toJSON()));
+      await persist();
+      await interaction.editReply({ embeds });
     } else {
-      await interaction.editReply({ embeds: await generateOverallAuditSummary(interaction.guild) });
+      const current = await load();
+      const store = getGuildStore(current, interaction.guild.id);
+      if (!store.overallSummary) {
+        await interaction.editReply('No saved overall summary is available yet.');
+      } else {
+        try {
+          const embeds = JSON.parse(store.overallSummary).map((item: unknown) => EmbedBuilder.from(item as Parameters<typeof EmbedBuilder.from>[0]));
+          await interaction.editReply({ embeds });
+        } catch {
+          await interaction.editReply('The saved overall summary could not be restored.');
+        }
+      }
     }
     return true;
   }
