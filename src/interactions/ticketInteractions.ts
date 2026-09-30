@@ -21,7 +21,6 @@ import {
   allocateTicketNumber,
   getGuildConfig,
   type DepartmentConfig,
-  isPremiumOrHigher,
   updateGuildConfig,
 } from '../services/configService';
 
@@ -789,21 +788,21 @@ async function createTicket(
       return;
     }
 
-    let departmentCategory:
-      | import('discord.js').CategoryChannel
-      | undefined;
+    /*
+     * Department categories are lazy-provisioned. This call is intentionally
+     * made for every ticket, including departments whose categoryId is null.
+     * That makes the first ticket the event that creates the category.
+     */
+    const departmentCategory =
+      await ensureDepartmentCategory(guild, department);
 
-    if (department.categoryId) {
-      departmentCategory = await ensureDepartmentCategory(guild, department);
-
-      if (department.categoryId !== departmentCategory.id) {
-        await updateGuildConfig(guild.id, (current) => {
-          const currentDepartment = current.departments[departmentId];
-          if (currentDepartment) {
-            currentDepartment.categoryId = departmentCategory!.id;
-          }
-        });
-      }
+    if (department.categoryId !== departmentCategory.id) {
+      await updateGuildConfig(guild.id, (current) => {
+        const currentDepartment = current.departments[departmentId];
+        if (currentDepartment) {
+          currentDepartment.categoryId = departmentCategory.id;
+        }
+      });
     }
 
     const openCategory =
@@ -1011,11 +1010,40 @@ async function createTicket(
           panel.id,
         );
 
-      await setChannelTopic(
-        ticketChannel.id,
-        finalTopic,
-        'Ticket topic initialization',
-      );
+      /*
+       * Persist the panel message ID when Discord is reachable. A temporary
+       * native REST timeout must not make a successfully created ticket fail.
+       * The full topic is still kept in runtime state for this process.
+       */
+      try {
+        await setChannelTopic(
+          ticketChannel.id,
+          finalTopic,
+          'Ticket topic initialization',
+        );
+      } catch (error) {
+        console.warn(
+          '⚠️ Ticket topic initialization timed out or failed; keeping the ticket and scheduling a retry:',
+          error,
+        );
+
+        void new Promise<void>((resolve) => {
+          setTimeout(resolve, 2_000);
+        })
+          .then(() =>
+            setChannelTopic(
+              ticketChannel!.id,
+              finalTopic,
+              'Ticket topic initialization retry',
+            ),
+          )
+          .catch((retryError) => {
+            console.warn(
+              '⚠️ Ticket topic initialization retry failed:',
+              retryError,
+            );
+          });
+      }
 
       ticketChannel.topic = finalTopic;
 
@@ -1083,28 +1111,27 @@ async function createTicket(
       });
 
       /*
-       * Audit logging never blocks ticket creation.
+       * Audit logging is a core feature, not a paid-tier gate. It runs in the
+       * background so the ticket response never waits on audit publishing.
        */
-      if (isPremiumOrHigher(config.tier)) {
-        void (async () => {
-          try {
-            await logTicketEvent(
-              guild,
-              auditParentCategoryId,
-              {
-                ticketNumber: String(number),
-                event: 'ticket_created',
-                actor: interaction.user.tag,
-                actorId: interaction.user.id,
-                actorName: interaction.user.tag,
-                detail: `Ticket created in department ${department.name}${departmentCategory ? ` under ${departmentCategory.name}` : ''}.`,
-              },
-            );
-          } catch (error) {
-            console.error('⚠️ Ticket creation audit failed:', error);
-          }
-        })();
-      }
+      void (async () => {
+        try {
+          await logTicketEvent(
+            guild,
+            auditParentCategoryId,
+            {
+              ticketNumber: String(number),
+              event: 'ticket_created',
+              actor: interaction.user.tag,
+              actorId: interaction.user.id,
+              actorName: interaction.user.tag,
+              detail: `Ticket created in department ${department.name} under ${departmentCategory.name}.`,
+            },
+          );
+        } catch (error) {
+          console.error('⚠️ Ticket creation audit failed:', error);
+        }
+      })();
     } catch (error) {
       /*
        * A ticket channel is a real user-facing record as soon as Discord
@@ -2082,14 +2109,6 @@ async function closeTicket(
      */
     void (async () => {
       try {
-        if (
-          !isPremiumOrHigher(
-            config.tier,
-          )
-        ) {
-          return;
-        }
-
         if (
           !config.supportCategoryId
         ) {
