@@ -35,7 +35,6 @@ import {
 import {
   ensureArchiveCategory,
   ensureClosedCategory,
-  ensureOpenCategory,
 } from '../services/ticketStorageService';
 
 import {
@@ -913,9 +912,6 @@ export async function execute(
       const supportCategory =
         await ensureContainer(guild);
 
-      const openCategory =
-        await ensureOpenCategory(guild);
-
       await ensureTranscriptChannel(
         guild,
         supportCategory.id,
@@ -976,6 +972,9 @@ export async function execute(
           await syncPanel(guild);
 
       const restoreMode = subcommand === 'restore';
+      const legacyOpenCategory = config.openCategoryId
+        ? guild.channels.cache.get(config.openCategoryId)
+        : undefined;
 
       await logSystemEvent(
         guild,
@@ -987,7 +986,7 @@ export async function execute(
           ' Support Forge=' +
           supportCategory.id +
           '; Open=' +
-          openCategory.id +
+          (legacyOpenCategory?.id ?? 'not-created') +
           '; departments=' +
           Object.keys(config.departments).length +
           '.',
@@ -998,7 +997,8 @@ export async function execute(
           ? `✅ **SupportForge restored successfully.**`
           : `✅ **SupportForge setup complete.**`) +
           `\n\n📁 Container: ${supportCategory}\n` +
-          `🟢 Open tickets: ${openCategory}\n` +
+          `📂 Department categories: **${Object.keys(config.departments).length}**\n` +
+          (legacyOpenCategory ? `🟢 Legacy Open bucket: ${legacyOpenCategory}\n` : '') +
           `📋 Departments: **${Object.keys(
             config.departments,
           ).length}**\n` +
