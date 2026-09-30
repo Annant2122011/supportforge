@@ -63,6 +63,8 @@ interface PersistedAuditEntry {
 interface AuditGuildStore {
   events: PersistedAuditEntry[];
   summaries: Record<string, string>;
+  overallSummary: string | null;
+  accumulationEnabled: boolean;
   panelMessageId: string | null;
   restoreMessageId: string | null;
   panelEventCheckpoint: number;
@@ -88,6 +90,8 @@ function cloneGuildStore(): AuditGuildStore {
   return {
     events: [],
     summaries: {},
+    overallSummary: null,
+    accumulationEnabled: false,
     panelMessageId: null,
     restoreMessageId: null,
     panelEventCheckpoint: 0,
@@ -145,6 +149,8 @@ async function load(): Promise<AuditStore> {
       guilds[guildId] = {
         events: store.events ?? [],
         summaries: store.summaries ?? {},
+        overallSummary: store.overallSummary ?? null,
+        accumulationEnabled: store.accumulationEnabled ?? false,
         panelMessageId: store.panelMessageId ?? null,
         restoreMessageId: store.restoreMessageId ?? null,
         panelEventCheckpoint: store.panelEventCheckpoint ?? 0,
@@ -542,7 +548,7 @@ async function appendAuditRecord(
   const current = await load();
   const store = getGuildStore(current, guild.id);
 
-  store.events.push(event);
+  if (store.accumulationEnabled) store.events.push(event);
 
   if (event.action === 'SETUP_COMPLETED') {
     store.lastSetupDate = dateKey(event.timestamp);
@@ -594,6 +600,12 @@ async function sendAuditEntry(
 
 const AUDIT_PANEL_TITLE = '📒 SupportForge Audit Log';
 const AUDIT_SUMMARY_CUSTOM_ID = 'sf:audit:summary';
+const AUDIT_DAILY_CUSTOM_ID = 'sf:audit:daily';
+const AUDIT_ACCUMULATE_CUSTOM_ID = 'sf:audit:accumulate';
+const AUDIT_ACCUMULATE_CONFIRM_CUSTOM_ID = 'sf:audit:accumulate:confirm';
+const AUDIT_ACCUMULATE_CANCEL_CUSTOM_ID = 'sf:audit:accumulate:cancel';
+const AUDIT_REVERT_CUSTOM_ID = 'sf:audit:revert';
+const AUDIT_REVERT_CONFIRM_CUSTOM_ID = 'sf:audit:revert:confirm';
 const AUDIT_COLLAPSE_CUSTOM_ID = 'sf:audit:collapse-panel';
 const AUDIT_RESTORE_CUSTOM_ID = 'sf:audit:restore-panel';
 const AUDIT_COLLAPSE_AFTER = 12;
@@ -602,10 +614,15 @@ function auditPanelComponents(canCollapse = false): ActionRowBuilder<ButtonBuild
   const buttons = [
     new ButtonBuilder()
       .setCustomId(AUDIT_SUMMARY_CUSTOM_ID)
-      .setLabel('Summarise Everything')
+      .setLabel('Overall Summary')
       .setEmoji('📊')
       .setStyle(ButtonStyle.Primary),
   ];
+
+  buttons.push(
+    new ButtonBuilder().setCustomId(AUDIT_DAILY_CUSTOM_ID).setLabel('Daily Summary').setEmoji('📅').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(AUDIT_ACCUMULATE_CUSTOM_ID).setLabel('Audit Data Settings').setEmoji('💾').setStyle(ButtonStyle.Secondary),
+  );
 
   if (canCollapse) {
     buttons.push(
@@ -1294,15 +1311,12 @@ async function publishDailySummary(
   const reportableEvents = events.filter(isReportableAuditEvent);
   const channel = await getOrCreateAuditChannel(guild, config.supportCategoryId);
 
-  await channel.send({
-    embeds: [
-      reportableEvents.length
-        ? buildDailySummaryEmbed(guild, date, reportableEvents)
-        : buildNoActivityDailySummaryEmbed(guild, date),
-    ],
-  });
+  const dailyEmbed = reportableEvents.length
+    ? buildDailySummaryEmbed(guild, date, reportableEvents)
+    : buildNoActivityDailySummaryEmbed(guild, date);
 
-  store.summaries[date] = new Date().toISOString();
+  await channel.send({ embeds: [dailyEmbed] });
+  store.summaries[date] = JSON.stringify(dailyEmbed.toJSON());
   await persist();
 }
 
@@ -1414,6 +1428,36 @@ export function startAuditDailySummaryScheduler(client: Client): void {
   scheduleNext();
 }
 
+async function saveOverallSummary(guild: Guild): Promise<void> {
+  const embeds = await generateOverallAuditSummary(guild);
+  const current = await load();
+  const store = getGuildStore(current, guild.id);
+  store.overallSummary = JSON.stringify(embeds.map((embed) => embed.toJSON()));
+  await persist();
+}
+
+export async function prepareFactoryResetAuditRetention(guild: Guild, accumulate: boolean): Promise<void> {
+  const current = await load();
+  const store = getGuildStore(current, guild.id);
+  store.accumulationEnabled = accumulate;
+  await saveOverallSummary(guild);
+  if (!accumulate) store.events = [];
+  await persist();
+}
+
+export async function setAuditAccumulation(guildId: string, enabled: boolean): Promise<void> {
+  const current = await load();
+  const store = getGuildStore(current, guildId);
+  store.accumulationEnabled = enabled;
+  if (!enabled) store.events = [];
+  await persist();
+}
+
+export async function getAuditAccumulation(guildId: string): Promise<boolean> {
+  const current = await load();
+  return getGuildStore(current, guildId).accumulationEnabled;
+}
+
 export async function handleAuditInteraction(interaction: ButtonInteraction): Promise<boolean> {
   if (!interaction.customId.startsWith('sf:audit:')) return false;
 
@@ -1503,8 +1547,82 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
 
   if (interaction.customId === AUDIT_SUMMARY_CUSTOM_ID) {
     await interaction.deferReply();
-    const embeds = await generateOverallAuditSummary(interaction.guild);
-    await interaction.editReply({ embeds });
+    const current = await load();
+    const store = getGuildStore(current, interaction.guild.id);
+    if (store.overallSummary) {
+      try {
+        const embeds = JSON.parse(store.overallSummary).map((item: unknown) => EmbedBuilder.from(item as Parameters<typeof EmbedBuilder.from>[0]));
+        await interaction.editReply({ embeds });
+      } catch {
+        await interaction.editReply({ embeds: await generateOverallAuditSummary(interaction.guild) });
+      }
+    } else {
+      await interaction.editReply({ embeds: await generateOverallAuditSummary(interaction.guild) });
+    }
+    return true;
+  }
+
+  if (interaction.customId === AUDIT_DAILY_CUSTOM_ID) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const current = await load();
+    const store = getGuildStore(current, interaction.guild.id);
+    const date = Object.keys(store.summaries).sort().pop();
+    const raw = date ? store.summaries[date] : null;
+    if (!raw) {
+      await interaction.editReply('No completed daily summary has been saved yet.');
+      return true;
+    }
+    try {
+      await interaction.editReply({ embeds: [EmbedBuilder.from(JSON.parse(raw))] });
+    } catch {
+      await interaction.editReply('The saved daily summary could not be restored.');
+    }
+    return true;
+  }
+
+  if (interaction.customId === AUDIT_ACCUMULATE_CUSTOM_ID) {
+    const enabled = await getAuditAccumulation(interaction.guild.id);
+    await interaction.reply({
+      content: enabled
+        ? 'Audit accumulation is enabled. Retained raw events can be reverted while saved summaries remain.'
+        : 'Audit accumulation is disabled. Only summaries are retained.',
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(enabled ? AUDIT_REVERT_CUSTOM_ID : AUDIT_ACCUMULATE_CONFIRM_CUSTOM_ID)
+          .setLabel(enabled ? 'Revert & Clear Raw Audits' : 'Enable Accumulation')
+          .setStyle(enabled ? ButtonStyle.Danger : ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(AUDIT_ACCUMULATE_CANCEL_CUSTOM_ID).setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+      )],
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+
+  if (interaction.customId === AUDIT_ACCUMULATE_CONFIRM_CUSTOM_ID || interaction.customId === AUDIT_REVERT_CONFIRM_CUSTOM_ID) {
+    await interaction.deferUpdate();
+    await setAuditAccumulation(interaction.guild.id, interaction.customId === AUDIT_ACCUMULATE_CONFIRM_CUSTOM_ID);
+    await interaction.followUp({
+      content: interaction.customId === AUDIT_ACCUMULATE_CONFIRM_CUSTOM_ID ? 'Audit accumulation enabled.' : 'Raw audit accumulation reverted. Saved summaries remain.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+
+  if (interaction.customId === AUDIT_REVERT_CUSTOM_ID) {
+    await interaction.reply({
+      content: 'Confirming this clears retained individual audits but keeps saved summaries.',
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(AUDIT_REVERT_CONFIRM_CUSTOM_ID).setLabel('Confirm Revert').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(AUDIT_ACCUMULATE_CANCEL_CUSTOM_ID).setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+      )],
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+
+  if (interaction.customId === AUDIT_ACCUMULATE_CANCEL_CUSTOM_ID) {
+    await interaction.deferUpdate();
+    await interaction.deleteReply().catch(() => undefined);
     return true;
   }
 
