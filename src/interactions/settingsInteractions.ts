@@ -167,6 +167,8 @@ function priorityRoleLabel(priority: TicketPriority): string {
   return PRIORITY_ROLE_DEFINITIONS[priority].label;
 }
 
+const pendingResetAuditChoice = new Map<string, boolean>();
+
 const PRIORITY_ROLE_ORDER: TicketPriority[] = [
   'critical',
   'urgent',
