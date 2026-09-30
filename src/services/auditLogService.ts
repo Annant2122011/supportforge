@@ -1458,6 +1458,12 @@ export async function getAuditAccumulation(guildId: string): Promise<boolean> {
   return getGuildStore(current, guildId).accumulationEnabled;
 }
 
+export async function refreshAuditPanel(guild: Guild): Promise<void> {
+  const channel = await findAuditChannel(guild);
+  if (!channel) return;
+  await ensureAuditPanel(guild, channel);
+}
+
 export async function handleAuditInteraction(interaction: ButtonInteraction): Promise<boolean> {
   if (!interaction.customId.startsWith('sf:audit:')) return false;
 
