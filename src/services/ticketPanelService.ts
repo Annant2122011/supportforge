@@ -399,6 +399,38 @@ export async function moveTicketPanelToBottom(
   );
 }
 
+export async function refreshTicketPanelControls(guild: Guild): Promise<void> {
+  const ticketChannels = guild.channels.cache.filter(
+    (channel): channel is TextChannel =>
+      channel.type === ChannelType.GuildText &&
+      isTicketTopic(channel.topic ?? ''),
+  );
+
+  for (const channel of ticketChannels.values()) {
+    const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+    if (!recent) continue;
+
+    const restore = recent.find(
+      (message) =>
+        message.author.id === channel.client.user?.id &&
+        isRestorePanelMessage(message),
+    );
+
+    if (restore) {
+      await restore.edit({
+        components: [
+          new ActionRowBuilder<ButtonBuilder>().addComponents(
+            restorePanelButton(),
+          ),
+        ],
+      }).catch(() => undefined);
+      continue;
+    }
+
+    await refreshTicketPanel(channel).catch(() => undefined);
+  }
+}
+
 export function isPanelButton(interaction: ButtonInteraction): boolean {
   return interaction.customId.startsWith('ticket:panel:');
 }
