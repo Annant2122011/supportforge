@@ -1035,6 +1035,7 @@ export async function handleSettingsInteraction(
       const tagId = newTagId();
       const now = new Date().toISOString();
       const category = await ensureDepartmentCategory(guild, {
+        id: departmentId,
         name,
         staffRoleId: null,
         categoryId: null,
@@ -1490,7 +1491,7 @@ export async function handleSettingsInteraction(
       }
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const id = newDepartmentId(); const tagId = newTagId(); const now = new Date().toISOString();
-      const category = await ensureDepartmentCategory(guild, { name, staffRoleId, categoryId: null });
+      const category = await ensureDepartmentCategory(guild, { id, name, staffRoleId, categoryId: null });
       await updateGuildConfig(guild.id, (current) => {
         current.departments[id] = { id, name, staffRoleId, categoryId: category.id, tags: { [tagId]: { id: tagId, name: 'General', createdAt: now } }, createdAt: now };
       });
