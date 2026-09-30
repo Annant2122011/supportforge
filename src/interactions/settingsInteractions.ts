@@ -657,23 +657,28 @@ async function showResetStepOne(interaction: ButtonInteraction): Promise<void> {
       .setTitle('🚨 Delete Everything • Confirmation 1 of 3')
       .setDescription(
         '**This permanently removes SupportForge data from this server.**\n\n' +
+        'Before continuing, choose whether SupportForge should retain individual audit events for future summaries. Daily and overall summaries are retained either way.\n\n' +
         'SupportForge-managed ticket channels and their messages, SupportForge categories, the public ticket panel, transcript/audit/settings channels, and stored SupportForge data will be deleted.\n\n' +
         'Unrelated Discord channels are not targeted.',
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:reset:confirm2').setLabel('Continue to Confirmation 2').setEmoji('⚠️').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('sf:settings:reset:audit:no').setLabel('Do Not Accumulate').setEmoji('📊').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sf:settings:reset:audit:yes').setLabel('Accumulate Audit Data').setEmoji('💾').setStyle(ButtonStyle.Primary),
       backButton(),
     ),
   ]);
 }
 
 async function showResetStepTwo(interaction: ButtonInteraction): Promise<void> {
+  const accumulate = pendingResetAuditChoice.get(interaction.guild!.id) ?? false;
   await renderSettingsView(interaction, [
     new EmbedBuilder()
       .setTitle('🚨 Delete Everything • Confirmation 2 of 3')
       .setDescription(
         '**You are about to erase every SupportForge-managed channel and stored record in this server.**\n\n' +
+        'Audit retention choice: **' + (accumulate ? 'Accumulate individual audit data' : 'Keep summaries only') + '**.\n\n' +
+        'Daily and overall summaries will remain available after SupportForge is set up again. This choice can be changed later from the Audit Log controls.\n\n' +
         'This includes every message inside SupportForge-managed channels. SupportForge cannot undo this operation.',
       ),
   ], [
@@ -796,6 +801,12 @@ export async function handleSettingsInteraction(
 
     if (id === 'sf:settings:reset') {
       await showResetStepOne(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:reset:audit:no' || id === 'sf:settings:reset:audit:yes') {
+      pendingResetAuditChoice.set(guild.id, id.endsWith(':yes'));
+      await showResetStepTwo(interaction);
       return true;
     }
 
@@ -1553,7 +1564,8 @@ export async function handleSettingsInteraction(
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
       try {
-        await performFactoryReset(guild);
+        await performFactoryReset(guild, pendingResetAuditChoice.get(guild.id) ?? false);
+        pendingResetAuditChoice.delete(guild.id);
         await interaction.editReply(
           '✅ SupportForge has been completely reset. All SupportForge-managed messages, channels, categories, and stored data were deleted.',
         );
