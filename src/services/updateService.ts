@@ -76,6 +76,15 @@ async function checkForUpdate(client: Client): Promise<void> {
 export function startSupportForgeUpdateMonitor(client: Client): void {
   if (scheduler) return;
 
+  /*
+   * Reconcile core SupportForge infrastructure immediately on startup.
+   * This recreates a missing audit channel/panel even when no new GitHub
+   * release has been detected.
+   */
+  void refreshAllSupportForgeUi(client).catch((error) => {
+    console.warn('⚠️ Initial SupportForge UI refresh failed:', error);
+  });
+
   void checkForUpdate(client);
 
   scheduler = setInterval(() => {
