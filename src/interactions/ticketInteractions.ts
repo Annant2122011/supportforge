@@ -806,12 +806,15 @@ async function createTicket(
       }
     }
 
-    const openCategory = await ensureOpenCategory(guild);
+    const openCategory =
+      departmentCategory?.type === ChannelType.GuildCategory
+        ? null
+        : await ensureOpenCategory(guild);
 
     const categoryId =
       departmentCategory?.type === ChannelType.GuildCategory
         ? departmentCategory.id
-        : openCategory.id;
+        : openCategory!.id;
 
     const ticketCategory =
       guild.channels.cache.get(categoryId);
