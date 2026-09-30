@@ -11,6 +11,9 @@ import {
   type DepartmentConfig,
 } from './configService';
 import { logSystemEvent } from './auditLogService';
+import { getPersistedTicketStatus } from './ticketPersistenceService';
+import { getField, isTicketTopic } from './ticketStateService';
+import { setChannelParent } from './discordChannelService';
 
 const MAX_CHANNELS_PER_CATEGORY = 50;
 const PREFIX = 'SupportForge.';
@@ -39,9 +42,48 @@ function isMatchingCategory(
   );
 }
 
+async function moveClosedTicketsForDepartment(
+  guild: Guild,
+  departmentId: string,
+  category: CategoryChannel,
+): Promise<void> {
+  for (const channel of guild.channels.cache.values()) {
+    if (channel.type !== ChannelType.GuildText) continue;
+
+    const topic = channel.topic ?? '';
+    if (!isTicketTopic(topic) || getField(topic, 'department') !== departmentId) {
+      continue;
+    }
+
+    const status =
+      (await getPersistedTicketStatus(channel.id)) ??
+      getField(topic, 'status') ??
+      'open';
+
+    if (status !== 'closed' || channel.parentId === category.id) {
+      continue;
+    }
+
+    await setChannelParent(
+      channel.id,
+      category.id,
+      'SupportForge: move closed ticket into its department category',
+    ).catch((error) => {
+      console.warn(
+        '⚠️ Could not move closed ticket #' +
+          (getField(topic, 'number') ?? 'unknown') +
+          ' into ' +
+          category.name +
+          ':',
+        error,
+      );
+    });
+  }
+}
+
 export async function ensureDepartmentCategory(
   guild: Guild,
-  department: Pick<DepartmentConfig, 'name' | 'staffRoleId' | 'categoryId'>,
+  department: Pick<DepartmentConfig, 'id' | 'name' | 'staffRoleId' | 'categoryId'>,
 ): Promise<CategoryChannel> {
   const bot = guild.members.me;
   if (!bot) {
@@ -58,6 +100,7 @@ export async function ensureDepartmentCategory(
     saved?.type === ChannelType.GuildCategory &&
     saved.children.cache.size < MAX_CHANNELS_PER_CATEGORY
   ) {
+    await moveClosedTicketsForDepartment(guild, department.id, saved);
     return saved;
   }
 
@@ -70,6 +113,7 @@ export async function ensureDepartmentCategory(
   );
 
   if (available) {
+    await moveClosedTicketsForDepartment(guild, department.id, available);
     return available;
   }
 
@@ -115,6 +159,7 @@ export async function ensureDepartmentCategory(
   });
 
   const config = await getGuildConfig(guild.id);
+  await moveClosedTicketsForDepartment(guild, department.id, category);
   if (config.supportCategoryId) {
     void logSystemEvent(
       guild,
