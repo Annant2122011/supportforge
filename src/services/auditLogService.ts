@@ -65,6 +65,7 @@ interface AuditGuildStore {
   summaries: Record<string, string>;
   overallSummary: string | null;
   accumulationEnabled: boolean;
+  developerMode: boolean;
   panelMessageId: string | null;
   restoreMessageId: string | null;
   panelEventCheckpoint: number;
@@ -92,6 +93,7 @@ function cloneGuildStore(): AuditGuildStore {
     summaries: {},
     overallSummary: null,
     accumulationEnabled: false,
+    developerMode: false,
     panelMessageId: null,
     restoreMessageId: null,
     panelEventCheckpoint: 0,
@@ -157,6 +159,7 @@ async function load(): Promise<AuditStore> {
         summaries: store.summaries ?? {},
         overallSummary: store.overallSummary ?? null,
         accumulationEnabled: store.accumulationEnabled ?? false,
+        developerMode: store.developerMode ?? false,
         panelMessageId: store.panelMessageId ?? null,
         restoreMessageId: store.restoreMessageId ?? null,
         panelEventCheckpoint: store.panelEventCheckpoint ?? 0,
@@ -612,6 +615,10 @@ const AUDIT_ACCUMULATE_CONFIRM_CUSTOM_ID = 'sf:audit:accumulate:confirm';
 const AUDIT_ACCUMULATE_CANCEL_CUSTOM_ID = 'sf:audit:accumulate:cancel';
 const AUDIT_REVERT_CUSTOM_ID = 'sf:audit:revert';
 const AUDIT_REVERT_CONFIRM_CUSTOM_ID = 'sf:audit:revert:confirm';
+const AUDIT_DEVELOPER_CUSTOM_ID = 'sf:audit:developer';
+const AUDIT_DEVELOPER_ON_CUSTOM_ID = 'sf:audit:developer:on';
+const AUDIT_DEVELOPER_OFF_CUSTOM_ID = 'sf:audit:developer:off';
+const AUDIT_QUICK_SUMMARY_CUSTOM_ID = 'sf:audit:quick-summary';
 const AUDIT_COLLAPSE_CUSTOM_ID = 'sf:audit:collapse-panel';
 const AUDIT_RESTORE_CUSTOM_ID = 'sf:audit:restore-panel';
 const AUDIT_COLLAPSE_AFTER = 12;
@@ -628,6 +635,7 @@ function auditPanelComponents(canCollapse = false): ActionRowBuilder<ButtonBuild
   buttons.push(
     new ButtonBuilder().setCustomId(AUDIT_DAILY_CUSTOM_ID).setLabel('Daily Summary').setEmoji('📅').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(AUDIT_ACCUMULATE_CUSTOM_ID).setLabel('Audit Data Settings').setEmoji('💾').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(AUDIT_DEVELOPER_CUSTOM_ID).setLabel('Developer Options').setEmoji('🛠️').setStyle(ButtonStyle.Secondary),
   );
 
   if (canCollapse) {
@@ -1163,13 +1171,39 @@ async function recordAndPublish(
    * Store every event, but only publish user-significant events to the visible
    * audit channel. Internal metadata changes stay in the durable audit store.
    */
+  const current = await load();
+  const store = getGuildStore(current, guild.id);
+
   if (!isReportableAuditEvent(record)) {
+    return;
+  }
+
+  if (!store.developerMode && record.category !== 'ticket') {
     return;
   }
 
   try {
     const channel = await getOrCreateAuditChannel(guild, parentCategoryId);
     await sendAuditEntry(channel, record);
+
+    const visibleEvents = store.events.filter((item) =>
+      isReportableAuditEvent(item) && (store.developerMode || item.category === 'ticket'),
+    );
+    if (visibleEvents.length - store.panelEventCheckpoint >= AUDIT_COLLAPSE_AFTER) {
+      await channel.send({
+        components: [
+          new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setCustomId(AUDIT_QUICK_SUMMARY_CUSTOM_ID)
+              .setLabel('Overall Summary')
+              .setEmoji('📊')
+              .setStyle(ButtonStyle.Primary),
+          ),
+        ],
+      }).catch(() => undefined);
+      store.panelEventCheckpoint = visibleEvents.length;
+      await persist();
+    }
   } catch (error) {
     console.error('❌ Failed to publish audit log entry:', error);
   }
@@ -1554,6 +1588,50 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
     store.panelMessageId = movedPanel.id;
     store.panelEventCheckpoint = store.events.length;
     await persist();
+    return true;
+  }
+
+  if (interaction.customId === AUDIT_DEVELOPER_CUSTOM_ID) {
+    const current = await load();
+    const store = getGuildStore(current, interaction.guild.id);
+    await interaction.reply({
+      content: store.developerMode
+        ? 'Developer audit mode is **ON**. Ticket, settings, and internal system events are published.'
+        : 'Developer audit mode is **OFF**. Only ticket-related events are published to the visible audit channel.',
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId(AUDIT_DEVELOPER_ON_CUSTOM_ID).setLabel('Enable Developer Audit').setStyle(ButtonStyle.Primary).setDisabled(store.developerMode),
+          new ButtonBuilder().setCustomId(AUDIT_DEVELOPER_OFF_CUSTOM_ID).setLabel('Ticket Audits Only').setStyle(ButtonStyle.Secondary).setDisabled(!store.developerMode),
+        ),
+      ],
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+
+  if (interaction.customId === AUDIT_DEVELOPER_ON_CUSTOM_ID || interaction.customId === AUDIT_DEVELOPER_OFF_CUSTOM_ID) {
+    const current = await load();
+    const store = getGuildStore(current, interaction.guild.id);
+    store.developerMode = interaction.customId === AUDIT_DEVELOPER_ON_CUSTOM_ID;
+    await persist();
+    await interaction.update({
+      content: store.developerMode
+        ? 'Developer audit mode is now **ON**.'
+        : 'Developer audit mode is now **OFF**. New settings/system events will no longer be published to the visible audit channel.',
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId(AUDIT_DEVELOPER_ON_CUSTOM_ID).setLabel('Enable Developer Audit').setStyle(ButtonStyle.Primary).setDisabled(store.developerMode),
+          new ButtonBuilder().setCustomId(AUDIT_DEVELOPER_OFF_CUSTOM_ID).setLabel('Ticket Audits Only').setStyle(ButtonStyle.Secondary).setDisabled(!store.developerMode),
+        ),
+      ],
+    });
+    return true;
+  }
+
+  if (interaction.customId === AUDIT_QUICK_SUMMARY_CUSTOM_ID) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const embeds = await generateOverallAuditSummary(interaction.guild);
+    await interaction.editReply({ embeds });
     return true;
   }
 
