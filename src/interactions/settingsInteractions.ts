@@ -639,10 +639,10 @@ async function showStorage(interaction: ButtonInteraction): Promise<void> {
         'Claimed tickets and Pending tickets can be added here when extra segregation is useful.',
       )
       .addFields(
-        { name: 'Closed tickets', value: settings.closedCategoryId ? '<#' + settings.closedCategoryId + '>' : 'Not provisioned', inline: true },
-        { name: 'Archive tickets', value: settings.archiveCategoryId ? '<#' + settings.archiveCategoryId + '>' : 'Not provisioned', inline: true },
-        { name: 'Claimed tickets', value: claimed ? '<#' + claimed.id + '>' : 'Not added', inline: true },
-        { name: 'Pending tickets', value: pending ? '<#' + pending.id + '>' : 'Not added', inline: true },
+        { name: 'Closed tickets', value: settings.closedCategoryId ? (interaction.guild!.channels.cache.get(settings.closedCategoryId)?.name ?? 'Configured category') : 'Not provisioned', inline: true },
+        { name: 'Archive tickets', value: settings.archiveCategoryId ? (interaction.guild!.channels.cache.get(settings.archiveCategoryId)?.name ?? 'Configured category') : 'Not provisioned', inline: true },
+        { name: 'Claimed tickets', value: claimed?.name ?? 'Not added', inline: true },
+        { name: 'Pending tickets', value: pending?.name ?? 'Not added', inline: true },
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
