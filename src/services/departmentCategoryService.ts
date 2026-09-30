@@ -42,12 +42,17 @@ function isMatchingCategory(
   );
 }
 
-async function moveClosedTicketsForDepartment(
+async function reconcileDepartmentTickets(
   guild: Guild,
   departmentId: string,
   category: CategoryChannel,
 ): Promise<void> {
+  const capacity = MAX_CHANNELS_PER_CATEGORY - category.children.cache.size;
+  if (capacity <= 0) return;
+
+  let moved = 0;
   for (const channel of guild.channels.cache.values()) {
+    if (moved >= capacity) break;
     if (channel.type !== ChannelType.GuildText) continue;
 
     const topic = channel.topic ?? '';
@@ -60,17 +65,20 @@ async function moveClosedTicketsForDepartment(
       getField(topic, 'status') ??
       'open';
 
-    if (status !== 'closed' || channel.parentId === category.id) {
+    // Archived tickets stay in the dedicated archive bucket.
+    if (status === 'archived' || channel.parentId === category.id) {
       continue;
     }
 
     await setChannelParent(
       channel.id,
       category.id,
-      'SupportForge: move closed ticket into its department category',
-    ).catch((error) => {
+      'SupportForge: reconcile ticket with department category',
+    ).then(() => {
+      moved += 1;
+    }).catch((error) => {
       console.warn(
-        '⚠️ Could not move closed ticket #' +
+        '⚠️ Could not move ticket #' +
           (getField(topic, 'number') ?? 'unknown') +
           ' into ' +
           category.name +
@@ -78,6 +86,34 @@ async function moveClosedTicketsForDepartment(
         error,
       );
     });
+  }
+}
+
+async function removeEmptyOrphanDepartmentCategories(guild: Guild): Promise<void> {
+  const config = await getGuildConfig(guild.id);
+  const protectedIds = new Set(
+    [
+      config.supportCategoryId,
+      config.openCategoryId,
+      ...Object.values(config.departments).map((department) => department.categoryId),
+    ].filter((id): id is string => Boolean(id)),
+  );
+
+  for (const channel of guild.channels.cache.values()) {
+    if (channel.type !== ChannelType.GuildCategory) continue;
+    if (protectedIds.has(channel.id)) continue;
+
+    const isSupportForgeDepartmentCategory =
+      channel.name.toLowerCase().startsWith(PREFIX.toLowerCase());
+
+    if (!isSupportForgeDepartmentCategory || channel.children.cache.size > 0) {
+      continue;
+    }
+
+    await channel.delete('SupportForge: remove empty orphan department category')
+      .catch((error) => {
+        console.warn('⚠️ Could not remove empty orphan SupportForge category ' + channel.name + ':', error);
+      });
   }
 }
 
@@ -100,7 +136,7 @@ export async function ensureDepartmentCategory(
     saved?.type === ChannelType.GuildCategory &&
     saved.children.cache.size < MAX_CHANNELS_PER_CATEGORY
   ) {
-    await moveClosedTicketsForDepartment(guild, department.id, saved);
+    await reconcileDepartmentTickets(guild, department.id, saved);
     return saved;
   }
 
@@ -113,7 +149,7 @@ export async function ensureDepartmentCategory(
   );
 
   if (available) {
-    await moveClosedTicketsForDepartment(guild, department.id, available);
+    await reconcileDepartmentTickets(guild, department.id, available);
     return available;
   }
 
@@ -159,7 +195,7 @@ export async function ensureDepartmentCategory(
   });
 
   const config = await getGuildConfig(guild.id);
-  await moveClosedTicketsForDepartment(guild, department.id, category);
+  await reconcileDepartmentTickets(guild, department.id, category);
   if (config.supportCategoryId) {
     void logSystemEvent(
       guild,
@@ -192,9 +228,9 @@ export async function ensureAllDepartmentCategories(
 
   for (const department of Object.values(config.departments)) {
     /*
-     * Every configured department owns a real Discord category. This is the
-     * canonical routing architecture. Missing category IDs are repaired here
-     * instead of falling back to a global Open bucket.
+     * Every configured department owns a real Discord category. Missing
+     * category IDs are repaired here instead of falling back to a global
+     * Open bucket.
      */
     const category = await ensureDepartmentCategory(guild, department);
 
@@ -202,4 +238,6 @@ export async function ensureAllDepartmentCategories(
       await syncDepartmentCategoryId(guild.id, department.id, category.id);
     }
   }
+
+  await removeEmptyOrphanDepartmentCategories(guild);
 }
