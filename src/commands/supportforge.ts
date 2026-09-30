@@ -1077,6 +1077,7 @@ export async function execute(
         newDepartmentId();
 
       const category = await ensureDepartmentCategory(guild, {
+        id,
         name,
         staffRoleId: role?.id ?? null,
         categoryId: null,
