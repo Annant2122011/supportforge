@@ -1,7 +1,7 @@
 import 'dotenv/config';
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
-const DISCORD_CHANNEL_TIMEOUT_MS = 15_000;
+const DISCORD_CHANNEL_TIMEOUT_MS = 30_000;
 const MAX_AUTOMATIC_RETRY_DELAY_MS = 5_000;
 const MAX_RATE_LIMIT_RETRIES = 1;
 
