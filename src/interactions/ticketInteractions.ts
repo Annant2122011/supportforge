@@ -788,29 +788,6 @@ async function createTicket(
       return;
     }
 
-    const openCategory =
-      departmentCategory?.type === ChannelType.GuildCategory
-        ? null
-        : await ensureOpenCategory(guild);
-
-    const categoryId =
-      departmentCategory?.type === ChannelType.GuildCategory
-        ? departmentCategory.id
-        : openCategory!.id;
-
-    const ticketCategory =
-      guild.channels.cache.get(categoryId);
-
-    if (
-      ticketCategory?.type !== ChannelType.GuildCategory
-    ) {
-      await replyError(
-        interaction,
-        '❌ The ticket destination category is missing. Run `/supportforge setup` to repair it.',
-      );
-      return;
-    }
-
     /*
      * Only active tickets block creation.
      * Closed and archived tickets do not.
@@ -893,6 +870,19 @@ async function createTicket(
           currentDepartment.categoryId = departmentCategory.id;
         }
       });
+    }
+
+    const ticketCategory =
+      guild.channels.cache.get(departmentCategory.id);
+
+    if (
+      ticketCategory?.type !== ChannelType.GuildCategory
+    ) {
+      await replyError(
+        interaction,
+        '❌ The ticket destination category is missing. Run `/supportforge setup` to repair it.',
+      );
+      return;
     }
 
     const number =
