@@ -76,7 +76,6 @@ interface AuditGuildStore {
    * Legacy field retained so older audit-log files can still be loaded.
    * It is no longer used as a global switch.
    */
-  developerMode: boolean;
   panelMessageId: string | null;
   restoreMessageId: string | null;
   panelEventCheckpoint: number;
@@ -105,7 +104,6 @@ function cloneGuildStore(): AuditGuildStore {
     overallSummary: null,
     accumulationEnabled: true,
     developerViewers: [],
-    developerMode: false,
     panelMessageId: null,
     restoreMessageId: null,
     panelEventCheckpoint: 0,
@@ -174,7 +172,6 @@ async function load(): Promise<AuditStore> {
         developerViewers: Array.isArray(store.developerViewers)
           ? store.developerViewers.filter((id): id is string => typeof id === 'string')
           : [],
-        developerMode: false,
         panelMessageId: store.panelMessageId ?? null,
         restoreMessageId: store.restoreMessageId ?? null,
         panelEventCheckpoint: store.panelEventCheckpoint ?? 0,
@@ -239,8 +236,25 @@ function actionLabel(action: string): string {
  * published to the normal visible feed, not whether they disappear from
  * reporting.
  */
-function isReportableAuditEvent(_event: PersistedAuditEntry): boolean {
-  return true;
+function isReportableAuditEvent(event: PersistedAuditEntry): boolean {
+  /*
+   * The durable audit database records everything. The shared Discord feed
+   * intentionally exposes only human-actionable ticket activity. Technical
+   * details and ticket configuration changes remain available through the
+   * private Developer View.
+   */
+  const hiddenFromStandardFeed = new Set([
+    'TICKET_PANEL_MOVED',
+    'TICKET_PANEL_AUTO_MOVED',
+    'TICKET_PRIORITY_CHANGED',
+    'TICKET_ROUTING_CHANGED',
+    'INTERNAL_NOTE',
+    'CHANNEL_TOPIC_CHANGED',
+    'CHANNEL_PERMISSIONS_CHANGED',
+    'CHANNEL_SETTINGS_CHANGED',
+  ]);
+
+  return !hiddenFromStandardFeed.has(event.action);
 }
 
 const SUPPORTFORGE_NAME_PREFIXES = [
@@ -742,7 +756,7 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
         ),
     );
 
-    for (const restore of existingRestores) {
+    for (const [, restore] of existingRestores) {
       await restore.delete().catch(() => undefined);
     }
 
@@ -827,7 +841,7 @@ function buildPrivateDeveloperAuditEmbeds(guild: Guild): Promise<EmbedBuilder[]>
   return load().then((current) => {
     const store = getGuildStore(current, guild.id);
     const internalEvents = store.events
-      .filter((event) => event.category !== 'ticket')
+      .filter((event) => !isReportableAuditEvent(event) || event.category !== 'ticket')
       .slice(-24)
       .reverse();
 
@@ -1248,7 +1262,16 @@ async function recordAndPublish(
   const current = await load();
   const store = getGuildStore(current, guild.id);
 
-  if (!isReportableAuditEvent(record) || record.category !== 'ticket') {
+  if (!isReportableAuditEvent(record)) {
+    return;
+  }
+
+  /*
+   * System/settings events and ticket-internal technical actions are stored
+   * but never published to the shared feed. Human-actionable ticket events
+   * remain visible regardless of category.
+   */
+  if (record.category === 'system' || record.category === 'settings') {
     return;
   }
 
@@ -1420,9 +1443,7 @@ async function publishDailySummary(
   if (!config.supportCategoryId) return;
 
   const events = store.events.filter((event) => dateKey(event.timestamp) === date);
-  const reportableEvents = events.filter(
-    (event) => isReportableAuditEvent(event) && event.category === 'ticket',
-  );
+  const reportableEvents = events.filter(isReportableAuditEvent);
   const channel = await getOrCreateAuditChannel(guild, config.supportCategoryId);
 
   const dailyEmbed = reportableEvents.length
