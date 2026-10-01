@@ -92,7 +92,7 @@ function cloneGuildStore(): AuditGuildStore {
     events: [],
     summaries: {},
     overallSummary: null,
-    accumulationEnabled: false,
+    accumulationEnabled: true,
     developerMode: false,
     panelMessageId: null,
     restoreMessageId: null,
@@ -218,14 +218,14 @@ function actionLabel(action: string): string {
     .join(' ');
 }
 
-const NON_USER_AUDIT_ACTIONS = new Set([
-  'CHANNEL_TOPIC_CHANGED',
-  'TICKET_PANEL_AUTO_MOVED',
-  'SETTINGS_REFRESH',
-]);
-
-function isReportableAuditEvent(event: PersistedAuditEntry): boolean {
-  return !NON_USER_AUDIT_ACTIONS.has(event.action);
+/*
+ * Every recorded event is part of the audit history and therefore belongs in
+ * summaries. Developer mode controls whether internal/system events are
+ * published to the normal visible feed, not whether they disappear from
+ * reporting.
+ */
+function isReportableAuditEvent(_event: PersistedAuditEntry): boolean {
+  return true;
 }
 
 const SUPPORTFORGE_NAME_PREFIXES = [
