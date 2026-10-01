@@ -423,6 +423,28 @@ export async function setChannelName(
   );
 }
 
+/**
+ * Updates the channel name and topic in one PATCH request.
+ *
+ * Both properties use the same Discord /channels/{channel.id} route bucket.
+ * Sending them separately doubles the number of requests and can cause
+ * unnecessary 429s when several ticket state changes happen close together.
+ */
+export async function setChannelNameAndTopic(
+  channelId: string,
+  name: string,
+  topic: string,
+  operation: string,
+): Promise<void> {
+  await discordRequest(
+    channelId,
+    'PATCH',
+    `/channels/${channelId}`,
+    { name, topic },
+    operation,
+  );
+}
+
 export async function setChannelParent(
   channelId: string,
   parentId: string,
