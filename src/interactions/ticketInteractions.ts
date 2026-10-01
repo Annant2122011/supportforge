@@ -2765,7 +2765,7 @@ async function applyTicketPriority(
   );
 
   await interaction.editReply({
-    content: `✅ Ticket priority changed to **${priorityLabel(priority)}**.`,
+    content: `✅ Ticket priority changed to **${({ low: '🟢 Low', normal: '🟡 Normal', high: '🟠 High', urgent: '🔴 Urgent', critical: '🟣 Critical' } as Record<TicketPriority, string>)[priority]}**.`,
     components: [],
   });
 
