@@ -183,33 +183,105 @@ export async function refreshTicketPanel(
 }
 
 const channelRenameQueues = new Map<string, Promise<void>>();
+const desiredChannelNames = new Map<string, string>();
+const channelRenameRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function getRateLimitRetryDelayMs(error: unknown): number | null {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(/another\s+(\d+)s\b/i);
+  if (!match) return null;
+
+  const seconds = Number(match[1]);
+  return Number.isFinite(seconds) && seconds > 0
+    ? (seconds + 1) * 1000
+    : null;
+}
+
+async function performQueuedChannelRename(
+  channel: TextChannel,
+  newName: string,
+  reason: string,
+): Promise<void> {
+  if (desiredChannelNames.get(channel.id) !== newName) {
+    return;
+  }
+
+  if (channel.name === newName) {
+    desiredChannelNames.delete(channel.id);
+    return;
+  }
+
+  try {
+    await setChannelName(
+      channel.id,
+      newName,
+      reason,
+    );
+
+    /*
+     * Native REST bypasses discord.js' REST manager. Keep the cached
+     * channel object synchronized so subsequent queued rename requests
+     * do not operate on stale channel.name data.
+     */
+    channel.name = newName;
+    desiredChannelNames.delete(channel.id);
+
+    const existingTimer = channelRenameRetryTimers.get(channel.id);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      channelRenameRetryTimers.delete(channel.id);
+    }
+
+    console.log(
+      `✅ Ticket channel renamed to ${newName}: ${channel.id}`,
+    );
+  } catch (error) {
+    const retryDelayMs = getRateLimitRetryDelayMs(error);
+
+    if (retryDelayMs !== null) {
+      console.warn(
+        `⏳ Ticket rename delayed for ${Math.ceil(retryDelayMs / 1000)}s by Discord rate limit: ${channel.id}`,
+      );
+
+      const existingTimer = channelRenameRetryTimers.get(channel.id);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+      }
+
+      const timer = setTimeout(() => {
+        channelRenameRetryTimers.delete(channel.id);
+        if (desiredChannelNames.get(channel.id) !== newName) {
+          return;
+        }
+        void performQueuedChannelRename(channel, newName, reason);
+      }, retryDelayMs);
+
+      channelRenameRetryTimers.set(channel.id, timer);
+      return;
+    }
+
+    throw error;
+  }
+}
 
 export function queueTicketChannelRename(
   channel: TextChannel,
   newName: string,
   reason: string,
 ): Promise<void> {
+  desiredChannelNames.set(channel.id, newName);
+
   const previous = channelRenameQueues.get(channel.id) ?? Promise.resolve();
   const next = previous
     .catch(() => undefined)
-    .then(async () => {
-      if (channel.name === newName) return;
-      await setChannelName(
-        channel.id,
-        newName,
-        reason,
-      );
-      /*
-       * Native REST bypasses discord.js' REST manager. Keep the cached
-       * channel object synchronized so subsequent queued rename requests
-       * do not operate on stale channel.name data.
-       */
-      channel.name = newName;
-    });
+    .then(() => performQueuedChannelRename(channel, newName, reason));
 
   channelRenameQueues.set(channel.id, next);
   void next.finally(() => {
-    if (channelRenameQueues.get(channel.id) === next) {
+    if (
+      channelRenameQueues.get(channel.id) === next &&
+      desiredChannelNames.get(channel.id) === newName
+    ) {
       channelRenameQueues.delete(channel.id);
     }
   }).catch(() => undefined);
