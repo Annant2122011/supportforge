@@ -227,10 +227,9 @@ function actionLabel(action: string): string {
 }
 
 /*
- * Every recorded event is part of the audit history and therefore belongs in
- * summaries. Developer mode controls whether internal/system events are
- * published to the normal visible feed, not whether they disappear from
- * reporting.
+ * Every recorded event remains in durable storage and can be exposed through
+ * the moderator's private Developer View. The standard shared feed is limited
+ * to human-actionable ticket activity.
  */
 function isReportableAuditEvent(event: PersistedAuditEntry): boolean {
   /*
@@ -754,6 +753,13 @@ async function removeHiddenAuditMessages(channel: TextChannel): Promise<void> {
 async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<void> {
   const current = await load();
   const store = getGuildStore(current, guild.id);
+
+  /*
+   * Older releases could already have published settings/system or
+   * technical ticket audit entries. Remove those from the shared channel
+   * during repair while leaving the durable records untouched.
+   */
+  await removeHiddenAuditMessages(channel);
 
   if (store.restoreMessageId) {
     const restore = channel.messages.cache.get(store.restoreMessageId) ??
