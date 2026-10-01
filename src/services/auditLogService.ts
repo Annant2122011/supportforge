@@ -1520,7 +1520,6 @@ async function recordAndPublish(
     ) {
       await publishBottomMoveControl(channel);
     }
-    }
   } catch (error) {
     console.error('❌ Failed to publish audit log entry:', error);
   }
@@ -1917,6 +1916,17 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
     interaction.customId === AUDIT_DEVELOPER_PAST_NOW_CUSTOM_ID ||
     interaction.customId.startsWith(AUDIT_DEVELOPER_PAGE_PREFIX)
   ) {
+    const isDeveloperPage =
+      interaction.customId.startsWith(AUDIT_DEVELOPER_PAGE_PREFIX);
+
+    if (isDeveloperPage) {
+      await interaction.deferUpdate();
+    } else {
+      await interaction.deferReply({
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
     const member = await interaction.guild.members
       .fetch(interaction.user.id)
       .catch(() => null);
@@ -1936,7 +1946,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       );
 
     if (!isModerator) {
-      await interaction.reply({
+      await interaction.editReply({
         content:
           '❌ Developer audit tools are restricted to SupportForge moderators.',
         flags: MessageFlags.Ephemeral,
@@ -1950,7 +1960,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
 
     if (interaction.customId.startsWith(AUDIT_DEVELOPER_PAGE_PREFIX)) {
       if (!isEnabled) {
-        await interaction.reply({
+        await interaction.editReply({
           content:
             '❌ Enable your Developer View before using its pages.',
           flags: MessageFlags.Ephemeral,
@@ -1962,7 +1972,6 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
         interaction.customId.slice(AUDIT_DEVELOPER_PAGE_PREFIX.length),
       );
 
-      await interaction.deferUpdate();
       const page = await buildPrivateDeveloperAuditPage(
         interaction.guild,
         interaction.user.id,
@@ -1980,7 +1989,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       const selectedMode =
         store.developerViewModes[interaction.user.id] ?? null;
 
-      await interaction.reply({
+      await interaction.editReply({
         content:
           '🛠️ **Developer View Options**\n\n' +
           'Choose what historical developer information this moderator should see. The choice is private to you, and the durable audit database keeps recording events regardless of this setting.',
@@ -2044,7 +2053,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       delete store.developerViewStartedAt[interaction.user.id];
       await persist();
 
-      await interaction.reply({
+      await interaction.editReply({
         content:
           '🛠️ **Developer View disabled.** The durable audit database continues recording all events normally.',
         flags: MessageFlags.Ephemeral,
@@ -2060,7 +2069,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       0,
     );
 
-    await interaction.reply({
+    await interaction.editReply({
       content:
         '🛠️ **Developer View enabled for you only.**\n' +
         '**Mode:** ' +
