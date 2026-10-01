@@ -853,23 +853,6 @@ async function createTicket(
       return;
     }
 
-    /*
-     * Provision the department category only after the ticket request has
-     * passed duplicate checks. Thus an unused department stays category-free
-     * until the first real ticket is actually being created.
-     */
-    const departmentCategory =
-      await ensureDepartmentCategory(guild, department);
-
-    if (department.categoryId !== departmentCategory.id) {
-      await updateGuildConfig(guild.id, (current) => {
-        const currentDepartment = current.departments[departmentId];
-        if (currentDepartment) {
-          currentDepartment.categoryId = departmentCategory.id;
-        }
-      });
-    }
-
     const subject =
       interaction.fields
         .getTextInputValue(
@@ -893,6 +876,23 @@ async function createTicket(
         '❌ Subject and description are required.',
       );
       return;
+    }
+
+    /*
+     * This is the first point at which we know a real ticket is actually
+     * being created. Do not create an otherwise-empty department category
+     * before validating the submitted ticket.
+     */
+    const departmentCategory =
+      await ensureDepartmentCategory(guild, department);
+
+    if (department.categoryId !== departmentCategory.id) {
+      await updateGuildConfig(guild.id, (current) => {
+        const currentDepartment = current.departments[departmentId];
+        if (currentDepartment) {
+          currentDepartment.categoryId = departmentCategory.id;
+        }
+      });
     }
 
     const number =
