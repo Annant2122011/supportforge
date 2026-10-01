@@ -1789,17 +1789,43 @@ export async function handleSettingsInteraction(
 
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
+      const accumulateAuditData =
+        pendingResetAuditChoice.get(guild.id) ?? false;
+
       try {
-        await performFactoryReset(guild, pendingResetAuditChoice.get(guild.id) ?? false);
+        /*
+         * A factory reset can delete the Settings channel that hosted the
+         * interaction which opened this modal. Therefore the ephemeral
+         * @original response is not a safe place to send the final result.
+         * Use a webhook follow-up instead, which is independent of the
+         * deleted SupportForge channel.
+         */
+        await performFactoryReset(guild, accumulateAuditData);
         pendingResetAuditChoice.delete(guild.id);
-        await interaction.editReply(
-          '✅ SupportForge has been completely reset. All SupportForge-managed messages, channels, categories, and stored data were deleted.',
-        );
+
+        await interaction.followUp({
+          content:
+            '✅ SupportForge has been completely reset. All SupportForge-managed messages, channels, categories, and stored data were deleted.',
+          flags: MessageFlags.Ephemeral,
+        }).catch((followUpError) => {
+          console.warn(
+            '⚠️ Factory reset completed, but the confirmation follow-up could not be delivered:',
+            followUpError,
+          );
+        });
       } catch (error) {
         console.error('❌ SupportForge factory reset failed:', error);
-        await interaction.editReply(
-          '❌ The complete reset encountered an error. Check the bot console for details.',
-        );
+
+        await interaction.followUp({
+          content:
+            '❌ The complete reset encountered an error. Check the bot console for details.',
+          flags: MessageFlags.Ephemeral,
+        }).catch((followUpError) => {
+          console.warn(
+            '⚠️ Factory reset error response could not be delivered:',
+            followUpError,
+          );
+        });
       }
       return true;
     }
