@@ -775,6 +775,34 @@ async function removeHiddenAuditMessages(channel: TextChannel): Promise<void> {
   }
 }
 
+async function removeLegacyAuditControlMessages(
+  channel: TextChannel,
+): Promise<void> {
+  const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+  if (!recent) return;
+
+  for (const message of recent.values()) {
+    if (message.author.id !== channel.client.user?.id) continue;
+
+    const hasLegacySummaryButton = message.components.some(
+      (row) =>
+        row.type === ComponentType.ActionRow &&
+        row.components.some(
+          (component) =>
+            'customId' in component &&
+            (
+              component.customId === AUDIT_QUICK_SUMMARY_CUSTOM_ID ||
+              component.customId === AUDIT_SUMMARY_CUSTOM_ID
+            ),
+        ),
+    );
+
+    if (hasLegacySummaryButton) {
+      await message.delete().catch(() => undefined);
+    }
+  }
+}
+
 async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<void> {
   const current = await load();
   const store = getGuildStore(current, guild.id);
@@ -785,6 +813,7 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
    * during repair while leaving the durable records untouched.
    */
   await removeHiddenAuditMessages(channel);
+  await removeLegacyAuditControlMessages(channel);
 
   if (store.restoreMessageId) {
     const restore = channel.messages.cache.get(store.restoreMessageId) ??
