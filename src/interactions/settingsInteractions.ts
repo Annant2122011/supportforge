@@ -1573,7 +1573,6 @@ export async function handleSettingsInteraction(
         return true;
       }
 
-      await interaction.deferUpdate();
       await updateGuildConfig(guild.id, (current) => {
         delete current.departments[departmentId];
       });
