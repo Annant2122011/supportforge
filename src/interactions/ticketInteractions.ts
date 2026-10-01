@@ -27,6 +27,7 @@ import {
 import { generateTranscript } from '../services/transcriptService';
 
 import {
+  setChannelNameAndTopic,
   setChannelParent,
   setChannelPermissionOverwrite,
   setChannelTopic,
@@ -488,51 +489,60 @@ function getRateLimitRetryDelayMs(error: unknown): number | null {
   return null;
 }
 
-const priorityTopicRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const priorityChannelSyncTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-function schedulePriorityTopicSync(
+function schedulePriorityChannelSync(
   channel: TextChannel,
   topic: string,
+  priority: TicketPriority,
 ): void {
-  const previous = priorityTopicRetryTimers.get(channel.id);
+  const previous = priorityChannelSyncTimers.get(channel.id);
   if (previous) {
     clearTimeout(previous);
   }
 
+  const desiredName = getTicketChannelName(
+    getField(topic, 'number') ?? 'unknown',
+    getTicketStatus(topic),
+    priority,
+  );
+
   const attempt = async (): Promise<void> => {
     try {
-      await setChannelTopic(
+      await setChannelNameAndTopic(
         channel.id,
+        desiredName,
         topic,
-        'SupportForge: priority topic synchronization',
+        'SupportForge: priority channel synchronization',
       );
+      channel.name = desiredName;
       channel.topic = topic;
-      priorityTopicRetryTimers.delete(channel.id);
+      priorityChannelSyncTimers.delete(channel.id);
       console.log(
-        `✅ Ticket topic synchronized after Discord rate-limit cooldown: ${channel.id}`,
+        `✅ Ticket name + topic synchronized after Discord rate-limit cooldown: ${channel.id}`,
       );
     } catch (error) {
       const retryDelayMs = getRateLimitRetryDelayMs(error);
 
       if (retryDelayMs !== null) {
         console.warn(
-          `⏳ Ticket topic synchronization delayed for ${Math.ceil(retryDelayMs / 1000)}s: ${channel.id}`,
+          `⏳ Ticket name + topic synchronization delayed for ${Math.ceil(retryDelayMs / 1000)}s: ${channel.id}`,
         );
 
         const timer = setTimeout(() => {
-          priorityTopicRetryTimers.delete(channel.id);
+          priorityChannelSyncTimers.delete(channel.id);
           void attempt();
         }, retryDelayMs);
 
-        priorityTopicRetryTimers.set(channel.id, timer);
+        priorityChannelSyncTimers.set(channel.id, timer);
         return;
       }
 
       console.error(
-        '⚠️ Ticket priority topic synchronization failed:',
+        '⚠️ Ticket priority channel synchronization failed:',
         error,
       );
-      priorityTopicRetryTimers.delete(channel.id);
+      priorityChannelSyncTimers.delete(channel.id);
     }
   };
 
@@ -2631,11 +2641,191 @@ async function changeTicketRoutingTag(interaction: StringSelectMenuInteraction):
   await applyTicketRouting(interaction, department, tagId, status, topic);
 }
 
+async function showPrioritySelector(
+  interaction: ButtonInteraction,
+): Promise<void> {
+  const priorities: Array<[TicketPriority, string, string]> = [
+    ['low', 'Low', '🟢'],
+    ['normal', 'Normal', '🟡'],
+    ['high', 'High', '🟠'],
+    ['urgent', 'Urgent', '🔴'],
+    ['critical', 'Critical', '🟣'],
+  ];
+
+  const channel =
+    interaction.channel?.type === ChannelType.GuildText
+      ? interaction.channel as TextChannel
+      : null;
+
+  const currentPriority =
+    channel
+      ? getTopicPriority(channel.topic ?? '')
+      : 'normal';
+
+  const priorityRow =
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      ...priorities.map(([priority, label, emoji]) =>
+        new ButtonBuilder()
+          .setCustomId(`ticket:priority:set:${priority}`)
+          .setLabel(label)
+          .setEmoji(emoji)
+          .setStyle(
+            priority === currentPriority
+              ? ButtonStyle.Primary
+              : ButtonStyle.Secondary,
+          ),
+      ),
+    );
+
+  const cancelRow =
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId('ticket:priority:cancel')
+        .setLabel('Cancel')
+        .setStyle(ButtonStyle.Secondary),
+    );
+
+  await interaction.editReply({
+    content:
+      '⚡ **Choose Ticket Priority**\n' +
+      'Select one of the five priority levels below. No typing is required.',
+    components: [priorityRow, cancelRow],
+  });
+}
+
+async function applyTicketPriority(
+  interaction: ButtonInteraction,
+  priority: TicketPriority,
+): Promise<void> {
+  await interaction.deferUpdate();
+
+  if (
+    !interaction.guild ||
+    interaction.channel?.type !== ChannelType.GuildText
+  ) {
+    await replyError(
+      interaction,
+      '❌ This action can only be used inside a ticket.',
+    );
+    return;
+  }
+
+  const channel = interaction.channel as TextChannel;
+  const state = getRuntimeTicketState(channel);
+  const topic = channel.topic ?? state.topic;
+  const status =
+    (await getPersistedTicketStatus(channel.id)) ??
+    getTicketStatus(topic);
+
+  if (!isTicketTopic(topic) || !isActiveTicketStatus(status)) {
+    await replyError(
+      interaction,
+      '❌ Only active tickets can have their priority changed.',
+    );
+    return;
+  }
+
+  const staff = getStaffContext(interaction, topic);
+  if (!staff.authorized) {
+    await replyError(
+      interaction,
+      '❌ Only configured staff or administrators can change ticket priority.',
+    );
+    return;
+  }
+
+  const newTopic = setField(
+    topic,
+    'priority',
+    priority,
+  );
+
+  await updatePersistedTicketMetadata(
+    channel.id,
+    { priority },
+  );
+
+  channel.topic = newTopic;
+  updateRuntimeTicketState(
+    channel,
+    newTopic,
+    status,
+  );
+
+  /*
+   * Name and topic use the same Discord channel PATCH route. Send them in a
+   * single request so a priority click does not consume two rate-limit
+   * slots. A long Discord 429 is retried in the background and never blocks
+   * the interaction acknowledgement.
+   */
+  schedulePriorityChannelSync(
+    channel,
+    newTopic,
+    priority,
+  );
+
+  await interaction.editReply({
+    content: `✅ Ticket priority changed to **${priorityLabel(priority)}**.`,
+    components: [],
+  });
+
+  const config = await getGuildConfig(channel.guild.id);
+  if (config.supportCategoryId) {
+    await logTicketEvent(
+      channel.guild,
+      config.supportCategoryId,
+      {
+        ticketNumber: getField(newTopic, 'number') ?? 'unknown',
+        event: 'ticket_priority_changed',
+        actor: interaction.user.tag,
+        actorId: interaction.user.id,
+        actorName: interaction.user.tag,
+        detail: 'Priority changed to ' + priority + '.',
+      },
+    );
+  }
+
+  void updateMainMessage(
+    channel,
+    getField(newTopic, 'message'),
+    status,
+    newTopic,
+  );
+}
+
 async function handlePanelButton(
   interaction: ButtonInteraction,
 ): Promise<void> {
   const id =
     interaction.customId;
+
+  if (id === 'ticket:panel:priority') {
+    if (!(await safeDeferReply(interaction))) {
+      return;
+    }
+    await showPrioritySelector(interaction);
+    return;
+  }
+
+  if (id.startsWith('ticket:priority:set:')) {
+    const priority = parseTicketPriority(
+      id.slice('ticket:priority:set:'.length),
+    );
+    if (!priority) {
+      await replyError(interaction, '❌ Invalid ticket priority.');
+      return;
+    }
+    await applyTicketPriority(interaction, priority);
+    return;
+  }
+
+  if (id === 'ticket:priority:cancel') {
+    await interaction.update({
+      content: 'Priority selection cancelled.',
+      components: [],
+    });
+    return;
+  }
 
   if (id.startsWith('ticket:department:page:')) {
     const page = Number(id.slice('ticket:department:page:'.length));
@@ -2911,45 +3101,6 @@ async function handlePanelButton(
             input,
           ),
       );
-    } else if (
-      id ===
-      'ticket:panel:priority'
-    ) {
-      modal
-        .setCustomId(
-          'ticket:panel-modal:priority',
-        )
-        .setTitle(
-          'Change Priority',
-        );
-
-      const input =
-        new TextInputBuilder()
-          .setCustomId(
-            'priority',
-          )
-          .setLabel(
-            'Priority',
-          )
-          .setPlaceholder(
-            'low, normal, high, urgent',
-          )
-          .setStyle(
-            TextInputStyle.Short,
-          )
-          .setRequired(
-            true,
-          )
-          .setMaxLength(
-            20,
-          );
-
-      modal.addComponents(
-        new ActionRowBuilder<TextInputBuilder>()
-          .addComponents(
-            input,
-          ),
-      );
     } else if (id === 'ticket:panel:department') {
       await renderDepartmentSelector(interaction, 0);
       return;
@@ -3202,106 +3353,6 @@ async function handlePanelModal(
           },
         );
       }
-
-      return;
-    }
-
-    /* ---------------------------------------------------------------------- */
-    /* Priority                                                               */
-    /* ---------------------------------------------------------------------- */
-
-    if (
-      id ===
-      'ticket:panel-modal:priority'
-    ) {
-      const priority =
-        interaction.fields
-          .getTextInputValue(
-            'priority',
-          )
-          .trim()
-          .toLowerCase();
-
-      const parsedPriority = parseTicketPriority(priority);
-
-      if (!parsedPriority) {
-        await interaction.editReply(
-          '❌ Priority must be `low`, `normal`, `high`, `urgent`, or `critical`.',
-        );
-        return;
-      }
-
-      newTopic =
-        setField(
-          newTopic,
-          'priority',
-          parsedPriority,
-        );
-
-      /*
-       * Priority is first committed to SupportForge's persistent ticket
-       * metadata and local runtime state. A Discord channel topic PATCH is
-       * only synchronization work and must never hold the interaction open
-       * during a long Discord rate-limit window.
-       */
-      await updatePersistedTicketMetadata(
-        channel.id,
-        { priority: parsedPriority },
-      );
-
-      channel.topic = newTopic;
-      updateRuntimeTicketState(
-        channel,
-        newTopic,
-        state.status,
-      );
-
-      schedulePriorityTopicSync(
-        channel,
-        newTopic,
-      );
-
-      void queueTicketChannelRename(
-        channel,
-        getTicketChannelName(
-          getField(newTopic, 'number') ?? 'unknown',
-          state.status,
-          parsedPriority,
-        ),
-        `Ticket priority changed to ${parsedPriority}`,
-      ).catch((error) => {
-        console.error('⚠️ Failed to rename ticket for priority change:', error);
-      });
-
-      await interaction.editReply(
-        `✅ Ticket priority changed to **${parsedPriority}**.`,
-      );
-
-      const priorityConfig = await getGuildConfig(channel.guild.id);
-      if (priorityConfig.supportCategoryId) {
-        await logTicketEvent(
-          channel.guild,
-          priorityConfig.supportCategoryId,
-          {
-            ticketNumber: getField(newTopic, 'number') ?? 'unknown',
-            event: 'ticket_priority_changed',
-            actor: interaction.user.tag,
-            actorId: interaction.user.id,
-            actorName: interaction.user.tag,
-            detail: 'Priority changed to ' + parsedPriority + '.',
-          },
-        );
-      }
-
-      void updateMainMessage(
-        channel,
-        getField(
-          newTopic,
-          'message',
-        ),
-        state.status,
-        newTopic,
-      );
 
       return;
     }
