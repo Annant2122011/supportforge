@@ -1751,7 +1751,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
   }
 
   if (interaction.customId === AUDIT_SUMMARY_CUSTOM_ID) {
-    await interaction.deferReply();
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const config = await getGuildConfig(interaction.guild.id);
     if (config.supportCategoryId) {
       const current = await load();
