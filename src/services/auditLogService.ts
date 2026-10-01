@@ -702,9 +702,15 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
   const store = getGuildStore(current, guild.id);
 
   if (store.restoreMessageId) {
-    const restore = channel.messages.cache.get(store.restoreMessageId);
-    if (restore) return;
+    const restore = channel.messages.cache.get(store.restoreMessageId) ??
+      await channel.messages.fetch(store.restoreMessageId).catch(() => null);
+
+    if (restore) {
+      await restore.delete().catch(() => undefined);
+    }
+
     store.restoreMessageId = null;
+    await persist();
   }
 
   if (store.panelMessageId) {
@@ -722,7 +728,7 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
 
   const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
   if (recent) {
-    const existingRestore = recent.find(
+    const existingRestores = recent.filter(
       (message) =>
         message.author.id === channel.client.user?.id &&
         message.components.some(
@@ -735,11 +741,9 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
             ),
         ),
     );
-    if (existingRestore) {
-      store.restoreMessageId = existingRestore.id;
-      store.panelMessageId = null;
-      await persist();
-      return;
+
+    for (const restore of existingRestores) {
+      await restore.delete().catch(() => undefined);
     }
 
     const existingPanel = recent.find(
