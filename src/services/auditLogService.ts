@@ -819,6 +819,71 @@ function formatAuditDate(timestamp: string): string {
   return Number.isNaN(date.getTime()) ? timestamp.slice(0, 10) : date.toISOString().slice(0, 10);
 }
 
+function buildPrivateDeveloperAuditEmbeds(guild: Guild): Promise<EmbedBuilder[]> {
+  return load().then((current) => {
+    const store = getGuildStore(current, guild.id);
+    const internalEvents = store.events
+      .filter((event) => event.category !== 'ticket')
+      .slice(-24)
+      .reverse();
+
+    const embeds: EmbedBuilder[] = [];
+    const chunks: PersistedAuditEntry[][] = [];
+
+    for (let index = 0; index < internalEvents.length; index += 8) {
+      chunks.push(internalEvents.slice(index, index + 8));
+    }
+
+    if (!chunks.length) {
+      return [
+        new EmbedBuilder()
+          .setTitle('🛠️ Private Developer Audit View')
+          .setDescription(
+            'No internal settings/system audit events are currently recorded.\n\n' +
+            'This view is private to the moderator who enabled Developer View.',
+          )
+          .setFooter({ text: guild.name + ' • Private Developer View' })
+          .setTimestamp(),
+      ];
+    }
+
+    for (let index = 0; index < chunks.length; index += 1) {
+      const lines = chunks[index].map((event) => {
+        const detail = event.detail?.replace(/\s+/g, ' ').trim();
+        return (
+          '• <t:' +
+          Math.floor(new Date(event.timestamp).getTime() / 1000) +
+          ':R> • **' +
+          actionLabel(event.action) +
+          '** • ' +
+          event.actorName +
+          (event.category === 'system' ? ' • system' : ' • settings') +
+          (detail ? ' • ' + detail.slice(0, 180) : '')
+        );
+      });
+
+      embeds.push(
+        new EmbedBuilder()
+          .setTitle(
+            '🛠️ Private Developer Audit View' +
+              (chunks.length > 1 ? ' • Page ' + (index + 1) + '/' + chunks.length : ''),
+          )
+          .setDescription(lines.join('\n'))
+          .setFooter({
+            text:
+              guild.name +
+              ' • Private Developer View • ' +
+              internalEvents.length +
+              ' internal events shown',
+          })
+          .setTimestamp(),
+      );
+    }
+
+    return embeds;
+  });
+}
+
 async function generateOverallAuditSummary(
   guild: Guild,
   includeInternalEvents = false,
@@ -1692,8 +1757,9 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
         interaction.guild,
         includeInternalEvents,
       );
-      const store = getGuildStore(current, interaction.guild.id);
-      store.overallSummary = JSON.stringify(embeds.map((embed) => embed.toJSON()));
+      if (!includeInternalEvents) {
+        store.overallSummary = JSON.stringify(embeds.map((embed) => embed.toJSON()));
+      }
       await persist();
       await interaction.editReply({ embeds });
     } else {
