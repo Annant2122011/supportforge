@@ -900,16 +900,23 @@ async function createTicket(
     const advancedSettings = await getAdvancedSettings(guild.id);
 
     const cleanSubject =
-      subject.replace(
-        /\s+/g,
-        ' ',
-      );
+      subject
+        .replace(/\s+/g, ' ')
+        .trim();
 
+    /*
+     * Preserve the customer's formatting exactly. In particular, do not
+     * collapse whitespace here: pasted support requests commonly contain
+     * paragraphs, blank lines, numbered steps, and bullet points.
+     *
+     * Discord modal text inputs currently cap this field at 4,000 characters,
+     * so the value arriving here is already within the supported range.
+     */
     const cleanDescription =
-      description.replace(
-        /\s+/g,
-        ' ',
-      );
+      description
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .trim();
 
     const topic = [
       TICKET_PREFIX,
@@ -1058,6 +1065,9 @@ async function createTicket(
 
       await withTimeout(
         ticketChannel.send({
+          allowedMentions: {
+            parse: [],
+          },
           embeds: [
             new EmbedBuilder()
               .setTitle(
@@ -2255,10 +2265,10 @@ async function showTicketCreationModal(
           'description',
         )
         .setLabel(
-          'Describe your issue (up to 4000 characters)',
+          'Describe your issue (up to 4,000 characters)',
         )
         .setPlaceholder(
-          'Give us the details we need to help you...',
+          'Paste or type the full issue. Keep paragraphs and bullet points as written.',
         )
         .setStyle(
           TextInputStyle.Paragraph,
