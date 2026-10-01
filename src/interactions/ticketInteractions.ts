@@ -915,8 +915,7 @@ async function createTicket(
     const cleanDescription =
       description
         .replace(/\r\n/g, '\n')
-        .replace(/\r/g, '\n')
-        .trim();
+        .replace(/\r/g, '\n');
 
     const topic = [
       TICKET_PREFIX,
