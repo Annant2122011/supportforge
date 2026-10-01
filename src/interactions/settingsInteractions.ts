@@ -970,6 +970,15 @@ export async function handleSettingsInteraction(
 
   const guild = interaction.guild;
 
+  /*
+   * Select menus have the same short interaction acknowledgement window as
+   * buttons. Acknowledge them before any asynchronous config/role lookups so
+   * slow disk or Discord operations cannot produce "didn't respond in time".
+   */
+  if (interaction.isStringSelectMenu()) {
+    await interaction.deferUpdate().catch(() => undefined);
+  }
+
   if (interaction.isButton()) {
     const id = interaction.customId;
 
@@ -1166,7 +1175,6 @@ export async function handleSettingsInteraction(
       if (Object.keys(d.tags).length <= 1) { await reject(interaction, '❌ Each department must keep at least one tag.'); return true; }
       const replacement = Object.values(d.tags).find((t) => t.id !== tagId);
       if (!replacement) { await reject(interaction, '❌ No replacement tag is available.'); return true; }
-      await interaction.deferUpdate();
       await updateGuildConfig(guild.id, (current) => {
         const item = current.departments[departmentId];
         if (item) delete item.tags[tagId];
@@ -1183,7 +1191,6 @@ export async function handleSettingsInteraction(
       if (Object.keys(config.departments).length <= 1) { await reject(interaction, '❌ At least one department must remain.'); return true; }
       const active = [...guild.channels.cache.values()].filter((c) => c.type === ChannelType.GuildText && c.topic?.startsWith('supportforge:ticket') && getField(c.topic, 'department') === departmentId && ['open','claimed','pending','reopened'].includes(getField(c.topic, 'status') ?? ''));
       if (active.length) { await reject(interaction, '❌ Cannot remove this department while it has active tickets. Reassign them first.'); return true; }
-      await interaction.deferUpdate();
       await updateGuildConfig(guild.id, (current) => { delete current.departments[departmentId]; });
       await refreshSettingsChannel(guild); await syncPanel(guild); await showTags(interaction);
       await auditSettingsAction(guild, interaction, 'DEPARTMENT_REMOVED', 'Removed department ' + d.name + '. Its Discord category was retained.');
@@ -1515,13 +1522,13 @@ export async function handleSettingsInteraction(
       const department = config.departments[departmentId];
 
       if (!department) {
-        await interaction.reply({ content: '❌ Routing tag not found.', flags: MessageFlags.Ephemeral });
+        await reject(interaction, '❌ Routing tag not found.');
         return true;
       }
 
       const remaining = Object.values(config.departments).filter((item) => item.id !== departmentId);
       if (remaining.length === 0) {
-        await interaction.reply({ content: '❌ At least one routing tag / department must remain configured.', flags: MessageFlags.Ephemeral });
+        await reject(interaction, '❌ At least one routing tag / department must remain configured.');
         return true;
       }
 
@@ -1533,10 +1540,10 @@ export async function handleSettingsInteraction(
       );
 
       if (activeTickets.length) {
-        await interaction.reply({
-          content: '❌ Cannot remove **' + department.name + '** while it has **' + activeTickets.length + '** active ticket(s). Reassign them first.',
-          flags: MessageFlags.Ephemeral,
-        });
+        await reject(
+          interaction,
+          '❌ Cannot remove **' + department.name + '** while it has **' + activeTickets.length + '** active ticket(s). Reassign them first.',
+        );
         return true;
       }
 
@@ -1557,16 +1564,13 @@ export async function handleSettingsInteraction(
       const department = config.departments[departmentId];
 
       if (!department) {
-        await interaction.reply({ content: '❌ Department not found.', flags: MessageFlags.Ephemeral });
+        await reject(interaction, '❌ Department not found.');
         return true;
       }
 
       const active = Object.values(config.departments).filter((item) => item.id !== departmentId);
       if (active.length === 0) {
-        await interaction.reply({
-          content: '❌ Keep at least one ticket department configured.',
-          flags: MessageFlags.Ephemeral,
-        });
+        await reject(interaction, '❌ Keep at least one ticket department configured.');
         return true;
       }
 
@@ -1584,14 +1588,12 @@ export async function handleSettingsInteraction(
 
   if (interaction.isStringSelectMenu()) {
     if (interaction.customId === 'sf:settings:department:select') {
-      await interaction.deferUpdate();
       await showDepartmentManager(interaction, interaction.values[0]);
       return true;
     }
     if (interaction.customId.startsWith('sf:settings:tag:select:')) {
       const departmentId = interaction.customId.slice('sf:settings:tag:select:'.length);
       const tagId = interaction.values[0];
-      await interaction.deferUpdate();
       await showTagActions(interaction, departmentId, tagId);
       return true;
     }
