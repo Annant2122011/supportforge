@@ -594,10 +594,6 @@ async function appendAuditRecord(
   const current = await load();
   const store = getGuildStore(current, guild.id);
 
-  // Remove technical audit-entry messages that older SupportForge versions
-  // may have published into the shared channel.
-  await removeHiddenAuditMessages(channel);
-
   store.events.push(event);
 
   if (event.action === 'SETUP_COMPLETED') {
