@@ -239,24 +239,29 @@ function isReportableAuditEvent(event: PersistedAuditEntry): boolean {
    * details and ticket configuration changes remain available through the
    * private Developer View.
    */
-  const hiddenFromStandardFeed = new Set([
-    'TICKET_PANEL_MOVED',
-    'TICKET_PANEL_AUTO_MOVED',
-    'TICKET_PRIORITY_CHANGED',
-    'TICKET_ROUTING_CHANGED',
-    'INTERNAL_NOTE',
-    'CHANNEL_TOPIC_CHANGED',
-    'CHANNEL_PERMISSIONS_CHANGED',
-    'CHANNEL_SETTINGS_CHANGED',
-  ]);
-
-  return !hiddenFromStandardFeed.has(event.action);
+  return isStandardVisibleAuditAction(event.action, event.category);
 }
 
 const SUPPORTFORGE_NAME_PREFIXES = [
   'SupportForge.',
   'SupportForge •',
 ];
+
+const STANDARD_HIDDEN_AUDIT_ACTIONS = new Set([
+  'TICKET_PANEL_MOVED',
+  'TICKET_PANEL_AUTO_MOVED',
+  'TICKET_PRIORITY_CHANGED',
+  'TICKET_ROUTING_CHANGED',
+  'INTERNAL_NOTE',
+  'CHANNEL_TOPIC_CHANGED',
+  'CHANNEL_PERMISSIONS_CHANGED',
+  'CHANNEL_SETTINGS_CHANGED',
+]);
+
+function isStandardVisibleAuditAction(action: string, category?: string): boolean {
+  if (category === 'system' || category === 'settings') return false;
+  return !STANDARD_HIDDEN_AUDIT_ACTIONS.has(action.toUpperCase());
+}
 
 function hasSupportForgeName(name: string): boolean {
   return SUPPORTFORGE_NAME_PREFIXES.some((prefix) =>
@@ -590,6 +595,10 @@ async function appendAuditRecord(
   const current = await load();
   const store = getGuildStore(current, guild.id);
 
+  // Remove technical audit-entry messages that older SupportForge versions
+  // may have published into the shared channel.
+  await removeHiddenAuditMessages(channel);
+
   store.events.push(event);
 
   if (event.action === 'SETUP_COMPLETED') {
@@ -705,6 +714,41 @@ function buildAuditPanelEmbed(guild: Guild): EmbedBuilder {
     )
     .setFooter({ text: guild.name + ' • SupportForge Audit' })
     .setTimestamp();
+}
+
+async function removeHiddenAuditMessages(channel: TextChannel): Promise<void> {
+  const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+  if (!recent) return;
+
+  for (const message of recent.values()) {
+    if (message.author.id !== channel.client.user?.id) continue;
+
+    const title = message.embeds[0]?.title ?? '';
+    if (!title.startsWith('SupportForge Audit • ')) continue;
+
+    const actionLabelFromTitle = title.slice('SupportForge Audit • '.length);
+    const normalizedAction = actionLabelFromTitle
+      .split(' ')
+      .filter(Boolean)
+      .map((part) => part.toUpperCase())
+      .join('_');
+
+    /*
+     * Settings/system entries have a category footer; ticket-internal
+     * technical entries are identified by their explicit hidden action.
+     */
+    const footer = message.embeds[0]?.footer?.text ?? '';
+    const hiddenByCategory =
+      footer === 'Settings action' ||
+      footer === 'System action';
+
+    if (
+      hiddenByCategory ||
+      STANDARD_HIDDEN_AUDIT_ACTIONS.has(normalizedAction)
+    ) {
+      await message.delete().catch(() => undefined);
+    }
+  }
 }
 
 async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<void> {
