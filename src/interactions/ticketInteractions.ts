@@ -489,64 +489,141 @@ function getRateLimitRetryDelayMs(error: unknown): number | null {
   return null;
 }
 
-const priorityChannelSyncTimers = new Map<string, ReturnType<typeof setTimeout>>();
+interface PriorityChannelSyncJob {
+  version: number;
+  desiredName: string;
+  topic: string;
+  timer?: ReturnType<typeof setTimeout>;
+  running: boolean;
+}
+
+const priorityChannelSyncJobs =
+  new Map<string, PriorityChannelSyncJob>();
 
 function schedulePriorityChannelSync(
   channel: TextChannel,
   topic: string,
   priority: TicketPriority,
 ): void {
-  const previous = priorityChannelSyncTimers.get(channel.id);
-  if (previous) {
-    clearTimeout(previous);
-  }
-
   const desiredName = getTicketChannelName(
     getField(topic, 'number') ?? 'unknown',
     getTicketStatus(topic),
     priority,
   );
 
-  const attempt = async (): Promise<void> => {
+  let job = priorityChannelSyncJobs.get(channel.id);
+
+  if (!job) {
+    job = {
+      version: 0,
+      desiredName,
+      topic,
+      running: false,
+    };
+    priorityChannelSyncJobs.set(channel.id, job);
+  }
+
+  job.version += 1;
+  job.desiredName = desiredName;
+  job.topic = topic;
+
+  if (job.timer) {
+    clearTimeout(job.timer);
+    job.timer = undefined;
+  }
+
+  const run = async (): Promise<void> => {
+    const currentJob = priorityChannelSyncJobs.get(channel.id);
+
+    if (!currentJob || currentJob !== job || currentJob.running) {
+      return;
+    }
+
+    currentJob.running = true;
+    const versionAtStart = currentJob.version;
+
     try {
+      /*
+       * If the channel already has the requested local state, do not spend
+       * another Discord PATCH on a no-op priority selection.
+       */
+      if (
+        channel.name === currentJob.desiredName &&
+        channel.topic === currentJob.topic
+      ) {
+        priorityChannelSyncJobs.delete(channel.id);
+        return;
+      }
+
       await setChannelNameAndTopic(
         channel.id,
-        desiredName,
-        topic,
+        currentJob.desiredName,
+        currentJob.topic,
         'SupportForge: priority channel synchronization',
       );
-      channel.name = desiredName;
-      channel.topic = topic;
-      priorityChannelSyncTimers.delete(channel.id);
-      console.log(
-        `✅ Ticket name + topic synchronized after Discord rate-limit cooldown: ${channel.id}`,
-      );
+
+      const latestJob = priorityChannelSyncJobs.get(channel.id);
+
+      if (
+        latestJob === currentJob &&
+        currentJob.version === versionAtStart
+      ) {
+        channel.name = currentJob.desiredName;
+        channel.topic = currentJob.topic;
+        priorityChannelSyncJobs.delete(channel.id);
+
+        console.log(
+          `✅ Ticket name + topic synchronized: ${channel.id}`,
+        );
+      }
     } catch (error) {
       const retryDelayMs = getRateLimitRetryDelayMs(error);
+      const latestJob = priorityChannelSyncJobs.get(channel.id);
 
-      if (retryDelayMs !== null) {
+      if (
+        latestJob === currentJob &&
+        currentJob.version === versionAtStart &&
+        retryDelayMs !== null
+      ) {
         console.warn(
           `⏳ Ticket name + topic synchronization delayed for ${Math.ceil(retryDelayMs / 1000)}s: ${channel.id}`,
         );
 
-        const timer = setTimeout(() => {
-          priorityChannelSyncTimers.delete(channel.id);
-          void attempt();
+        currentJob.timer = setTimeout(() => {
+          currentJob.timer = undefined;
+          void run();
         }, retryDelayMs);
-
-        priorityChannelSyncTimers.set(channel.id, timer);
-        return;
+      } else if (
+        latestJob === currentJob &&
+        currentJob.version === versionAtStart
+      ) {
+        console.error(
+          '⚠️ Ticket priority channel synchronization failed:',
+          error,
+        );
+        priorityChannelSyncJobs.delete(channel.id);
       }
+    } finally {
+      currentJob.running = false;
 
-      console.error(
-        '⚠️ Ticket priority channel synchronization failed:',
-        error,
-      );
-      priorityChannelSyncTimers.delete(channel.id);
+      const latestJob = priorityChannelSyncJobs.get(channel.id);
+
+      /*
+       * A newer priority was selected while the previous Discord request was
+       * in flight. Immediately process the newest desired state rather than
+       * replaying the stale mutation.
+       */
+      if (
+        latestJob === currentJob &&
+        latestJob.version !== versionAtStart &&
+        !latestJob.timer
+      ) {
+        void run();
+      }
     }
   };
 
-  void attempt();
+  void run();
 }
 
 async function removePreviousTicketTranscript(
