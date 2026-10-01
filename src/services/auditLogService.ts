@@ -65,6 +65,17 @@ interface AuditGuildStore {
   summaries: Record<string, string>;
   overallSummary: string | null;
   accumulationEnabled: boolean;
+  /**
+   * Developer visibility is per moderator. Discord channel messages are
+   * inherently visible to everyone who can read the channel, so internal
+   * audit events are never published globally. These IDs only control each
+   * moderator's private Developer View.
+   */
+  developerViewers: string[];
+  /**
+   * Legacy field retained so older audit-log files can still be loaded.
+   * It is no longer used as a global switch.
+   */
   developerMode: boolean;
   panelMessageId: string | null;
   restoreMessageId: string | null;
@@ -93,6 +104,7 @@ function cloneGuildStore(): AuditGuildStore {
     summaries: {},
     overallSummary: null,
     accumulationEnabled: true,
+    developerViewers: [],
     developerMode: false,
     panelMessageId: null,
     restoreMessageId: null,
@@ -158,8 +170,11 @@ async function load(): Promise<AuditStore> {
         events: store.events ?? [],
         summaries: store.summaries ?? {},
         overallSummary: store.overallSummary ?? null,
-        accumulationEnabled: store.accumulationEnabled ?? false,
-        developerMode: store.developerMode ?? false,
+        accumulationEnabled: store.accumulationEnabled ?? true,
+        developerViewers: Array.isArray(store.developerViewers)
+          ? store.developerViewers.filter((id): id is string => typeof id === 'string')
+          : [],
+        developerMode: false,
         panelMessageId: store.panelMessageId ?? null,
         restoreMessageId: store.restoreMessageId ?? null,
         panelEventCheckpoint: store.panelEventCheckpoint ?? 0,
@@ -629,48 +644,36 @@ const AUDIT_DEVELOPER_OFF_CUSTOM_ID = 'sf:audit:developer:off';
 const AUDIT_QUICK_SUMMARY_CUSTOM_ID = 'sf:audit:quick-summary';
 const AUDIT_COLLAPSE_CUSTOM_ID = 'sf:audit:collapse-panel';
 const AUDIT_RESTORE_CUSTOM_ID = 'sf:audit:restore-panel';
-const AUDIT_COLLAPSE_AFTER = 12;
 
-function auditPanelComponents(canCollapse = false): ActionRowBuilder<ButtonBuilder>[] {
-  const buttons = [
-    new ButtonBuilder()
-      .setCustomId(AUDIT_SUMMARY_CUSTOM_ID)
-      .setLabel('Overall Summary')
-      .setEmoji('📊')
-      .setStyle(ButtonStyle.Primary),
-  ];
-
-  buttons.push(
-    new ButtonBuilder().setCustomId(AUDIT_DAILY_CUSTOM_ID).setLabel('Daily Summary').setEmoji('📅').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(AUDIT_ACCUMULATE_CUSTOM_ID).setLabel('Audit Data Settings').setEmoji('💾').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(AUDIT_DEVELOPER_CUSTOM_ID).setLabel('Developer Options').setEmoji('🛠️').setStyle(ButtonStyle.Secondary),
-  );
-
-  if (canCollapse) {
-    buttons.push(
+function auditPanelComponents(): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(AUDIT_COLLAPSE_CUSTOM_ID)
-        .setLabel('Collapse Audit Panel')
+        .setLabel('Move Audit Panel Down')
         .setEmoji('⬇️')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(AUDIT_DAILY_CUSTOM_ID)
+        .setLabel('Daily Summary')
+        .setEmoji('📅')
         .setStyle(ButtonStyle.Secondary),
-    );
-  }
-
-  return [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(...buttons),
+      new ButtonBuilder()
+        .setCustomId(AUDIT_ACCUMULATE_CUSTOM_ID)
+        .setLabel('Audit Data Settings')
+        .setEmoji('💾')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(AUDIT_DEVELOPER_CUSTOM_ID)
+        .setLabel('Developer Options')
+        .setEmoji('🛠️')
+        .setStyle(ButtonStyle.Secondary),
+    ),
   ];
 }
 
 function auditRestoreComponents(): ActionRowBuilder<ButtonBuilder>[] {
-  return [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(AUDIT_RESTORE_CUSTOM_ID)
-        .setLabel('Restore Audit Panel')
-        .setEmoji('↩️')
-        .setStyle(ButtonStyle.Secondary),
-    ),
-  ];
+  return [];
 }
 
 function buildAuditPanelEmbed(guild: Guild): EmbedBuilder {
@@ -707,26 +710,10 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
   if (store.panelMessageId) {
     const panel = channel.messages.cache.get(store.panelMessageId);
     if (panel?.embeds.some((embed) => embed.title === AUDIT_PANEL_TITLE)) {
-      const visibleEventCount = store.events.filter(
-        (event) => isReportableAuditEvent(event) && (store.developerMode || event.category === 'ticket'),
-      ).length;
-      const canCollapse =
-        visibleEventCount - store.panelEventCheckpoint >= AUDIT_COLLAPSE_AFTER;
-      const hasCollapse = panel.components.some(
-        (row) =>
-          row.type === ComponentType.ActionRow &&
-          row.components.some(
-            (component) =>
-              'customId' in component &&
-              component.customId === AUDIT_COLLAPSE_CUSTOM_ID,
-          ),
-      );
-
-      if (canCollapse !== hasCollapse) {
-        await panel.edit({
-          components: auditPanelComponents(canCollapse),
-        });
-      }
+      await panel.edit({
+        embeds: [buildAuditPanelEmbed(guild)],
+        components: auditPanelComponents(),
+      }).catch(() => undefined);
       return;
     }
 
@@ -762,13 +749,11 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
     );
     if (existingPanel) {
       store.panelMessageId = existingPanel.id;
-      const visibleEventCount = store.events.filter(
-        (event) => isReportableAuditEvent(event) && (store.developerMode || event.category === 'ticket'),
-      ).length;
-      const canCollapse =
-        visibleEventCount - store.panelEventCheckpoint >= AUDIT_COLLAPSE_AFTER;
       await existingPanel
-        .edit({ components: auditPanelComponents(canCollapse) })
+        .edit({
+          embeds: [buildAuditPanelEmbed(guild)],
+          components: auditPanelComponents(),
+        })
         .catch(() => undefined);
       await persist();
       return;
@@ -777,7 +762,7 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
 
   const panel = await channel.send({
     embeds: [buildAuditPanelEmbed(guild)],
-    components: auditPanelComponents(false),
+    components: auditPanelComponents(),
   });
 
   store.panelMessageId = panel.id;
@@ -834,9 +819,15 @@ function formatAuditDate(timestamp: string): string {
   return Number.isNaN(date.getTime()) ? timestamp.slice(0, 10) : date.toISOString().slice(0, 10);
 }
 
-async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]> {
+async function generateOverallAuditSummary(
+  guild: Guild,
+  includeInternalEvents = false,
+): Promise<EmbedBuilder[]> {
   const current = await load();
   const store = getGuildStore(current, guild.id);
+  const visibleAuditEvents = store.events.filter(
+    (event) => event.category === 'ticket' || includeInternalEvents,
+  );
   const [config, settings, ticketRecords, liveTickets] = await Promise.all([
     getGuildConfig(guild.id),
     getAdvancedSettings(guild.id),
@@ -872,7 +863,7 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
   const lifetimeArchived = lifetimeCounts.get('archived') ?? 0;
   const lifetimeClosed =
     (lifetimeCounts.get('closed') ?? 0) + lifetimeArchived;
-  const ticketCreationEvents = store.events.filter((event) => event.action === 'TICKET_CREATED').length;
+  const ticketCreationEvents = visibleAuditEvents.filter((event) => event.action === 'TICKET_CREATED').length;
   const ticketsCreatedToDate = Math.max(
     ticketRecords.length,
     liveTickets.length,
@@ -938,9 +929,9 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
     .filter((item): item is { ticket: typeof liveTickets[number]; timestamp: number } => Number.isFinite(item.timestamp))
     .sort((a, b) => a.timestamp - b.timestamp)[0];
 
-  const tagCreationEvents = store.events.filter((event) => event.action === 'TAG_ADDED');
+  const tagCreationEvents = visibleAuditEvents.filter((event) => event.action === 'TAG_ADDED');
   const tagCreations = tagCreationEvents.length;
-  const reportableEvents = store.events.filter(isReportableAuditEvent);
+  const reportableEvents = visibleAuditEvents.filter(isReportableAuditEvent);
   const settingsActions = reportableEvents.filter((event) => event.category === 'settings').length;
   const ticketActions = reportableEvents.filter((event) => event.category === 'ticket').length;
   const priorityRolesCreated = reportableEvents.filter((event) => event.action === 'PRIORITY_ROLE_CREATED').length;
@@ -971,7 +962,7 @@ async function generateOverallAuditSummary(guild: Guild): Promise<EmbedBuilder[]
     '**Existing departments:** ' + departments.length,
     '**Active custom tags:** ' + tags.length,
     '**Tag creations recorded:** ' + tagCreations,
-    '**Audit entries stored:** ' + store.events.length,
+    '**Audit entries visible in this view:** ' + visibleAuditEvents.length,
   ];
 
   const priorityLines = ['**Current ticket priorities**'];
@@ -1188,11 +1179,7 @@ async function recordAndPublish(
   const current = await load();
   const store = getGuildStore(current, guild.id);
 
-  if (!isReportableAuditEvent(record)) {
-    return;
-  }
-
-  if (!store.developerMode && record.category !== 'ticket') {
+  if (!isReportableAuditEvent(record) || record.category !== 'ticket') {
     return;
   }
 
@@ -1200,23 +1187,25 @@ async function recordAndPublish(
     const channel = await getOrCreateAuditChannel(guild, parentCategoryId);
     await sendAuditEntry(channel, record);
 
-    const visibleEvents = store.events.filter((item) =>
-      isReportableAuditEvent(item) && (store.developerMode || item.category === 'ticket'),
-    );
-    if (visibleEvents.length - store.panelEventCheckpoint >= AUDIT_COLLAPSE_AFTER) {
+    const ticketEventCount = store.events.filter(
+      (item) => isReportableAuditEvent(item) && item.category === 'ticket',
+    ).length;
+
+    if (
+      ticketEventCount > 0 &&
+      ticketEventCount % 12 === 0
+    ) {
       await channel.send({
         components: [
           new ActionRowBuilder<ButtonBuilder>().addComponents(
             new ButtonBuilder()
               .setCustomId(AUDIT_QUICK_SUMMARY_CUSTOM_ID)
-              .setLabel('Overall Summary')
+              .setLabel('Summarise Everything')
               .setEmoji('📊')
               .setStyle(ButtonStyle.Primary),
           ),
         ],
       }).catch(() => undefined);
-      store.panelEventCheckpoint = visibleEvents.length;
-      await persist();
     }
   } catch (error) {
     console.error('❌ Failed to publish audit log entry:', error);
@@ -1362,7 +1351,9 @@ async function publishDailySummary(
   if (!config.supportCategoryId) return;
 
   const events = store.events.filter((event) => dateKey(event.timestamp) === date);
-  const reportableEvents = events.filter(isReportableAuditEvent);
+  const reportableEvents = events.filter(
+    (event) => isReportableAuditEvent(event) && event.category === 'ticket',
+  );
   const channel = await getOrCreateAuditChannel(guild, config.supportCategoryId);
 
   const dailyEmbed = reportableEvents.length
@@ -1483,7 +1474,7 @@ export function startAuditDailySummaryScheduler(client: Client): void {
 }
 
 async function saveOverallSummary(guild: Guild): Promise<void> {
-  const embeds = await generateOverallAuditSummary(guild);
+  const embeds = await generateOverallAuditSummary(guild, false);
   const current = await load();
   const store = getGuildStore(current, guild.id);
   store.overallSummary = JSON.stringify(embeds.map((embed) => embed.toJSON()));
@@ -1575,10 +1566,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
     const current = await load();
     const store = getGuildStore(current, interaction.guild.id);
 
-    if (
-      !store.panelMessageId ||
-      store.events.length - store.panelEventCheckpoint < AUDIT_COLLAPSE_AFTER
-    ) {
+    if (!store.panelMessageId) {
       return true;
     }
 
@@ -1594,7 +1582,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
 
     const movedPanel = await interaction.channel.send({
       embeds: [buildAuditPanelEmbed(interaction.guild)],
-      components: auditPanelComponents(false),
+      components: auditPanelComponents(),
     });
 
     await oldPanel.delete().catch(() => undefined);
@@ -1605,46 +1593,90 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
     return true;
   }
 
-  if (interaction.customId === AUDIT_DEVELOPER_CUSTOM_ID) {
-    const current = await load();
-    const store = getGuildStore(current, interaction.guild.id);
-    await interaction.reply({
-      content: store.developerMode
-        ? 'Developer audit mode is **ON**. Ticket, settings, and internal system events are published.'
-        : 'Developer audit mode is **OFF**. Only ticket-related events are published to the visible audit channel.',
-      components: [
-        new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder().setCustomId(AUDIT_DEVELOPER_ON_CUSTOM_ID).setLabel('Enable Developer Audit').setStyle(ButtonStyle.Primary).setDisabled(store.developerMode),
-          new ButtonBuilder().setCustomId(AUDIT_DEVELOPER_OFF_CUSTOM_ID).setLabel('Ticket Audits Only').setStyle(ButtonStyle.Secondary).setDisabled(!store.developerMode),
-        ),
-      ],
-      flags: MessageFlags.Ephemeral,
-    });
-    return true;
-  }
+  if (
+    interaction.customId === AUDIT_DEVELOPER_CUSTOM_ID ||
+    interaction.customId === AUDIT_DEVELOPER_ON_CUSTOM_ID ||
+    interaction.customId === AUDIT_DEVELOPER_OFF_CUSTOM_ID
+  ) {
+    const member = await interaction.guild.members
+      .fetch(interaction.user.id)
+      .catch(() => null);
 
-  if (interaction.customId === AUDIT_DEVELOPER_ON_CUSTOM_ID || interaction.customId === AUDIT_DEVELOPER_OFF_CUSTOM_ID) {
+    const config = await getGuildConfig(interaction.guild.id);
+    const staffRoleIds = new Set(
+      Object.values(config.departments)
+        .map((department) => department.staffRoleId)
+        .filter((id): id is string => Boolean(id)),
+    );
+
+    const isModerator =
+      Boolean(
+        interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
+        interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ||
+        member?.roles.cache.some((role) => staffRoleIds.has(role.id)),
+      );
+
+    if (!isModerator) {
+      await interaction.reply({
+        content: '❌ Developer audit tools are restricted to SupportForge moderators.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+
     const current = await load();
     const store = getGuildStore(current, interaction.guild.id);
-    store.developerMode = interaction.customId === AUDIT_DEVELOPER_ON_CUSTOM_ID;
-    await persist();
-    await interaction.update({
-      content: store.developerMode
-        ? 'Developer audit mode is now **ON**.'
-        : 'Developer audit mode is now **OFF**. New settings/system events will no longer be published to the visible audit channel.',
+    const isEnabled = store.developerViewers.includes(interaction.user.id);
+
+    if (interaction.customId === AUDIT_DEVELOPER_ON_CUSTOM_ID) {
+      if (!isEnabled) {
+        store.developerViewers.push(interaction.user.id);
+        await persist();
+      }
+    } else if (interaction.customId === AUDIT_DEVELOPER_OFF_CUSTOM_ID) {
+      store.developerViewers = store.developerViewers.filter(
+        (id) => id !== interaction.user.id,
+      );
+      await persist();
+    }
+
+    const enabledNow = store.developerViewers.includes(interaction.user.id);
+
+    await interaction.reply({
+      content: enabledNow
+        ? '🛠️ **Developer View is ON for you only.** Internal settings/system audit events remain hidden from the shared audit channel and are shown only in your private developer view.'
+        : '🛠️ **Developer View is OFF for you.** You will receive the normal moderator audit view.',
       components: [
         new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder().setCustomId(AUDIT_DEVELOPER_ON_CUSTOM_ID).setLabel('Enable Developer Audit').setStyle(ButtonStyle.Primary).setDisabled(store.developerMode),
-          new ButtonBuilder().setCustomId(AUDIT_DEVELOPER_OFF_CUSTOM_ID).setLabel('Ticket Audits Only').setStyle(ButtonStyle.Secondary).setDisabled(!store.developerMode),
+          new ButtonBuilder()
+            .setCustomId(AUDIT_DEVELOPER_ON_CUSTOM_ID)
+            .setLabel('Enable My Developer View')
+            .setStyle(ButtonStyle.Primary)
+            .setDisabled(enabledNow),
+          new ButtonBuilder()
+            .setCustomId(AUDIT_DEVELOPER_OFF_CUSTOM_ID)
+            .setLabel('Disable My Developer View')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(!enabledNow),
         ),
       ],
+      embeds: enabledNow
+        ? await buildPrivateDeveloperAuditEmbeds(interaction.guild)
+        : [],
+      flags: MessageFlags.Ephemeral,
     });
     return true;
   }
 
   if (interaction.customId === AUDIT_QUICK_SUMMARY_CUSTOM_ID) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const embeds = await generateOverallAuditSummary(interaction.guild);
+    const current = await load();
+    const store = getGuildStore(current, interaction.guild.id);
+    const includeInternalEvents = store.developerViewers.includes(interaction.user.id);
+    const embeds = await generateOverallAuditSummary(
+      interaction.guild,
+      includeInternalEvents,
+    );
     await interaction.editReply({ embeds });
     return true;
   }
@@ -1653,8 +1685,13 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
     await interaction.deferReply();
     const config = await getGuildConfig(interaction.guild.id);
     if (config.supportCategoryId) {
-      const embeds = await generateOverallAuditSummary(interaction.guild);
       const current = await load();
+      const store = getGuildStore(current, interaction.guild.id);
+      const includeInternalEvents = store.developerViewers.includes(interaction.user.id);
+      const embeds = await generateOverallAuditSummary(
+        interaction.guild,
+        includeInternalEvents,
+      );
       const store = getGuildStore(current, interaction.guild.id);
       store.overallSummary = JSON.stringify(embeds.map((embed) => embed.toJSON()));
       await persist();
