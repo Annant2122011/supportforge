@@ -1785,16 +1785,53 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
 
   if (interaction.customId === AUDIT_DAILY_CUSTOM_ID) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
     const current = await load();
     const store = getGuildStore(current, interaction.guild.id);
+    const includeInternalEvents = store.developerViewers.includes(interaction.user.id);
+
+    /*
+     * Normal moderators receive the shared, persisted daily summary.
+     * Developer View generates the same day privately from raw events so
+     * internal settings/system activity never leaks into the shared view.
+     */
+    if (includeInternalEvents) {
+      const completedDates = Object.keys(store.summaries).sort();
+      const date = completedDates.pop();
+
+      if (!date) {
+        await interaction.editReply('No completed daily summary has been saved yet.');
+        return true;
+      }
+
+      const events = store.events.filter(
+        (event) => dateKey(event.timestamp) === date,
+      );
+
+      if (!events.length) {
+        await interaction.editReply({
+          embeds: [buildNoActivityDailySummaryEmbed(interaction.guild, date)],
+        });
+        return true;
+      }
+
+      await interaction.editReply({
+        embeds: [buildDailySummaryEmbed(interaction.guild, date, events)],
+      });
+      return true;
+    }
+
     const date = Object.keys(store.summaries).sort().pop();
     const raw = date ? store.summaries[date] : null;
     if (!raw) {
       await interaction.editReply('No completed daily summary has been saved yet.');
       return true;
     }
+
     try {
-      await interaction.editReply({ embeds: [EmbedBuilder.from(JSON.parse(raw))] });
+      await interaction.editReply({
+        embeds: [EmbedBuilder.from(JSON.parse(raw))],
+      });
     } catch {
       await interaction.editReply('The saved daily summary could not be restored.');
     }
