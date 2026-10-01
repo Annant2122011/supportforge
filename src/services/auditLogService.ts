@@ -1923,7 +1923,6 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       await interaction.deferUpdate();
     } else {
       await interaction.deferReply({
-        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -1949,7 +1948,6 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       await interaction.editReply({
         content:
           '❌ Developer audit tools are restricted to SupportForge moderators.',
-        flags: MessageFlags.Ephemeral,
       });
       return true;
     }
@@ -1963,7 +1961,6 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
         await interaction.editReply({
           content:
             '❌ Enable your Developer View before using its pages.',
-          flags: MessageFlags.Ephemeral,
         });
         return true;
       }
@@ -2021,7 +2018,6 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
               .setDisabled(!isEnabled),
           ),
         ],
-        flags: MessageFlags.Ephemeral,
       });
       return true;
     }
@@ -2056,7 +2052,6 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       await interaction.editReply({
         content:
           '🛠️ **Developer View disabled.** The durable audit database continues recording all events normally.',
-        flags: MessageFlags.Ephemeral,
       });
       return true;
     }
@@ -2082,7 +2077,6 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
         ),
       embeds: page.embeds,
       components: page.components,
-      flags: MessageFlags.Ephemeral,
     });
     return true;
   }
