@@ -13,7 +13,8 @@ const MAX_RATE_LIMIT_RETRIES = 1;
  * requests/second global bot limit, but the value is deliberately treated
  * as an implementation safety ceiling rather than a Discord guarantee.
  */
-const GLOBAL_REQUEST_SPACING_MS = 25;
+const GLOBAL_REQUEST_SPACING_MS = 100;
+const CHANNEL_MUTATION_SPACING_MS = 250;
 
 type PermissionValue = bigint | number | string;
 
@@ -41,6 +42,7 @@ const bucketRateLimitUntil = new Map<string, number>();
 const channelRequestQueues = new Map<string, Promise<void>>();
 let globalRateLimitUntil = 0;
 let lastNativeRequestAt = 0;
+const lastChannelMutationAt = new Map<string, number>();
 let globalRequestQueue: Promise<void> = Promise.resolve();
 
 function permissionListToBitfield(
@@ -228,6 +230,27 @@ async function waitForGlobalRequestSpacing(): Promise<void> {
   }
 }
 
+async function waitForChannelMutationSpacing(
+  channelId: string,
+): Promise<void> {
+  const elapsed =
+    Date.now() - (lastChannelMutationAt.get(channelId) ?? 0);
+
+  const remaining =
+    CHANNEL_MUTATION_SPACING_MS - elapsed;
+
+  if (remaining > 0) {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, remaining);
+    });
+  }
+
+  lastChannelMutationAt.set(
+    channelId,
+    Date.now(),
+  );
+}
+
 async function waitForCooldown(
   channelId: string,
   operation: string,
@@ -299,6 +322,7 @@ async function discordRequest<T = unknown>(
     for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt += 1) {
     await waitForCooldown(channelId, operation);
     await waitForGlobalRequestSpacing();
+    await waitForChannelMutationSpacing(channelId);
 
     const controller = new AbortController();
     const timer = setTimeout(
