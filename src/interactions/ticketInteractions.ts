@@ -962,7 +962,7 @@ async function createTicket(
             type:
               ChannelType.GuildText,
             parent:
-              categoryId,
+              departmentCategory.id,
             topic,
             permissionOverwrites:
               overwrites,
