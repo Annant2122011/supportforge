@@ -72,6 +72,8 @@ interface AuditGuildStore {
    * moderator's private Developer View.
    */
   developerViewers: string[];
+  developerViewModes: Record<string, 'now' | 'past_and_now'>;
+  developerViewStartedAt: Record<string, string>;
   panelMessageId: string | null;
   restoreMessageId: string | null;
   panelEventCheckpoint: number;
@@ -100,6 +102,8 @@ function cloneGuildStore(): AuditGuildStore {
     overallSummary: null,
     accumulationEnabled: true,
     developerViewers: [],
+    developerViewModes: {},
+    developerViewStartedAt: {},
     panelMessageId: null,
     restoreMessageId: null,
     panelEventCheckpoint: 0,
@@ -168,6 +172,28 @@ async function load(): Promise<AuditStore> {
         developerViewers: Array.isArray(store.developerViewers)
           ? store.developerViewers.filter((id): id is string => typeof id === 'string')
           : [],
+        developerViewModes:
+          store.developerViewModes &&
+          typeof store.developerViewModes === 'object'
+            ? Object.fromEntries(
+                Object.entries(store.developerViewModes).filter(
+                  ([id, mode]) =>
+                    typeof id === 'string' &&
+                    (mode === 'now' || mode === 'past_and_now'),
+                ),
+              )
+            : {},
+        developerViewStartedAt:
+          store.developerViewStartedAt &&
+          typeof store.developerViewStartedAt === 'object'
+            ? Object.fromEntries(
+                Object.entries(store.developerViewStartedAt).filter(
+                  ([id, timestamp]) =>
+                    typeof id === 'string' &&
+                    typeof timestamp === 'string',
+                ),
+              )
+            : {},
         panelMessageId: store.panelMessageId ?? null,
         restoreMessageId: store.restoreMessageId ?? null,
         panelEventCheckpoint: store.panelEventCheckpoint ?? 0,
@@ -655,6 +681,9 @@ const AUDIT_REVERT_CONFIRM_CUSTOM_ID = 'sf:audit:revert:confirm';
 const AUDIT_DEVELOPER_CUSTOM_ID = 'sf:audit:developer';
 const AUDIT_DEVELOPER_ON_CUSTOM_ID = 'sf:audit:developer:on';
 const AUDIT_DEVELOPER_OFF_CUSTOM_ID = 'sf:audit:developer:off';
+const AUDIT_DEVELOPER_NOW_CUSTOM_ID = 'sf:audit:developer:now';
+const AUDIT_DEVELOPER_PAST_NOW_CUSTOM_ID = 'sf:audit:developer:past-now';
+const AUDIT_DEVELOPER_PAGE_PREFIX = 'sf:audit:developer:page:';
 const AUDIT_QUICK_SUMMARY_CUSTOM_ID = 'sf:audit:quick-summary';
 const AUDIT_COLLAPSE_CUSTOM_ID = 'sf:audit:collapse-panel';
 const AUDIT_RESTORE_CUSTOM_ID = 'sf:audit:restore-panel';
@@ -695,7 +724,7 @@ function buildAuditPanelEmbed(guild: Guild): EmbedBuilder {
     .setTitle(AUDIT_PANEL_TITLE)
     .setDescription(
       'This channel is the central SupportForge audit record. It keeps a durable history of ticket lifecycle actions and important configuration changes, including responsible users and timestamps.\n\n' +
-      'Use **Summarise Everything** to generate a current, detailed snapshot of ticket activity, tags, channels, departments, priorities, retention, and other useful metrics.',
+      '**Move Audit Panel Down** places this control panel at the newest point in the audit channel. Use it repeatedly as new entries arrive. Overall summaries are never inserted as a bottom-of-channel control.',
     )
     .addFields(
       {
@@ -879,70 +908,191 @@ function formatAuditDate(timestamp: string): string {
   return Number.isNaN(date.getTime()) ? timestamp.slice(0, 10) : date.toISOString().slice(0, 10);
 }
 
-function buildPrivateDeveloperAuditEmbeds(guild: Guild): Promise<EmbedBuilder[]> {
-  return load().then((current) => {
-    const store = getGuildStore(current, guild.id);
-    const internalEvents = store.events
-      .filter((event) => !isReportableAuditEvent(event) || event.category !== 'ticket')
-      .slice(-24)
-      .reverse();
+type DeveloperViewMode = 'now' | 'past_and_now';
 
-    const embeds: EmbedBuilder[] = [];
-    const chunks: PersistedAuditEntry[][] = [];
+function developerModeLabel(mode: DeveloperViewMode): string {
+  return mode === 'now' ? 'Now only' : 'Past and now';
+}
 
-    for (let index = 0; index < internalEvents.length; index += 8) {
-      chunks.push(internalEvents.slice(index, index + 8));
+function developerCategoryLabel(category: PersistedAuditEntry['category']): string {
+  return category === 'ticket'
+    ? '🎫 Ticket'
+    : category === 'settings'
+      ? '⚙️ Settings'
+      : '🛠️ System';
+}
+
+async function buildPrivateDeveloperAuditPage(
+  guild: Guild,
+  userId: string,
+  page = 0,
+): Promise<{
+  embeds: EmbedBuilder[];
+  components: ActionRowBuilder<ButtonBuilder>[];
+}> {
+  const current = await load();
+  const store = getGuildStore(current, guild.id);
+  const mode = store.developerViewModes[userId] ?? 'past_and_now';
+  const startedAt = store.developerViewStartedAt[userId];
+
+  let events = store.events.slice();
+
+  if (mode === 'now' && startedAt) {
+    const startedTimestamp = Date.parse(startedAt);
+    if (Number.isFinite(startedTimestamp)) {
+      events = events.filter(
+        (event) => Date.parse(event.timestamp) >= startedTimestamp,
+      );
     }
+  }
 
-    if (!chunks.length) {
-      return [
-        new EmbedBuilder()
-          .setTitle('🛠️ Private Developer Audit View')
-          .setDescription(
-            'No internal settings/system audit events are currently recorded.\n\n' +
-            'This view is private to the moderator who enabled Developer View.',
-          )
-          .setFooter({ text: guild.name + ' • Private Developer View' })
-          .setTimestamp(),
-      ];
-    }
+  events.reverse();
 
-    for (let index = 0; index < chunks.length; index += 1) {
-      const lines = chunks[index].map((event) => {
-        const detail = event.detail?.replace(/\s+/g, ' ').trim();
-        return (
-          '• <t:' +
-          Math.floor(new Date(event.timestamp).getTime() / 1000) +
-          ':R> • **' +
-          actionLabel(event.action) +
-          '** • ' +
-          event.actorName +
-          (event.category === 'system' ? ' • system' : ' • settings') +
-          (detail ? ' • ' + detail.slice(0, 180) : '')
-        );
-      });
+  const eventsPerPage = 5;
+  const totalPages = Math.max(1, Math.ceil(events.length / eventsPerPage));
+  const safePage = Math.min(
+    Math.max(page, 0),
+    totalPages - 1,
+  );
+  const pageEvents = events.slice(
+    safePage * eventsPerPage,
+    (safePage + 1) * eventsPerPage,
+  );
+
+  const embeds: EmbedBuilder[] = [
+    new EmbedBuilder()
+      .setTitle('🛠️ Private Developer Audit View')
+      .setDescription(
+        '**Developer view mode:** ' + developerModeLabel(mode) + '\n\n' +
+        (
+          mode === 'now'
+            ? 'Showing audit activity recorded from the moment this view was enabled. Earlier developer history is excluded.'
+            : 'Showing the complete retained audit history, including ticket, settings, and system activity. New records are included when this view is refreshed.'
+        ),
+      )
+      .addFields(
+        {
+          name: '📌 Records shown',
+          value: String(events.length),
+          inline: true,
+        },
+        {
+          name: '📄 Page',
+          value: (safePage + 1) + ' / ' + totalPages,
+          inline: true,
+        },
+        {
+          name: '👤 Viewer',
+          value: '<@' + userId + '>',
+          inline: true,
+        },
+      )
+      .setFooter({
+        text:
+          guild.name +
+          ' • Private Developer View • Only the requesting moderator can see this',
+      })
+      .setTimestamp(),
+  ];
+
+  if (!pageEvents.length) {
+    embeds.push(
+      new EmbedBuilder()
+        .setTitle('📭 No matching developer audit events')
+        .setDescription(
+          mode === 'now'
+            ? 'No audit events have been recorded since you enabled **Now only**.'
+            : 'No retained audit events are currently available.',
+        )
+        .setFooter({ text: 'SupportForge • Developer Audit' })
+        .setTimestamp(),
+    );
+  } else {
+    for (const [index, event] of pageEvents.entries()) {
+      const timestamp = Math.floor(
+        new Date(event.timestamp).getTime() / 1000,
+      );
+      const detail =
+        event.detail?.trim() ||
+        'No additional details were recorded.';
 
       embeds.push(
         new EmbedBuilder()
           .setTitle(
-            '🛠️ Private Developer Audit View' +
-              (chunks.length > 1 ? ' • Page ' + (index + 1) + '/' + chunks.length : ''),
+            'Event ' +
+              (safePage * eventsPerPage + index + 1) +
+              ' • ' +
+              actionLabel(event.action),
           )
-          .setDescription(lines.join('\n'))
+          .addFields(
+            {
+              name: 'Category',
+              value: developerCategoryLabel(event.category),
+              inline: true,
+            },
+            {
+              name: 'Actor',
+              value: event.actorName || 'Unknown',
+              inline: true,
+            },
+            {
+              name: 'When',
+              value:
+                '<t:' + timestamp + ':F>\n' +
+                '<t:' + timestamp + ':R>',
+              inline: true,
+            },
+            ...(event.ticketNumber
+              ? [{
+                  name: 'Ticket',
+                  value: '#' + event.ticketNumber,
+                  inline: true,
+                }]
+              : []),
+            {
+              name: 'Details',
+              value: detail.slice(0, 1024),
+            },
+          )
           .setFooter({
             text:
               guild.name +
-              ' • Private Developer View • ' +
-              internalEvents.length +
-              ' internal events shown',
+              ' • Developer event ' +
+              (safePage * eventsPerPage + index + 1) +
+              ' of ' +
+              events.length,
           })
-          .setTimestamp(),
+          .setTimestamp(new Date(event.timestamp)),
       );
     }
+  }
 
-    return embeds;
-  });
+  return {
+    embeds,
+    components: [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(AUDIT_DEVELOPER_PAGE_PREFIX + (safePage - 1))
+          .setLabel('Previous Page')
+          .setEmoji('⬅️')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(safePage === 0),
+        new ButtonBuilder()
+          .setCustomId(AUDIT_DEVELOPER_PAGE_PREFIX + (safePage + 1))
+          .setLabel('Next Page')
+          .setEmoji('➡️')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(safePage >= totalPages - 1),
+        new ButtonBuilder()
+          .setCustomId(AUDIT_DEVELOPER_OFF_CUSTOM_ID)
+          .setLabel('Disable My Developer View')
+          .setEmoji('🛑')
+          .setStyle(ButtonStyle.Danger),
+      ),
+    ],
+  };
 }
+
 
 async function generateOverallAuditSummary(
   guild: Guild,
@@ -1273,6 +1423,45 @@ async function generateOverallAuditSummary(
   return [first, ...detailEmbeds];
 }
 
+async function publishBottomMoveControl(channel: TextChannel): Promise<void> {
+  const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+
+  if (recent) {
+    for (const message of recent.values()) {
+      if (message.author.id !== channel.client.user?.id) continue;
+      if (message.embeds.length > 0) continue;
+
+      const hasMoveButton = message.components.some(
+        (row) =>
+          row.type === ComponentType.ActionRow &&
+          row.components.some(
+            (component) =>
+              'customId' in component &&
+              component.customId === AUDIT_COLLAPSE_CUSTOM_ID,
+          ),
+      );
+
+      if (hasMoveButton) {
+        await message.delete().catch(() => undefined);
+      }
+    }
+  }
+
+  await channel.send({
+    content:
+      '⬇️ **Move Audit Panel Down**\nMove the SupportForge audit control panel to the newest point in this channel.',
+    components: [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(AUDIT_COLLAPSE_CUSTOM_ID)
+          .setLabel('Move Audit Panel Down')
+          .setEmoji('⬇️')
+          .setStyle(ButtonStyle.Primary),
+      ),
+    ],
+  }).catch(() => undefined);
+}
+
 async function recordAndPublish(
   guild: Guild,
   parentCategoryId: string,
@@ -1329,17 +1518,8 @@ async function recordAndPublish(
       ticketEventCount > 0 &&
       ticketEventCount % 12 === 0
     ) {
-      await channel.send({
-        components: [
-          new ActionRowBuilder<ButtonBuilder>().addComponents(
-            new ButtonBuilder()
-              .setCustomId(AUDIT_QUICK_SUMMARY_CUSTOM_ID)
-              .setLabel('Summarise Everything')
-              .setEmoji('📊')
-              .setStyle(ButtonStyle.Primary),
-          ),
-        ],
-      }).catch(() => undefined);
+      await publishBottomMoveControl(channel);
+    }
     }
   } catch (error) {
     console.error('❌ Failed to publish audit log entry:', error);
@@ -1695,6 +1875,10 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
   if (interaction.customId === AUDIT_COLLAPSE_CUSTOM_ID) {
     await interaction.deferUpdate();
 
+    if (interaction.message.embeds.length === 0) {
+      await interaction.message.delete().catch(() => undefined);
+    }
+
     const current = await load();
     const store = getGuildStore(current, interaction.guild.id);
 
@@ -1728,7 +1912,10 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
   if (
     interaction.customId === AUDIT_DEVELOPER_CUSTOM_ID ||
     interaction.customId === AUDIT_DEVELOPER_ON_CUSTOM_ID ||
-    interaction.customId === AUDIT_DEVELOPER_OFF_CUSTOM_ID
+    interaction.customId === AUDIT_DEVELOPER_OFF_CUSTOM_ID ||
+    interaction.customId === AUDIT_DEVELOPER_NOW_CUSTOM_ID ||
+    interaction.customId === AUDIT_DEVELOPER_PAST_NOW_CUSTOM_ID ||
+    interaction.customId.startsWith(AUDIT_DEVELOPER_PAGE_PREFIX)
   ) {
     const member = await interaction.guild.members
       .fetch(interaction.user.id)
@@ -1750,7 +1937,8 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
 
     if (!isModerator) {
       await interaction.reply({
-        content: '❌ Developer audit tools are restricted to SupportForge moderators.',
+        content:
+          '❌ Developer audit tools are restricted to SupportForge moderators.',
         flags: MessageFlags.Ephemeral,
       });
       return true;
@@ -1760,41 +1948,131 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
     const store = getGuildStore(current, interaction.guild.id);
     const isEnabled = store.developerViewers.includes(interaction.user.id);
 
-    if (interaction.customId === AUDIT_DEVELOPER_ON_CUSTOM_ID) {
+    if (interaction.customId.startsWith(AUDIT_DEVELOPER_PAGE_PREFIX)) {
+      if (!isEnabled) {
+        await interaction.reply({
+          content:
+            '❌ Enable your Developer View before using its pages.',
+          flags: MessageFlags.Ephemeral,
+        });
+        return true;
+      }
+
+      const requestedPage = Number(
+        interaction.customId.slice(AUDIT_DEVELOPER_PAGE_PREFIX.length),
+      );
+
+      await interaction.deferUpdate();
+      const page = await buildPrivateDeveloperAuditPage(
+        interaction.guild,
+        interaction.user.id,
+        Number.isInteger(requestedPage) ? requestedPage : 0,
+      );
+
+      await interaction.editReply({
+        embeds: page.embeds,
+        components: page.components,
+      });
+      return true;
+    }
+
+    if (interaction.customId === AUDIT_DEVELOPER_CUSTOM_ID) {
+      const selectedMode =
+        store.developerViewModes[interaction.user.id] ?? null;
+
+      await interaction.reply({
+        content:
+          '🛠️ **Developer View Options**\n\n' +
+          'Choose what historical developer information this moderator should see. The choice is private to you, and the durable audit database keeps recording events regardless of this setting.',
+        components: [
+          new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setCustomId(AUDIT_DEVELOPER_NOW_CUSTOM_ID)
+              .setLabel('Now Only')
+              .setEmoji('🕐')
+              .setStyle(
+                selectedMode === 'now'
+                  ? ButtonStyle.Primary
+                  : ButtonStyle.Secondary,
+              ),
+            new ButtonBuilder()
+              .setCustomId(AUDIT_DEVELOPER_PAST_NOW_CUSTOM_ID)
+              .setLabel('Past and Now')
+              .setEmoji('🗂️')
+              .setStyle(
+                selectedMode === 'past_and_now'
+                  ? ButtonStyle.Primary
+                  : ButtonStyle.Secondary,
+              ),
+            new ButtonBuilder()
+              .setCustomId(AUDIT_DEVELOPER_OFF_CUSTOM_ID)
+              .setLabel('Disable')
+              .setEmoji('🛑')
+              .setStyle(ButtonStyle.Danger)
+              .setDisabled(!isEnabled),
+          ),
+        ],
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+
+    if (interaction.customId === AUDIT_DEVELOPER_NOW_CUSTOM_ID) {
       if (!isEnabled) {
         store.developerViewers.push(interaction.user.id);
-        await persist();
       }
+      store.developerViewModes[interaction.user.id] = 'now';
+      store.developerViewStartedAt[interaction.user.id] =
+        new Date().toISOString();
+      await persist();
+    } else if (
+      interaction.customId === AUDIT_DEVELOPER_PAST_NOW_CUSTOM_ID ||
+      interaction.customId === AUDIT_DEVELOPER_ON_CUSTOM_ID
+    ) {
+      if (!isEnabled) {
+        store.developerViewers.push(interaction.user.id);
+      }
+      store.developerViewModes[interaction.user.id] = 'past_and_now';
+      store.developerViewStartedAt[interaction.user.id] ??=
+        new Date().toISOString();
+      await persist();
     } else if (interaction.customId === AUDIT_DEVELOPER_OFF_CUSTOM_ID) {
       store.developerViewers = store.developerViewers.filter(
         (id) => id !== interaction.user.id,
       );
+      delete store.developerViewModes[interaction.user.id];
+      delete store.developerViewStartedAt[interaction.user.id];
       await persist();
+
+      await interaction.reply({
+        content:
+          '🛠️ **Developer View disabled.** The durable audit database continues recording all events normally.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
     }
 
-    const enabledNow = store.developerViewers.includes(interaction.user.id);
+    const selectedMode =
+      store.developerViewModes[interaction.user.id] ?? 'past_and_now';
+    const page = await buildPrivateDeveloperAuditPage(
+      interaction.guild,
+      interaction.user.id,
+      0,
+    );
 
     await interaction.reply({
-      content: enabledNow
-        ? '🛠️ **Developer View is ON for you only.** Internal settings/system audit events remain hidden from the shared audit channel and are shown only in your private developer view.'
-        : '🛠️ **Developer View is OFF for you.** You will receive the normal moderator audit view.',
-      components: [
-        new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder()
-            .setCustomId(AUDIT_DEVELOPER_ON_CUSTOM_ID)
-            .setLabel('Enable My Developer View')
-            .setStyle(ButtonStyle.Primary)
-            .setDisabled(enabledNow),
-          new ButtonBuilder()
-            .setCustomId(AUDIT_DEVELOPER_OFF_CUSTOM_ID)
-            .setLabel('Disable My Developer View')
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(!enabledNow),
+      content:
+        '🛠️ **Developer View enabled for you only.**\n' +
+        '**Mode:** ' +
+        developerModeLabel(selectedMode) +
+        '\n\n' +
+        (
+          selectedMode === 'now'
+            ? 'Only audit activity recorded from the moment you enabled this view is shown.'
+            : 'All retained audit history is available through the page controls, and future records appear when the view is refreshed.'
         ),
-      ],
-      embeds: enabledNow
-        ? await buildPrivateDeveloperAuditEmbeds(interaction.guild)
-        : [],
+      embeds: page.embeds,
+      components: page.components,
       flags: MessageFlags.Ephemeral,
     });
     return true;
