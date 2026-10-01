@@ -72,10 +72,6 @@ interface AuditGuildStore {
    * moderator's private Developer View.
    */
   developerViewers: string[];
-  /**
-   * Legacy field retained so older audit-log files can still be loaded.
-   * It is no longer used as a global switch.
-   */
   panelMessageId: string | null;
   restoreMessageId: string | null;
   panelEventCheckpoint: number;
@@ -908,9 +904,9 @@ async function generateOverallAuditSummary(
 ): Promise<EmbedBuilder[]> {
   const current = await load();
   const store = getGuildStore(current, guild.id);
-  const visibleAuditEvents = store.events.filter(
-    (event) => event.category === 'ticket' || includeInternalEvents,
-  );
+  const visibleAuditEvents = includeInternalEvents
+    ? store.events
+    : store.events.filter(isReportableAuditEvent);
   const [config, settings, ticketRecords, liveTickets] = await Promise.all([
     getGuildConfig(guild.id),
     getAdvancedSettings(guild.id),
