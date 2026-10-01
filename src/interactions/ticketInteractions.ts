@@ -2328,11 +2328,13 @@ async function handleTicketTagSelection(interaction: StringSelectMenuInteraction
   const parts = interaction.customId.split(':');
   const departmentId = parts[3] ?? '';
   const tagId = interaction.values[0] ?? '';
-  const config = await getGuildConfig(interaction.guild!.id);
-  if (!config.departments[departmentId]?.tags?.[tagId]) {
-    await replyError(interaction, '❌ That tag is no longer configured for this department.');
-    return;
-  }
+
+  /*
+   * The tag menu was generated from the current department configuration.
+   * Do not perform another configuration load before showModal(): the
+   * interaction has a very short acknowledgement window. The modal submit
+   * validates the department/tag again before creating the ticket.
+   */
   await showTicketCreationModal(interaction, departmentId, tagId);
 }
 
@@ -2350,36 +2352,19 @@ async function showTicketCreationModal(
   }
 
   try {
-    const config =
-      await withTimeout(
-        getGuildConfig(
-          interaction.guild.id,
-        ),
-        DISCORD_OPERATION_TIMEOUT_MS,
-        'Guild configuration load',
-      );
-
-    const department =
-      config.departments[
-        departmentId
-      ];
-    const tag = department?.tags?.[tagId];
-
-    if (!department || !tag) {
-      await replyError(
-        interaction,
-        '❌ This ticket department no longer exists. Please refresh the support panel.',
-      );
-      return;
-    }
-
+    /*
+     * Do not load guild configuration before showModal(). A slow config
+     * read must never make a valid tag selection expire as Unknown
+     * interaction (10062). The modal submit revalidates the department/tag
+     * before any ticket is created.
+     */
     const modal =
       new ModalBuilder()
         .setCustomId(
           `ticket:modal:${departmentId}:${tagId}`,
         )
         .setTitle(
-          `${department.name} Support`,
+          'Support Request',
         );
 
     const subjectInput =
@@ -2767,9 +2752,9 @@ async function handlePanelButton(
     id === 'ticket:panel:move-bottom' ||
     id === 'ticket:panel:restore-move'
   ) {
-    if (!(await safeDeferReply(interaction))) {
-      return;
-    }
+    /*
+     * Already acknowledged at handleTicketInteraction() entry.
+     */
 
     if (
       !interaction.guild ||
@@ -3451,6 +3436,22 @@ export async function handleTicketInteraction(
     | ModalSubmitInteraction,
 ): Promise<void> {
   try {
+    /*
+     * Move/Restore is allowed to perform several Discord API operations,
+     * but the button acknowledgement must happen immediately. Defer before
+     * routing so rate limits or other latency cannot cause Unknown
+     * interaction (10062).
+     */
+    if (
+      interaction.isButton() &&
+      (interaction.customId === 'ticket:panel:move-bottom' ||
+        interaction.customId === 'ticket:panel:restore-move')
+    ) {
+      if (!(await safeDeferReply(interaction))) {
+        return;
+      }
+    }
+
     if (interaction.isStringSelectMenu()) {
       if (interaction.customId === 'ticket:create-tag:select') {
         await handleTicketTagSelection(interaction);
