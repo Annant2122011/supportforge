@@ -467,6 +467,129 @@ function decodeSubject(
   }
 }
 
+function getRateLimitRetryDelayMs(error: unknown): number | null {
+  const message = error instanceof Error ? error.message : String(error);
+  const secondsMatch = message.match(/another\s+(\d+)s\b/i);
+  if (secondsMatch) {
+    const seconds = Number(secondsMatch[1]);
+    return Number.isFinite(seconds) && seconds > 0
+      ? (seconds + 1) * 1000
+      : null;
+  }
+
+  const millisecondsMatch = message.match(/another\s+(\d+)ms\b/i);
+  if (millisecondsMatch) {
+    const milliseconds = Number(millisecondsMatch[1]);
+    return Number.isFinite(milliseconds) && milliseconds > 0
+      ? milliseconds + 1000
+      : null;
+  }
+
+  return null;
+}
+
+const priorityTopicRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function schedulePriorityTopicSync(
+  channel: TextChannel,
+  topic: string,
+): void {
+  const previous = priorityTopicRetryTimers.get(channel.id);
+  if (previous) {
+    clearTimeout(previous);
+  }
+
+  const attempt = async (): Promise<void> => {
+    try {
+      await setChannelTopic(
+        channel.id,
+        topic,
+        'SupportForge: priority topic synchronization',
+      );
+      channel.topic = topic;
+      priorityTopicRetryTimers.delete(channel.id);
+      console.log(
+        `✅ Ticket topic synchronized after Discord rate-limit cooldown: ${channel.id}`,
+      );
+    } catch (error) {
+      const retryDelayMs = getRateLimitRetryDelayMs(error);
+
+      if (retryDelayMs !== null) {
+        console.warn(
+          `⏳ Ticket topic synchronization delayed for ${Math.ceil(retryDelayMs / 1000)}s: ${channel.id}`,
+        );
+
+        const timer = setTimeout(() => {
+          priorityTopicRetryTimers.delete(channel.id);
+          void attempt();
+        }, retryDelayMs);
+
+        priorityTopicRetryTimers.set(channel.id, timer);
+        return;
+      }
+
+      console.error(
+        '⚠️ Ticket priority topic synchronization failed:',
+        error,
+      );
+      priorityTopicRetryTimers.delete(channel.id);
+    }
+  };
+
+  void attempt();
+}
+
+async function removePreviousTicketTranscript(
+  guild: import('discord.js').Guild,
+  topic: string,
+): Promise<void> {
+  const transcriptChannelId = (await getGuildConfig(guild.id)).transcriptChannelId;
+  const transcriptMessageId = getField(topic, 'transcript_id');
+
+  if (!transcriptChannelId) {
+    return;
+  }
+
+  const transcriptChannel = guild.channels.cache.get(transcriptChannelId);
+  if (!transcriptChannel || transcriptChannel.type !== ChannelType.GuildText) {
+    return;
+  }
+
+  if (transcriptMessageId) {
+    const previousTranscript =
+      transcriptChannel.messages.cache.get(transcriptMessageId) ??
+      await transcriptChannel.messages.fetch(transcriptMessageId).catch(() => null);
+
+    if (previousTranscript) {
+      await previousTranscript.delete().catch((error) => {
+        console.warn(
+          `⚠️ Could not delete previous transcript ${transcriptMessageId} for ticket ${getField(topic, 'number') ?? 'unknown'}:`,
+          error,
+        );
+      });
+    }
+    return;
+  }
+
+  /*
+   * Legacy fallback: older tickets did not store the transcript message ID.
+   * Remove matching SupportForge transcript posts from the recent transcript
+   * history, without touching unrelated files/messages.
+   */
+  const ticketNumber = getField(topic, 'number') ?? 'unknown';
+  const recent = await transcriptChannel.messages.fetch({ limit: 100 }).catch(() => null);
+  if (!recent) return;
+
+  for (const message of recent.values()) {
+    if (
+      message.author.id === guild.client.user?.id &&
+      message.content === `📄 Transcript for ticket **#${ticketNumber}**`
+    ) {
+      await message.delete().catch(() => undefined);
+    }
+  }
+}
+
 function parseUserId(
   value: string,
 ): string | null {
@@ -1484,6 +1607,18 @@ async function transition(
       newStatus ===
       'reopened'
     ) {
+      try {
+        await removePreviousTicketTranscript(
+          interaction.guild!,
+          oldTopic,
+        );
+      } catch (error) {
+        console.warn(
+          '⚠️ Previous ticket transcript could not be removed during reopen:',
+          error,
+        );
+      }
+
       newTopic =
         setField(
           newTopic,
@@ -1519,6 +1654,12 @@ async function transition(
         removeField(
           newTopic,
           'claimed_at',
+        );
+
+      newTopic =
+        removeField(
+          newTopic,
+          'transcript_id',
         );
 
       /*
@@ -2012,7 +2153,7 @@ async function closeTicket(
         'Transcript generation',
       );
 
-    await withTimeout(
+    const transcriptMessage = await withTimeout(
       transcriptChannel.send({
         content:
           `📄 Transcript for ticket **#${ticketNumber}**`,
@@ -2034,12 +2175,16 @@ async function closeTicket(
     const closedTopic =
       setField(
         setField(
-          topic,
-          'status',
-          'closed',
+          setField(
+            topic,
+            'status',
+            'closed',
+          ),
+          'closed_at',
+          closedAt.toISOString(),
         ),
-        'closed_at',
-        closedAt.toISOString(),
+        'transcript_id',
+        transcriptMessage.id,
       );
 
     await setPersistedTicketStatus(
@@ -3108,23 +3253,27 @@ async function handlePanelModal(
           parsedPriority,
         );
 
-      await runChannelMutation(
-        channel,
-        'Priority update',
-        async () => {
-          await setChannelTopic(
-            channel.id,
-            newTopic,
-            `SupportForge: priority update`,
-          );
-          channel.topic = newTopic;
-        },
+      /*
+       * Priority is first committed to SupportForge's persistent ticket
+       * metadata and local runtime state. A Discord channel topic PATCH is
+       * only synchronization work and must never hold the interaction open
+       * during a long Discord rate-limit window.
+       */
+      await updatePersistedTicketMetadata(
+        channel.id,
+        { priority: parsedPriority },
       );
 
+      channel.topic = newTopic;
       updateRuntimeTicketState(
         channel,
         newTopic,
         state.status,
+      );
+
+      schedulePriorityTopicSync(
+        channel,
+        newTopic,
       );
 
       void queueTicketChannelRename(
