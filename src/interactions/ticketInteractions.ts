@@ -27,7 +27,6 @@ import {
 import { generateTranscript } from '../services/transcriptService';
 
 import {
-  setChannelNameAndTopic,
   setChannelParent,
   setChannelPermissionOverwrite,
   setChannelTopic,
@@ -489,142 +488,7 @@ function getRateLimitRetryDelayMs(error: unknown): number | null {
   return null;
 }
 
-interface PriorityChannelSyncJob {
-  version: number;
-  desiredName: string;
-  topic: string;
-  timer?: ReturnType<typeof setTimeout>;
-  running: boolean;
-}
 
-const priorityChannelSyncJobs =
-  new Map<string, PriorityChannelSyncJob>();
-
-function schedulePriorityChannelSync(
-  channel: TextChannel,
-  topic: string,
-  priority: TicketPriority,
-): void {
-  const desiredName = getTicketChannelName(
-    getField(topic, 'number') ?? 'unknown',
-    getTicketStatus(topic),
-    priority,
-  );
-
-  let job = priorityChannelSyncJobs.get(channel.id);
-
-  if (!job) {
-    job = {
-      version: 0,
-      desiredName,
-      topic,
-      running: false,
-    };
-    priorityChannelSyncJobs.set(channel.id, job);
-  }
-
-  job.version += 1;
-  job.desiredName = desiredName;
-  job.topic = topic;
-
-  if (job.timer) {
-    clearTimeout(job.timer);
-    job.timer = undefined;
-  }
-
-  const run = async (): Promise<void> => {
-    const currentJob = priorityChannelSyncJobs.get(channel.id);
-
-    if (!currentJob || currentJob !== job || currentJob.running) {
-      return;
-    }
-
-    currentJob.running = true;
-    const versionAtStart = currentJob.version;
-
-    try {
-      /*
-       * If the channel already has the requested local state, do not spend
-       * another Discord PATCH on a no-op priority selection.
-       */
-      if (
-        channel.name === currentJob.desiredName &&
-        channel.topic === currentJob.topic
-      ) {
-        priorityChannelSyncJobs.delete(channel.id);
-        return;
-      }
-
-      await setChannelNameAndTopic(
-        channel.id,
-        currentJob.desiredName,
-        currentJob.topic,
-        'SupportForge: priority channel synchronization',
-      );
-
-      const latestJob = priorityChannelSyncJobs.get(channel.id);
-
-      if (
-        latestJob === currentJob &&
-        currentJob.version === versionAtStart
-      ) {
-        channel.name = currentJob.desiredName;
-        channel.topic = currentJob.topic;
-        priorityChannelSyncJobs.delete(channel.id);
-
-        console.log(
-          `✅ Ticket name + topic synchronized: ${channel.id}`,
-        );
-      }
-    } catch (error) {
-      const retryDelayMs = getRateLimitRetryDelayMs(error);
-      const latestJob = priorityChannelSyncJobs.get(channel.id);
-
-      if (
-        latestJob === currentJob &&
-        currentJob.version === versionAtStart &&
-        retryDelayMs !== null
-      ) {
-        console.warn(
-          `⏳ Ticket name + topic synchronization delayed for ${Math.ceil(retryDelayMs / 1000)}s: ${channel.id}`,
-        );
-
-        currentJob.timer = setTimeout(() => {
-          currentJob.timer = undefined;
-          void run();
-        }, retryDelayMs);
-      } else if (
-        latestJob === currentJob &&
-        currentJob.version === versionAtStart
-      ) {
-        console.error(
-          '⚠️ Ticket priority channel synchronization failed:',
-          error,
-        );
-        priorityChannelSyncJobs.delete(channel.id);
-      }
-    } finally {
-      currentJob.running = false;
-
-      const latestJob = priorityChannelSyncJobs.get(channel.id);
-
-      /*
-       * A newer priority was selected while the previous Discord request was
-       * in flight. Immediately process the newest desired state rather than
-       * replaying the stale mutation.
-       */
-      if (
-        latestJob === currentJob &&
-        latestJob.version !== versionAtStart &&
-        !latestJob.timer
-      ) {
-        void run();
-      }
-    }
-  };
-
-  void run();
-}
 
 async function removePreviousTicketTranscript(
   guild: import('discord.js').Guild,
@@ -2830,16 +2694,12 @@ async function applyTicketPriority(
   );
 
   /*
-   * Name and topic use the same Discord channel PATCH route. Send them in a
-   * single request so a priority click does not consume two rate-limit
-   * slots. A long Discord 429 is retried in the background and never blocks
-   * the interaction acknowledgement.
+   * Priority is intentionally NOT synchronized by a Discord channel PATCH.
+   * Discord applies a strict resource-specific limit to channel updates;
+   * repeatedly rewriting the channel name/topic for cosmetic priority
+   * changes wastes that quota. The persistent ticket record and panel state
+   * are the source of truth for priority.
    */
-  schedulePriorityChannelSync(
-    channel,
-    newTopic,
-    priority,
-  );
 
   await interaction.editReply({
     content: `✅ Ticket priority changed to **${({ low: '🟢 Low', normal: '🟡 Normal', high: '🟠 High', urgent: '🔴 Urgent', critical: '🟣 Critical' } as Record<TicketPriority, string>)[priority]}**.`,
