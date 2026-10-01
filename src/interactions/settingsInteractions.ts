@@ -942,6 +942,15 @@ export async function handleSettingsInteraction(
 ): Promise<boolean> {
   if (!interaction.guild) return false;
 
+  /*
+   * Acknowledge settings select menus immediately. This must happen before
+   * authorization/configuration lookups because Discord expires unacknowledged
+   * component interactions after a few seconds.
+   */
+  if (interaction.isStringSelectMenu()) {
+    await interaction.deferUpdate().catch(() => undefined);
+  }
+
   if (
     (interaction.isButton() || interaction.isStringSelectMenu() || interaction.isModalSubmit()) &&
     (interaction.customId.startsWith('sf:settings:'))
@@ -969,15 +978,6 @@ export async function handleSettingsInteraction(
   }
 
   const guild = interaction.guild;
-
-  /*
-   * Select menus have the same short interaction acknowledgement window as
-   * buttons. Acknowledge them before any asynchronous config/role lookups so
-   * slow disk or Discord operations cannot produce "didn't respond in time".
-   */
-  if (interaction.isStringSelectMenu()) {
-    await interaction.deferUpdate().catch(() => undefined);
-  }
 
   if (interaction.isButton()) {
     const id = interaction.customId;
@@ -1547,7 +1547,6 @@ export async function handleSettingsInteraction(
         return true;
       }
 
-      await interaction.deferUpdate();
       await updateGuildConfig(guild.id, (current) => {
         delete current.departments[departmentId];
       });
