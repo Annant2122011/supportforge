@@ -2439,7 +2439,7 @@ async function showTicketHistory(
       return;
     }
 
-    const lines = recent.map((event) => {
+    const lines = recent.map((event: Awaited<ReturnType<typeof getTicketAuditHistory>>[number]) => {
       const timestamp = Math.floor(new Date(event.timestamp).getTime() / 1000);
       const detail = event.detail?.trim();
 
@@ -2449,7 +2449,7 @@ async function showTicketHistory(
         ':f> • **' +
         event.action
           .split('_')
-          .map((part) => part.charAt(0) + part.slice(1).toLowerCase())
+          .map((part: string) => part.charAt(0) + part.slice(1).toLowerCase())
           .join(' ') +
         '** • ' +
         (event.actorName || 'Unknown') +
