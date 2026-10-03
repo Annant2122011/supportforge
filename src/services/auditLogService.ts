@@ -1543,15 +1543,36 @@ async function recordAndPublish(
       (item) => isReportableAuditEvent(item) && item.category === 'ticket',
     ).length;
 
+    /*
+     * Keep the Move Audit Panel Down control dynamic. Five new visible
+     * ticket audit events are enough to make the control useful, without
+     * posting it after every single event.
+     *
+     * The control itself is never a summary and never replaces the audit
+     * history. It simply gives staff a fresh way to move the real panel.
+     */
     if (
       ticketEventCount > 0 &&
-      ticketEventCount % 12 === 0
+      ticketEventCount % 5 === 0
     ) {
       await publishBottomMoveControl(channel);
     }
   } catch (error) {
     console.error('❌ Failed to publish audit log entry:', error);
   }
+}
+
+export async function getTicketAuditHistory(
+  guildId: string,
+  ticketNumber: string,
+): Promise<PersistedAuditEntry[]> {
+  const current = await load();
+  const store = getGuildStore(current, guildId);
+
+  return store.events.filter(
+    (event) =>
+      event.ticketNumber === ticketNumber,
+  );
 }
 
 export async function logTicketEvent(
