@@ -424,22 +424,59 @@ export async function restoreSettingsChannelToBottom(guild: Guild): Promise<void
   const channel = guild.channels.cache.get(settings.settingsChannelId);
   if (channel?.type !== ChannelType.GuildText) return;
 
-  const botId = channel.client.user?.id;
-  if (!botId) return;
+  /*
+   * "Restore to Settings" is a true reset of the visible settings-channel
+   * conversation. The user asked for the old sub-pages/action messages to
+   * disappear, leaving exactly one live dashboard.
+   *
+   * Discord bulk deletion is efficient for recent messages, while messages
+   * older than Discord's bulk-delete window must be deleted individually.
+   */
+  let before: string | undefined;
+  let deletedCount = 0;
 
-  const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
-  if (recent) {
-    const dashboardMessages = [...recent.values()].filter(
+  for (;;) {
+    const batch = await channel.messages
+      .fetch({
+        limit: 100,
+        ...(before ? { before } : {}),
+      })
+      .catch(() => null);
+
+    if (!batch || batch.size === 0) break;
+
+    const messages = [...batch.values()];
+
+    const recent = messages.filter(
       (message) =>
-        message.author.id === botId &&
-        isSettingsDashboardMessage(message, botId),
+        Date.now() - message.createdTimestamp <
+        14 * 24 * 60 * 60 * 1000,
     );
 
-    await Promise.all(
-      dashboardMessages.map((message) =>
-        message.delete().catch(() => undefined),
-      ),
+    const old = messages.filter(
+      (message) =>
+        Date.now() - message.createdTimestamp >=
+        14 * 24 * 60 * 60 * 1000,
     );
+
+    if (recent.length > 1) {
+      const deleted = await channel
+        .bulkDelete(recent, true)
+        .catch(() => null);
+      deletedCount += deleted?.size ?? 0;
+    } else if (recent.length === 1) {
+      await recent[0].delete().catch(() => undefined);
+      deletedCount += 1;
+    }
+
+    for (const message of old) {
+      await message.delete().catch(() => undefined);
+      deletedCount += 1;
+    }
+
+    before = messages[messages.length - 1]?.id;
+
+    if (messages.length < 100) break;
   }
 
   const resolvedSettings = await getAdvancedSettings(guild.id);
@@ -457,4 +494,8 @@ export async function restoreSettingsChannelToBottom(guild: Guild): Promise<void
   });
 
   await pruneSettingsHistory(channel);
+
+  console.log(
+    `📌 Restored SupportForge Settings channel to one dashboard message: ${channel.id} (removed ${deletedCount} previous message(s)).`,
+  );
 }
