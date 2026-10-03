@@ -52,6 +52,7 @@ import {
 } from '../services/ticketPersistenceService';
 
 import {
+  getTicketAuditHistory,
   logTicketEvent,
 } from '../services/auditLogService';
 
@@ -2406,15 +2407,10 @@ async function showTicketCreationModal(
 async function showTicketHistory(
   interaction: ButtonInteraction,
 ): Promise<void> {
-  if (!(await safeDeferReply(interaction))) {
-    return;
-  }
+  if (!(await safeDeferReply(interaction))) return;
 
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
-    await replyError(
-      interaction,
-      '❌ Ticket history is only available inside a ticket channel.',
-    );
+    await replyError(interaction, '❌ Ticket history is only available inside a ticket channel.');
     return;
   }
 
@@ -2422,73 +2418,55 @@ async function showTicketHistory(
     const channel = interaction.channel as TextChannel;
     const topic = channel.topic ?? '';
     const ticketNumber = getField(topic, 'number') ?? 'unknown';
-    const config = await withTimeout(
-      getGuildConfig(interaction.guild.id),
-      DISCORD_OPERATION_TIMEOUT_MS,
-      'Guild configuration load',
+
+    /*
+     * Read the durable audit store instead of the visible audit channel.
+     * Developer-only/internal events are intentionally absent from the
+     * standard Discord audit feed, so message scraping cannot provide a
+     * complete ticket history.
+     */
+    const events = await getTicketAuditHistory(
+      interaction.guild.id,
+      ticketNumber,
     );
 
-    const auditId = config.auditChannelId;
-    const auditChannel = auditId
-      ? interaction.guild.channels.cache.get(auditId)
-      : null;
+    const recent = events.slice(-20).reverse();
 
-    if (!auditChannel || auditChannel.type !== ChannelType.GuildText) {
+    if (!recent.length) {
       await interaction.editReply(
-        'ℹ️ No audit history exists for this ticket yet.',
+        `📜 **Ticket #${ticketNumber} History**\n\nNo audit events have been recorded for this ticket yet.`,
       );
       return;
     }
 
-    const messages = await withTimeout(
-      auditChannel.messages.fetch({ limit: 100 }),
-      DISCORD_OPERATION_TIMEOUT_MS,
-      'Ticket history fetch',
-    );
+    const lines = recent.map((event) => {
+      const timestamp = Math.floor(new Date(event.timestamp).getTime() / 1000);
+      const detail = event.detail?.trim();
 
-    const matching = messages
-      .filter((message) =>
-        message.embeds.some(
-          (embed) =>
-            embed.description?.includes(
-              `Ticket #${ticketNumber}`,
-            ) ?? false,
-        ),
-      )
-      .sort(
-        (a, b) =>
-          b.createdTimestamp - a.createdTimestamp,
-      )
-      .first(15);
-
-    const lines = matching.length
-      ? matching
-          .map((message) => {
-            const embed = message.embeds[0];
-            const description =
-              embed?.description ?? 'Recorded event';
-            const compact = description
-              .replace(/\\n+/g, ' ')
-              .replace(/\\s{2,}/g, ' ')
-              .trim();
-
-            return `• <t:${Math.floor(message.createdTimestamp / 1000)}:f> • ${compact}`;
-          })
-          .join('\\n')
-      : 'No recent audit events found for this ticket.';
+      return (
+        '• <t:' +
+        timestamp +
+        ':f> • **' +
+        event.action
+          .split('_')
+          .map((part) => part.charAt(0) + part.slice(1).toLowerCase())
+          .join(' ') +
+        '** • ' +
+        (event.actorName || 'Unknown') +
+        (detail ? ' • ' + detail.slice(0, 220) : '')
+      );
+    });
 
     await interaction.editReply(
-      `📜 **Ticket #${ticketNumber} History**\\n\\n${lines}`,
+      `📜 **Ticket #${ticketNumber} History**\n\n` +
+        lines.join('\n'),
     );
   } catch (error) {
     console.error('❌ Failed to load ticket history:', error);
-
-    await replyError(
-      interaction,
-      '❌ SupportForge could not load this ticket history.',
-    );
+    await replyError(interaction, '❌ SupportForge could not load this ticket history.');
   }
 }
+
 
 async function renderDepartmentSelector(interaction: ButtonInteraction | StringSelectMenuInteraction, page = 0): Promise<void> {
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) { await replyError(interaction, '❌ This action can only be used inside a ticket.'); return; }
@@ -3071,7 +3049,7 @@ async function handlePanelButton(
             true,
           )
           .setMaxLength(
-            1000,
+            4000,
           );
 
       modal.addComponents(
@@ -3522,6 +3500,14 @@ export async function handleTicketInteraction(
       /*
        * Panel tool buttons.
        */
+      if (
+        interaction.customId.startsWith('ticket:priority:set:') ||
+        interaction.customId === 'ticket:priority:cancel'
+      ) {
+        await handlePanelButton(interaction);
+        return;
+      }
+
       if (
         isPanelButton(
           interaction,
