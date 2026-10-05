@@ -1842,12 +1842,31 @@ async function transition(
      * tickets and other ticket metadata operations.
      */
     if (newStatus === 'claimed') {
-      await setChannelTopic(channel.id, newTopic, 'Persist SupportForge multi-moderator claim metadata').catch(() => undefined);
+      await setChannelTopic(
+        channel.id,
+        newTopic,
+        'Persist SupportForge multi-moderator claim metadata',
+      ).catch((error) => {
+        console.warn('⚠️ Claimed ticket metadata topic update was deferred:', error);
+      });
       channel.topic = newTopic;
       await applyTicketVisibilityMode(channel, newTopic, 'claimed');
       await syncTicketVoiceParticipants(interaction.guild!, newTopic);
     } else if (newStatus === 'open' || newStatus === 'pending' || newStatus === 'reopened') {
-      await applyTicketVisibilityMode(channel, newTopic, 'unclaimed', getField(oldTopic, 'claimed_by'));
+      await setChannelTopic(
+        channel.id,
+        newTopic,
+        'Persist SupportForge ticket lifecycle metadata',
+      ).catch((error) => {
+        console.warn('⚠️ Ticket lifecycle metadata topic update was deferred:', error);
+      });
+      channel.topic = newTopic;
+      await applyTicketVisibilityMode(
+        channel,
+        newTopic,
+        'unclaimed',
+        getField(oldTopic, 'claimed_by'),
+      );
     }
 
     if (newStatus !== 'claimed' && getField(oldTopic, 'voice_channel_id')) {
