@@ -140,18 +140,12 @@ export async function ensureDepartmentCategory(
     return saved;
   }
 
-  const candidates = [...guild.channels.cache.values()]
-    .filter((channel) => isMatchingCategory(channel, baseName))
-    .sort((a, b) => a.position - b.position);
-
-  const available = candidates.find(
-    (category) => category.children.cache.size < MAX_CHANNELS_PER_CATEGORY,
-  );
-
-  if (available) {
-    await reconcileDepartmentTickets(guild, department.id, available);
-    return available;
-  }
+  /*
+   * A matching name is not ownership proof. An administrator may have created
+   * an unrelated category with the same department name. Only the persisted
+   * categoryId identifies an existing SupportForge department category.
+   */
+  const candidates: CategoryChannel[] = [];
 
   const suffix = candidates.length + 1;
 
