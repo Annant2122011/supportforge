@@ -48,10 +48,10 @@ export function buildSettingsDashboardComponents(): ActionRowBuilder<ButtonBuild
       settingsButton('sf:settings:appearance', 'Appearance', ButtonStyle.Secondary, '🎨'),
       settingsButton('sf:settings:storage', 'Storage', ButtonStyle.Secondary, '🗄️'),
       settingsButton('sf:settings:rules', 'Rules & Roles', ButtonStyle.Secondary, '🎨'),
-      settingsButton('sf:settings:team', 'Team & Voice', ButtonStyle.Secondary, '👥'),
       settingsButton('sf:settings:repair', 'Repair System', ButtonStyle.Secondary, '🛠️'),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
+      settingsButton('sf:settings:team', 'Team & Voice', ButtonStyle.Secondary, '👥'),
       settingsButton('sf:settings:manual', 'Manual', ButtonStyle.Secondary, '📖'),
       settingsButton('sf:settings:refresh', 'Refresh', ButtonStyle.Secondary, '🔄'),
       settingsButton('sf:settings:reset', 'Delete Everything', ButtonStyle.Danger, '🚨'),
