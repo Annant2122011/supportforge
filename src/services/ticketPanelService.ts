@@ -89,7 +89,10 @@ export function buildTicketPanelEmbed(
     .setTimestamp();
 }
 
-export function buildTicketPanelComponents(status: TicketStatus): ActionRowBuilder<ButtonBuilder>[] {
+export function buildTicketPanelComponents(
+  status: TicketStatus,
+  topic = '',
+): ActionRowBuilder<ButtonBuilder>[] {
   const lifecycle = new ActionRowBuilder<ButtonBuilder>();
 
   if (status === 'open' || status === 'reopened') {
@@ -143,6 +146,23 @@ export function buildTicketPanelComponents(status: TicketStatus): ActionRowBuild
   }
 
   if (['open', 'claimed', 'pending', 'reopened'].includes(status)) {
+    const voiceChannelId = getField(topic, 'voice_channel_id');
+    const claimedBy = getField(topic, 'claimed_by');
+    const voiceControls = new ActionRowBuilder<ButtonBuilder>();
+
+    if (status === 'claimed' && claimedBy) {
+      if (voiceChannelId) {
+        voiceControls.addComponents(
+          new ButtonBuilder().setCustomId('ticket:panel:voice:end').setLabel('End Voice').setEmoji('🔚').setStyle(ButtonStyle.Danger),
+          new ButtonBuilder().setCustomId('ticket:panel:voice:join').setLabel('Join Voice').setEmoji('🎙️').setStyle(ButtonStyle.Secondary),
+        );
+      } else {
+        voiceControls.addComponents(
+          new ButtonBuilder().setCustomId('ticket:panel:voice:start').setLabel('Voice Mode').setEmoji('🎙️').setStyle(ButtonStyle.Primary),
+        );
+      }
+    }
+
     const positioning = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId('ticket:panel:move-bottom')
@@ -156,7 +176,9 @@ export function buildTicketPanelComponents(status: TicketStatus): ActionRowBuild
         .setStyle(ButtonStyle.Secondary),
     );
 
-    return [lifecycle, tools, positioning];
+    return voiceControls.components.length
+      ? [lifecycle, tools, voiceControls, positioning]
+      : [lifecycle, tools, positioning];
   }
 
   return status === 'archived' ? [lifecycle] : [lifecycle, tools];
@@ -178,7 +200,7 @@ export async function refreshTicketPanel(
 
   await message.edit({
     embeds: [buildTicketPanelEmbed(channel.guild, channel.name, topic, config)],
-    components: buildTicketPanelComponents(getTicketStatus(topic)),
+    components: buildTicketPanelComponents(getTicketStatus(topic), topic),
   });
 }
 
