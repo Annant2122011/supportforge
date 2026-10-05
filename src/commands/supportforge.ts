@@ -98,16 +98,24 @@ function categoryButton(
     .setStyle(ButtonStyle.Primary);
 }
 
-async function buildPanelEmbed(
+export async function buildPanelEmbed(
   guild: Guild,
   departments: DepartmentConfig[],
+  page = 0,
 ): Promise<EmbedBuilder> {
   const settings = await getAdvancedSettings(guild.id);
-  const visibleDepartments = departments.slice(0, 20);
+  const departmentsPerPage = departments.length > 20 ? 20 : 25;
+  const pageCount = Math.max(1, Math.ceil(departments.length / departmentsPerPage));
+  const safePage = Math.min(Math.max(page, 0), pageCount - 1);
+  const visibleDepartments = departments.slice(
+    safePage * departmentsPerPage,
+    (safePage + 1) * departmentsPerPage,
+  );
+
   const lines = departments.length
     ? visibleDepartments.map((department) => `🎫 **${department.name}**`).join('\n') +
-      (departments.length > visibleDepartments.length
-        ? '\n\n…and **' + (departments.length - visibleDepartments.length) + '** more. Use the page controls below to browse them.'
+      (pageCount > 1
+        ? '\n\nPage **' + (safePage + 1) + ' / ' + pageCount + '** • Use the buttons below to browse departments.'
         : '')
     : 'No ticket departments configured.';
 
@@ -546,7 +554,7 @@ export async function syncPanel(
     );
   }
 
-  const embed = await buildPanelEmbed(guild, departments);
+  const embed = await buildPanelEmbed(guild, departments, safePage);
 
   let message = config.panelMessageId
     ? await panel.messages.fetch(config.panelMessageId).catch(() => null)
