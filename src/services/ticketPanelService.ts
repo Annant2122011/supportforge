@@ -614,8 +614,8 @@ function priorityColor(priority: string): number {
   return {
     low: 0x2ecc71,
     normal: 0xf1c40f,
-    high: 0xe74c3c,
-    urgent: 0xe67e22,
+    high: 0xe67e22,
+    urgent: 0xe74c3c,
     critical: 0x9b59b6,
   }[normalizedPriority(priority)];
 }
