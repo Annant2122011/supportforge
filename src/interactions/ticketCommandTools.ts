@@ -177,18 +177,99 @@ async function audit(
   );
 }
 
+async function syncCommandTicketVisibility(
+  context: Awaited<ReturnType<typeof getTicketContext>>,
+  oldTopic: string,
+  newTopic: string,
+): Promise<void> {
+  const ownerId = getField(newTopic, 'owner');
+  if (!ownerId) return;
+
+  const staffRoleId = getField(newTopic, 'staff');
+  const oldClaimants = (getField(oldTopic, 'claimed_by') ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+  const newClaimants = (getField(newTopic, 'claimed_by') ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+  const users = (getField(newTopic, 'users') ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+  const status = getTicketStatus(newTopic);
+
+  if (staffRoleId && staffRoleId !== 'none') {
+    await setChannelPermissionOverwrite(
+      context.channel.id,
+      staffRoleId,
+      status === 'claimed'
+        ? [PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ViewChannel]
+        : [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+      status === 'claimed'
+        ? [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory]
+        : [],
+      0,
+      status === 'claimed'
+        ? 'Hide claimed ticket from unassigned department staff'
+        : 'Restore department staff access to ticket',
+    ).catch((error) => {
+      console.warn('⚠️ Could not synchronize ticket staff visibility:', error);
+    });
+  }
+
+  const participants = new Set([
+    ownerId,
+    ...users,
+    ...(status === 'claimed' ? newClaimants : []),
+  ]);
+
+  for (const userId of participants) {
+    if (!userId || userId === context.guild.members.me?.id) continue;
+
+    await setChannelPermissionOverwrite(
+      context.channel.id,
+      userId,
+      [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.AttachFiles,
+        PermissionFlagsBits.EmbedLinks,
+      ],
+      [],
+      1,
+      'Synchronize SupportForge ticket participant access',
+    ).catch((error) => {
+      console.warn('⚠️ Could not grant ticket participant visibility:', error);
+    });
+  }
+
+  for (const oldClaimantId of oldClaimants) {
+    if (participants.has(oldClaimantId)) continue;
+
+    await setChannelPermissionOverwrite(
+      context.channel.id,
+      oldClaimantId,
+      [],
+      [],
+      1,
+      'Clear former SupportForge ticket claimant access',
+    ).catch((error) => {
+      console.warn('⚠️ Could not clear former claimant visibility:', error);
+    });
+  }
+}
+
 async function saveTopic(
   context: Awaited<
     ReturnType<typeof getTicketContext>
   >,
   topic: string,
 ): Promise<void> {
-  /*
-   * Keep metadata topics and persisted lifecycle state synchronized for
-   * slash-command mutations. Native REST is used here so topic changes
-   * share the same rate-limit-aware queue as other channel mutations.
-   * Persist only after Discord accepts the topic update.
-   */
+  const oldTopic = context.topic;
+
   await setChannelTopic(
     context.channel.id,
     topic,
@@ -207,6 +288,11 @@ async function saveTopic(
     getTicketStatus(topic),
   );
 
+  await syncCommandTicketVisibility(
+    context,
+    oldTopic,
+    topic,
+  );
 
   await refreshTicketPanel(
     context.channel,
@@ -218,6 +304,7 @@ async function saveTopic(
     const expectedName = getTicketChannelName(
       ticketNumber,
       getTicketStatus(topic),
+      (getField(topic, 'priority') ?? 'normal') as 'low' | 'normal' | 'high' | 'urgent' | 'critical',
     );
 
     if (context.channel.name !== expectedName) {
