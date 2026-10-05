@@ -3992,6 +3992,17 @@ async function handlePanelButton(
       await renderRoutingTagSelector(interaction, 0);
       return;
     } else {
+      if (
+        id === 'ticket:panel:note' &&
+        !isPremiumOrHigher(await getTier(interaction.guild!.id))
+      ) {
+        await interaction.reply({
+          content: '🔒 Internal notes are available in Premium/Pro demo mode.',
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
       modal
         .setCustomId(
           'ticket:panel-modal:note',
@@ -4047,6 +4058,16 @@ async function handlePanelModal(
   interaction: ModalSubmitInteraction,
 ): Promise<void> {
   if (!(await safeDeferReply(interaction))) {
+    return;
+  }
+
+  if (
+    interaction.guild &&
+    !isPremiumOrHigher(await getTier(interaction.guild.id))
+  ) {
+    await interaction.editReply(
+      '🔒 Internal notes are available in Premium/Pro demo mode.',
+    );
     return;
   }
 
