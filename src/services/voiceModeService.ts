@@ -25,7 +25,12 @@ function getRetryDelayMs(error: unknown): number | null {
   return Math.min((seconds + 1) * 1000, VOICE_TOPIC_RETRY_MAX_DELAY_MS);
 }
 
-function participantOverwrites(guild: Guild, ownerId: string, moderatorIds: string[]) {
+function participantOverwrites(
+  guild: Guild,
+  ownerId: string,
+  moderatorIds: string[],
+  staffRoleId?: string,
+) {
   const botId = guild.members.me?.id;
   if (!botId) throw new Error('SupportForge bot member could not be resolved.');
 
@@ -37,7 +42,7 @@ function participantOverwrites(guild: Guild, ownerId: string, moderatorIds: stri
     PermissionFlagsBits.UseVAD,
   ];
 
-  return [
+  const overwrites = [
     {
       id: guild.roles.everyone.id,
       deny: [
@@ -47,6 +52,17 @@ function participantOverwrites(guild: Guild, ownerId: string, moderatorIds: stri
         PermissionFlagsBits.Stream,
       ],
     },
+    ...(staffRoleId && staffRoleId !== 'none'
+      ? [{
+          id: staffRoleId,
+          deny: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.Connect,
+            PermissionFlagsBits.Speak,
+            PermissionFlagsBits.Stream,
+          ],
+        }]
+      : []),
     {
       id: botId,
       allow: [
@@ -56,8 +72,12 @@ function participantOverwrites(guild: Guild, ownerId: string, moderatorIds: stri
       ],
     },
     { id: ownerId, allow: participantAllow },
-    ...moderatorIds.filter((id) => id && id !== ownerId).map((id) => ({ id, allow: participantAllow })),
+    ...moderatorIds
+      .filter((id) => id && id !== ownerId)
+      .map((id) => ({ id, allow: participantAllow })),
   ];
+
+  return overwrites;
 }
 
 async function updateVoiceTopic(channel: TextChannel, topic: string, reason: string): Promise<string> {
@@ -91,6 +111,7 @@ export async function startTicketVoiceMode(
 ): Promise<{ voiceChannel: VoiceChannel; topic: string }> {
   const ownerId = getField(topic, 'owner');
   const moderatorIds = (getField(topic, 'claimed_by') ?? '').split(',').map((id) => id.trim()).filter(Boolean);
+  const staffRoleId = getField(topic, 'staff');
   const number = getField(topic, 'number') ?? 'unknown';
 
   if (!ownerId || !moderatorIds.length) {
@@ -111,7 +132,7 @@ export async function startTicketVoiceMode(
     type: ChannelType.GuildVoice,
     parent: ticketChannel.parentId ?? undefined,
     userLimit: settings.ticketDefaults.maxClaimedModerators + 1,
-    permissionOverwrites: participantOverwrites(guild, ownerId, moderatorIds),
+    permissionOverwrites: participantOverwrites(guild, ownerId, moderatorIds, staffRoleId),
     reason: 'SupportForge private voice mode for ticket #' + number,
   }) as VoiceChannel;
 
