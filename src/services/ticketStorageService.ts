@@ -30,6 +30,25 @@ async function ensureBucket(
     savedChannel?.type === ChannelType.GuildCategory &&
     savedChannel.children.cache.size < MAX_CHANNELS_PER_CATEGORY
   ) {
+    const bot = guild.members.me;
+    if (!bot) {
+      throw new Error('SupportForge bot member could not be resolved.');
+    }
+
+    await savedChannel.permissionOverwrites.edit(guild.roles.everyone.id, {
+      ViewChannel: false,
+      SendMessages: false,
+      ReadMessageHistory: false,
+    });
+    await savedChannel.permissionOverwrites.edit(bot.id, {
+      ViewChannel: true,
+      SendMessages: true,
+      ReadMessageHistory: true,
+      ManageChannels: true,
+      ManageMessages: true,
+      EmbedLinks: true,
+      AttachFiles: true,
+    });
     return savedChannel;
   }
 
