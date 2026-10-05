@@ -2164,7 +2164,7 @@ export async function handleSettingsInteraction(
     }
 
     if (interaction.customId.startsWith('sf:settings:modal:report-subcategory:edit:')) {
-      const parts = interaction.customId.split(':'); const categoryId = parts[4] ?? ''; const subcategoryId = parts[5] ?? '';
+      const parts = interaction.customId.split(':'); const categoryId = parts[5] ?? ''; const subcategoryId = parts[6] ?? '';
       const sub = (await getAdvancedSettings(guild.id)).reports.categories[categoryId]?.subcategories[subcategoryId];
       if (!sub) { await reject(interaction, '❌ Report subcategory not found.'); return true; }
       const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
