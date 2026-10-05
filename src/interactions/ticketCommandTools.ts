@@ -357,6 +357,7 @@ export async function executeTicketCommand(
       const expectedName = getTicketChannelName(
         context.ticketNumber,
         'archived',
+        (getField(topic, 'priority') ?? 'normal') as 'low' | 'normal' | 'high' | 'urgent' | 'critical',
       );
 
       if (context.channel.name !== expectedName) {
