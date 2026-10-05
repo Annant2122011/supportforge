@@ -31,6 +31,7 @@ export interface GuildConfig {
   tier: SupportForgeTier;
   nextTicketNumber: number;
   departments: Record<string, DepartmentConfig>;
+  retiredCategoryIds: string[];
 }
 
 interface ConfigFile {
@@ -53,6 +54,7 @@ const DEFAULT_CONFIG: GuildConfig = {
   tier: 'free',
   nextTicketNumber: 1000,
   departments: {},
+  retiredCategoryIds: [],
 };
 
 let state: ConfigFile | null = null;
@@ -113,6 +115,10 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
   current.guilds[guildId] ??= cloneDefaultConfig();
 
   let migrated = false;
+  if (!Array.isArray(current.guilds[guildId].retiredCategoryIds)) {
+    current.guilds[guildId].retiredCategoryIds = [];
+    migrated = true;
+  }
 
   if (current.guilds[guildId].openCategoryId === undefined) {
     current.guilds[guildId].openCategoryId = null;
