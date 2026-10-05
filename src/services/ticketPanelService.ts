@@ -152,15 +152,19 @@ export function buildTicketPanelComponents(
     const claimedBy = getField(topic, 'claimed_by');
     const voiceControls = new ActionRowBuilder<ButtonBuilder>();
 
-    if (status === 'claimed' && claimedBy) {
-      if (voiceChannelId) {
+    if (['open', 'claimed', 'reopened'].includes(status)) {
+      if (status === 'claimed' && claimedBy && voiceChannelId) {
         voiceControls.addComponents(
           new ButtonBuilder().setCustomId('ticket:panel:voice:end').setLabel('End Voice').setEmoji('🔚').setStyle(ButtonStyle.Danger),
           new ButtonBuilder().setCustomId('ticket:panel:voice:join').setLabel('Join Voice').setEmoji('🎙️').setStyle(ButtonStyle.Secondary),
         );
       } else {
         voiceControls.addComponents(
-          new ButtonBuilder().setCustomId('ticket:panel:voice:start').setLabel('Voice Mode').setEmoji('🎙️').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId('ticket:panel:voice:start')
+            .setLabel('Turn On Voice Mode')
+            .setEmoji('🎙️')
+            .setStyle(ButtonStyle.Primary),
         );
       }
     }
@@ -169,8 +173,8 @@ export function buildTicketPanelComponents(
       new ButtonBuilder()
         .setCustomId('ticket:panel:report')
         .setLabel('Report User')
-        .setEmoji('🚩')
-        .setStyle(ButtonStyle.Danger),
+        .setEmoji('🛡️')
+        .setStyle(ButtonStyle.Primary),
     );
 
     const positioning = new ActionRowBuilder<ButtonBuilder>().addComponents(
