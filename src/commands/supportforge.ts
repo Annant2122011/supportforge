@@ -385,13 +385,14 @@ export async function ensurePanelChannel(
     }
   }
 
+  /*
+   * A channel name is not ownership proof. Recover a previous SupportForge
+   * panel only from its managed topic; otherwise create a new panel channel.
+   */
   const existing = guild.channels.cache.find(
     (channel) =>
       channel.type === ChannelType.GuildText &&
-      (channel.topic?.startsWith(
-        PANEL_TOPIC,
-      ) ||
-        channel.name === PANEL_CHANNEL_NAME),
+      channel.topic?.startsWith(PANEL_TOPIC),
   );
 
   if (
