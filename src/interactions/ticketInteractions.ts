@@ -2987,8 +2987,24 @@ async function applyTicketRouting(interaction: StringSelectMenuInteraction, depa
       }
       await setChannelTopic(channel.id, newTopic, 'Update department and tag metadata');
     });
-    channel.topic = newTopic; updateRuntimeTicketState(channel, newTopic, status);
-    await updatePersistedTicketMetadata(channel.id, { departmentId: department.id, tagId });
+    channel.topic = newTopic;
+    updateRuntimeTicketState(channel, newTopic, status);
+
+    /*
+     * Rerouting can replace the department staff role while a ticket is already
+     * claimed. Reapply ticket visibility so the new department does not expose
+     * a private claimed ticket to unassigned staff.
+     */
+    await applyTicketVisibilityMode(
+      channel,
+      newTopic,
+      status === 'claimed' ? 'claimed' : 'unclaimed',
+    );
+
+    await updatePersistedTicketMetadata(channel.id, {
+      departmentId: department.id,
+      tagId,
+    });
     await updateMainMessage(channel, getField(newTopic, 'message'), status, newTopic);
     await interaction.editReply({ content: '✅ Ticket routed to **' + department.name + ' → ' + (department.tags[tagId]?.name ?? 'tag') + '**.', components: [] });
     if (config.supportCategoryId) await logTicketEvent(interaction.guild!, config.supportCategoryId, { ticketNumber: getField(newTopic, 'number') ?? 'unknown', event: 'ticket_routing_changed', actor: interaction.user.tag, actorId: interaction.user.id, actorName: interaction.user.tag, detail: 'Department=' + department.name + '; tag=' + (department.tags[tagId]?.name ?? tagId) + '.' });
