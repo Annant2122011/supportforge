@@ -72,6 +72,7 @@ export async function performFactoryReset(guild: Guild, accumulateAuditData = fa
         settings.statusCategories.claimedCategoryId,
         settings.statusCategories.pendingCategoryId,
         ...Object.values(config.departments).map((department) => department.categoryId ?? null),
+        ...(config.retiredCategoryIds ?? []),
       ].filter((id): id is string => Boolean(id)),
     );
 
