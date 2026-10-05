@@ -29,6 +29,9 @@ export interface TicketFields {
   subject?: string;
   number?: string;
   messageId?: string;
+  voiceChannelId?: string;
+  voiceStartedAt?: string;
+  voiceStartedBy?: string;
 }
 
 function escapeRegExp(value: string): string {
@@ -245,5 +248,9 @@ export function parseTicketFields(
       topic,
       'message',
     ),
+
+    voiceChannelId: getField(topic, 'voice_channel_id'),
+    voiceStartedAt: getField(topic, 'voice_started_at'),
+    voiceStartedBy: getField(topic, 'voice_started_by'),
   };
 }
