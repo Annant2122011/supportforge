@@ -454,14 +454,26 @@ export async function executeTicketCommand(
         return;
       }
 
-      if (context.status === 'claimed') {
+      const claimedIds = (context.claimedBy ?? '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean);
+
+      if (claimedIds.includes(interaction.user.id)) {
         await interaction.editReply(
-          context.claimedBy ===
-            interaction.user.id
-            ? `ℹ️ You already have ticket #${context.ticketNumber} claimed.`
-            : `❌ Ticket #${context.ticketNumber} is already claimed by <@${context.claimedBy ?? '0'}>.`,
+          `ℹ️ You already have ticket #${context.ticketNumber} claimed.`,
         );
         return;
+      }
+
+      if (context.status === 'claimed') {
+        const settings = await getAdvancedSettings(interaction.guild!.id);
+        if (claimedIds.length >= settings.ticketDefaults.maxClaimedModerators) {
+          await interaction.editReply(
+            `❌ Ticket #${context.ticketNumber} already has the maximum of **${settings.ticketDefaults.maxClaimedModerators}** moderators assisting.`,
+          );
+          return;
+        }
       }
 
       let topic = setField(
@@ -473,7 +485,7 @@ export async function executeTicketCommand(
       topic = setField(
         topic,
         'claimed_by',
-        interaction.user.id,
+        [...claimedIds, interaction.user.id].join(','),
       );
 
       topic = setField(
