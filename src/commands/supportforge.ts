@@ -103,8 +103,12 @@ async function buildPanelEmbed(
   departments: DepartmentConfig[],
 ): Promise<EmbedBuilder> {
   const settings = await getAdvancedSettings(guild.id);
+  const visibleDepartments = departments.slice(0, 20);
   const lines = departments.length
-    ? departments.map((department) => `🎫 **${department.name}**`).join('\n')
+    ? visibleDepartments.map((department) => `🎫 **${department.name}**`).join('\n') +
+      (departments.length > visibleDepartments.length
+        ? '\n\n…and **' + (departments.length - visibleDepartments.length) + '** more. Use the page controls below to browse them.'
+        : '')
     : 'No ticket departments configured.';
 
   return new EmbedBuilder()
