@@ -181,6 +181,7 @@ export async function ensureSettingsChannel(
 export function buildSettingsDashboardEmbed(
   settings: Awaited<ReturnType<typeof getAdvancedSettings>>,
   departmentCount: number,
+  tagCount: number,
 ): EmbedBuilder {
   const priorityRoleCount = Object.keys(settings.priorityRoles).length;
 
@@ -226,7 +227,7 @@ export function buildSettingsDashboardEmbed(
       },
       {
         name: '🏷️ Routing tags',
-        value: '**' + departmentCount + '** configured',
+        value: '**' + tagCount + '** configured',
         inline: true,
       },
       {
@@ -266,8 +267,8 @@ export function buildSettingsDashboardEmbed(
           priorityRoleCount +
           '\n' +
           '**Routing tags**: Configured routing tags – ' +
-          departmentCount +
-          (departmentCount ? '' : ' (none)') +
+          tagCount +
+          (tagCount ? '' : ' (none)') +
           '\n' +
           '**Retention**: Closed – ' +
           closed +
@@ -347,9 +348,14 @@ async function refreshSettingsDashboard(
     settings ?? (await getAdvancedSettings(channel.guild.id));
   const config = await getGuildConfig(channel.guild.id);
   const departmentCount = Object.keys(config.departments).length;
+  const tagCount = Object.values(config.departments).reduce(
+    (total, department) => total + Object.keys(department.tags ?? {}).length,
+    0,
+  );
   const embed = buildSettingsDashboardEmbed(
     resolvedSettings,
     departmentCount,
+    tagCount,
   );
 
   const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
