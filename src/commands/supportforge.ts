@@ -407,6 +407,32 @@ export async function ensurePanelChannel(
     if (
       saved?.type === ChannelType.GuildText
     ) {
+      if (saved.parentId !== parentId) {
+        await saved.setParent(parentId, { lockPermissions: false }).catch((error) => {
+          throw new Error(
+            'SupportForge panel channel could not be placed in its managed category.',
+            { cause: error },
+          );
+        });
+      }
+
+      await saved.permissionOverwrites.edit(guild.roles.everyone.id, {
+        ViewChannel: true,
+        ReadMessageHistory: true,
+        SendMessages: false,
+      });
+      await saved.permissionOverwrites.edit(bot.id, {
+        ViewChannel: true,
+        SendMessages: true,
+        ReadMessageHistory: true,
+        EmbedLinks: true,
+      });
+      await saved.setTopic(`${PANEL_TOPIC} guild=${guild.id}`).catch((error) => {
+        throw new Error(
+          'SupportForge panel channel topic could not be repaired.',
+          { cause: error },
+        );
+      });
       return saved;
     }
   }
