@@ -3272,6 +3272,30 @@ async function handlePanelButton(
   const id =
     interaction.customId;
 
+  if (id.startsWith('ticket:panel:page:')) {
+    await interaction.deferUpdate();
+
+    if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
+      await replyError(interaction, '❌ The support panel can only be paged inside a server channel.');
+      return;
+    }
+
+    const page = Number(id.slice('ticket:panel:page:'.length));
+    if (!Number.isInteger(page) || page < 0) {
+      await replyError(interaction, '❌ Invalid support panel page.');
+      return;
+    }
+
+    try {
+      await syncPanel(interaction.guild, page);
+      await interaction.editReply({}).catch(() => undefined);
+    } catch (error) {
+      console.error('❌ Failed to change support panel page:', error);
+      await replyError(interaction, '❌ SupportForge could not change the support panel page.');
+    }
+    return;
+  }
+
   if (id === 'ticket:panel:voice:start') { await handleTicketVoiceStart(interaction); return; }
   if (id === 'ticket:panel:voice:end') { await handleTicketVoiceEnd(interaction); return; }
   if (id === 'ticket:panel:voice:join') { await handleTicketVoiceJoin(interaction); return; }
