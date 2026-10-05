@@ -551,6 +551,21 @@ interface AuditDeveloperInfrastructure {
 
 const developerInfrastructureLocks = new Map<string, Promise<AuditDeveloperInfrastructure>>();
 
+async function backfillDeveloperAuditChannel(guild: Guild, channel: TextChannel): Promise<void> {
+  const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+  if (recent?.some((message) => message.author.id === channel.client.user?.id && message.embeds.some((embed) => (embed.title ?? '').startsWith('SupportForge Audit • ')))) {
+    return;
+  }
+
+  const current = await load();
+  const store = getGuildStore(current, guild.id);
+  for (const event of store.events) {
+    await sendAuditEntry(channel, event).catch((error) => {
+      console.warn('⚠️ Could not backfill developer audit entry:', error);
+    });
+  }
+}
+
 async function createOrRepairAuditDeveloperInfrastructure(
   guild: Guild,
   parentCategoryId: string,
