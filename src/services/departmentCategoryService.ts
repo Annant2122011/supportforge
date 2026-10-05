@@ -124,6 +124,30 @@ export async function ensureDepartmentCategory(
     saved?.type === ChannelType.GuildCategory &&
     saved.children.cache.size < MAX_CHANNELS_PER_CATEGORY
   ) {
+    await saved.permissionOverwrites.edit(guild.roles.everyone.id, {
+      ViewChannel: false,
+      SendMessages: false,
+      ReadMessageHistory: false,
+    });
+
+    await saved.permissionOverwrites.edit(bot.id, {
+      ViewChannel: true,
+      SendMessages: true,
+      ReadMessageHistory: true,
+      ManageChannels: true,
+      ManageMessages: true,
+      EmbedLinks: true,
+      AttachFiles: true,
+    });
+
+    if (department.staffRoleId) {
+      await saved.permissionOverwrites.edit(department.staffRoleId, {
+        ViewChannel: true,
+        ReadMessageHistory: true,
+        SendMessages: false,
+      });
+    }
+
     await reconcileDepartmentTickets(guild, department.id, saved);
     return saved;
   }
