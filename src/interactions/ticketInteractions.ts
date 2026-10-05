@@ -1382,6 +1382,16 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
   newTopic = removeField(newTopic, 'claimed_at');
   newTopic = setField(newTopic, 'status', 'open');
 
+  if (getField(newTopic, 'voice_channel_id')) {
+    newTopic = await endTicketVoiceMode(
+      interaction.guild,
+      channel,
+      newTopic,
+      'open',
+      'SupportForge voice mode ended because the final moderator unclaimed the ticket',
+    );
+  }
+
   await setChannelTopic(channel.id, newTopic, 'SupportForge last moderator unclaimed ticket').catch(() => undefined);
   channel.topic = newTopic;
   await setPersistedTicketStatus(channel.id, 'open');
