@@ -815,11 +815,11 @@ async function appendAuditRecord(
     store.lastSetupDate = dateKey(event.timestamp);
   }
 
-  // Keep the local audit database bounded while retaining a useful history.
-  if (store.events.length > 5000) {
-    store.events.splice(0, store.events.length - 5000);
-  }
-
+  /*
+   * The durable audit store is the source of truth for Ticket History,
+   * Developer View, and overall summaries. Never silently discard old events
+   * merely because the server has been busy for a long time.
+   */
   await persist();
 }
 
