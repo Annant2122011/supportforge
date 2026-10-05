@@ -427,77 +427,79 @@ export async function restoreSettingsChannelToBottom(guild: Guild): Promise<void
   if (channel?.type !== ChannelType.GuildText) return;
 
   /*
-   * "Restore to Settings" is a true reset of the visible settings-channel
-   * conversation. The user asked for the old sub-pages/action messages to
-   * disappear, leaving exactly one live dashboard.
+   * Restore-to-settings must restore the dashboard without deleting the
+   * dashboard itself. The previous implementation swept the whole channel
+   * and recreated the panel, which made the live Settings panel appear to
+   * vanish when the user clicked its navigation controls.
    *
-   * Discord bulk deletion is efficient for recent messages, while messages
-   * older than Discord's bulk-delete window must be deleted individually.
+   * Keep the newest real dashboard intact, remove only SupportForge's
+   * temporary/sub-view messages, and create a dashboard only when one is
+   * genuinely missing. User-authored messages are never touched here.
    */
-  let before: string | undefined;
-  let deletedCount = 0;
+  const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+  const botId = channel.client.user?.id;
 
-  for (;;) {
-    const batch = await channel.messages
-      .fetch({
-        limit: 100,
-        ...(before ? { before } : {}),
-      })
-      .catch(() => null);
-
-    if (!batch || batch.size === 0) break;
-
-    const messages = [...batch.values()];
-
-    const recent = messages.filter(
-      (message) =>
-        Date.now() - message.createdTimestamp <
-        14 * 24 * 60 * 60 * 1000,
-    );
-
-    const old = messages.filter(
-      (message) =>
-        Date.now() - message.createdTimestamp >=
-        14 * 24 * 60 * 60 * 1000,
-    );
-
-    if (recent.length > 1) {
-      const deleted = await channel
-        .bulkDelete(recent, true)
-        .catch(() => null);
-      deletedCount += deleted?.size ?? 0;
-    } else if (recent.length === 1) {
-      await recent[0].delete().catch(() => undefined);
-      deletedCount += 1;
-    }
-
-    for (const message of old) {
-      await message.delete().catch(() => undefined);
-      deletedCount += 1;
-    }
-
-    before = messages[messages.length - 1]?.id;
-
-    if (messages.length < 100) break;
+  if (!recent || !botId) {
+    await refreshSettingsDashboard(channel, settings);
+    return;
   }
 
-  const resolvedSettings = await getAdvancedSettings(guild.id);
-  const config = await getGuildConfig(guild.id);
-  const departmentCount = Object.keys(config.departments).length;
+  const dashboards = [...recent.values()]
+    .filter((message) => isSettingsDashboardMessage(message, botId))
+    .sort((a, b) => b.createdTimestamp - a.createdTimestamp);
 
-  await channel.send({
-    embeds: [
-      buildSettingsDashboardEmbed(
-        resolvedSettings,
-        departmentCount,
-      ),
-    ],
-    components: buildSettingsDashboardComponents(),
-  });
+  const dashboard = dashboards[0];
+
+  const removable = [...recent.values()].filter(
+    (message) =>
+      message.author.id === botId &&
+      message.id !== dashboard?.id &&
+      !isSettingsDashboardMessage(message, botId),
+  );
+
+  /*
+   * Only SupportForge-authored transient messages are cleared. The current
+   * dashboard remains the same Discord message, preserving its buttons,
+   * position and message identity.
+   */
+  await Promise.all(
+    removable.map((message) =>
+      message.delete().catch((error) => {
+        console.warn(
+          `⚠️ Could not remove temporary Settings message ${message.id}:`,
+          error,
+        );
+      }),
+    ),
+  );
+
+  if (dashboard) {
+    const resolvedSettings = await getAdvancedSettings(guild.id);
+    const config = await getGuildConfig(guild.id);
+    await dashboard.edit({
+      embeds: [
+        buildSettingsDashboardEmbed(
+          resolvedSettings,
+          Object.keys(config.departments).length,
+        ),
+      ],
+      components: buildSettingsDashboardComponents(),
+    });
+  } else {
+    await channel.send({
+      embeds: [
+        buildSettingsDashboardEmbed(
+          settings,
+          Object.keys((await getGuildConfig(guild.id)).departments).length,
+        ),
+      ],
+      components: buildSettingsDashboardComponents(),
+    });
+  }
 
   await pruneSettingsHistory(channel);
 
   console.log(
-    `📌 Restored SupportForge Settings channel to one dashboard message: ${channel.id} (removed ${deletedCount} previous message(s)).`,
+    `📌 Restored SupportForge Settings navigation without deleting the live dashboard: ${channel.id}`,
   );
 }
