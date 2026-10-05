@@ -10,6 +10,7 @@ import { getGuildConfig, resetConfigState } from './configService';
 import { prepareFactoryResetAuditRetention } from './auditLogService';
 import { getAdvancedSettings, resetAdvancedSettingsState } from './advancedSettingsService';
 import { resetTicketPersistenceState } from './ticketPersistenceService';
+import { resetReportState } from './reportService';
 
 const DATA_DIR = join(process.cwd(), 'data');
 
@@ -159,6 +160,7 @@ export async function performFactoryReset(guild: Guild, accumulateAuditData = fa
     await resetConfigState();
     await resetAdvancedSettingsState();
     await resetTicketPersistenceState();
+    await resetReportState();
   /*
    * Audit history is deliberately NOT reset. The Discord audit channel is
    * deleted with the rest of SupportForge, but data/audit-log.json and its
