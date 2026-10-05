@@ -86,10 +86,10 @@ export async function ensureChannelPurposeMessage(
     release = resolve;
   });
 
-  const current = previous.then(() => gate);
+  const current = previous.catch(() => undefined).then(() => gate);
   purposeQueues.set(channel.id, current);
 
-  await previous;
+  await previous.catch(() => undefined);
 
   try {
     const botId = channel.client.user?.id;
