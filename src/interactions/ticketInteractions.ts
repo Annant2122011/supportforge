@@ -2925,10 +2925,11 @@ async function handleTicketVoiceJoin(interaction: ButtonInteraction): Promise<vo
     await interaction.editReply('❌ The private voice channel is no longer available.');
     return;
   }
-  await interaction.editReply('🎙️ **Private Voice Channel**
-' + voiceChannel + '
-
-This room is limited to the ticket owner and assigned moderator.');
+  await interaction.editReply(
+    '🎙️ **Private Voice Channel**\\n' +
+      voiceChannel +
+      '\\n\\nThis room is limited to the ticket owner and assigned moderator.',
+  );
 }
 
 async function handlePanelButton(
