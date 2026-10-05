@@ -22,8 +22,34 @@ export interface RetentionApproval {
   messageId: string | null;
 }
 
+export interface ReportSubcategory {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReportCategory {
+  id: string;
+  name: string;
+  emoji: string;
+  subcategories: Record<string, ReportSubcategory>;
+}
+
+export type FlagActionType = 'tickets' | 'channel' | 'server';
+
+export interface FlagRule {
+  id: string;
+  threshold: number;
+  action: FlagActionType;
+  channelId: string | null;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AdvancedGuildSettings {
-  version: 4;
+  version: 5;
   settingsChannelId: string | null;
   closedCategoryId: string | null;
   archiveCategoryId: string | null;
@@ -54,6 +80,12 @@ export interface AdvancedGuildSettings {
   };
   ticketDefaults: {
     priority: TicketPriority;
+    maxClaimedModerators: number;
+  };
+  reports: {
+    enabled: boolean;
+    categories: Record<string, ReportCategory>;
+    flagRules: Record<string, FlagRule>;
   };
   /**
    * Optional server roles explicitly created by an administrator for
@@ -72,8 +104,30 @@ interface SettingsFile {
 const DATA_DIR = join(process.cwd(), 'data');
 const SETTINGS_PATH = join(DATA_DIR, 'advanced-settings.json');
 
+function defaultReportCategories(): Record<string, ReportCategory> {
+  const now = new Date().toISOString();
+  const definitions: Array<[string, string, string, string[]]> = [
+    ['profanity', 'Profanity', '🤬', ['Excessive profanity', 'Slurs or hate speech', 'Sexual profanity']],
+    ['harassment', 'Harassment', '🚫', ['Personal attacks', 'Threats or intimidation', 'Targeted harassment']],
+    ['inappropriate', 'Inappropriate Content', '⚠️', ['Inappropriate questions', 'Sexual or explicit content', 'Graphic violence']],
+    ['off-topic', 'Off-topic Questions', '💬', ['Irrelevant questions', 'Spam or repeated requests', 'Abusive misuse of support']],
+  ];
+  return Object.fromEntries(definitions.map(([id, name, emoji, subs]) => [
+    id,
+    {
+      id,
+      name,
+      emoji,
+      subcategories: Object.fromEntries(subs.map((name) => {
+        const subId = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        return [subId, { id: subId, name, createdAt: now, updatedAt: now }];
+      })),
+    },
+  ]));
+}
+
 const DEFAULTS: AdvancedGuildSettings = {
-  version: 4,
+  version: 5,
   settingsChannelId: null,
   closedCategoryId: null,
   archiveCategoryId: null,
@@ -105,6 +159,15 @@ const DEFAULTS: AdvancedGuildSettings = {
   },
   ticketDefaults: {
     priority: 'normal',
+    maxClaimedModerators: 2,
+  },
+  reports: {
+    enabled: true,
+    categories: defaultReportCategories(),
+    flagRules: {
+      'tickets-5': { id: 'tickets-5', threshold: 5, action: 'tickets', channelId: null, enabled: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+      'server-10': { id: 'server-10', threshold: 10, action: 'server', channelId: null, enabled: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+    },
   },
   priorityRoles: {},
   customTags: {},
@@ -201,6 +264,17 @@ function normalizeExistingSettings(
     ticketDefaults: {
       ...DEFAULTS.ticketDefaults,
       ...(settings.ticketDefaults ?? {}),
+      maxClaimedModerators: Math.min(3, Math.max(1, Number(settings.ticketDefaults?.maxClaimedModerators ?? DEFAULTS.ticketDefaults.maxClaimedModerators) || 2)),
+    },
+    reports: {
+      ...DEFAULTS.reports,
+      ...(settings.reports ?? {}),
+      categories: settings.reports?.categories && Object.keys(settings.reports.categories).length
+        ? settings.reports.categories
+        : defaultReportCategories(),
+      flagRules: settings.reports?.flagRules && Object.keys(settings.reports.flagRules).length
+        ? settings.reports.flagRules
+        : { ...DEFAULTS.reports.flagRules },
     },
     priorityRoles: {
       ...DEFAULTS.priorityRoles,
@@ -344,6 +418,12 @@ export function buildSettingsSummary(
     '',
     '**🎟️ Ticket defaults**',
     '• Default priority: ' + settings.ticketDefaults.priority,
+    '• Maximum simultaneous moderators per ticket: ' + settings.ticketDefaults.maxClaimedModerators,
+    '',
+    '**🛡️ Reports & flags**',
+    '• Reporting: ' + (settings.reports.enabled ? 'Enabled' : 'Disabled'),
+    '• Categories: ' + Object.keys(settings.reports.categories).length,
+    '• Flag rules: ' + Object.keys(settings.reports.flagRules).length,
     '',
     '**🎨 Priority roles**',
     '• Explicitly created roles: ' + Object.keys(settings.priorityRoles).length,
@@ -370,7 +450,7 @@ export function buildSettingsSummary(
 
 export async function resetAdvancedSettings(): Promise<void> {
   state = {
-    version: 4,
+    version: 5,
     guilds: {},
   };
   await persist();
