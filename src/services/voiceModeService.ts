@@ -175,7 +175,10 @@ export async function syncTicketVoiceParticipants(
   await setChannelPermissionOverwrites(
     voiceChannel.id,
     participantOverwrites(guild, ownerId, moderatorIds, staffRoleId),
-    new Set([guild.roles.everyone.id]),
+    new Set([
+      guild.roles.everyone.id,
+      ...(staffRoleId ? [staffRoleId] : []),
+    ]),
     'Synchronize SupportForge voice participants',
   ).catch((error) => {
     console.warn('⚠️ Could not synchronize SupportForge voice participants:', error);
