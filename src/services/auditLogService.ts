@@ -548,11 +548,11 @@ async function createOrRepairAuditDeveloperInfrastructure(
     if (configuredRole && !configuredRole.managed) role = configuredRole;
   }
 
-  role ??= guild.roles.cache.find(
-    (candidate) =>
-      !candidate.managed &&
-      candidate.name.toLowerCase() === AUDIT_DEVELOPER_ROLE_NAME,
-  ) ?? null;
+  /*
+   * Role names are not ownership proof. A server member can legitimately
+   * create a role with the same name, so only the persisted role ID may be
+   * reused. A missing configured role is recreated instead.
+   */
 
   if (!role && bot.permissions.has(PermissionFlagsBits.ManageRoles)) {
     role = await guild.roles.create({
