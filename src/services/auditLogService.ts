@@ -78,6 +78,7 @@ interface AuditGuildStore {
   restoreMessageId: string | null;
   panelEventCheckpoint: number;
   lastSetupDate: string | null;
+  developerBackfillChannelId: string | null;
 }
 
 interface AuditStore {
@@ -111,6 +112,7 @@ function cloneGuildStore(): AuditGuildStore {
     restoreMessageId: null,
     panelEventCheckpoint: 0,
     lastSetupDate: null,
+    developerBackfillChannelId: null,
   };
 }
 
@@ -203,6 +205,7 @@ async function load(): Promise<AuditStore> {
         restoreMessageId: store.restoreMessageId ?? null,
         panelEventCheckpoint: store.panelEventCheckpoint ?? 0,
         lastSetupDate: store.lastSetupDate ?? null,
+        developerBackfillChannelId: store.developerBackfillChannelId ?? null,
       };
     }
 
@@ -512,17 +515,47 @@ interface AuditDeveloperInfrastructure {
 const developerInfrastructureLocks = new Map<string, Promise<AuditDeveloperInfrastructure>>();
 
 async function backfillDeveloperAuditChannel(guild: Guild, channel: TextChannel): Promise<void> {
-  const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
-  if (recent?.some((message) => message.author.id === channel.client.user?.id && message.embeds.some((embed) => (embed.title ?? '').startsWith('SupportForge Audit • ')))) {
+  const current = await load();
+  const store = getGuildStore(current, guild.id);
+
+  /*
+   * A recent-message check is not sufficient because developer audit channels
+   * can contain more than 100 messages. Track which concrete channel was
+   * backfilled so older history is never duplicated, while a newly recreated
+   * developer channel still receives the retained history.
+   */
+  if (store.developerBackfillChannelId === channel.id) {
     return;
   }
 
-  const current = await load();
-  const store = getGuildStore(current, guild.id);
+  const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+  if (
+    recent?.some(
+      (message) =>
+        message.author.id === channel.client.user?.id &&
+        message.embeds.some((embed) =>
+          (embed.title ?? '').startsWith('SupportForge Audit • '),
+        ),
+    )
+  ) {
+    store.developerBackfillChannelId = channel.id;
+    await persist();
+    return;
+  }
+
+  let allSent = true;
   for (const event of store.events) {
-    await sendAuditEntry(channel, event).catch((error) => {
+    try {
+      await sendAuditEntry(channel, event);
+    } catch (error) {
+      allSent = false;
       console.warn('⚠️ Could not backfill developer audit entry:', error);
-    });
+    }
+  }
+
+  if (allSent) {
+    store.developerBackfillChannelId = channel.id;
+    await persist();
   }
 }
 
