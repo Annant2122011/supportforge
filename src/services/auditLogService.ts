@@ -288,12 +288,6 @@ function isStandardVisibleAuditAction(action: string, category?: string): boolea
   return !STANDARD_HIDDEN_AUDIT_ACTIONS.has(action.toUpperCase());
 }
 
-function hasSupportForgeName(name: string): boolean {
-  return SUPPORTFORGE_NAME_PREFIXES.some((prefix) =>
-    name.toLowerCase().startsWith(prefix.toLowerCase()),
-  );
-}
-
 export function permissionOverwriteSignature(channel: GuildBasedChannel): string {
   if (!('permissionOverwrites' in channel)) {
     return '';
