@@ -36,6 +36,7 @@ import {
 import {
   getPersistedTicketStatus,
   setPersistedTicketStatus,
+  updatePersistedTicketMetadata,
 } from '../services/ticketPersistenceService';
 
 import { setChannelTopic } from '../services/discordChannelService';
@@ -1002,43 +1003,36 @@ export async function executeTicketCommand(
         return;
       }
 
-      const topic =
-        setField(
-          context.topic,
-          'priority',
-          level,
-        );
+      const priority = level as 'low' | 'normal' | 'high' | 'urgent' | 'critical';
+      const topic = setField(
+        context.topic,
+        'priority',
+        priority,
+      );
 
-      await saveTopic(
-        context,
+      /*
+       * Priority changes do not need a /channels PATCH. Persist the value in
+       * the ticket record and refresh the panel immediately, avoiding Discord's
+       * heavily rate-limited channel mutation bucket.
+       */
+      await updatePersistedTicketMetadata(
+        context.channel.id,
+        { priority },
+      );
+
+      context.channel.topic = topic;
+      await refreshTicketPanel(
+        context.channel,
         topic,
       );
 
-      const emoji =
-        (
-          {
-            low: '🟢',
-            normal: '',
-            high: '🟠',
-            urgent: '🔴',
-            critical: '🟣',
-          } as Record<
-            string,
-            string
-          >
-        )[level];
-
-      const baseName =
-        context.channel.name.replace(
-          /^[🟢⚪🟠🔴🟣]\s*/u,
-          '',
-        );
-
       await queueTicketChannelRename(
         context.channel,
-        level === 'normal'
-          ? baseName
-          : `${emoji}${baseName}`,
+        getTicketChannelName(
+          context.ticketNumber,
+          context.status,
+          priority,
+        ),
         `SupportForge priority changed to ${level}`,
       );
 
