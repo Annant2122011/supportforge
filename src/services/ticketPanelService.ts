@@ -153,10 +153,23 @@ export function buildTicketPanelComponents(
     const voiceControls = new ActionRowBuilder<ButtonBuilder>();
 
     if (['open', 'claimed', 'reopened'].includes(status)) {
-      if (status === 'claimed' && claimedBy && voiceChannelId) {
+      if (voiceChannelId) {
+        /*
+         * An active voice session always gets an explicit close control.
+         * Keep it visible alongside Join Voice so moderators do not have to
+         * hunt through lifecycle controls to end the temporary voice chat.
+         */
         voiceControls.addComponents(
-          new ButtonBuilder().setCustomId('ticket:panel:voice:end').setLabel('End Voice').setEmoji('🔚').setStyle(ButtonStyle.Danger),
-          new ButtonBuilder().setCustomId('ticket:panel:voice:join').setLabel('Join Voice').setEmoji('🎙️').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder()
+            .setCustomId('ticket:panel:voice:end')
+            .setLabel('Close Voice Chat')
+            .setEmoji('🔚')
+            .setStyle(ButtonStyle.Danger),
+          new ButtonBuilder()
+            .setCustomId('ticket:panel:voice:join')
+            .setLabel('Join Voice')
+            .setEmoji('🎙️')
+            .setStyle(ButtonStyle.Secondary),
         );
       } else {
         voiceControls.addComponents(
