@@ -2188,6 +2188,14 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       return true;
     }
 
+    if (!member) {
+      await interaction.editReply({
+        content:
+          '❌ Your member record could not be resolved, so developer audit access could not be changed.',
+      });
+      return true;
+    }
+
     const infrastructure = await ensureAuditDeveloperInfrastructure(
       interaction.guild,
       config.supportCategoryId ?? interaction.channel.parentId ?? interaction.guild.id,
