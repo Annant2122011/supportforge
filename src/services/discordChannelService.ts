@@ -206,9 +206,9 @@ async function waitForGlobalRequestSpacing(): Promise<void> {
     });
 
   globalRequestQueue =
-    previous.then(() => gate);
+    previous.catch(() => undefined).then(() => gate);
 
-  await previous;
+  await previous.catch(() => undefined);
 
   try {
     const elapsed =
