@@ -807,9 +807,18 @@ async function applyTicketVisibilityMode(
     PermissionFlagsBits.EmbedLinks,
   ];
 
-  if (mode === 'claimed' && staffRoleId && staffRoleId !== 'none') {
-    await setChannelPermissionOverwrite(channel.id, staffRoleId, [], textPermissions, 0, 'Restrict claimed ticket to its participants');
-  } else if (staffRoleId && staffRoleId !== 'none') {
+  if (staffRoleId && staffRoleId !== 'none') {
+    await setChannelPermissionOverwrite(
+      channel.id,
+      staffRoleId,
+      textPermissions,
+      [],
+      0,
+      mode === 'claimed'
+        ? 'Keep department moderators on claimed ticket'
+        : 'Restore department staff access to ticket',
+    );
+  }
     await setChannelPermissionOverwrite(channel.id, staffRoleId, textPermissions, [], 0, 'Restore department staff access to ticket');
   }
 
@@ -2801,11 +2810,15 @@ async function handleTicketVoiceStart(interaction: ButtonInteraction): Promise<v
     await replyError(interaction, '❌ Voice mode is available only for claimed tickets.');
     return;
   }
-  if (!getStaffContext(interaction, topic).authorized) {
-    await replyError(interaction, '❌ Only configured staff or administrators can start voice mode.');
+  const claimedBy = getField(topic, 'claimed_by');
+  const isAdministrator = Boolean(
+    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator),
+  );
+  if (!claimedBy || (!isAdministrator && interaction.user.id !== claimedBy)) {
+    await replyError(interaction, '❌ Only the claiming moderator or an administrator can start voice mode.');
     return;
   }
-  if (!getField(topic, 'claimed_by')) {
+  if (!claimedBy) {
     await replyError(interaction, '❌ Claim the ticket before starting voice mode.');
     return;
   }
@@ -2860,8 +2873,12 @@ async function handleTicketVoiceEnd(interaction: ButtonInteraction): Promise<voi
     await replyError(interaction, '❌ This ticket is no longer using an active voice session.');
     return;
   }
-  if (!getStaffContext(interaction, topic).authorized) {
-    await replyError(interaction, '❌ Only configured staff or administrators can end voice mode.');
+  const claimedBy = getField(topic, 'claimed_by');
+  const isAdministrator = Boolean(
+    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator),
+  );
+  if (!claimedBy || (!isAdministrator && interaction.user.id !== claimedBy)) {
+    await replyError(interaction, '❌ Only the claiming moderator or an administrator can end voice mode.');
     return;
   }
   try {
@@ -2908,14 +2925,8 @@ async function handleTicketVoiceJoin(interaction: ButtonInteraction): Promise<vo
     await interaction.editReply('❌ No active private voice session was found for this ticket.');
     return;
   }
-  const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-  const staffRoleIds = new Set(
-    Object.values((await getGuildConfig(interaction.guild.id)).departments)
-      .map((d) => d.staffRoleId)
-      .filter((id): id is string => Boolean(id)),
-  );
   const allowed = interaction.user.id === ownerId || interaction.user.id === claimedBy ||
-    Boolean(member?.roles.cache.some((role) => staffRoleIds.has(role.id)));
+    Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.Administrator));
   if (!allowed) {
     await interaction.editReply('❌ Only the ticket owner and assigned moderator can use this private voice session.');
     return;
