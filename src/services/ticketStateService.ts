@@ -19,6 +19,7 @@ export interface TicketFields {
   tags: string[];
   users: string[];
   claimedBy?: string;
+  claimedByIds: string[];
   pendingSince?: string;
   claimedAt?: string;
   assignedAt?: string;
@@ -197,7 +198,12 @@ export function parseTicketFields(
     claimedBy: getField(
       topic,
       'claimed_by',
-    ),
+    )?.split(',').filter(Boolean)[0],
+
+    claimedByIds: (getField(topic, 'claimed_by') ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean),
 
     pendingSince: getField(
       topic,
