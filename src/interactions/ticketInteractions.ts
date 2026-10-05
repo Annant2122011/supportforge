@@ -2489,22 +2489,98 @@ async function closeTicket(
 /* Ticket creation modal                                                      */
 /* -------------------------------------------------------------------------- */
 
-async function showTicketTagSelector(interaction: ButtonInteraction, departmentId: string): Promise<void> {
+async function showTicketTagSelector(
+  interaction: ButtonInteraction,
+  departmentId: string,
+  page = 0,
+): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
-  if (!interaction.guild) { await replyError(interaction, '❌ This action must be used inside a server.'); return; }
+  if (!interaction.guild) {
+    await replyError(interaction, '❌ This action must be used inside a server.');
+    return;
+  }
+
   const config = await getGuildConfig(interaction.guild.id);
   const department = config.departments[departmentId];
-  if (!department) { await replyError(interaction, '❌ This department no longer exists.'); return; }
-  const tags = Object.values(department.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
-  if (!tags.length) { await replyError(interaction, '❌ This department has no tags configured. Ask an administrator to add one.'); return; }
+  if (!department) {
+    await replyError(interaction, '❌ This department no longer exists.');
+    return;
+  }
+
+  const tags = Object.values(department.tags ?? {}).sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
+  if (!tags.length) {
+    await replyError(
+      interaction,
+      '❌ This department has no tags configured. Ask an administrator to add one.',
+    );
+    return;
+  }
+
+  const pageSize = 25;
+  const pageCount = Math.max(1, Math.ceil(tags.length / pageSize));
+  const safePage = Math.min(Math.max(page, 0), pageCount - 1);
+  const visibleTags = tags.slice(
+    safePage * pageSize,
+    (safePage + 1) * pageSize,
+  );
+
   const menu = new StringSelectMenuBuilder()
     .setCustomId('ticket:create-tag:select:' + departmentId)
     .setPlaceholder('Choose a tag')
-    .setMinValues(1).setMaxValues(1)
-    .addOptions(tags.slice(0, 25).map((tag) => ({ label: tag.name.slice(0, 100), value: tag.id, description: 'Subcategory of ' + department.name })));
+    .setMinValues(1)
+    .setMaxValues(1)
+    .addOptions(
+      visibleTags.map((tag) => ({
+        label: tag.name.slice(0, 100),
+        value: tag.id,
+        description: 'Subcategory of ' + department.name,
+      })),
+    );
+
+  const components: Array<
+    ActionRowBuilder<StringSelectMenuBuilder> |
+    ActionRowBuilder<ButtonBuilder>
+  > = [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
+  ];
+
+  if (pageCount > 1) {
+    components.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(
+            'ticket:create-tag:page:' + departmentId + ':' + (safePage - 1),
+          )
+          .setLabel('Previous')
+          .setEmoji('⬅️')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(safePage === 0),
+        new ButtonBuilder()
+          .setCustomId('ticket:create-tag:page:' + departmentId + ':' + safePage)
+          .setLabel('Page ' + (safePage + 1) + ' / ' + pageCount)
+          .setEmoji('📄')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(true),
+        new ButtonBuilder()
+          .setCustomId(
+            'ticket:create-tag:page:' + departmentId + ':' + (safePage + 1),
+          )
+          .setLabel('Next')
+          .setEmoji('➡️')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(safePage >= pageCount - 1),
+      ),
+    );
+  }
+
   await interaction.editReply({
-    content: '🏷️ **Choose a tag for your ' + department.name + ' ticket**\nTags are subcategories inside the department and do not create Discord categories.',
-    components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
+    content:
+      '🏷️ **Choose a tag for your ' +
+      department.name +
+      ' ticket**\nTags are subcategories inside the department and do not create Discord categories.',
+    components,
   });
 }
 
