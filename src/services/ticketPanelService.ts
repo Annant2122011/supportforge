@@ -13,7 +13,7 @@ import {
 import { getGuildConfig, type GuildConfig } from './configService';
 import { getPersistedTicketPriority, getPersistedTicketStatus } from './ticketPersistenceService';
 import type { TicketPriority } from './advancedSettingsService';
-import { setChannelName } from './discordChannelService';
+import { setChannelName, setChannelTopic } from './discordChannelService';
 import {
   getField,
   getTicketStatus,
@@ -409,13 +409,16 @@ async function findCurrentPanelAndRestoreControl(
 ): Promise<{ panel?: Message; restore?: Message }> {
   const recent = await channel.messages.fetch({ limit: 100 });
 
-  const panel =
-    (messageId ? recent.get(messageId) : undefined) ??
-    recent.find(
-      (message) =>
-        message.author.id === channel.client.user?.id &&
-        message.embeds.some((embed) => embed.title === panelTitle),
-    );
+  let panel = messageId
+    ? (recent.get(messageId) ??
+      await channel.messages.fetch(messageId).catch(() => null))
+    : undefined;
+
+  panel ??= recent.find(
+    (message) =>
+      message.author.id === channel.client.user?.id &&
+      message.embeds.some((embed) => embed.title === panelTitle),
+  );
 
   const restore = recent.find(
     (message) =>
@@ -492,6 +495,14 @@ export async function collapseTicketPanelToRestoreButton(
     await restore.delete().catch(() => undefined);
   }
 
+  const collapsedTopic = removeField(topic, 'message');
+  channel.topic = collapsedTopic;
+  await setChannelTopic(
+    channel.id,
+    collapsedTopic,
+    'SupportForge panel collapsed to restore control',
+  ).catch(() => undefined);
+
   console.log(
     `📦 Ticket #${ticketNumber} panel collapsed to Restore/Move Panel.`,
   );
@@ -545,6 +556,14 @@ export async function moveTicketPanelToBottom(
   if (restoreControl && restoreControl.id !== newPanel.id) {
     await restoreControl.delete().catch(() => undefined);
   }
+
+  const movedTopic = setField(topic, 'message', newPanel.id);
+  channel.topic = movedTopic;
+  await setChannelTopic(
+    channel.id,
+    movedTopic,
+    'SupportForge ticket panel pointer moved to latest panel',
+  ).catch(() => undefined);
 
   console.log(
     `📌 Ticket #${ticketNumber} controls manually moved to the bottom.`,
