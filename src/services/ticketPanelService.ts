@@ -232,9 +232,19 @@ export async function refreshTicketPanel(
     (await channel.messages.fetch(messageId));
 
   await message.edit({
-    embeds: [buildTicketPanelEmbed(channel.guild, channel.name, topic, config)],
-    components: buildTicketPanelComponents(getTicketStatus(topic), topic),
-  });
+    embeds: [
+      buildTicketPanelEmbed(
+        channel.guild,
+        channel.name,
+        effectiveTopic,
+        config,
+      ),
+    ],
+    components: buildTicketPanelComponents(
+      getTicketStatus(effectiveTopic),
+      effectiveTopic,
+    ),
+  );
 }
 
 const channelRenameQueues = new Map<string, Promise<void>>();
