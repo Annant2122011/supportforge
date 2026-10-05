@@ -3040,6 +3040,13 @@ async function showTicketHistory(
 ): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
 
+  if (interaction.guild && !isPremiumOrHigher(await getTier(interaction.guild.id))) {
+    await interaction.editReply(
+      '🔒 Ticket history is available in Premium/Pro demo mode.',
+    );
+    return;
+  }
+
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
     await replyError(interaction, '❌ Ticket history is only available inside a ticket channel.');
     return;
