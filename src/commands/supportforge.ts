@@ -130,14 +130,6 @@ async function ensureContainer(guild: Guild) {
     );
   }
 
-  const staffRoleIds = [
-    ...new Set(
-      Object.values(config.departments)
-        .map((department) => department.staffRoleId)
-        .filter((id): id is string => Boolean(id)),
-    ),
-  ];
-
   if (saved.supportCategoryId) {
     const channel = guild.channels.cache.get(
       saved.supportCategoryId,
@@ -228,6 +220,14 @@ async function ensureTranscriptChannel(
       'SupportForge bot member could not be resolved.',
     );
   }
+
+  const staffRoleIds = [
+    ...new Set(
+      Object.values(config.departments)
+        .map((department) => department.staffRoleId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
 
   if (config.transcriptChannelId) {
     const saved = guild.channels.cache.get(
