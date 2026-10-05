@@ -117,7 +117,9 @@ function cloneGuildStore(): AuditGuildStore {
 async function persist(): Promise<void> {
   if (!state) return;
 
-  writeQueue = writeQueue.then(async () => {
+  writeQueue = writeQueue
+    .catch(() => undefined)
+    .then(async () => {
     await mkdir(DATA_DIR, { recursive: true });
     const persistedState = JSON.parse(JSON.stringify(state)) as AuditStore;
     for (const store of Object.values(persistedState.guilds)) {
