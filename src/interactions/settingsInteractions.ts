@@ -150,7 +150,7 @@ function manualDetailedEmbeds(): EmbedBuilder[] {
         '**Panel navigation**\n' +
         'When conversation activity pushes the panel away from view, SupportForge may collapse or move it. Restore/Move Panel brings the controls back to the bottom without duplicating old panels.\n\n' +
         '**Audit log**\n' +
-        'The audit log records ticket and administrative activity. Its Summarise Everything control produces a current snapshot with ticket counts, tag dates, channels, departments, priorities and additional metrics.\n\n' +
+        'The audit log records ticket and administrative activity. Use **Daily Summary** for the current day, **Audit Data Settings** for retention controls, and **Developer Options** for the continuous technical audit stream.\n\n' +
         '**Settings & priority roles**\n' +
         'Administrators can configure departments, retention, appearance, storage and optional priority roles. Priority roles are never created automatically. Claimed and Pending are status states, not extra role types.\n\n' +
         '**Retention**\n' +
