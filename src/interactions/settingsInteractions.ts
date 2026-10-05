@@ -1255,6 +1255,29 @@ export async function handleSettingsInteraction(
       return true;
     }
 
+    if (id.startsWith('sf:settings:reports:subcategory:edit:')) {
+      const parts = id.split(':'); const categoryId = parts[5] ?? ''; const subcategoryId = parts[6] ?? '';
+      const sub = (await getAdvancedSettings(guild.id)).reports.categories[categoryId]?.subcategories[subcategoryId];
+      if (!sub) { await reject(interaction, '❌ Report subcategory not found.'); return true; }
+      await openModal(interaction, 'sf:settings:modal:report-subcategory:edit:' + categoryId + ':' + subcategoryId, 'Edit Report Subcategory', [
+        new TextInputBuilder().setCustomId('name').setLabel('Subcategory name').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(sub.name),
+      ]);
+      return true;
+    }
+
+    if (id.startsWith('sf:settings:reports:subcategory:remove:')) {
+      const parts = id.split(':'); const categoryId = parts[5] ?? ''; const subcategoryId = parts[6] ?? '';
+      const settings = await getAdvancedSettings(guild.id);
+      const category = settings.reports.categories[categoryId];
+      if (!category || !category.subcategories[subcategoryId]) { await reject(interaction, '❌ Report subcategory not found.'); return true; }
+      if (Object.keys(category.subcategories).length <= 1) { await reject(interaction, '❌ Each report category must keep at least one subcategory.'); return true; }
+      await interaction.deferUpdate();
+      await updateAdvancedSettings(guild.id, (current) => { const item = current.reports.categories[categoryId]; if (item) delete item.subcategories[subcategoryId]; });
+      await refreshSettingsChannel(guild);
+      await showReportCategorySettings(interaction, categoryId);
+      return true;
+    }
+
     if (id === 'sf:settings:defaults') {
       await showDefaults(interaction);
       return true;
@@ -1889,29 +1912,6 @@ export async function handleSettingsInteraction(
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
       await auditSettingsAction(guild, interaction, 'REPORT_SUBCATEGORY_ADDED', 'Added report subcategory ' + name + '.');
-      return true;
-    }
-
-    if (interaction.customId.startsWith('sf:settings:reports:subcategory:edit:')) {
-      const parts = interaction.customId.split(':'); const categoryId = parts[5] ?? ''; const subcategoryId = parts[6] ?? '';
-      const sub = (await getAdvancedSettings(guild.id)).reports.categories[categoryId]?.subcategories[subcategoryId];
-      if (!sub) { await reject(interaction, '❌ Report subcategory not found.'); return true; }
-      await openModal(interaction, 'sf:settings:modal:report-subcategory:edit:' + categoryId + ':' + subcategoryId, 'Edit Report Subcategory', [
-        new TextInputBuilder().setCustomId('name').setLabel('Subcategory name').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(sub.name),
-      ]);
-      return true;
-    }
-
-    if (interaction.customId.startsWith('sf:settings:reports:subcategory:remove:')) {
-      const parts = interaction.customId.split(':'); const categoryId = parts[5] ?? ''; const subcategoryId = parts[6] ?? '';
-      const settings = await getAdvancedSettings(guild.id);
-      const category = settings.reports.categories[categoryId];
-      if (!category || !category.subcategories[subcategoryId]) { await reject(interaction, '❌ Report subcategory not found.'); return true; }
-      if (Object.keys(category.subcategories).length <= 1) { await reject(interaction, '❌ Each report category must keep at least one subcategory.'); return true; }
-      await interaction.deferUpdate();
-      await updateAdvancedSettings(guild.id, (current) => { const item = current.reports.categories[categoryId]; if (item) delete item.subcategories[subcategoryId]; });
-      await refreshSettingsChannel(guild);
-      await showReportCategorySettings(interaction, categoryId);
       return true;
     }
 
