@@ -244,7 +244,7 @@ export async function refreshTicketPanel(
       getTicketStatus(effectiveTopic),
       effectiveTopic,
     ),
-  );
+  });
 }
 
 const channelRenameQueues = new Map<string, Promise<void>>();
