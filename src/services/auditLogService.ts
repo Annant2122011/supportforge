@@ -86,7 +86,10 @@ interface AuditStore {
 }
 
 const AUDIT_TOPIC = 'supportforge:audit';
-const AUDIT_NAME = '📒 supportforge-audit-log';
+const AUDIT_DEV_TOPIC = 'supportforge:audit-dev';
+const AUDIT_NAME = 'audit-log-general';
+const AUDIT_DEV_NAME = 'audit-log-dev';
+const AUDIT_DEVELOPER_ROLE_NAME = 'developer-mode audit-log';
 const DATA_DIR = join(process.cwd(), 'data');
 const AUDIT_PATH = join(DATA_DIR, 'audit-log.json');
 const AUDIT_BACKUP_PATH = join(DATA_DIR, 'audit-log.backup.json');
@@ -346,6 +349,7 @@ export async function isSupportForgeManagedChannel(
     config.panelChannelId,
     config.transcriptChannelId,
     config.auditChannelId,
+    config.auditDevChannelId,
   ].filter((id): id is string => Boolean(id)));
 
   if (configuredIds.has(channel.id)) {
@@ -446,8 +450,11 @@ export async function isSupportForgeManagedRole(
     ),
   );
 
+  const config = await getGuildConfig(guild.id);
   return configuredIds.has(role.id) ||
-    role.name.toLowerCase().startsWith('supportforge •');
+    role.id === config.auditDeveloperRoleId ||
+    role.name.toLowerCase().startsWith('supportforge •') ||
+    role.name.toLowerCase() === AUDIT_DEVELOPER_ROLE_NAME;
 }
 
 export async function logDiscordMutation(
@@ -537,12 +544,173 @@ async function findAuditChannel(guild: Guild): Promise<TextChannel | null> {
   return null;
 }
 
+interface AuditDeveloperInfrastructure {
+  role: Role | null;
+  channel: TextChannel;
+}
+
+const developerInfrastructureLocks = new Map<string, Promise<AuditDeveloperInfrastructure>>();
+
+async function createOrRepairAuditDeveloperInfrastructure(
+  guild: Guild,
+  parentCategoryId: string,
+): Promise<AuditDeveloperInfrastructure> {
+  const config = await getGuildConfig(guild.id);
+  const bot = guild.members.me;
+  if (!bot) throw new Error('SupportForge bot member could not be resolved.');
+
+  let role: Role | null = null;
+
+  if (config.auditDeveloperRoleId) {
+    const configuredRole = guild.roles.cache.get(config.auditDeveloperRoleId);
+    if (configuredRole && !configuredRole.managed) role = configuredRole;
+  }
+
+  role ??= guild.roles.cache.find(
+    (candidate) =>
+      !candidate.managed &&
+      candidate.name.toLowerCase() === AUDIT_DEVELOPER_ROLE_NAME,
+  ) ?? null;
+
+  if (!role && bot.permissions.has(PermissionFlagsBits.ManageRoles)) {
+    role = await guild.roles.create({
+      name: AUDIT_DEVELOPER_ROLE_NAME,
+      mentionable: false,
+      reason: 'SupportForge private developer audit access',
+    }).catch((error) => {
+      console.warn('⚠️ Could not create the developer audit role:', error);
+      return null;
+    });
+  }
+
+  if (role) {
+    await updateGuildConfig(guild.id, (current) => {
+      current.auditDeveloperRoleId = role!.id;
+    });
+  }
+
+  let channel = config.auditDevChannelId
+    ? guild.channels.cache.get(config.auditDevChannelId)
+    : undefined;
+
+  if (channel?.type !== ChannelType.GuildText) channel = undefined;
+
+  if (!channel) {
+    const byTopic = guild.channels.cache.find(
+      (candidate) =>
+        candidate.type === ChannelType.GuildText &&
+        candidate.topic?.startsWith(AUDIT_DEV_TOPIC),
+    );
+    if (byTopic?.type === ChannelType.GuildText) channel = byTopic;
+  }
+
+  if (!channel) {
+    channel = await guild.channels.create({
+      name: AUDIT_DEV_NAME,
+      type: ChannelType.GuildText,
+      parent: parentCategoryId,
+      topic: AUDIT_DEV_TOPIC + ' guild=' + guild.id,
+      permissionOverwrites: [
+        {
+          id: guild.roles.everyone.id,
+          deny: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.ReadMessageHistory,
+          ],
+        },
+        {
+          id: bot.id,
+          allow: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.ReadMessageHistory,
+            PermissionFlagsBits.EmbedLinks,
+          ],
+        },
+        ...(role ? [{
+          id: role.id,
+          allow: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.ReadMessageHistory,
+          ],
+        }] : []),
+      ],
+    });
+
+    await updateGuildConfig(guild.id, (current) => {
+      current.auditDevChannelId = channel!.id;
+    });
+  } else {
+    if (channel.name !== AUDIT_DEV_NAME) {
+      await channel.setName(AUDIT_DEV_NAME, 'SupportForge developer audit channel normalization').catch(() => undefined);
+    }
+    if (channel.parentId !== parentCategoryId) {
+      await channel.setParent(parentCategoryId, { lockPermissions: false }).catch(() => undefined);
+    }
+
+    await channel.permissionOverwrites.edit(guild.roles.everyone.id, {
+      ViewChannel: false,
+      SendMessages: false,
+      ReadMessageHistory: false,
+    }).catch(() => undefined);
+
+    await channel.permissionOverwrites.edit(bot.id, {
+      ViewChannel: true,
+      SendMessages: true,
+      ReadMessageHistory: true,
+      EmbedLinks: true,
+    }).catch(() => undefined);
+
+    if (role) {
+      await channel.permissionOverwrites.edit(role.id, {
+        ViewChannel: true,
+        ReadMessageHistory: true,
+        SendMessages: false,
+      }).catch(() => undefined);
+    }
+
+    await updateGuildConfig(guild.id, (current) => {
+      current.auditDevChannelId = channel!.id;
+    });
+  }
+
+  await ensureChannelPurposeMessage(
+    channel,
+    'This private channel contains the raw SupportForge developer audit stream. Every durable audit event is published here. Access is granted only through the **' + AUDIT_DEVELOPER_ROLE_NAME + '** role.',
+  );
+
+  return { role, channel };
+}
+
+export async function ensureAuditDeveloperInfrastructure(
+  guild: Guild,
+  parentCategoryId: string,
+): Promise<AuditDeveloperInfrastructure> {
+  const existing = developerInfrastructureLocks.get(guild.id);
+  if (existing) return existing;
+
+  const promise = createOrRepairAuditDeveloperInfrastructure(guild, parentCategoryId);
+  developerInfrastructureLocks.set(guild.id, promise);
+
+  try {
+    return await promise;
+  } finally {
+    if (developerInfrastructureLocks.get(guild.id) === promise) {
+      developerInfrastructureLocks.delete(guild.id);
+    }
+  }
+}
+
 export async function getOrCreateAuditChannel(
   guild: Guild,
   parentCategoryId: string,
 ): Promise<TextChannel> {
   const existing = await findAuditChannel(guild);
   if (existing) {
+    if (existing.name !== AUDIT_NAME) {
+      await existing.setName(AUDIT_NAME, 'SupportForge general audit channel normalization').catch(() => undefined);
+    }
     if (existing.parentId !== parentCategoryId) {
       await existing
         .setParent(parentCategoryId, { lockPermissions: false })
@@ -556,6 +724,9 @@ export async function getOrCreateAuditChannel(
       'This private channel stores SupportForge’s durable operational audit history. It records important ticket lifecycle actions, configuration changes, retention decisions, repairs, and other administrative events with responsible users and timestamps.',
     );
     await ensureAuditPanel(guild, existing);
+    await ensureAuditDeveloperInfrastructure(guild, parentCategoryId).catch((error) => {
+      console.warn('⚠️ Developer audit infrastructure repair skipped:', error);
+    });
     return existing;
   }
 
@@ -610,6 +781,9 @@ export async function getOrCreateAuditChannel(
   );
 
   await ensureAuditPanel(guild, channel);
+  await ensureAuditDeveloperInfrastructure(guild, parentCategoryId).catch((error) => {
+    console.warn('⚠️ Developer audit infrastructure creation skipped:', error);
+  });
   return channel;
 }
 
@@ -1203,7 +1377,7 @@ async function generateOverallAuditSummary(
         (channel.type === ChannelType.GuildText &&
           channel.topic?.startsWith('supportforge:')) ||
         channel.name === '📄 support-transcripts' ||
-        channel.name === '📒 supportforge-audit-log' ||
+        channel.name === 'audit-log-general' || channel.name === 'audit-log-dev' ||
         channel.name === 'supportforge-settings' ||
         channel.name.startsWith('SupportForge.') ||
         channel.name.startsWith('SupportForge • Closed') ||
@@ -1514,6 +1688,17 @@ async function recordAndPublish(
   };
 
   await appendAuditRecord(guild, record);
+
+  /* Keep the complete raw stream in the private developer audit channel. */
+  try {
+    const developerInfrastructure = await ensureAuditDeveloperInfrastructure(
+      guild,
+      parentCategoryId,
+    );
+    await sendAuditEntry(developerInfrastructure.channel, record);
+  } catch (error) {
+    console.warn('⚠️ Failed to publish raw developer audit entry:', error);
+  }
 
   /*
    * Store every event, but only publish user-significant events to the visible
@@ -1973,6 +2158,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       await interaction.deferUpdate();
     } else {
       await interaction.deferReply({
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -1998,6 +2184,21 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       await interaction.editReply({
         content:
           '❌ Developer audit tools are restricted to SupportForge moderators.',
+      });
+      return true;
+    }
+
+    const infrastructure = await ensureAuditDeveloperInfrastructure(
+      interaction.guild,
+      config.supportCategoryId ?? interaction.channel.parentId ?? interaction.guild.id,
+    ).catch((error) => {
+      console.warn('⚠️ Could not prepare developer audit infrastructure:', error);
+      return null;
+    });
+
+    if (!infrastructure?.role) {
+      await interaction.editReply({
+        content: '❌ The developer audit role is unavailable. The private channel remains inaccessible and no setup-executor fallback was assigned.',
       });
       return true;
     }
@@ -2076,6 +2277,9 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       if (!isEnabled) {
         store.developerViewers.push(interaction.user.id);
       }
+      await member.roles.add(infrastructure.role, 'SupportForge Developer Audit Mode enabled').catch((error) => {
+        throw new Error('Could not grant the developer-mode audit-log role: ' + String(error));
+      });
       store.developerViewModes[interaction.user.id] = 'now';
       store.developerViewStartedAt[interaction.user.id] =
         new Date().toISOString();
@@ -2087,11 +2291,17 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       if (!isEnabled) {
         store.developerViewers.push(interaction.user.id);
       }
+      await member.roles.add(infrastructure.role, 'SupportForge Developer Audit Mode enabled').catch((error) => {
+        throw new Error('Could not grant the developer-mode audit-log role: ' + String(error));
+      });
       store.developerViewModes[interaction.user.id] = 'past_and_now';
       store.developerViewStartedAt[interaction.user.id] ??=
         new Date().toISOString();
       await persist();
     } else if (interaction.customId === AUDIT_DEVELOPER_OFF_CUSTOM_ID) {
+      await member.roles.remove(infrastructure.role, 'SupportForge Developer Audit Mode disabled').catch((error) => {
+        console.warn('⚠️ Could not remove developer audit role:', error);
+      });
       store.developerViewers = store.developerViewers.filter(
         (id) => id !== interaction.user.id,
       );
@@ -2126,7 +2336,16 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
             : 'All retained audit history is available through the page controls, and future records appear when the view is refreshed.'
         ),
       embeds: page.embeds,
-      components: page.components,
+      components: [
+        ...page.components,
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setStyle(ButtonStyle.Link)
+            .setLabel('Open audit-log-dev')
+            .setEmoji('🛠️')
+            .setURL('https://discord.com/channels/' + interaction.guild.id + '/' + infrastructure.channel.id),
+        ),
+      ],
     });
     return true;
   }
