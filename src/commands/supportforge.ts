@@ -489,78 +489,93 @@ export async function ensurePanelChannel(
 
 export async function syncPanel(
   guild: Guild,
+  page = 0,
 ): Promise<void> {
-  const config =
-    await getGuildConfig(guild.id);
+  const config = await getGuildConfig(guild.id);
 
-  const parent =
-    await ensureContainer(guild);
+  const parent = await ensureContainer(guild);
+  const panel = await ensurePanelChannel(guild, parent.id);
 
-  const panel =
-    await ensurePanelChannel(
-      guild,
-      parent.id,
-    );
-
-  const departments = Object.values(
-    config.departments,
-  ).sort((a, b) =>
+  const departments = Object.values(config.departments).sort((a, b) =>
     a.name.localeCompare(b.name),
   );
 
-  const rows: ActionRowBuilder<ButtonBuilder>[] =
-    [];
-
-  for (
-    let i = 0;
-    i < departments.length;
-    i += 5
-  ) {
-    const row =
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        departments
-          .slice(i, i + 5)
-          .map((department) =>
-            categoryButton(
-              department.id,
-              department.name,
-            ),
-          ),
-      );
-
-    rows.push(row);
-  }
-
-  const embed = await buildPanelEmbed(
-    guild,
-    departments,
+  /*
+   * Discord limits a message to 25 components. Five rows can therefore hold
+   * at most four rows of department buttons when the fifth row is reserved
+   * for pagination.
+   */
+  const departmentsPerPage = departments.length > 20 ? 20 : 25;
+  const pageCount = Math.max(1, Math.ceil(departments.length / departmentsPerPage));
+  const safePage = Math.min(Math.max(page, 0), pageCount - 1);
+  const visibleDepartments = departments.slice(
+    safePage * departmentsPerPage,
+    (safePage + 1) * departmentsPerPage,
   );
 
-  let message =
-    config.panelMessageId
-      ? await panel.messages
-          .fetch(config.panelMessageId)
-          .catch(() => null)
-      : null;
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+
+  for (let i = 0; i < visibleDepartments.length; i += 5) {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        visibleDepartments
+          .slice(i, i + 5)
+          .map((department) => categoryButton(department.id, department.name)),
+      ),
+    );
+  }
+
+  if (pageCount > 1) {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`ticket:panel:page:${safePage - 1}`)
+          .setLabel('Previous')
+          .setEmoji('⬅️')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(safePage === 0),
+        new ButtonBuilder()
+          .setCustomId(`ticket:panel:page:${safePage + 1}`)
+          .setLabel(`Page ${safePage + 1} / ${pageCount}`)
+          .setEmoji('📄')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(true),
+        new ButtonBuilder()
+          .setCustomId(`ticket:panel:page:${safePage + 1}`)
+          .setLabel('Next')
+          .setEmoji('➡️')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(safePage >= pageCount - 1),
+      ),
+    );
+  }
+
+  const embed = await buildPanelEmbed(guild, departments);
+
+  let message = config.panelMessageId
+    ? await panel.messages.fetch(config.panelMessageId).catch(() => null)
+    : null;
 
   if (!message) {
     const existingBotMessage = (
-      await panel.messages.fetch({
-        limit: 50,
-      })
+      await panel.messages.fetch({ limit: 50 })
     ).find(
       (candidate) =>
-        candidate.author.id ===
-          guild.client.user?.id &&
-        candidate.embeds.some(
-          (embed) =>
-            embed.title ===
-            '🎫 SupportForge Support Center',
+        candidate.author.id === guild.client.user?.id &&
+        (
+          candidate.embeds.some((embed) => embed.title === settingsTitleForPanelCandidate(guild, config)) ||
+          candidate.components.some((row) =>
+            row.type === 1 &&
+            row.components.some((component) =>
+              'customId' in component &&
+              typeof component.customId === 'string' &&
+              component.customId.startsWith('ticket:create:'),
+            ),
+          )
         ),
     );
 
-    message =
-      existingBotMessage ?? null;
+    message = existingBotMessage ?? null;
   }
 
   if (message) {
@@ -575,15 +590,22 @@ export async function syncPanel(
     });
   }
 
-  await updateGuildConfig(
-    guild.id,
-    (current) => {
-      current.panelChannelId =
-        panel.id;
-      current.panelMessageId =
-        message.id;
-    },
-  );
+  await updateGuildConfig(guild.id, (current) => {
+    current.panelChannelId = panel.id;
+    current.panelMessageId = message.id;
+  });
+}
+
+/*
+ * The panel title is user-configurable. The fallback matcher therefore must
+ * derive it from the current settings instead of depending on the historical
+ * default title.
+ */
+function settingsTitleForPanelCandidate(
+  _guild: Guild,
+  config: Awaited<ReturnType<typeof getGuildConfig>>,
+): string {
+  return config.appearance.panelTitle;
 }
 
 export const data =
