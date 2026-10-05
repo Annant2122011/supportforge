@@ -2660,12 +2660,6 @@ async function normalRepair(guild: Guild): Promise<void> {
   await ensureTranscriptChannel(guild, supportCategory.id);
   await ensurePanelChannel(guild, supportCategory.id);
   await ensureSettingsChannel(guild, supportCategory.id);
-
-  /*
-   * Department categories are lazy infrastructure. Repair reconciles
-   * departments that already have a persisted categoryId, but must not create
-   * empty Discord categories for departments that have never received a ticket.
-   */
   await ensureAllDepartmentCategories(guild);
   await syncPanel(guild);
 }
