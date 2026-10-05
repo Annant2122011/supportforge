@@ -130,6 +130,14 @@ async function ensureContainer(guild: Guild) {
     );
   }
 
+  const staffRoleIds = [
+    ...new Set(
+      Object.values(config.departments)
+        .map((department) => department.staffRoleId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+
   if (saved.supportCategoryId) {
     const channel = guild.channels.cache.get(
       saved.supportCategoryId,
@@ -229,6 +237,14 @@ async function ensureTranscriptChannel(
     if (
       saved?.type === ChannelType.GuildText
     ) {
+      for (const roleId of staffRoleIds) {
+        await saved.permissionOverwrites.edit(roleId, {
+          ViewChannel: true,
+          ReadMessageHistory: true,
+          SendMessages: false,
+        }).catch(() => undefined);
+      }
+
       await ensureChannelPurposeMessage(
         saved,
         'This private channel is the SupportForge transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
@@ -274,6 +290,14 @@ async function ensureTranscriptChannel(
       },
     );
 
+    for (const roleId of staffRoleIds) {
+      await existing.permissionOverwrites.edit(roleId, {
+        ViewChannel: true,
+        ReadMessageHistory: true,
+        SendMessages: false,
+      }).catch(() => undefined);
+    }
+
     await updateGuildConfig(
       guild.id,
       (current) => {
@@ -315,6 +339,16 @@ async function ensureTranscriptChannel(
             PermissionFlagsBits.EmbedLinks,
           ],
         },
+        ...staffRoleIds.map((roleId) => ({
+          id: roleId,
+          allow: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.ReadMessageHistory,
+          ],
+          deny: [
+            PermissionFlagsBits.SendMessages,
+          ],
+        })),
       ],
     });
 
