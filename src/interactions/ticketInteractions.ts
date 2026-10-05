@@ -47,6 +47,7 @@ import { endTicketVoiceMode, startTicketVoiceMode, syncTicketVoiceParticipants }
 import { getUserFlagCount, isTicketCreationRestricted, recordReport } from '../services/reportService';
 
 import {
+  getPersistedTicketPriority,
   getPersistedTicketStatus,
   registerTicket,
   setPersistedTicketStatus,
@@ -89,6 +90,16 @@ function parseTicketPriority(value: string): TicketPriority | null {
 
 function getTopicPriority(topic: string): TicketPriority {
   return parseTicketPriority(getField(topic, 'priority') ?? '') ?? 'normal';
+}
+
+async function getEffectiveTicketPriority(
+  channelId: string,
+  topic: string,
+): Promise<TicketPriority> {
+  return (
+    (await getPersistedTicketPriority(channelId).catch(() => undefined)) ??
+    getTopicPriority(topic)
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1420,7 +1431,7 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
   const number = getField(newTopic, 'number') ?? 'unknown';
   void queueTicketChannelRename(
     channel,
-    getTicketChannelName(number, 'open', getTopicPriority(newTopic)),
+    getTicketChannelName(number, 'open', await getEffectiveTicketPriority(channel.id, newTopic)),
     'Ticket returned to open after final moderator unclaimed',
   ).catch(() => undefined);
 
@@ -1923,7 +1934,7 @@ async function transition(
       getTicketChannelName(
         ticketNumberForName,
         newStatus,
-        getTopicPriority(newTopic),
+        await getEffectiveTicketPriority(channel.id, newTopic),
       ),
       `Ticket #${ticketNumberForName} status changed to ${newStatus}`,
     ).catch((error) => {
@@ -2368,7 +2379,7 @@ async function closeTicket(
       getTicketChannelName(
         ticketNumber,
         'closed',
-        getTopicPriority(topic),
+        await getEffectiveTicketPriority(channel.id, topic),
       ),
       `Ticket #${ticketNumber} closed`,
     ).catch((error) => {
@@ -3000,7 +3011,7 @@ async function showPrioritySelector(
 
   const currentPriority =
     channel
-      ? getTopicPriority(channel.topic ?? '')
+      ? await getEffectiveTicketPriority(channel.id, channel.topic ?? '')
       : 'normal';
 
   const priorityRow =
