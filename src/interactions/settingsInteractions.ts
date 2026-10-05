@@ -647,7 +647,16 @@ async function showHome(interaction: SettingsViewInteraction): Promise<void> {
 
   await renderSettingsView(
     interaction,
-    [buildSettingsDashboardEmbed(settings, Object.keys(config.departments).length)],
+    [
+      buildSettingsDashboardEmbed(
+        settings,
+        Object.keys(config.departments).length,
+        Object.values(config.departments).reduce(
+          (total, department) => total + Object.keys(department.tags ?? {}).length,
+          0,
+        ),
+      ),
+    ],
     buildSettingsDashboardComponents(),
   );
 }
