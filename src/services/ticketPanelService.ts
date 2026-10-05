@@ -18,6 +18,7 @@ import {
   getField,
   getTicketStatus,
   isTicketTopic,
+  removeField,
   setField,
   type TicketStatus,
 } from './ticketStateService';
