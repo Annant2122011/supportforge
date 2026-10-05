@@ -577,11 +577,21 @@ async function restoreSettingsHome(
     await interaction.deferUpdate();
   }
 
-  if (interaction.replied || interaction.deferred) {
-    await interaction.deleteReply().catch(() => undefined);
-  }
-
+  /*
+   * Do not delete the message that contains the Restore to Settings button.
+   * The channel restore routine preserves the live dashboard itself. If the
+   * clicked control came from an ephemeral settings sub-view, simply replace
+   * that ephemeral view with a small confirmation instead of deleting it.
+   */
   await restoreSettingsChannelToBottom(guild);
+
+  if (isEphemeralSettingsMessage(interaction as ButtonInteraction)) {
+    await interaction.editReply({
+      content: '✅ Restored the Settings view. The live Settings panel remains intact.',
+      embeds: [],
+      components: [],
+    }).catch(() => undefined);
+  }
 }
 
 function isEphemeralSettingsMessage(interaction: ButtonInteraction): boolean {
