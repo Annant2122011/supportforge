@@ -2863,6 +2863,9 @@ async function showTicketHistory(
 
 
 async function renderDepartmentSelector(interaction: ButtonInteraction | StringSelectMenuInteraction, page = 0): Promise<void> {
+  if (!interaction.replied && !interaction.deferred) {
+    await interaction.deferUpdate();
+  }
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) { await replyError(interaction, '❌ This action can only be used inside a ticket.'); return; }
   const channel = interaction.channel as TextChannel;
   if (!isTicketTopic(channel.topic ?? '')) { await replyError(interaction, '❌ This action can only be used inside a ticket.'); return; }
