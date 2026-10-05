@@ -506,7 +506,9 @@ export async function moveTicketPanelToBottom(
     throw new Error('This channel is not a SupportForge ticket.');
   }
 
-  const status = getTicketStatus(topic);
+  const status =
+    (await getPersistedTicketStatus(channel.id).catch(() => undefined)) ??
+    getTicketStatus(topic);
   const config = await getGuildConfig(channel.guild.id);
   const ticketNumber = getField(topic, 'number') ?? 'unknown';
   const panelTitle = `🎫 SupportForge Ticket #${ticketNumber}`;
