@@ -1419,9 +1419,23 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
   let newTopic = topic;
 
   if (remaining.length) {
-    newTopic = setField(newTopic, 'claimed_by', remaining.join(','));
-    await setChannelTopic(channel.id, newTopic, 'SupportForge moderator unclaimed from multi-moderator ticket').catch(() => undefined);
+    newTopic = setField(
+      newTopic,
+      'claimed_by',
+      remaining.join(','),
+    );
+    await setChannelTopic(
+      channel.id,
+      newTopic,
+      'SupportForge moderator unclaimed from multi-moderator ticket',
+    ).catch(() => undefined);
     channel.topic = newTopic;
+    await applyTicketVisibilityMode(
+      channel,
+      newTopic,
+      'claimed',
+      interaction.user.id,
+    );
     updateRuntimeTicketState(channel, newTopic, 'claimed');
     await syncTicketVoiceParticipants(interaction.guild, newTopic);
     await updateMainMessage(channel, getField(newTopic, 'message'), 'claimed', newTopic);
