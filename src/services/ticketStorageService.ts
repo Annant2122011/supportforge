@@ -33,12 +33,14 @@ async function ensureBucket(
     return savedChannel;
   }
 
-  const candidates = guild.channels.cache.filter(
-    (channel): channel is CategoryChannel =>
-      channel.type === ChannelType.GuildCategory &&
-      (channel.name === baseName ||
-        channel.name.startsWith(baseName + ' ')),
-  );
+  const candidates = [...guild.channels.cache.values()]
+    .filter(
+      (channel): channel is CategoryChannel =>
+        channel.type === ChannelType.GuildCategory &&
+        (channel.name === baseName ||
+          channel.name.startsWith(baseName + ' ')),
+    )
+    .sort((a, b) => a.position - b.position);
 
   const available = candidates
     .sort((a, b) => a.position - b.position)
@@ -54,7 +56,7 @@ async function ensureBucket(
     return available;
   }
 
-  const suffix = candidates.size + 1;
+  const suffix = candidates.length + 1;
   const bot = guild.members.me;
 
   if (!bot) {
@@ -126,20 +128,12 @@ export async function ensureOpenCategory(
     return saved;
   }
 
-  const candidates = [...guild.channels.cache.values()]
-    .filter(
-      (channel): channel is CategoryChannel =>
-        channel.type === ChannelType.GuildCategory &&
-        (
-          channel.name === OPEN_CATEGORY_NAME ||
-          channel.name.startsWith(OPEN_CATEGORY_NAME + ' ')
-        ),
-    )
-    .sort((a, b) => a.position - b.position);
-
-  const available = candidates.find(
-    (category) => category.children.cache.size < MAX_CHANNELS_PER_CATEGORY,
-  );
+  /*
+   * A category's name is not ownership proof. Only a persisted ID can identify
+   * an existing SupportForge Open bucket; otherwise create a new managed one.
+   */
+  const candidates: CategoryChannel[] = [];
+  const available: CategoryChannel | undefined = undefined;
 
   if (available) {
     await updateGuildConfig(guild.id, (current) => {
