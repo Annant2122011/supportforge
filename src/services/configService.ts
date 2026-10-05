@@ -135,17 +135,6 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
       migrated = true;
     }
 
-    if (!department.tags) {
-      const legacyTagId = newDepartmentId();
-      department.tags = {
-        [legacyTagId]: {
-          id: legacyTagId,
-          name: 'General',
-          createdAt: department.createdAt ?? new Date().toISOString(),
-        },
-      };
-      migrated = true;
-    }
   }
 
   if (migrated) {
