@@ -193,6 +193,13 @@ async function saveTopic(
     'SupportForge ticket metadata update',
   );
 
+  /*
+   * The native REST helper updates Discord but does not mutate the discord.js
+   * channel cache. Keep the local topic synchronized so immediately following
+   * commands read the state that was just committed.
+   */
+  context.channel.topic = topic;
+
   await setPersistedTicketStatus(
     context.channel.id,
     getTicketStatus(topic),
