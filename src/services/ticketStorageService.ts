@@ -33,30 +33,20 @@ async function ensureBucket(
     return savedChannel;
   }
 
-  const candidates = [...guild.channels.cache.values()]
+  /*
+   * Display names are not ownership proof. If the persisted category ID is
+   * missing or invalid, create a new SupportForge storage bucket rather than
+   * adopting an unrelated category with the same name.
+   */
+  const existingNames = [...guild.channels.cache.values()]
     .filter(
       (channel): channel is CategoryChannel =>
         channel.type === ChannelType.GuildCategory &&
         (channel.name === baseName ||
           channel.name.startsWith(baseName + ' ')),
-    )
-    .sort((a, b) => a.position - b.position);
-
-  const available = candidates
-    .sort((a, b) => a.position - b.position)
-    .find(
-      (category) =>
-        category.children.cache.size < MAX_CHANNELS_PER_CATEGORY,
     );
 
-  if (available) {
-    await updateAdvancedSettings(guild.id, (current) => {
-      current[key] = available.id;
-    });
-    return available;
-  }
-
-  const suffix = candidates.length + 1;
+  const suffix = existingNames.length + 1;
   const bot = guild.members.me;
 
   if (!bot) {
