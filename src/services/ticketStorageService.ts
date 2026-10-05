@@ -131,22 +131,10 @@ export async function ensureOpenCategory(
   /*
    * A category's name is not ownership proof. Only a persisted ID can identify
    * an existing SupportForge Open bucket; otherwise create a new managed one.
+   * Discord allows duplicate category names, so there is no need to adopt an
+   * unrelated category or manufacture a suffix based on unrelated resources.
    */
-  const candidates: CategoryChannel[] = [];
-  const available: CategoryChannel | undefined = undefined;
-
-  if (available) {
-    await updateGuildConfig(guild.id, (current) => {
-      current.openCategoryId = available.id;
-    });
-    return available;
-  }
-
-  const suffix = candidates.length + 1;
-  const name =
-    suffix === 1
-      ? OPEN_CATEGORY_NAME
-      : OPEN_CATEGORY_NAME + ' ' + suffix;
+  const name = OPEN_CATEGORY_NAME;
 
   const bot = guild.members.me;
 
