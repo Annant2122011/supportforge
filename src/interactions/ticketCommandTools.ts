@@ -121,6 +121,9 @@ async function getTicketContext(
     isAdmin: Boolean(
       interaction.memberPermissions?.has(
         PermissionFlagsBits.Administrator,
+      ) ||
+      interaction.memberPermissions?.has(
+        PermissionFlagsBits.ManageGuild,
       ),
     ),
     isAuthorized:
@@ -128,6 +131,9 @@ async function getTicketContext(
       Boolean(
         interaction.memberPermissions?.has(
           PermissionFlagsBits.Administrator,
+        ) ||
+        interaction.memberPermissions?.has(
+          PermissionFlagsBits.ManageGuild,
         ),
       ),
     ticketNumber:
