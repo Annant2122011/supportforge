@@ -46,6 +46,7 @@ export function buildTicketPanelEmbed(
   const department = departmentId ? config.departments[departmentId] : undefined;
   const ownerId = getField(topic, 'owner');
   const claimedBy = getField(topic, 'claimed_by');
+  const claimedModerators = (claimedBy ?? '').split(',').map((id) => id.trim()).filter(Boolean);
   const priority = getField(topic, 'priority') ?? 'normal';
   const tagId = getField(topic, 'tag');
   const ticketTag = department?.tags?.[tagId ?? ''];
@@ -68,7 +69,7 @@ export function buildTicketPanelEmbed(
       { name: '📂 Department', value: department?.name ?? departmentId ?? 'Unknown', inline: true },
       { name: '⚡ Priority', value: priorityLabel(priority), inline: true },
       { name: '👤 Owner', value: ownerId ? `<@${ownerId}>` : 'Unknown', inline: true },
-      { name: '🙋 Claimed by', value: claimedBy ? `<@${claimedBy}>` : 'Unclaimed', inline: true },
+      { name: '🙋 Moderators', value: claimedModerators.length ? claimedModerators.map((id) => `<@${id}>`).join(', ') : 'Unclaimed', inline: true },
       {
         name: '🏷️ Tag',
         value: ticketTag?.name ?? tagId ?? 'Not configured',
@@ -103,6 +104,7 @@ export function buildTicketPanelComponents(
     );
   } else if (status === 'claimed') {
     lifecycle.addComponents(
+      new ButtonBuilder().setCustomId('ticket:claim').setLabel('Claim / Join').setEmoji('🙋').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('ticket:unclaim').setLabel('Unclaim').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('ticket:pending').setLabel('Pending').setEmoji('⏳').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('ticket:close').setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Danger),
@@ -163,6 +165,14 @@ export function buildTicketPanelComponents(
       }
     }
 
+    const safety = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId('ticket:panel:report')
+        .setLabel('Report User')
+        .setEmoji('🚩')
+        .setStyle(ButtonStyle.Danger),
+    );
+
     const positioning = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId('ticket:panel:move-bottom')
@@ -177,8 +187,8 @@ export function buildTicketPanelComponents(
     );
 
     return voiceControls.components.length
-      ? [lifecycle, tools, voiceControls, positioning]
-      : [lifecycle, tools, positioning];
+      ? [lifecycle, tools, voiceControls, safety, positioning]
+      : [lifecycle, tools, safety, positioning];
   }
 
   return status === 'archived' ? [lifecycle] : [lifecycle, tools];
