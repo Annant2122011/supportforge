@@ -155,12 +155,7 @@ async function audit(
   event: string,
   detail?: string,
 ): Promise<void> {
-  if (
-    !context.config.supportCategoryId ||
-    !isPremiumOrHigher(
-      context.config.tier,
-    )
-  ) {
+  if (!context.config.supportCategoryId) {
     return;
   }
 
