@@ -66,8 +66,14 @@ export async function recordTicketMessageForPanel(message: Message): Promise<voi
       if (anchor) {
         state.anchorMessageId = anchor.id;
         for (const item of recent.values()) {
+          /*
+           * messageCreate fires before this handler runs, so the triggering
+           * message may already be present in the fetched history. Do not
+           * count it in the baseline and then count it again below.
+           */
           if (
             item.id !== anchor.id &&
+            item.id !== message.id &&
             item.createdTimestamp > anchor.createdTimestamp &&
             !item.author.bot
           ) {
