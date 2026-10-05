@@ -739,9 +739,6 @@ export async function getOrCreateAuditChannel(
       'This private channel stores SupportForge’s durable operational audit history. It records important ticket lifecycle actions, configuration changes, retention decisions, repairs, and other administrative events with responsible users and timestamps.',
     );
     await ensureAuditPanel(guild, existing);
-    await ensureAuditDeveloperInfrastructure(guild, parentCategoryId).catch((error) => {
-      console.warn('⚠️ Developer audit infrastructure repair skipped:', error);
-    });
     return existing;
   }
 
@@ -796,9 +793,6 @@ export async function getOrCreateAuditChannel(
   );
 
   await ensureAuditPanel(guild, channel);
-  await ensureAuditDeveloperInfrastructure(guild, parentCategoryId).catch((error) => {
-    console.warn('⚠️ Developer audit infrastructure creation skipped:', error);
-  });
   return channel;
 }
 
@@ -1682,13 +1676,22 @@ async function recordAndPublish(
 
   await appendAuditRecord(guild, record);
 
-  /* Keep the complete raw stream in the private developer audit channel. */
+  /*
+   * The raw developer stream is opt-in. A normal SupportForge audit event must
+   * never create the developer role/channel as a side effect. Once Developer
+   * View has been enabled at least once, its persisted channel ID marks the
+   * infrastructure as intentionally provisioned and the stream remains
+   * continuous from that point onward.
+   */
   try {
-    const developerInfrastructure = await ensureAuditDeveloperInfrastructure(
-      guild,
-      parentCategoryId,
-    );
-    await sendAuditEntry(developerInfrastructure.channel, record);
+    const config = await getGuildConfig(guild.id);
+    if (config.auditDevChannelId || config.auditDeveloperRoleId) {
+      const developerInfrastructure = await ensureAuditDeveloperInfrastructure(
+        guild,
+        parentCategoryId,
+      );
+      await sendAuditEntry(developerInfrastructure.channel, record);
+    }
   } catch (error) {
     console.warn('⚠️ Failed to publish raw developer audit entry:', error);
   }
