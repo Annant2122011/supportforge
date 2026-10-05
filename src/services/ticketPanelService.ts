@@ -13,10 +13,12 @@ import {
 import { getGuildConfig, type GuildConfig } from './configService';
 import type { TicketPriority } from './advancedSettingsService';
 import { setChannelName } from './discordChannelService';
+import { getPersistedTicketPriority } from './ticketPersistenceService';
 import {
   getField,
   getTicketStatus,
   isTicketTopic,
+  setField,
   type TicketStatus,
 } from './ticketStateService';
 
@@ -217,7 +219,11 @@ export async function refreshTicketPanel(
   topicOverride?: string,
 ): Promise<void> {
   const topic = topicOverride ?? channel.topic ?? '';
-  const messageId = getField(topic, 'message');
+  const persistedPriority = await getPersistedTicketPriority(channel.id).catch(() => undefined);
+  const effectiveTopic = persistedPriority
+    ? setField(topic, 'priority', persistedPriority)
+    : topic;
+  const messageId = getField(effectiveTopic, 'message');
   if (!messageId) return;
 
   const config = await getGuildConfig(channel.guild.id);
