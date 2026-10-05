@@ -347,23 +347,14 @@ export async function isSupportForgeManagedChannel(
     return true;
   }
 
-  /*
-   * Any channel directly inside a SupportForge-managed category is part of
-   * the managed scope, even when it has no SupportForge topic of its own.
-   */
-  if (channel.parentId && configuredCategoryIds.has(channel.parentId)) {
-    return true;
-  }
-
-  /*
-   * Names are never sufficient to establish SupportForge ownership. Only
-   * persisted resource IDs, managed topics, or membership in a persisted
-   * SupportForge category qualify. This prevents unrelated channels/categories
-   * named "Open" or "SupportForge.*" from entering the audit stream.
-   */
-  return Boolean(
-    channel.parentId && configuredCategoryIds.has(channel.parentId),
-  );
+/*
+   * Names and parent-category membership are not ownership proof. An
+   * administrator may place an unrelated channel inside a SupportForge
+   * category, and that must not make the channel part of SupportForge's
+   * managed audit scope.
+   *
+   * Ownership is established by a SupportForge topic or an explicitly
+   * persisted resource ID only.
 }
 
 type DiscordAuditTarget =
