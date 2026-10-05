@@ -427,9 +427,7 @@ export async function isSupportForgeManagedRole(
 
   const config = await getGuildConfig(guild.id);
   return configuredIds.has(role.id) ||
-    role.id === config.auditDeveloperRoleId ||
-    role.name.toLowerCase().startsWith('supportforge •') ||
-    role.name.toLowerCase() === AUDIT_DEVELOPER_ROLE_NAME;
+    role.id === config.auditDeveloperRoleId;
 }
 
 export async function logDiscordMutation(
