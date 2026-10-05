@@ -10,6 +10,7 @@ import { setChannelTopic } from './discordChannelService';
 import { getField, removeField, setField } from './ticketStateService';
 import { getTicketChannelName, queueTicketChannelRename } from './ticketPanelService';
 import type { TicketPriority } from './advancedSettingsService';
+import { getAdvancedSettings } from './advancedSettingsService';
 import type { TicketStatus } from './ticketStateService';
 
 const VOICE_TOPIC_RETRY_MAX_DELAY_MS = 15 * 60 * 1000;
@@ -24,7 +25,7 @@ function getRetryDelayMs(error: unknown): number | null {
   return Math.min((seconds + 1) * 1000, VOICE_TOPIC_RETRY_MAX_DELAY_MS);
 }
 
-function participantOverwrites(guild: Guild, ownerId: string, moderatorId: string) {
+function participantOverwrites(guild: Guild, ownerId: string, moderatorIds: string[]) {
   const botId = guild.members.me?.id;
   if (!botId) throw new Error('SupportForge bot member could not be resolved.');
 
@@ -55,7 +56,7 @@ function participantOverwrites(guild: Guild, ownerId: string, moderatorId: strin
       ],
     },
     { id: ownerId, allow: participantAllow },
-    { id: moderatorId, allow: participantAllow },
+    ...moderatorIds.filter((id) => id && id !== ownerId).map((id) => ({ id, allow: participantAllow })),
   ];
 }
 
@@ -89,10 +90,10 @@ export async function startTicketVoiceMode(
   topic: string,
 ): Promise<{ voiceChannel: VoiceChannel; topic: string }> {
   const ownerId = getField(topic, 'owner');
-  const moderatorId = getField(topic, 'claimed_by');
+  const moderatorIds = (getField(topic, 'claimed_by') ?? '').split(',').map((id) => id.trim()).filter(Boolean);
   const number = getField(topic, 'number') ?? 'unknown';
 
-  if (!ownerId || !moderatorId) {
+  if (!ownerId || !moderatorIds.length) {
     throw new Error('Voice mode requires a ticket owner and claiming moderator.');
   }
 
@@ -104,18 +105,19 @@ export async function startTicketVoiceMode(
     }
   }
 
+  const settings = await getAdvancedSettings(guild.id);
   const voiceChannel = await guild.channels.create({
     name: 'ticket-' + number + '-voice',
     type: ChannelType.GuildVoice,
     parent: ticketChannel.parentId ?? undefined,
-    userLimit: 2,
-    permissionOverwrites: participantOverwrites(guild, ownerId, moderatorId),
+    userLimit: settings.ticketDefaults.maxClaimedModerators + 1,
+    permissionOverwrites: participantOverwrites(guild, ownerId, moderatorIds),
     reason: 'SupportForge private voice mode for ticket #' + number,
   }) as VoiceChannel;
 
   let newTopic = setField(topic, 'voice_channel_id', voiceChannel.id);
   newTopic = setField(newTopic, 'voice_started_at', new Date().toISOString());
-  newTopic = setField(newTopic, 'voice_started_by', moderatorId);
+  newTopic = setField(newTopic, 'voice_started_by', moderatorIds[0]);
   newTopic = setField(newTopic, 'voice_channel_name', voiceChannel.name);
   newTopic = await updateVoiceTopic(
     ticketChannel,
