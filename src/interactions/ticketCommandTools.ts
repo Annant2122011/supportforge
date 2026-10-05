@@ -35,6 +35,10 @@ import {
   queueTicketChannelRename,
   refreshTicketPanel,
 } from '../services/ticketPanelService';
+import {
+  endTicketVoiceMode,
+  syncTicketVoiceParticipants,
+} from '../services/voiceModeService';
 
 import {
   getPersistedTicketStatus,
@@ -278,6 +282,23 @@ async function saveTopic(
 ): Promise<void> {
   const oldTopic = context.topic;
 
+  /*
+   * Voice mode is valid only while the ticket remains claimed. Slash-command
+   * transitions must clean up the temporary room just like the button path.
+   */
+  if (
+    getField(oldTopic, 'voice_channel_id') &&
+    getTicketStatus(topic) !== 'claimed'
+  ) {
+    topic = await endTicketVoiceMode(
+      context.guild,
+      context.channel,
+      topic,
+      getTicketStatus(topic),
+      'SupportForge voice mode ended by ticket command transition',
+    );
+  }
+
   await setChannelTopic(
     context.channel.id,
     topic,
@@ -301,6 +322,10 @@ async function saveTopic(
     oldTopic,
     topic,
   );
+
+  if (getField(topic, 'voice_channel_id') && getTicketStatus(topic) === 'claimed') {
+    await syncTicketVoiceParticipants(context.guild, topic);
+  }
 
   await refreshTicketPanel(
     context.channel,
