@@ -78,7 +78,15 @@ async function loadState(): Promise<ConfigFile> {
       version: 1,
       guilds: parsed.guilds ?? {},
     };
-  } catch {
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') {
+      throw new Error(
+        'SupportForge config could not be loaded safely. The existing file was not replaced.',
+        { cause: error },
+      );
+    }
+
     state = {
       version: 1,
       guilds: {},
