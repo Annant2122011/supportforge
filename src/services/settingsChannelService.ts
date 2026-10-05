@@ -487,6 +487,10 @@ export async function restoreSettingsChannelToBottom(guild: Guild): Promise<void
         buildSettingsDashboardEmbed(
           resolvedSettings,
           Object.keys(config.departments).length,
+          Object.values(config.departments).reduce(
+            (total, department) => total + Object.keys(department.tags ?? {}).length,
+            0,
+          ),
         ),
       ],
       components: buildSettingsDashboardComponents(),
@@ -497,6 +501,10 @@ export async function restoreSettingsChannelToBottom(guild: Guild): Promise<void
         buildSettingsDashboardEmbed(
           settings,
           Object.keys((await getGuildConfig(guild.id)).departments).length,
+          Object.values((await getGuildConfig(guild.id)).departments).reduce(
+            (total, department) => total + Object.keys(department.tags ?? {}).length,
+            0,
+          ),
         ),
       ],
       components: buildSettingsDashboardComponents(),
