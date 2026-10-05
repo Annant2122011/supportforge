@@ -2829,34 +2829,85 @@ async function handleReportTargetSelection(interaction: StringSelectMenuInteract
   });
 }
 
+async function renderReportSubcategorySelector(
+  interaction: ButtonInteraction | StringSelectMenuInteraction,
+  targetId: string,
+  categoryId: string,
+  page = 0,
+): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const category = settings.reports.categories[categoryId];
+
+  if (!category) {
+    await replyError(interaction, '❌ That report category is no longer available.');
+    return;
+  }
+
+  const subcategories = Object.values(category.subcategories);
+  if (!subcategories.length) {
+    await replyError(interaction, '❌ That report category has no configured subcategories.');
+    return;
+  }
+
+  const pageSize = 25;
+  const pageCount = Math.max(1, Math.ceil(subcategories.length / pageSize));
+  const safePage = Math.min(Math.max(page, 0), pageCount - 1);
+  const visible = subcategories.slice(safePage * pageSize, (safePage + 1) * pageSize);
+
+  const components: Array<ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<ButtonBuilder>> = [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('ticket:report:subcategory:' + targetId + ':' + categoryId)
+        .setPlaceholder('Choose a report subcategory')
+        .addOptions(visible.map((sub) => ({
+          label: sub.name.slice(0, 100),
+          value: sub.id,
+          description: category.name,
+        }))),
+    ),
+  ];
+
+  if (pageCount > 1) {
+    components.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId('ticket:report:subcategory:page:' + targetId + ':' + categoryId + ':' + (safePage - 1))
+          .setLabel('Previous')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(safePage === 0),
+        new ButtonBuilder()
+          .setCustomId('ticket:report:subcategory:page:' + targetId + ':' + categoryId + ':' + safePage)
+          .setLabel('Page ' + (safePage + 1) + ' / ' + pageCount)
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(true),
+        new ButtonBuilder()
+          .setCustomId('ticket:report:subcategory:page:' + targetId + ':' + categoryId + ':' + (safePage + 1))
+          .setLabel('Next')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(safePage >= pageCount - 1),
+      ),
+    );
+  }
+
+  const payload = {
+    content: '🚩 **Report subcategory**\nChoose the most specific reason.' +
+      (pageCount > 1 ? '\nPage ' + (safePage + 1) + ' of ' + pageCount + '.' : ''),
+    components,
+  };
+
+  if (interaction.replied || interaction.deferred) {
+    await interaction.editReply(payload);
+  } else {
+    await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
+  }
+}
+
 async function handleReportCategorySelection(interaction: StringSelectMenuInteraction): Promise<void> {
   await interaction.deferUpdate();
   const parts = interaction.customId.split(':');
   const targetId = parts[3] ?? '';
   const categoryId = interaction.values[0];
-  const settings = await getAdvancedSettings(interaction.guild!.id);
-  const category = settings.reports.categories[categoryId];
-
-  if (!category) {
-    await interaction.editReply({ content: '❌ That report category is no longer available.', components: [] });
-    return;
-  }
-
-  await interaction.editReply({
-    content: '🚩 **Report subcategory**\nChoose the most specific reason.',
-    components: [
-      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-        new StringSelectMenuBuilder()
-          .setCustomId('ticket:report:subcategory:' + targetId + ':' + categoryId)
-          .setPlaceholder('Choose a report subcategory')
-          .addOptions(Object.values(category.subcategories).slice(0, 25).map((sub) => ({
-            label: sub.name.slice(0, 100),
-            value: sub.id,
-            description: category.name,
-          }))),
-      ),
-    ],
-  });
+  await renderReportSubcategorySelector(interaction, targetId, categoryId, 0);
 }
 
 async function handleReportSubcategorySelection(interaction: StringSelectMenuInteraction): Promise<void> {
@@ -3569,6 +3620,16 @@ async function handlePanelButton(
   if (id === 'ticket:panel:voice:start') { await handleTicketVoiceStart(interaction); return; }
   if (id === 'ticket:panel:voice:end') { await handleTicketVoiceEnd(interaction); return; }
   if (id === 'ticket:panel:voice:join') { await handleTicketVoiceJoin(interaction); return; }
+  if (id.startsWith('ticket:report:subcategory:page:')) {
+    const parts = id.split(':');
+    const targetId = parts[4] ?? '';
+    const categoryId = parts[5] ?? '';
+    const page = Number(parts[6] ?? '0');
+    await interaction.deferUpdate();
+    await renderReportSubcategorySelector(interaction, targetId, categoryId, Number.isInteger(page) ? page : 0);
+    return;
+  }
+
   if (id === 'ticket:panel:report' || id.startsWith('ticket:panel:report:page:')) {
     const page = id.startsWith('ticket:panel:report:page:') ? Number(id.slice('ticket:panel:report:page:'.length)) : 0;
     await showReportTargetSelector(interaction, Number.isInteger(page) ? page : 0);
