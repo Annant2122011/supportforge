@@ -2178,6 +2178,13 @@ export async function handleSettingsInteraction(
       }
 
       await updateGuildConfig(guild.id, (current) => {
+        const department = current.departments[departmentId];
+        if (department?.categoryId) {
+          current.retiredCategoryIds = Array.from(new Set([
+            ...(current.retiredCategoryIds ?? []),
+            department.categoryId,
+          ]));
+        }
         delete current.departments[departmentId];
       });
       await syncPanel(guild);
@@ -2204,6 +2211,13 @@ export async function handleSettingsInteraction(
       }
 
       await updateGuildConfig(guild.id, (current) => {
+        const department = current.departments[departmentId];
+        if (department?.categoryId) {
+          current.retiredCategoryIds = Array.from(new Set([
+            ...(current.retiredCategoryIds ?? []),
+            department.categoryId,
+          ]));
+        }
         delete current.departments[departmentId];
       });
       await syncPanel(guild);
