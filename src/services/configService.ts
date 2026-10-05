@@ -92,7 +92,7 @@ async function loadState(): Promise<ConfigFile> {
 async function persistState(): Promise<void> {
   if (!state) return;
 
-  writeQueue = writeQueue.then(async () => {
+  writeQueue = writeQueue.catch(() => undefined).then(async () => {
     await mkdir(DATA_DIR, { recursive: true });
     await writeFile(CONFIG_PATH, JSON.stringify(state, null, 2), 'utf8');
   });
