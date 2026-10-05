@@ -2914,6 +2914,9 @@ async function changeTicketDepartment(interaction: StringSelectMenuInteraction):
 }
 
 async function renderRoutingTagSelector(interaction: ButtonInteraction | StringSelectMenuInteraction, page: number): Promise<void> {
+  if (!interaction.replied && !interaction.deferred) {
+    await interaction.deferUpdate();
+  }
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) { await replyError(interaction, '❌ This action can only be used inside a ticket.'); return; }
   const channel = interaction.channel as TextChannel; const topic = channel.topic ?? '';
   const departmentId = getField(topic, 'department'); const config = await getGuildConfig(interaction.guild.id); const department = departmentId ? config.departments[departmentId] : undefined;
