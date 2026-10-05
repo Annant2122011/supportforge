@@ -304,6 +304,18 @@ function isSettingsDashboardMessage(message: {
   );
 }
 
+function isSettingsPurposeMessage(message: {
+  author: { id: string };
+  embeds: readonly { title?: string | null; footer?: { text?: string | null } | null }[];
+}): boolean {
+  return message.author.id === message.author.id &&
+    message.embeds.some(
+      (embed) =>
+        embed.title === '📝 SupportForge Channel Purpose' &&
+        embed.footer?.text === 'SupportForge • Channel Purpose',
+    );
+}
+
 function isLegacySmallSettingsDashboard(message: {
   embeds: readonly { title?: string | null; footer?: { text?: string | null } | null }[];
 }): boolean {
@@ -460,7 +472,8 @@ export async function restoreSettingsChannelToBottom(guild: Guild): Promise<void
     (message) =>
       message.author.id === botId &&
       message.id !== dashboard?.id &&
-      !isSettingsDashboardMessage(message, botId),
+      !isSettingsDashboardMessage(message, botId) &&
+      !isSettingsPurposeMessage(message),
   );
 
   /*
