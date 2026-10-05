@@ -2863,6 +2863,15 @@ async function renderDepartmentSelector(interaction: ButtonInteraction | StringS
 }
 
 async function changeTicketDepartment(interaction: StringSelectMenuInteraction): Promise<void> {
+  /*
+   * Department changes can trigger category creation, permission mutations
+   * and topic updates. Acknowledge the select immediately so Discord does not
+   * expire the interaction while those operations are running.
+   */
+  if (!interaction.replied && !interaction.deferred) {
+    await interaction.deferUpdate();
+  }
+
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) { await replyError(interaction, '❌ This action can only be used inside a ticket.'); return; }
   const channel = interaction.channel as TextChannel; const topic = channel.topic ?? '';
   const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
@@ -2872,11 +2881,11 @@ async function changeTicketDepartment(interaction: StringSelectMenuInteraction):
   const departmentId = interaction.values[0]; const config = await getGuildConfig(interaction.guild.id); const department = config.departments[departmentId];
   if (!department) { await replyError(interaction, '❌ Department not found.'); return; }
   const oldDepartmentId = getField(topic, 'department');
-  if (oldDepartmentId === departmentId) { await interaction.update({ content: 'ℹ️ This ticket is already in **' + department.name + '**.', components: [] }); return; }
+  if (oldDepartmentId === departmentId) { await interaction.editReply({ content: 'ℹ️ This ticket is already in **' + department.name + '**.', components: [] }); return; }
   const tags = Object.values(department.tags ?? {}).sort((x, y) => x.name.localeCompare(y.name));
   if (!tags.length) { await replyError(interaction, '❌ The destination department has no tags. Add at least one tag first.'); return; }
   if (tags.length > 1) {
-    await interaction.update({ content: '🏷️ **Choose the tag for ' + department.name + '**', components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId('ticket:routing-tag:select:' + department.id).setPlaceholder('Choose a tag').addOptions(tags.slice(0, 25).map((t) => ({ label: t.name.slice(0, 100), value: t.id, description: 'Subcategory of ' + department.name })) ))] });
+    await interaction.editReply({ content: '🏷️ **Choose the tag for ' + department.name + '**', components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId('ticket:routing-tag:select:' + department.id).setPlaceholder('Choose a tag').addOptions(tags.slice(0, 25).map((t) => ({ label: t.name.slice(0, 100), value: t.id, description: 'Subcategory of ' + department.name })) ))] });
     return;
   }
   await applyTicketRouting(interaction, department, tags[0].id, status, topic);
@@ -2907,7 +2916,6 @@ async function applyTicketRouting(interaction: StringSelectMenuInteraction, depa
   const oldDepartmentId = getField(topic, 'department'); const oldDepartment = oldDepartmentId ? config.departments[oldDepartmentId] : undefined;
   const category = await ensureDepartmentCategory(interaction.guild!, department);
   const newTopic = setField(setField(setField(topic, 'department', department.id), 'staff', department.staffRoleId ?? 'none'), 'tags', tagId);
-  await interaction.deferUpdate();
   try {
     await runChannelMutation(channel, 'Ticket routing update', async () => {
       if (oldDepartmentId !== department.id) {
@@ -3085,7 +3093,9 @@ async function applyTicketPriority(
 
 
 async function handleTicketVoiceStart(interaction: ButtonInteraction): Promise<void> {
-  await interaction.deferUpdate();
+  if (!interaction.replied && !interaction.deferred) {
+    await interaction.deferUpdate();
+  }
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
     await replyError(interaction, '❌ Voice mode is only available inside a ticket.');
     return;
@@ -3146,7 +3156,9 @@ async function handleTicketVoiceStart(interaction: ButtonInteraction): Promise<v
 }
 
 async function handleTicketVoiceEnd(interaction: ButtonInteraction): Promise<void> {
-  await interaction.deferUpdate();
+  if (!interaction.replied && !interaction.deferred) {
+    await interaction.deferUpdate();
+  }
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
     await replyError(interaction, '❌ Voice mode is only available inside a ticket.');
     return;
