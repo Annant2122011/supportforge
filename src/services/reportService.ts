@@ -57,7 +57,7 @@ function emptyGuildStore(): ReportGuildStore {
 
 async function persist(): Promise<void> {
   if (!state) return;
-  writeQueue = writeQueue.then(async () => {
+  writeQueue = writeQueue.catch(() => undefined).then(async () => {
     await mkdir(DATA_DIR, { recursive: true });
     await writeFile(REPORT_PATH, JSON.stringify(state, null, 2), 'utf8');
   });
