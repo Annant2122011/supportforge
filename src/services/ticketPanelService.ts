@@ -505,7 +505,7 @@ export async function moveTicketPanelToBottom(
         config,
       ),
     ],
-    components: buildTicketPanelComponents(status),
+    components: buildTicketPanelComponents(status, topic),
   });
 
   if (currentPanel && currentPanel.id !== newPanel.id) {
