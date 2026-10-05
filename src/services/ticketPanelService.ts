@@ -533,16 +533,21 @@ export async function moveTicketPanelToBottom(
       messageId,
     );
 
+  const persistedPriority = await getPersistedTicketPriority(channel.id).catch(() => undefined);
+  const panelTopic = persistedPriority
+    ? setField(setField(topic, 'status', status), 'priority', persistedPriority)
+    : setField(topic, 'status', status);
+
   const newPanel = await channel.send({
     embeds: [
       buildTicketPanelEmbed(
         channel.guild,
         channel.name,
-        topic,
+        panelTopic,
         config,
       ),
     ],
-    components: buildTicketPanelComponents(status, topic),
+    components: buildTicketPanelComponents(status, panelTopic),
   });
 
   if (currentPanel && currentPanel.id !== newPanel.id) {
