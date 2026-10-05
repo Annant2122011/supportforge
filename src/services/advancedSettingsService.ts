@@ -191,7 +191,20 @@ function cloneDefaults(): AdvancedGuildSettings {
     ticketDefaults: { ...DEFAULTS.ticketDefaults },
     reports: {
       ...DEFAULTS.reports,
-      categories: Object.fromEntries(Object.entries(DEFAULTS.reports.categories).map(([id, category]) => [id, { ...category, subcategories: { ...category.subcategories } }])),
+      categories: Object.fromEntries(
+        Object.entries(DEFAULTS.reports.categories).map(([id, category]) => [
+          id,
+          {
+            ...category,
+            subcategories: Object.fromEntries(
+              Object.entries(category.subcategories).map(([subId, subcategory]) => [
+                subId,
+                { ...subcategory },
+              ]),
+            ),
+          },
+        ]),
+      ),
       flagRules: { ...DEFAULTS.reports.flagRules },
     },
     priorityRoles: { ...DEFAULTS.priorityRoles },
