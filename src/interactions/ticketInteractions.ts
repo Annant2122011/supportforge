@@ -708,20 +708,30 @@ async function updateMainMessage(
       return;
     }
 
+    const persistedPriority = await getPersistedTicketPriority(channel.id).catch(() => undefined);
+    const panelTopic = setField(
+      topic,
+      'status',
+      status,
+    );
+    const effectivePanelTopic = persistedPriority
+      ? setField(panelTopic, 'priority', persistedPriority)
+      : panelTopic;
+
     await withTimeout(
       message.edit({
         embeds: [
           buildTicketPanelEmbed(
             channel.guild,
             channel.name,
-            topic,
+            effectivePanelTopic,
             config,
           ),
         ],
         components:
           buildTicketPanelComponents(
             status,
-            topic,
+            effectivePanelTopic,
           ),
       }),
       DISCORD_OPERATION_TIMEOUT_MS,
