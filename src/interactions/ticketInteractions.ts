@@ -138,7 +138,7 @@ async function runChannelMutation<T>(
     });
 
   const current =
-    previous.then(() => gate);
+    previous.catch(() => undefined).then(() => gate);
 
   ticketMutationQueues.set(
     channel.id,
@@ -149,7 +149,7 @@ async function runChannelMutation<T>(
    * Wait for the previous mutation, but never let a broken Discord REST
    * request hold the entire ticket queue hostage forever.
    */
-  await previous;
+  await previous.catch(() => undefined);
 
   try {
     console.log(
