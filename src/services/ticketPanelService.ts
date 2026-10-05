@@ -14,7 +14,6 @@ import { getGuildConfig, type GuildConfig } from './configService';
 import { getPersistedTicketPriority, getPersistedTicketStatus } from './ticketPersistenceService';
 import type { TicketPriority } from './advancedSettingsService';
 import { setChannelName } from './discordChannelService';
-import { getPersistedTicketPriority } from './ticketPersistenceService';
 import {
   getField,
   getTicketStatus,
