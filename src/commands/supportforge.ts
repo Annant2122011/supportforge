@@ -492,6 +492,7 @@ export async function syncPanel(
   page = 0,
 ): Promise<void> {
   const config = await getGuildConfig(guild.id);
+  const settings = await getAdvancedSettings(guild.id);
 
   const parent = await ensureContainer(guild);
   const panel = await ensurePanelChannel(guild, parent.id);
@@ -563,7 +564,7 @@ export async function syncPanel(
       (candidate) =>
         candidate.author.id === guild.client.user?.id &&
         (
-          candidate.embeds.some((embed) => embed.title === settingsTitleForPanelCandidate(guild, config)) ||
+          candidate.embeds.some((embed) => embed.title === settings.appearance.panelTitle) ||
           candidate.components.some((row) =>
             row.type === 1 &&
             row.components.some((component) =>
@@ -596,17 +597,6 @@ export async function syncPanel(
   });
 }
 
-/*
- * The panel title is user-configurable. The fallback matcher therefore must
- * derive it from the current settings instead of depending on the historical
- * default title.
- */
-function settingsTitleForPanelCandidate(
-  _guild: Guild,
-  config: Awaited<ReturnType<typeof getGuildConfig>>,
-): string {
-  return config.appearance.panelTitle;
-}
 
 export const data =
   new SlashCommandBuilder()
