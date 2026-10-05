@@ -349,6 +349,13 @@ export async function executeTicketCommand(
         );
       }
 
+      /*
+       * Native REST does not reliably mutate the discord.js channel cache.
+       * Keep the local topic aligned with the archived state so the next
+       * command or panel lookup does not read the old closed metadata.
+       */
+      context.channel.topic = topic;
+
       await refreshTicketPanel(
         context.channel,
         topic,
