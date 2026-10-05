@@ -45,7 +45,6 @@ export function buildTicketPanelEmbed(
   const departmentId = getField(topic, 'department');
   const department = departmentId ? config.departments[departmentId] : undefined;
   const ownerId = getField(topic, 'owner');
-  const claimedBy = getField(topic, 'claimed_by');
   const claimedModerators = (claimedBy ?? '').split(',').map((id) => id.trim()).filter(Boolean);
   const priority = getField(topic, 'priority') ?? 'normal';
   const tagId = getField(topic, 'tag');
@@ -152,7 +151,7 @@ export function buildTicketPanelComponents(
     const claimedBy = getField(topic, 'claimed_by');
     const voiceControls = new ActionRowBuilder<ButtonBuilder>();
 
-    if (['open', 'claimed', 'reopened'].includes(status)) {
+    if (status === 'claimed') {
       if (voiceChannelId) {
         /*
          * An active voice session always gets an explicit close control.
