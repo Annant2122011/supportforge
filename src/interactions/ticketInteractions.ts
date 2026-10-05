@@ -44,6 +44,7 @@ import { resetPanelActivity } from '../services/panelActivityService';
 import { getAdvancedSettings, type TicketPriority } from '../services/advancedSettingsService';
 import { ensureDepartmentCategory } from '../services/departmentCategoryService';
 import { endTicketVoiceMode, startTicketVoiceMode } from '../services/voiceModeService';
+import { getUserFlagCount, isTicketCreationRestricted, recordReport } from '../services/reportService';
 
 import {
   getPersistedTicketStatus,
@@ -790,6 +791,7 @@ async function applyTicketVisibilityMode(
   const staffRoleId = getField(topic, 'staff');
   const ownerId = getField(topic, 'owner');
   const claimedBy = getField(topic, 'claimed_by');
+  const claimedModerators = (claimedBy ?? '').split(',').map((id) => id.trim()).filter(Boolean);
   const users = (getField(topic, 'users') ?? '').split(',').map((value) => value.trim()).filter(Boolean);
 
   if (!channel.guild.members.me || !ownerId) {
@@ -811,11 +813,11 @@ async function applyTicketVisibilityMode(
     await setChannelPermissionOverwrite(
       channel.id,
       staffRoleId,
-      textPermissions,
-      [],
+      mode === 'claimed' ? [] : textPermissions,
+      mode === 'claimed' ? textPermissions : [],
       0,
       mode === 'claimed'
-        ? 'Keep department moderators on claimed ticket'
+        ? 'Hide claimed ticket from unassigned department staff'
         : 'Restore department staff access to ticket',
     );
   }
@@ -827,7 +829,7 @@ async function applyTicketVisibilityMode(
   const participants = new Set<string>([
     ownerId,
     ...users,
-    ...(mode === 'claimed' && claimedBy ? [claimedBy] : []),
+    ...(mode === 'claimed' ? claimedModerators : []),
   ]);
 
   for (const userId of participants) {
