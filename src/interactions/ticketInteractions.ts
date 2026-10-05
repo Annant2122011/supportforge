@@ -3055,6 +3055,15 @@ async function showTicketHistory(
   try {
     const channel = interaction.channel as TextChannel;
     const topic = channel.topic ?? '';
+    const staff = getStaffContext(interaction, topic);
+
+    if (!staff.authorized) {
+      await interaction.editReply(
+        '❌ Ticket history is restricted to configured moderators or administrators.',
+      );
+      return;
+    }
+
     const ticketNumber = getField(topic, 'number') ?? 'unknown';
 
     const events = await getTicketAuditHistory(
