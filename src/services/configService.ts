@@ -10,12 +10,6 @@ export interface TagConfig {
   createdAt: string;
 }
 
-export interface TagConfig {
-  id: string;
-  name: string;
-  createdAt: string;
-}
-
 export interface DepartmentConfig {
   id: string;
   name: string;
