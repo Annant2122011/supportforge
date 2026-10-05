@@ -10,6 +10,7 @@ import {
 } from './advancedSettingsService';
 import { getGuildConfig } from './configService';
 import { logTicketEvent } from './auditLogService';
+import { setChannelPermissionOverwrite } from './discordChannelService';
 
 export interface StoredReport {
   id: string;
@@ -148,14 +149,19 @@ async function applyFlagRule(
     }
 
     try {
-      await channel.permissionOverwrites.edit(targetUserId, {
-        ViewChannel: false,
-        SendMessages: false,
-        ReadMessageHistory: false,
-        AddReactions: false,
-      }, {
-        reason: 'SupportForge automatic report flag restriction',
-      });
+      await setChannelPermissionOverwrite(
+        channel.id,
+        targetUserId,
+        [],
+        [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+          PermissionFlagsBits.AddReactions,
+        ],
+        1,
+        'SupportForge automatic report flag restriction',
+      );
       succeeded = true;
     } catch (error) {
       console.warn('⚠️ Could not apply report channel restriction:', error);
