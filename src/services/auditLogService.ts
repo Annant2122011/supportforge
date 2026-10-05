@@ -662,6 +662,13 @@ async function createOrRepairAuditDeveloperInfrastructure(
     'This private channel contains the raw SupportForge developer audit stream. Every durable audit event is published here. Access is granted only through the **' + AUDIT_DEVELOPER_ROLE_NAME + '** role.',
   );
 
+  /*
+   * A newly provisioned or empty developer channel must contain the retained
+   * historical audit stream as well as future events. The helper is a no-op
+   * when recent developer audit entries already exist.
+   */
+  await backfillDeveloperAuditChannel(guild, channel);
+
   return { role, channel };
 }
 
