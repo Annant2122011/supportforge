@@ -309,14 +309,14 @@ async function discordRequest<T = unknown>(
     });
 
   const current =
-    previous.then(() => gate);
+    previous.catch(() => undefined).then(() => gate);
 
   channelRequestQueues.set(
     channelId,
     current,
   );
 
-  await previous;
+  await previous.catch(() => undefined);
 
   try {
     for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt += 1) {
