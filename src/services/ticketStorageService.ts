@@ -242,8 +242,18 @@ export async function ensureOptionalStatusCategory(
    * Reusing an unrelated category based solely on its display name could
    * expose private tickets to the wrong users.
    */
-  const candidates: CategoryChannel[] = [];
-  const suffix = candidates.length + 1;
+  /*
+   * The visible category name is not ownership proof. A missing persisted ID
+   * means SupportForge must create a fresh optional-status bucket.
+   */
+  const existingNames = [...guild.channels.cache.values()]
+    .filter(
+      (channel): channel is CategoryChannel =>
+        channel.type === ChannelType.GuildCategory &&
+        channel.name.toLowerCase().startsWith(config.name.toLowerCase()),
+    );
+
+  const suffix = existingNames.length + 1;
   const name =
     suffix === 1
       ? config.name
