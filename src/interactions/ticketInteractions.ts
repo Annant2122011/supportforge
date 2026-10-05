@@ -1780,7 +1780,10 @@ async function transition(
      * tickets and other ticket metadata operations.
      */
     if (newStatus === 'claimed') {
+      await setChannelTopic(channel.id, newTopic, 'Persist SupportForge multi-moderator claim metadata').catch(() => undefined);
+      channel.topic = newTopic;
       await applyTicketVisibilityMode(channel, newTopic, 'claimed');
+      await syncTicketVoiceParticipants(interaction.guild!, newTopic);
     } else if (newStatus === 'open' || newStatus === 'pending' || newStatus === 'reopened') {
       await applyTicketVisibilityMode(channel, newTopic, 'unclaimed', getField(oldTopic, 'claimed_by'));
     }
@@ -2657,7 +2660,6 @@ async function handleReportCategorySelection(interaction: StringSelectMenuIntera
 }
 
 async function handleReportSubcategorySelection(interaction: StringSelectMenuInteraction): Promise<void> {
-  await interaction.deferUpdate();
   const parts = interaction.customId.split(':');
   const targetId = parts[3] ?? '';
   const categoryId = parts[4] ?? '';
@@ -3085,11 +3087,9 @@ async function handleTicketVoiceStart(interaction: ButtonInteraction): Promise<v
     return;
   }
   const claimedBy = getField(topic, 'claimed_by');
-  const isAdministrator = Boolean(
-    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator),
-  );
-  if (!claimedBy || (!isAdministrator && interaction.user.id !== claimedBy)) {
-    await replyError(interaction, '❌ Only the claiming moderator or an administrator can start voice mode.');
+  const claimedIds = (claimedBy ?? '').split(',').filter(Boolean);
+  if (!claimedIds.length || !claimedIds.includes(interaction.user.id)) {
+    await replyError(interaction, '❌ Only an assigned moderator can start voice mode.');
     return;
   }
   if (!claimedBy) {
@@ -3105,7 +3105,7 @@ async function handleTicketVoiceStart(interaction: ButtonInteraction): Promise<v
       embeds: [
         new EmbedBuilder()
           .setTitle('🎙️ Private Voice Mode Active')
-          .setDescription('A private voice room has been created for this ticket. Only the ticket owner and assigned moderator can connect. The room has a **2-person limit** and supports screen sharing.')
+          .setDescription('A private voice room has been created for this ticket. Only the ticket owner and assigned moderators can connect. The room capacity is sized for the configured moderator limit plus the customer, and screen sharing is enabled.')
           .addFields({ name: 'Voice channel', value: result.voiceChannel.toString() })
           .setTimestamp(),
       ],
@@ -3125,7 +3125,7 @@ async function handleTicketVoiceStart(interaction: ButtonInteraction): Promise<v
         actor: interaction.user.tag,
         actorId: interaction.user.id,
         actorName: interaction.user.tag,
-        detail: 'Created private voice channel ' + result.voiceChannel.name + ' for the owner and assigned moderator. User limit=2; screen sharing enabled.',
+        detail: 'Created private voice channel ' + result.voiceChannel.name + ' for the owner and assigned moderators. Capacity follows the configured moderator limit plus the customer; screen sharing enabled.',
       });
     }
   } catch (error) {
@@ -3148,11 +3148,9 @@ async function handleTicketVoiceEnd(interaction: ButtonInteraction): Promise<voi
     return;
   }
   const claimedBy = getField(topic, 'claimed_by');
-  const isAdministrator = Boolean(
-    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator),
-  );
-  if (!claimedBy || (!isAdministrator && interaction.user.id !== claimedBy)) {
-    await replyError(interaction, '❌ Only the claiming moderator or an administrator can end voice mode.');
+  const claimedIds = (claimedBy ?? '').split(',').filter(Boolean);
+  if (!claimedIds.length || !claimedIds.includes(interaction.user.id)) {
+    await replyError(interaction, '❌ Only an assigned moderator can end voice mode.');
     return;
   }
   try {
@@ -3199,10 +3197,10 @@ async function handleTicketVoiceJoin(interaction: ButtonInteraction): Promise<vo
     await interaction.editReply('❌ No active private voice session was found for this ticket.');
     return;
   }
-  const allowed = interaction.user.id === ownerId || interaction.user.id === claimedBy ||
-    Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.Administrator));
+  const claimedIds = (claimedBy ?? '').split(',').filter(Boolean);
+  const allowed = interaction.user.id === ownerId || claimedIds.includes(interaction.user.id);
   if (!allowed) {
-    await interaction.editReply('❌ Only the ticket owner and assigned moderator can use this private voice session.');
+    await interaction.editReply('❌ Only the ticket owner and assigned moderators can use this private voice session.');
     return;
   }
   const voiceChannel = interaction.guild.channels.cache.get(voiceId);
