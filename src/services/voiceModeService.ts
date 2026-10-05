@@ -6,7 +6,7 @@ import {
   type VoiceChannel,
 } from 'discord.js';
 
-import { setChannelTopic } from './discordChannelService';
+import { setChannelPermissionOverwrites, setChannelTopic, setChannelUserLimit } from './discordChannelService';
 import { getField, removeField, setField } from './ticketStateService';
 import { getTicketChannelName, queueTicketChannelRename } from './ticketPanelService';
 import type { TicketPriority } from './advancedSettingsService';
@@ -172,17 +172,22 @@ export async function syncTicketVoiceParticipants(
 
   const settings = await getAdvancedSettings(guild.id);
   const staffRoleId = getField(topic, 'staff');
-  await voiceChannel.permissionOverwrites.set(
+  await setChannelPermissionOverwrites(
+    voiceChannel.id,
     participantOverwrites(guild, ownerId, moderatorIds, staffRoleId),
+    new Set([guild.roles.everyone.id]),
     'Synchronize SupportForge voice participants',
   ).catch((error) => {
     console.warn('⚠️ Could not synchronize SupportForge voice participants:', error);
   });
 
-  await voiceChannel.setUserLimit(settings.ticketDefaults.maxClaimedModerators + 1)
-    .catch((error) => {
-      console.warn('⚠️ Could not synchronize SupportForge voice capacity:', error);
-    });
+  await setChannelUserLimit(
+    voiceChannel.id,
+    settings.ticketDefaults.maxClaimedModerators + 1,
+    'Synchronize SupportForge voice capacity',
+  ).catch((error) => {
+    console.warn('⚠️ Could not synchronize SupportForge voice capacity:', error);
+  });
 }
 
 export async function endTicketVoiceMode(
