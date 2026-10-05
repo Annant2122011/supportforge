@@ -723,6 +723,30 @@ export async function getOrCreateAuditChannel(
 ): Promise<TextChannel> {
   const existing = await findAuditChannel(guild);
   if (existing) {
+    /*
+     * Reconcile staff access on every repair. Newly added department staff
+     * otherwise cannot read the existing audit channel until it is recreated.
+     */
+    const currentConfig = await getGuildConfig(guild.id);
+    const currentStaffRoleIds = new Set(
+      Object.values(currentConfig.departments)
+        .map((department) => department.staffRoleId)
+        .filter((id): id is string => Boolean(id)),
+    );
+
+    for (const roleId of currentStaffRoleIds) {
+      await existing.permissionOverwrites.edit(roleId, {
+        ViewChannel: true,
+        ReadMessageHistory: true,
+        SendMessages: false,
+      }).catch((error) => {
+        console.warn(
+          `⚠️ Could not synchronize audit access for staff role ${roleId}:`,
+          error,
+        );
+      });
+    }
+
     if (existing.name !== AUDIT_NAME) {
       await existing.setName(AUDIT_NAME, 'SupportForge general audit channel normalization').catch(() => undefined);
     }
