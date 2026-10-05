@@ -151,6 +151,20 @@ async function ensureContainer(guild: Guild) {
       channel?.type ===
       ChannelType.GuildCategory
     ) {
+      await channel.permissionOverwrites.edit(guild.roles.everyone.id, {
+        ViewChannel: true,
+        ReadMessageHistory: true,
+        SendMessages: false,
+      });
+      await channel.permissionOverwrites.edit(bot.id, {
+        ViewChannel: true,
+        SendMessages: true,
+        ReadMessageHistory: true,
+        ManageChannels: true,
+        ManageMessages: true,
+        EmbedLinks: true,
+        AttachFiles: true,
+      });
       return channel;
     }
   }
