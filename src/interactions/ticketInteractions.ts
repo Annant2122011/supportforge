@@ -338,7 +338,10 @@ function isAdmin(
   return Boolean(
     interaction.memberPermissions?.has(
       PermissionFlagsBits.Administrator,
-    ),
+    ) ||
+      interaction.memberPermissions?.has(
+        PermissionFlagsBits.ManageGuild,
+      ),
   );
 }
 
