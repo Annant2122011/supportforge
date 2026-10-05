@@ -253,12 +253,39 @@ async function ensureTranscriptChannel(
     if (
       saved?.type === ChannelType.GuildText
     ) {
+      if (saved.parentId !== parentId) {
+        await saved.setParent(parentId, { lockPermissions: false }).catch((error) => {
+          throw new Error(
+            'SupportForge transcript channel could not be placed in its managed category.',
+            { cause: error },
+          );
+        });
+      }
+
+      await saved.permissionOverwrites.edit(guild.roles.everyone.id, {
+        ViewChannel: false,
+        SendMessages: false,
+        ReadMessageHistory: false,
+      });
+      await saved.permissionOverwrites.edit(bot.id, {
+        ViewChannel: true,
+        SendMessages: true,
+        ReadMessageHistory: true,
+        AttachFiles: true,
+        EmbedLinks: true,
+      });
+
       for (const roleId of staffRoleIds) {
         await saved.permissionOverwrites.edit(roleId, {
           ViewChannel: true,
           ReadMessageHistory: true,
           SendMessages: false,
-        }).catch(() => undefined);
+        }).catch((error) => {
+          console.warn(
+            '⚠️ Could not synchronize transcript staff access for ' + roleId + ':',
+            error,
+          );
+        });
       }
 
       await ensureChannelPurposeMessage(
