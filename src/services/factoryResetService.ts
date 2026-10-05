@@ -18,6 +18,8 @@ const KNOWN_NAMES = new Set([
   'support-panel',
   '📄 support-transcripts',
   '📒 supportforge-audit-log',
+  'audit-log-general',
+  'audit-log-dev',
   'supportforge-settings',
 ]);
 
@@ -38,6 +40,7 @@ const TOPIC_PREFIXES = [
   'supportforge:panel',
   'supportforge:transcript',
   'supportforge:audit',
+  'supportforge:audit-dev',
   'supportforge:settings',
 ];
 
@@ -94,6 +97,7 @@ export async function performFactoryReset(guild: Guild, accumulateAuditData = fa
         config.panelChannelId,
         config.transcriptChannelId,
         config.auditChannelId,
+        config.auditDevChannelId,
         settings.settingsChannelId,
       ].filter((id): id is string => Boolean(id)),
     );
@@ -117,7 +121,11 @@ export async function performFactoryReset(guild: Guild, accumulateAuditData = fa
     ].filter(
       (role) =>
         !role.managed &&
-        role.name.toLowerCase().startsWith('supportforge •'),
+        (
+          role.name.toLowerCase().startsWith('supportforge •') ||
+          role.name.toLowerCase() === 'developer-mode audit-log' ||
+          role.id === config.auditDeveloperRoleId
+        ),
     );
 
     for (const role of managedPriorityRoles) {
