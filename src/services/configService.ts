@@ -211,9 +211,6 @@ export async function allocateTicketNumber(guildId: string): Promise<number> {
   await updateGuildConfig(guildId, (config) => {
     allocated = config.nextTicketNumber;
     config.nextTicketNumber += 1;
-    if (config.nextTicketNumber > 999999) {
-      config.nextTicketNumber = 1000;
-    }
   });
 
   return allocated;
