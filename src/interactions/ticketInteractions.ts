@@ -3991,11 +3991,8 @@ async function handlePanelButton(
       }
       await renderRoutingTagSelector(interaction, 0);
       return;
-    } else {
-      if (
-        id === 'ticket:panel:note' &&
-        !isPremiumOrHigher(await getTier(interaction.guild!.id))
-      ) {
+    } else if (id === 'ticket:panel:note') {
+      if (!isPremiumOrHigher(await getTier(interaction.guild!.id))) {
         await interaction.reply({
           content: '🔒 Internal notes are available in Premium/Pro demo mode.',
           flags: MessageFlags.Ephemeral,
@@ -4047,6 +4044,11 @@ async function handlePanelButton(
         error,
       );
     }
+  } else {
+    await replyError(
+      interaction,
+      '❌ This SupportForge ticket control is no longer available. Please refresh the ticket panel.',
+    );
   }
 }
 
