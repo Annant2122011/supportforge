@@ -134,6 +134,35 @@ export async function startTicketVoiceMode(
   return { voiceChannel, topic: newTopic };
 }
 
+export async function syncTicketVoiceParticipants(
+  guild: Guild,
+  topic: string,
+): Promise<void> {
+  const voiceId = getField(topic, 'voice_channel_id');
+  const ownerId = getField(topic, 'owner');
+  const moderatorIds = (getField(topic, 'claimed_by') ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+  if (!voiceId || !ownerId || !moderatorIds.length) return;
+
+  const voiceChannel = guild.channels.cache.get(voiceId);
+  if (voiceChannel?.type !== ChannelType.GuildVoice) return;
+
+  const settings = await getAdvancedSettings(guild.id);
+  await voiceChannel.permissionOverwrites.set(
+    participantOverwrites(guild, ownerId, moderatorIds),
+    'Synchronize SupportForge voice participants',
+  ).catch((error) => {
+    console.warn('⚠️ Could not synchronize SupportForge voice participants:', error);
+  });
+
+  await voiceChannel.setUserLimit(settings.ticketDefaults.maxClaimedModerators + 1)
+    .catch((error) => {
+      console.warn('⚠️ Could not synchronize SupportForge voice capacity:', error);
+    });
+}
+
 export async function endTicketVoiceMode(
   guild: Guild,
   ticketChannel: TextChannel,
