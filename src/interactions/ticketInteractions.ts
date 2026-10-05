@@ -20,6 +20,8 @@ import {
 import {
   allocateTicketNumber,
   getGuildConfig,
+  getTier,
+  isPremiumOrHigher,
   type DepartmentConfig,
   updateGuildConfig,
 } from '../services/configService';
@@ -3296,6 +3298,13 @@ async function applyTicketPriority(
 ): Promise<void> {
   await interaction.deferUpdate();
 
+  if (interaction.guild && !isPremiumOrHigher(await getTier(interaction.guild.id))) {
+    await interaction.editReply(
+      '🔒 Ticket priority controls are available in Premium/Pro demo mode.',
+    );
+    return;
+  }
+
   if (
     !interaction.guild ||
     interaction.channel?.type !== ChannelType.GuildText
@@ -3655,6 +3664,14 @@ async function handlePanelButton(
     if (!(await safeDeferReply(interaction))) {
       return;
     }
+
+    if (!isPremiumOrHigher(await getTier(interaction.guild!.id))) {
+      await interaction.editReply(
+        '🔒 Ticket priority controls are available in Premium/Pro demo mode.',
+      );
+      return;
+    }
+
     await showPrioritySelector(interaction);
     return;
   }
