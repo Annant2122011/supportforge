@@ -870,8 +870,6 @@ const AUDIT_REVERT_CONFIRM_CUSTOM_ID = 'sf:audit:revert:confirm';
 const AUDIT_DEVELOPER_CUSTOM_ID = 'sf:audit:developer';
 const AUDIT_DEVELOPER_ON_CUSTOM_ID = 'sf:audit:developer:on';
 const AUDIT_DEVELOPER_OFF_CUSTOM_ID = 'sf:audit:developer:off';
-const AUDIT_DEVELOPER_NOW_CUSTOM_ID = 'sf:audit:developer:now';
-const AUDIT_DEVELOPER_PAST_NOW_CUSTOM_ID = 'sf:audit:developer:past-now';
 const AUDIT_DEVELOPER_PAGE_PREFIX = 'sf:audit:developer:page:';
 const AUDIT_QUICK_SUMMARY_CUSTOM_ID = 'sf:audit:quick-summary';
 const AUDIT_COLLAPSE_CUSTOM_ID = 'sf:audit:collapse-panel';
@@ -1126,12 +1124,6 @@ function formatAuditDate(timestamp: string): string {
   return Number.isNaN(date.getTime()) ? timestamp.slice(0, 10) : date.toISOString().slice(0, 10);
 }
 
-type DeveloperViewMode = 'now' | 'past_and_now';
-
-function developerModeLabel(mode: DeveloperViewMode): string {
-  return mode === 'now' ? 'Now only' : 'Past and now';
-}
-
 function developerCategoryLabel(category: PersistedAuditEntry['category']): string {
   return category === 'ticket'
     ? '🎫 Ticket'
@@ -1150,20 +1142,12 @@ async function buildPrivateDeveloperAuditPage(
 }> {
   const current = await load();
   const store = getGuildStore(current, guild.id);
-  const mode = store.developerViewModes[userId] ?? 'past_and_now';
-  const startedAt = store.developerViewStartedAt[userId];
-
+  /*
+   * Developer audit is one continuous stream. Every moderator who enables
+   * Developer View sees the retained historical audit records plus new records
+   * written from that point onward. There is intentionally no Past/Now mode.
+   */
   let events = store.events.slice();
-
-  if (mode === 'now' && startedAt) {
-    const startedTimestamp = Date.parse(startedAt);
-    if (Number.isFinite(startedTimestamp)) {
-      events = events.filter(
-        (event) => Date.parse(event.timestamp) >= startedTimestamp,
-      );
-    }
-  }
-
   events.reverse();
 
   const eventsPerPage = 5;
@@ -1181,12 +1165,8 @@ async function buildPrivateDeveloperAuditPage(
     new EmbedBuilder()
       .setTitle('🛠️ Private Developer Audit View')
       .setDescription(
-        '**Developer view mode:** ' + developerModeLabel(mode) + '\n\n' +
-        (
-          mode === 'now'
-            ? 'Showing audit activity recorded from the moment this view was enabled. Earlier developer history is excluded.'
-            : 'Showing the complete retained audit history, including ticket, settings, and system activity. New records are included when this view is refreshed.'
-        ),
+        '**Developer view:** Continuous history + live developer audit stream.\n\n' +
+        'Showing the complete retained audit history, including ticket, settings, and system activity. New records are written to the same **audit-log-dev** channel and appear here when the view is refreshed.',
       )
       .addFields(
         {
@@ -1218,9 +1198,7 @@ async function buildPrivateDeveloperAuditPage(
       new EmbedBuilder()
         .setTitle('📭 No matching developer audit events')
         .setDescription(
-          mode === 'now'
-            ? 'No audit events have been recorded since you enabled **Now only**.'
-            : 'No retained audit events are currently available.',
+          'No retained audit events are currently available.',
         )
         .setFooter({ text: 'SupportForge • Developer Audit' })
         .setTimestamp(),
@@ -2162,8 +2140,6 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
     interaction.customId === AUDIT_DEVELOPER_CUSTOM_ID ||
     interaction.customId === AUDIT_DEVELOPER_ON_CUSTOM_ID ||
     interaction.customId === AUDIT_DEVELOPER_OFF_CUSTOM_ID ||
-    interaction.customId === AUDIT_DEVELOPER_NOW_CUSTOM_ID ||
-    interaction.customId === AUDIT_DEVELOPER_PAST_NOW_CUSTOM_ID ||
     interaction.customId.startsWith(AUDIT_DEVELOPER_PAGE_PREFIX)
   ) {
     const isDeveloperPage =
@@ -2257,69 +2233,37 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
     }
 
     if (interaction.customId === AUDIT_DEVELOPER_CUSTOM_ID) {
-      const selectedMode =
-        store.developerViewModes[interaction.user.id] ?? null;
-
       await interaction.editReply({
         content:
           '🛠️ **Developer View Options**\n\n' +
-          'Choose what historical developer information this moderator should see. The choice is private to you, and the durable audit database keeps recording events regardless of this setting.',
+          'One continuous developer audit stream is used. When enabled, you receive the retained history already recorded plus all new developer audit events. There are no **Now Only**, **Past and Now**, or split-history modes.',
         components: [
           new ActionRowBuilder<ButtonBuilder>().addComponents(
             new ButtonBuilder()
-              .setCustomId(AUDIT_DEVELOPER_NOW_CUSTOM_ID)
-              .setLabel('Now Only')
-              .setEmoji('🕐')
-              .setStyle(
-                selectedMode === 'now'
-                  ? ButtonStyle.Primary
-                  : ButtonStyle.Secondary,
-              ),
-            new ButtonBuilder()
-              .setCustomId(AUDIT_DEVELOPER_PAST_NOW_CUSTOM_ID)
-              .setLabel('Past and Now')
-              .setEmoji('🗂️')
-              .setStyle(
-                selectedMode === 'past_and_now'
-                  ? ButtonStyle.Primary
-                  : ButtonStyle.Secondary,
-              ),
-            new ButtonBuilder()
-              .setCustomId(AUDIT_DEVELOPER_OFF_CUSTOM_ID)
-              .setLabel('Disable')
-              .setEmoji('🛑')
-              .setStyle(ButtonStyle.Danger)
-              .setDisabled(!isEnabled),
+              .setCustomId(
+                isEnabled
+                  ? AUDIT_DEVELOPER_OFF_CUSTOM_ID
+                  : AUDIT_DEVELOPER_ON_CUSTOM_ID,
+              )
+              .setLabel(isEnabled ? 'Disable Developer View' : 'Enable Developer View')
+              .setEmoji(isEnabled ? '🛑' : '🛠️')
+              .setStyle(isEnabled ? ButtonStyle.Danger : ButtonStyle.Primary),
           ),
         ],
       });
       return true;
     }
 
-    if (interaction.customId === AUDIT_DEVELOPER_NOW_CUSTOM_ID) {
+    if (interaction.customId === AUDIT_DEVELOPER_ON_CUSTOM_ID) {
       if (!isEnabled) {
         store.developerViewers.push(interaction.user.id);
       }
-      await member.roles.add(infrastructure.role, 'SupportForge Developer Audit Mode enabled').catch((error) => {
+      await member.roles.add(
+        infrastructure.role,
+        'SupportForge Developer Audit Mode enabled',
+      ).catch((error) => {
         throw new Error('Could not grant the developer-mode audit-log role: ' + String(error));
       });
-      store.developerViewModes[interaction.user.id] = 'now';
-      store.developerViewStartedAt[interaction.user.id] =
-        new Date().toISOString();
-      await persist();
-    } else if (
-      interaction.customId === AUDIT_DEVELOPER_PAST_NOW_CUSTOM_ID ||
-      interaction.customId === AUDIT_DEVELOPER_ON_CUSTOM_ID
-    ) {
-      if (!isEnabled) {
-        store.developerViewers.push(interaction.user.id);
-      }
-      await member.roles.add(infrastructure.role, 'SupportForge Developer Audit Mode enabled').catch((error) => {
-        throw new Error('Could not grant the developer-mode audit-log role: ' + String(error));
-      });
-      store.developerViewModes[interaction.user.id] = 'past_and_now';
-      store.developerViewStartedAt[interaction.user.id] ??=
-        new Date().toISOString();
       await persist();
     } else if (interaction.customId === AUDIT_DEVELOPER_OFF_CUSTOM_ID) {
       await member.roles.remove(infrastructure.role, 'SupportForge Developer Audit Mode disabled').catch((error) => {
@@ -2339,8 +2283,6 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       return true;
     }
 
-    const selectedMode =
-      store.developerViewModes[interaction.user.id] ?? 'past_and_now';
     const page = await buildPrivateDeveloperAuditPage(
       interaction.guild,
       interaction.user.id,
@@ -2350,14 +2292,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
     await interaction.editReply({
       content:
         '🛠️ **Developer View enabled for you only.**\n' +
-        '**Mode:** ' +
-        developerModeLabel(selectedMode) +
-        '\n\n' +
-        (
-          selectedMode === 'now'
-            ? 'Only audit activity recorded from the moment you enabled this view is shown.'
-            : 'All retained audit history is available through the page controls, and future records appear when the view is refreshed.'
-        ),
+        'The same **audit-log-dev** channel contains the retained history already recorded and the new developer audit events from now onward. No Past/Now mode is used.',
       embeds: page.embeds,
       components: [
         ...page.components,
