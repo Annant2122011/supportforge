@@ -2348,6 +2348,22 @@ async function closeTicket(
     );
 
     /*
+     * Persist transcript/closure metadata in the channel topic as well as the
+     * local lifecycle store. Reopen and retention use this metadata to find the
+     * previous transcript and calculate eligibility after a restart.
+     */
+    await setChannelTopic(
+      channel.id,
+      closedTopic,
+      'SupportForge persist closed ticket metadata',
+    ).catch((error) => {
+      console.warn(
+        `⚠️ Could not persist closed ticket metadata in channel topic; local status remains authoritative for ticket #${ticketNumber}:`,
+        error,
+      );
+    });
+
+    /*
      * The dedicated close flow does not use transition('closed'), so it must
      * explicitly move the ticket into the configured Closed storage bucket.
      * Without this, closed tickets remain in an active department category and
