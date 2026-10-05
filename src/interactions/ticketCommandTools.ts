@@ -1044,7 +1044,12 @@ export async function executeTicketCommand(
           priority,
         ),
         `SupportForge priority changed to ${level}`,
-      );
+      ).catch((error) => {
+        console.warn(
+          `⚠️ Ticket #${context.ticketNumber} priority was saved, but its channel rename was deferred:`,
+          error,
+        );
+      });
 
       await audit(
         interaction,
