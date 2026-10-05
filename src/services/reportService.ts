@@ -114,22 +114,32 @@ async function applyFlagRule(
   targetUserId: string,
   rule: FlagRule,
   sourceChannelId?: string,
-): Promise<void> {
+): Promise<boolean> {
   const current = await load();
   const store = getGuildStore(current, guild.id);
   const applied = store.appliedRules[targetUserId] ?? [];
 
-  if (applied.includes(rule.id)) return;
+  if (applied.includes(rule.id)) return true;
+
+  let succeeded = false;
 
   if (rule.action === 'tickets') {
     if (!store.ticketRestrictedUsers.includes(targetUserId)) {
       store.ticketRestrictedUsers.push(targetUserId);
     }
+    succeeded = true;
   } else if (rule.action === 'channel') {
     const channelId = rule.channelId ?? sourceChannelId;
     const channel = channelId ? guild.channels.cache.get(channelId) : undefined;
 
-    if (channel && 'permissionOverwrites' in channel) {
+    if (!channel || !('permissionOverwrites' in channel)) {
+      console.warn(
+        '⚠️ Report channel restriction could not run because the target channel was not found.',
+      );
+      return false;
+    }
+
+    try {
       await channel.permissionOverwrites.edit(targetUserId, {
         ViewChannel: false,
         SendMessages: false,
@@ -137,21 +147,26 @@ async function applyFlagRule(
         AddReactions: false,
       }, {
         reason: 'SupportForge automatic report flag restriction',
-      }).catch((error) => {
-        console.warn('⚠️ Could not apply report channel restriction:', error);
       });
+      succeeded = true;
+    } catch (error) {
+      console.warn('⚠️ Could not apply report channel restriction:', error);
+      return false;
     }
   } else if (rule.action === 'server') {
-    const member = await guild.members.fetch(targetUserId).catch(() => null);
-    if (member) {
-      await guild.members.ban(member, {
+    try {
+      await guild.members.ban(targetUserId, {
         deleteMessageSeconds: 0,
         reason: 'SupportForge automatic report flag threshold reached',
-      }).catch((error) => {
-        console.warn('⚠️ Could not apply automatic SupportForge server ban:', error);
       });
+      succeeded = true;
+    } catch (error) {
+      console.warn('⚠️ Could not apply automatic SupportForge server ban:', error);
+      return false;
     }
   }
+
+  if (!succeeded) return false;
 
   applied.push(rule.id);
   store.appliedRules[targetUserId] = applied;
@@ -173,6 +188,8 @@ async function applyFlagRule(
         '>.',
     }).catch(() => undefined);
   }
+
+  return true;
 }
 
 export async function recordReport(
@@ -242,8 +259,9 @@ export async function recordReport(
       if (flagCount >= rule.threshold) {
         const alreadyApplied = (store.appliedRules[input.targetUserId] ?? []).includes(rule.id);
         if (!alreadyApplied) {
-          await applyFlagRule(guild, input.targetUserId, rule, input.channelId);
-          appliedRules.push(rule);
+          if (await applyFlagRule(guild, input.targetUserId, rule, input.channelId)) {
+            appliedRules.push(rule);
+          }
         }
       }
     }
