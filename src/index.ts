@@ -57,6 +57,7 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildVoiceStates,
   ],
   rest: {
     timeout: 15_000,
@@ -382,6 +383,13 @@ client.on('roleDelete', async (role) => {
 });
 
 
+function formatExactMessageContent(content: string): string {
+  const runs = content.match(new RegExp(bt + '+', 'g')) ?? [];
+  const longestRun = runs.reduce((max, run) => Math.max(max, run.length), 0);
+  const fence = bt.repeat(Math.max(3, longestRun + 1));
+  return fence + '\n' + content + '\n' + fence;
+}
+
 client.on('messageCreate', async (message) => {
   if (
     !message.guild ||
@@ -441,13 +449,17 @@ client.on('messageCreate', async (message) => {
       );
 
       try {
+        const exactContent = message.content;
+        const description = exactContent
+          ? 'This ticket is **' + status + '**, so your message was removed. The exact text you attempted to send is preserved below, word-for-word. You do not need to retype it.\\n\\n' + formatExactMessageContent(exactContent)
+          : 'This ticket is **' + status + '**, so your message was removed. The attempted message contained no text content.';
         await message.channel.send({
+          allowedMentions: { parse: [] },
           embeds: [
             new EmbedBuilder()
-              .setTitle('🤖 SupportForge')
-              .setDescription(
-                'This is not an error. The ticket is closed, so you cannot send any messages.',
-              )
+              .setTitle('🤖 SupportForge • Message Preserved')
+              .setDescription(description)
+              .setFooter({ text: 'Read-only reproduction of the exact text you attempted to send.' })
               .setTimestamp(),
           ],
         });
