@@ -347,7 +347,7 @@ export async function isSupportForgeManagedChannel(
     return true;
   }
 
-/*
+  /*
    * Names and parent-category membership are not ownership proof. An
    * administrator may place an unrelated channel inside a SupportForge
    * category, and that must not make the channel part of SupportForge's
@@ -355,6 +355,8 @@ export async function isSupportForgeManagedChannel(
    *
    * Ownership is established by a SupportForge topic or an explicitly
    * persisted resource ID only.
+   */
+  return false;
 }
 
 type DiscordAuditTarget =
