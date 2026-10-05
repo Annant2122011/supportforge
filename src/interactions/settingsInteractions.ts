@@ -947,20 +947,121 @@ async function showDepartmentManager(interaction: SettingsViewInteraction, depar
   ]);
 }
 
-async function showTagManager(interaction: SettingsViewInteraction, departmentId: string): Promise<void> {
+async function showTagManager(
+  interaction: SettingsViewInteraction,
+  departmentId: string,
+  page = 0,
+): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
   const d = config.departments[departmentId];
-  if (!d) { await reject(interaction, '❌ Department not found.'); return; }
-  const tags = Object.values(d.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
-  await renderSettingsView(interaction, [
-    new EmbedBuilder().setTitle('🏷️ Tags • ' + d.name).setDescription(tags.length ? 'Select a tag to edit or remove it.' : 'No tags configured.'),
-  ], [
-    ...(tags.length ? [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-      new StringSelectMenuBuilder().setCustomId('sf:settings:tag:select:' + d.id).setPlaceholder('Choose a tag').addOptions(tags.slice(0, 25).map((t) => ({ label: t.name.slice(0, 100), value: t.id, description: 'Subcategory of ' + d.name }))),
-    )] : []),
-    new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setCustomId('sf:settings:department:manage:' + d.id).setLabel('Back to Department').setStyle(ButtonStyle.Secondary)),
-  ]);
+  if (!d) {
+    await reject(interaction, '❌ Department not found.');
+    return;
+  }
+
+  const tags = Object.values(d.tags ?? {}).sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
+
+  if (!tags.length) {
+    await renderSettingsView(
+      interaction,
+      [new EmbedBuilder()
+        .setTitle('🏷️ Tags • ' + d.name)
+        .setDescription('No tags configured.')],
+      [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId('sf:settings:department:manage:' + d.id)
+            .setLabel('Back to Department')
+            .setStyle(ButtonStyle.Secondary),
+        ),
+      ],
+    );
+    return;
+  }
+
+  const pageSize = 25;
+  const pageCount = Math.max(1, Math.ceil(tags.length / pageSize));
+  const safePage = Math.min(Math.max(page, 0), pageCount - 1);
+  const visible = tags.slice(
+    safePage * pageSize,
+    (safePage + 1) * pageSize,
+  );
+
+  const components: Array<
+    ActionRowBuilder<StringSelectMenuBuilder> |
+    ActionRowBuilder<ButtonBuilder>
+  > = [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('sf:settings:tag:select:' + d.id)
+        .setPlaceholder('Choose a tag')
+        .addOptions(
+          visible.map((t) => ({
+            label: t.name.slice(0, 100),
+            value: t.id,
+            description: 'Subcategory of ' + d.name,
+          })),
+        ),
+    ),
+  ];
+
+  if (pageCount > 1) {
+    components.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId('sf:settings:tag:manage-page:' + d.id + ':' + (safePage - 1))
+          .setLabel('Previous')
+          .setEmoji('⬅️')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(safePage === 0),
+        new ButtonBuilder()
+          .setCustomId('sf:settings:tag:manage-page:' + d.id + ':' + safePage)
+          .setLabel('Page ' + (safePage + 1) + ' / ' + pageCount)
+          .setEmoji('📄')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(true),
+        new ButtonBuilder()
+          .setCustomId('sf:settings:tag:manage-page:' + d.id + ':' + (safePage + 1))
+          .setLabel('Next')
+          .setEmoji('➡️')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(safePage >= pageCount - 1),
+      ),
+    );
+  }
+
+  components.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId('sf:settings:department:manage:' + d.id)
+        .setLabel('Back to Department')
+        .setStyle(ButtonStyle.Secondary),
+    ),
+  );
+
+  await renderSettingsView(
+    interaction,
+    [new EmbedBuilder()
+      .setTitle('🏷️ Tags • ' + d.name)
+      .setDescription(
+        'Select a tag to edit or remove it.' +
+        (pageCount > 1
+          ? '\nShowing tags ' +
+            (safePage * pageSize + 1) +
+            '–' +
+            Math.min((safePage + 1) * pageSize, tags.length) +
+            ' of ' +
+            tags.length +
+            '.'
+          : ''),
+      )],
+    components,
+  );
 }
+
+
 
 async function showDepartments(interaction: SettingsViewInteraction): Promise<void> {
   await showTags(interaction);
@@ -1448,6 +1549,18 @@ export async function handleSettingsInteraction(
       await openModal(interaction, 'sf:settings:modal:tag:add:' + departmentId, 'Add Tag', [
         new TextInputBuilder().setCustomId('name').setLabel('Tag name').setPlaceholder('Billing, Refund, Chargeback').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
       ]);
+      return true;
+    }
+
+    if (id.startsWith('sf:settings:tag:manage-page:')) {
+      const parts = id.split(':');
+      const departmentId = parts[5] ?? '';
+      const page = Number(parts[6] ?? '0');
+      if (!Number.isInteger(page)) {
+        await reject(interaction, '❌ Invalid tag page.');
+        return true;
+      }
+      await showTagManager(interaction, departmentId, page);
       return true;
     }
 
