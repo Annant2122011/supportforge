@@ -3287,7 +3287,62 @@ async function handlePanelButton(
     }
 
     try {
-      await syncPanel(interaction.guild, page);
+      const config = await getGuildConfig(interaction.guild.id);
+      const departments = Object.values(config.departments).sort((a, b) =>
+        a.name.localeCompare(b.name),
+      );
+      const departmentsPerPage = departments.length > 20 ? 20 : 25;
+      const pageCount = Math.max(
+        1,
+        Math.ceil(departments.length / departmentsPerPage),
+      );
+      const safePage = Math.min(page, pageCount - 1);
+      const visibleDepartments = departments.slice(
+        safePage * departmentsPerPage,
+        (safePage + 1) * departmentsPerPage,
+      );
+
+      const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+      for (let i = 0; i < visibleDepartments.length; i += 5) {
+        rows.push(
+          new ActionRowBuilder<ButtonBuilder>().addComponents(
+            visibleDepartments.slice(i, i + 5).map((department) =>
+              new ButtonBuilder()
+                .setCustomId('ticket:create:' + department.id)
+                .setLabel(department.name.slice(0, 80))
+                .setEmoji('🎫')
+                .setStyle(ButtonStyle.Primary),
+            ),
+          ),
+        );
+      }
+
+      if (pageCount > 1) {
+        rows.push(
+          new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setCustomId('ticket:panel:page:' + (safePage - 1))
+              .setLabel('Previous')
+              .setEmoji('⬅️')
+              .setStyle(ButtonStyle.Secondary)
+              .setDisabled(safePage === 0),
+            new ButtonBuilder()
+              .setCustomId('ticket:panel:page:' + (safePage + 1))
+              .setLabel('Page ' + (safePage + 1) + ' / ' + pageCount)
+              .setEmoji('📄')
+              .setStyle(ButtonStyle.Secondary)
+              .setDisabled(true),
+            new ButtonBuilder()
+              .setCustomId('ticket:panel:page:' + (safePage + 1))
+              .setLabel('Next')
+              .setEmoji('➡️')
+              .setStyle(ButtonStyle.Secondary)
+              .setDisabled(safePage >= pageCount - 1),
+          ),
+        );
+      }
+
+      await interaction.message.edit({ components: rows });
       await interaction.editReply({}).catch(() => undefined);
     } catch (error) {
       console.error('❌ Failed to change support panel page:', error);
