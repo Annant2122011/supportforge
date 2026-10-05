@@ -819,8 +819,6 @@ async function applyTicketVisibilityMode(
         : 'Restore department staff access to ticket',
     );
   }
-    await setChannelPermissionOverwrite(channel.id, staffRoleId, textPermissions, [], 0, 'Restore department staff access to ticket');
-  }
 
   if (formerClaimedBy && formerClaimedBy !== ownerId && formerClaimedBy !== claimedBy) {
     await setChannelPermissionOverwrite(channel.id, formerClaimedBy, [], [], 1, 'Clear former claimant ticket override');
