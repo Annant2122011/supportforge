@@ -97,7 +97,7 @@ export interface AdvancedGuildSettings {
 }
 
 interface SettingsFile {
-  version: 4;
+  version: 5;
   guilds: Record<string, AdvancedGuildSettings>;
 }
 
@@ -219,12 +219,12 @@ async function load(): Promise<SettingsFile> {
     const parsed = JSON.parse(raw) as Partial<SettingsFile>;
 
     state = {
-      version: 4,
+      version: 5,
       guilds: parsed.guilds ?? {},
     };
   } catch {
     state = {
-      version: 4,
+      version: 5,
       guilds: {},
     };
 
@@ -240,7 +240,7 @@ function normalizeExistingSettings(
   return {
     ...cloneDefaults(),
     ...settings,
-    version: 4,
+    version: 5,
     panelActivity: {
       ...DEFAULTS.panelActivity,
       ...(settings.panelActivity ?? {}),
