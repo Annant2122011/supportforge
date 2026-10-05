@@ -272,11 +272,6 @@ function isReportableAuditEvent(event: PersistedAuditEntry): boolean {
   return isStandardVisibleAuditAction(event.action, event.category);
 }
 
-const SUPPORTFORGE_NAME_PREFIXES = [
-  'SupportForge.',
-  'SupportForge •',
-];
-
 const STANDARD_HIDDEN_AUDIT_ACTIONS = new Set([
   'TICKET_PANEL_MOVED',
   'TICKET_PANEL_AUTO_MOVED',
@@ -366,37 +361,15 @@ export async function isSupportForgeManagedChannel(
     return true;
   }
 
-  if (
-    channel.type === ChannelType.GuildCategory &&
-    channel.name.toLowerCase() === 'support forge'
-  ) {
-    return true;
-  }
-
-  const parent =
-    channel.parentId
-      ? guild.channels.cache.get(channel.parentId)
-      : undefined;
-
-  const parentLooksManaged =
-    Boolean(
-      parent &&
-      (
-        hasSupportForgeName(parent.name) ||
-        parent.name === 'Open' ||
-        parent.name.startsWith('Open ')
-      ),
-    );
-
-  return hasSupportForgeName(channel.name) ||
-    parentLooksManaged ||
-    (
-      channel.type === ChannelType.GuildCategory &&
-      (
-        channel.name === 'Open' ||
-        channel.name.startsWith('Open ')
-      )
-    );
+  /*
+   * Names are never sufficient to establish SupportForge ownership. Only
+   * persisted resource IDs, managed topics, or membership in a persisted
+   * SupportForge category qualify. This prevents unrelated channels/categories
+   * named "Open" or "SupportForge.*" from entering the audit stream.
+   */
+  return Boolean(
+    channel.parentId && configuredCategoryIds.has(channel.parentId),
+  );
 }
 
 type DiscordAuditTarget =
