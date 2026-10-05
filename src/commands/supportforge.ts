@@ -143,17 +143,7 @@ async function ensureContainer(guild: Guild) {
     }
   }
 
-  const existing = guild.channels.cache.find(
-    (channel) =>
-      channel.type === ChannelType.GuildCategory &&
-      channel.name.toLowerCase() ===
-        SUPPORT_CATEGORY_NAME.toLowerCase(),
-  );
-
-  const category =
-    existing?.type === ChannelType.GuildCategory
-      ? existing
-      : await guild.channels.create({
+  const category = await guild.channels.create({
           name: SUPPORT_CATEGORY_NAME,
           type: ChannelType.GuildCategory,
           permissionOverwrites: [
