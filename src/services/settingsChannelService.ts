@@ -41,12 +41,14 @@ export function buildSettingsDashboardComponents(): ActionRowBuilder<ButtonBuild
       settingsButton('sf:settings:defaults', 'Ticket Defaults', ButtonStyle.Secondary, '🎟️'),
       settingsButton('sf:settings:tags', 'Tags / Departments', ButtonStyle.Secondary, '🏷️'),
       settingsButton('sf:settings:usecases', 'Use Cases', ButtonStyle.Secondary, '🧩'),
+      settingsButton('sf:settings:reports', 'Safety & Reports', ButtonStyle.Secondary, '🚩'),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       settingsButton('sf:settings:retention', 'Retention', ButtonStyle.Secondary, '🧹'),
       settingsButton('sf:settings:appearance', 'Appearance', ButtonStyle.Secondary, '🎨'),
       settingsButton('sf:settings:storage', 'Storage', ButtonStyle.Secondary, '🗄️'),
       settingsButton('sf:settings:rules', 'Rules & Roles', ButtonStyle.Secondary, '🎨'),
+      settingsButton('sf:settings:team', 'Team & Voice', ButtonStyle.Secondary, '👥'),
       settingsButton('sf:settings:repair', 'Repair System', ButtonStyle.Secondary, '🛠️'),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
