@@ -215,7 +215,7 @@ function cloneDefaults(): AdvancedGuildSettings {
 async function persist(): Promise<void> {
   if (!state) return;
 
-  writeQueue = writeQueue.then(async () => {
+  writeQueue = writeQueue.catch(() => undefined).then(async () => {
     await mkdir(DATA_DIR, { recursive: true });
     await writeFile(
       SETTINGS_PATH,
