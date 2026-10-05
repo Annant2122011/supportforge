@@ -188,6 +188,13 @@ export async function ensureDepartmentCategory(
     reason: 'SupportForge department category provisioning',
   });
 
+  await updateGuildConfig(guild.id, (current) => {
+    const configuredDepartment = current.departments[department.id];
+    if (configuredDepartment) {
+      configuredDepartment.categoryId = category.id;
+    }
+  });
+
   const config = await getGuildConfig(guild.id);
   await reconcileDepartmentTickets(guild, department.id, category);
   if (config.supportCategoryId) {
