@@ -2336,6 +2336,17 @@ async function closeTicket(
       'closed',
     );
 
+    /*
+     * The dedicated close flow does not use transition('closed'), so it must
+     * explicitly move the ticket into the configured Closed storage bucket.
+     * Without this, closed tickets remain in an active department category and
+     * retention/storage rules cannot manage the lifecycle consistently.
+     */
+    await moveTicketToCategory(
+      channel,
+      await ensureClosedCategory(interaction.guild!),
+    );
+
     updateRuntimeTicketState(
       channel,
       closedTopic,
