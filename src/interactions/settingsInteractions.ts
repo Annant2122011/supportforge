@@ -666,6 +666,98 @@ async function showPanelSettings(interaction: ButtonInteraction): Promise<void> 
   ]);
 }
 
+async function showTeamSettings(interaction: ButtonInteraction): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const max = settings.ticketDefaults.maxClaimedModerators;
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('👥 Team & Voice')
+      .setDescription('A ticket may be assisted by multiple moderators at the same time. The same limit controls the private voice room: **customer + configured moderator capacity**.')
+      .addFields(
+        { name: 'Maximum simultaneous moderators', value: '**' + max + '**', inline: true },
+        { name: 'Voice capacity', value: '**' + (max + 1) + '** people', inline: true },
+      ),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:team:edit').setLabel('Set Moderator Limit').setEmoji('👥').setStyle(ButtonStyle.Primary),
+      backButton(),
+    ),
+  ]);
+}
+
+async function showReportSettings(interaction: ButtonInteraction): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const categories = Object.values(settings.reports.categories);
+  const rules = Object.values(settings.reports.flagRules).filter((rule) => rule.enabled).sort((a, b) => a.threshold - b.threshold);
+  const categoryText = categories.map((category) =>
+    category.emoji + ' **' + category.name + '**\n' +
+    Object.values(category.subcategories).map((sub) => '• ' + sub.name).join(' • ')
+  ).join('\n\n').slice(0, 3800) || 'No report categories configured.';
+
+  const ruleText = rules.length
+    ? rules.map((rule) => '• **' + rule.threshold + ' flags** → **' + rule.action + '**' + (rule.channelId ? ' in <#' + rule.channelId + '>' : '')).join('\n')
+    : 'No automatic actions configured.';
+
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('🚩 Safety & Reports')
+      .setDescription('Reports are independent of ticket use cases. Moderators choose a category and subcategory during a report; they never need to configure a use-case preset first.')
+      .addFields(
+        { name: 'Reporting', value: settings.reports.enabled ? '🟢 Enabled' : '🔴 Disabled', inline: true },
+        { name: 'Configured categories', value: String(categories.length), inline: true },
+        { name: 'Automatic flag rules', value: String(rules.length), inline: true },
+        { name: 'Categories & subcategories', value: categoryText.slice(0, 1024) },
+        { name: 'Automatic actions', value: ruleText.slice(0, 1024) },
+      ),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:reports:toggle').setLabel(settings.reports.enabled ? 'Disable Reports' : 'Enable Reports').setEmoji(settings.reports.enabled ? '⏸️' : '▶️').setStyle(settings.reports.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sf:settings:reports:rules').setLabel('Flag Rules').setEmoji('🚩').setStyle(ButtonStyle.Primary),
+      backButton(),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      ...categories.slice(0, 5).map((category) =>
+        new ButtonBuilder().setCustomId('sf:settings:reports:category:' + category.id).setLabel(category.name.slice(0, 80)).setEmoji(category.emoji).setStyle(ButtonStyle.Secondary),
+      ),
+    ),
+  ]);
+}
+
+async function showReportCategorySettings(interaction: ButtonInteraction, categoryId: string): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const category = settings.reports.categories[categoryId];
+  if (!category) { await reject(interaction, '❌ Report category not found.'); return; }
+  const subcategories = Object.values(category.subcategories);
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle(category.emoji + ' ' + category.name)
+      .setDescription('These are the report subcategories automatically available to moderators. They are independent of ticket departments and use cases.')
+      .addFields({ name: 'Subcategories', value: subcategories.map((sub) => '• ' + sub.name).join('\n').slice(0, 3900) || 'None' }),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:add:' + categoryId).setLabel('Add Subcategory').setEmoji('➕').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:select:' + categoryId).setLabel('Edit / Remove').setEmoji('✏️').setStyle(ButtonStyle.Primary).setDisabled(!subcategories.length),
+      backButton(),
+    ),
+  ]);
+}
+
+async function showReportSubcategorySelector(interaction: ButtonInteraction, categoryId: string): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const category = settings.reports.categories[categoryId];
+  if (!category) { await reject(interaction, '❌ Report category not found.'); return; }
+  await interaction.reply({
+    content: 'Select the report subcategory to edit or remove.',
+    components: [
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder().setCustomId('sf:settings:reports:subcategory:pick:' + categoryId).setPlaceholder('Choose a subcategory').addOptions(Object.values(category.subcategories).slice(0, 25).map((sub) => ({ label: sub.name.slice(0, 100), value: sub.id }))),
+      ),
+      new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()),
+    ],
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
 async function showDefaults(interaction: ButtonInteraction): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
 
@@ -1086,6 +1178,64 @@ export async function handleSettingsInteraction(
         new TextInputBuilder().setCustomId('messages').setLabel('Message safety cap (5-30)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String((await getAdvancedSettings(guild.id)).panelActivity.messageBudget)),
         new TextInputBuilder().setCustomId('minimum').setLabel('Minimum messages (3-20)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String((await getAdvancedSettings(guild.id)).panelActivity.minimumMessagesBeforeMove)),
       ]);
+      return true;
+    }
+
+    if (id === 'sf:settings:team') {
+      await showTeamSettings(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:team:edit') {
+      const settings = await getAdvancedSettings(guild.id);
+      await openModal(interaction, 'sf:settings:modal:team', 'Team & Voice', [
+        new TextInputBuilder().setCustomId('maxModerators').setLabel('Maximum simultaneous moderators (1-3)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.ticketDefaults.maxClaimedModerators)),
+      ]);
+      return true;
+    }
+
+    if (id === 'sf:settings:reports') {
+      await showReportSettings(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:reports:toggle') {
+      await interaction.deferUpdate();
+      await updateAdvancedSettings(guild.id, (settings) => { settings.reports.enabled = !settings.reports.enabled; });
+      await refreshSettingsChannel(guild);
+      await showReportSettings(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:reports:rules') {
+      const settings = await getAdvancedSettings(guild.id);
+      const ticketRule = Object.values(settings.reports.flagRules).find((r) => r.action === 'tickets');
+      const serverRule = Object.values(settings.reports.flagRules).find((r) => r.action === 'server');
+      const channelRule = Object.values(settings.reports.flagRules).find((r) => r.action === 'channel');
+      await openModal(interaction, 'sf:settings:modal:report-rules', 'Report Flag Rules', [
+        new TextInputBuilder().setCustomId('tickets').setLabel('Ticket restriction threshold (0 = off)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(ticketRule?.threshold ?? 5)),
+        new TextInputBuilder().setCustomId('server').setLabel('Server ban threshold (0 = off)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(serverRule?.threshold ?? 10)),
+        new TextInputBuilder().setCustomId('channel').setLabel('Channel restriction threshold (0 = off)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(channelRule?.threshold ?? 0)),
+        new TextInputBuilder().setCustomId('channelId').setLabel('Channel ID / mention for channel rule').setStyle(TextInputStyle.Short).setRequired(false).setValue(channelRule?.channelId ? '<#' + channelRule.channelId + '>' : ''),
+      ]);
+      return true;
+    }
+
+    if (id.startsWith('sf:settings:reports:category:')) {
+      await showReportCategorySettings(interaction, id.slice('sf:settings:reports:category:'.length));
+      return true;
+    }
+
+    if (id.startsWith('sf:settings:reports:subcategory:add:')) {
+      const categoryId = id.slice('sf:settings:reports:subcategory:add:'.length);
+      await openModal(interaction, 'sf:settings:modal:report-subcategory:add:' + categoryId, 'Add Report Subcategory', [
+        new TextInputBuilder().setCustomId('name').setLabel('Subcategory name').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
+      ]);
+      return true;
+    }
+
+    if (id.startsWith('sf:settings:reports:subcategory:select:')) {
+      await showReportSubcategorySelector(interaction, id.slice('sf:settings:reports:subcategory:select:'.length));
       return true;
     }
 
