@@ -240,7 +240,15 @@ async function load(): Promise<SettingsFile> {
       version: 5,
       guilds: parsed.guilds ?? {},
     };
-  } catch {
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') {
+      throw new Error(
+        'SupportForge advanced settings could not be loaded safely. The existing file was not replaced.',
+        { cause: error },
+      );
+    }
+
     state = {
       version: 5,
       guilds: {},
