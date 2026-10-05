@@ -3196,14 +3196,38 @@ async function renderRoutingTagSelector(interaction: ButtonInteraction | StringS
 }
 
 async function applyTicketRouting(interaction: StringSelectMenuInteraction, department: DepartmentConfig, tagId: string, status: TicketStatus, topic: string): Promise<void> {
-  const channel = interaction.channel as TextChannel; const config = await getGuildConfig(interaction.guild!.id);
-  const oldDepartmentId = getField(topic, 'department'); const oldDepartment = oldDepartmentId ? config.departments[oldDepartmentId] : undefined;
-  const category = await ensureDepartmentCategory(interaction.guild!, department);
-  const newTopic = setField(setField(setField(topic, 'department', department.id), 'staff', department.staffRoleId ?? 'none'), 'tags', tagId);
+  const channel = interaction.channel as TextChannel;
+  const config = await getGuildConfig(interaction.guild!.id);
+  const oldDepartmentId = getField(topic, 'department');
+  const oldDepartment = oldDepartmentId
+    ? config.departments[oldDepartmentId]
+    : undefined;
+  const departmentChanged = oldDepartmentId !== department.id;
+  const category = departmentChanged
+    ? await ensureDepartmentCategory(interaction.guild!, department)
+    : null;
+  const newTopic = setField(
+    setField(
+      setField(topic, 'department', department.id),
+      'staff',
+      department.staffRoleId ?? 'none',
+    ),
+    'tags',
+    tagId,
+  );
+
   try {
     await runChannelMutation(channel, 'Ticket routing update', async () => {
-      if (oldDepartmentId !== department.id) {
-        await setChannelParent(channel.id, category.id, 'Move ticket to department category');
+      if (departmentChanged) {
+        if (!category) {
+          throw new Error('Destination department category could not be provisioned.');
+        }
+
+        await setChannelParent(
+          channel.id,
+          category.id,
+          'Move ticket to department category',
+        );
         if (oldDepartment?.staffRoleId && oldDepartment.staffRoleId !== department.staffRoleId) await setChannelPermissionOverwrite(channel.id, oldDepartment.staffRoleId, [], [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory], 0, 'Remove previous department staff');
         if (department.staffRoleId) await setChannelPermissionOverwrite(channel.id, department.staffRoleId, [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks], [], 0, 'Grant department staff');
       }
