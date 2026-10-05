@@ -32,6 +32,8 @@ export interface GuildConfig {
   panelMessageId: string | null;
   transcriptChannelId: string | null;
   auditChannelId: string | null;
+  auditDevChannelId: string | null;
+  auditDeveloperRoleId: string | null;
   tier: SupportForgeTier;
   nextTicketNumber: number;
   departments: Record<string, DepartmentConfig>;
@@ -52,6 +54,8 @@ const DEFAULT_CONFIG: GuildConfig = {
   panelMessageId: null,
   transcriptChannelId: null,
   auditChannelId: null,
+  auditDevChannelId: null,
+  auditDeveloperRoleId: null,
   tier: 'free',
   nextTicketNumber: 1000,
   departments: {},
@@ -110,6 +114,14 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
 
   if (current.guilds[guildId].openCategoryId === undefined) {
     current.guilds[guildId].openCategoryId = null;
+    migrated = true;
+  }
+  if (current.guilds[guildId].auditDevChannelId === undefined) {
+    current.guilds[guildId].auditDevChannelId = null;
+    migrated = true;
+  }
+  if (current.guilds[guildId].auditDeveloperRoleId === undefined) {
+    current.guilds[guildId].auditDeveloperRoleId = null;
     migrated = true;
   }
   for (const department of Object.values(current.guilds[guildId].departments)) {
