@@ -256,11 +256,13 @@ export async function declineRetentionDeletion(
     throw new Error('Only the administrator who was asked, or the server owner, can cancel this deletion.');
   }
 
+  /*
+   * A declined request must not remain as a non-pending sentinel. The
+   * scheduler treats any pending-approval object as an existing request, so
+   * retaining a "declined" object would permanently suppress future prompts.
+   */
   await updateAdvancedSettings(guild.id, (current) => {
-    current.retention.pendingApprovals[scope] = {
-      ...pending,
-      status: 'declined',
-    };
+    current.retention.pendingApprovals[scope] = null;
   });
 }
 
