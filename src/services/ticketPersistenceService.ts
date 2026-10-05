@@ -100,6 +100,13 @@ export async function getPersistedTicketStatus(
   return current.tickets[channelId]?.status;
 }
 
+export async function getPersistedTicketPriority(
+  channelId: string,
+): Promise<TicketPriority | undefined> {
+  const current = await loadState();
+  return current.tickets[channelId]?.priority ?? undefined;
+}
+
 export interface TicketRegistration {
   guildId: string;
   ticketNumber: string;
