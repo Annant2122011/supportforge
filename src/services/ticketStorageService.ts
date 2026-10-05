@@ -38,15 +38,21 @@ async function ensureBucket(
    * missing or invalid, create a new SupportForge storage bucket rather than
    * adopting an unrelated category with the same name.
    */
-  const existingNames = [...guild.channels.cache.values()]
+  const existingManagedBuckets = [...guild.channels.cache.values()]
     .filter(
       (channel): channel is CategoryChannel =>
         channel.type === ChannelType.GuildCategory &&
-        (channel.name === baseName ||
-          channel.name.startsWith(baseName + ' ')),
+        channel.name === baseName &&
+        channel.permissionOverwrites.cache.has(guild.roles.everyone.id) &&
+        channel.permissionOverwrites.cache.has(guild.members.me?.id ?? ''),
     );
 
-  const suffix = existingNames.length + 1;
+  /*
+   * A matching display name is still unsafe to adopt. Keep a deterministic
+   * suffix for genuinely new buckets, based only on previously provisioned
+   * SupportForge buckets that are still identifiable by name + bot overwrite.
+   */
+  const suffix = existingManagedBuckets.length + 1;
   const bot = guild.members.me;
 
   if (!bot) {
