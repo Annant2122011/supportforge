@@ -171,6 +171,7 @@ export async function performFactoryReset(guild: Guild, accumulateAuditData = fa
     'config.json',
     'advanced-settings.json',
     'tickets.json',
+    'reports.json',
   ]) {
     await unlink(join(DATA_DIR, filename)).catch(() => undefined);
   }
