@@ -96,31 +96,13 @@ async function reconcileDepartmentTickets(
 }
 
 async function removeEmptyOrphanDepartmentCategories(guild: Guild): Promise<void> {
-  const config = await getGuildConfig(guild.id);
-  const protectedIds = new Set(
-    [
-      config.supportCategoryId,
-      config.openCategoryId,
-      ...Object.values(config.departments).map((department) => department.categoryId),
-    ].filter((id): id is string => Boolean(id)),
-  );
-
-  for (const channel of guild.channels.cache.values()) {
-    if (channel.type !== ChannelType.GuildCategory) continue;
-    if (protectedIds.has(channel.id)) continue;
-
-    const isSupportForgeDepartmentCategory =
-      channel.name.toLowerCase().startsWith(PREFIX.toLowerCase());
-
-    if (!isSupportForgeDepartmentCategory || channel.children.cache.size > 0) {
-      continue;
-    }
-
-    await channel.delete('SupportForge: remove empty orphan department category')
-      .catch((error) => {
-        console.warn('⚠️ Could not remove empty orphan SupportForge category ' + channel.name + ':', error);
-      });
-  }
+  /*
+   * An empty category has no ticket topic that can prove ownership. Names are
+   * not sufficient either because administrators can legitimately create
+   * categories with the same display name. Leave unreferenced categories alone
+   * rather than risking deletion of unrelated server infrastructure.
+   */
+  return;
 }
 
 export async function ensureDepartmentCategory(
