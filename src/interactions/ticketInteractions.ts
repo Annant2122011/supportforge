@@ -884,6 +884,15 @@ async function createTicket(
   ticketCreationLocks.add(
     lockKey,
   );
+\n  if (await isTicketCreationRestricted(guild.id, interaction.user.id)) {
+    const flags = await getUserFlagCount(guild.id, interaction.user.id);
+    await replyError(
+      interaction,
+      `🚫 You are currently restricted from opening new SupportForge tickets because your account has reached **${flags}** moderation flag(s).`,
+    );
+    ticketCreationLocks.delete(lockKey);
+    return;
+  }
 
   let ticketChannel:
     | TextChannel
@@ -1407,16 +1416,15 @@ async function transition(
     }
 
     /*
-     * No-op protection.
+     * A claimed ticket can be joined by another moderator until the configured
+     * simultaneous-moderator limit is reached.
      */
     if (
-      oldStatus ===
-      newStatus
+      oldStatus === newStatus &&
+      !(newStatus === 'claimed' && interaction.customId === 'ticket:claim')
     ) {
       await interaction.editReply(
-        `ℹ️ This ticket is already **${capitalize(
-          newStatus,
-        )}**.`,
+        `ℹ️ This ticket is already **${capitalize(newStatus)}**.`,
       );
       return;
     }
@@ -1495,35 +1503,24 @@ async function transition(
       return;
     }
 
-    /*
-     * Prevent staff from silently stealing an existing claim.
-     */
-    if (
-      newStatus ===
-        'claimed' &&
-      oldStatus ===
-        'claimed'
-    ) {
-      const claimedBy =
-        getField(
-          oldTopic,
-          'claimed_by',
-        );
+    if (newStatus === 'claimed') {
+      const claimedIds = (getField(oldTopic, 'claimed_by') ?? '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean);
+      const settings = await getAdvancedSettings(interaction.guild!.id);
 
-      if (
-        claimedBy ===
-        interaction.user.id
-      ) {
-        await interaction.editReply(
-          'ℹ️ You already have this ticket claimed.',
-        );
-      } else {
-        await interaction.editReply(
-          `❌ This ticket is already claimed by <@${claimedBy ?? 'unknown'}>.`,
-        );
+      if (claimedIds.includes(interaction.user.id)) {
+        await interaction.editReply('ℹ️ You are already assisting on this ticket.');
+        return;
       }
 
-      return;
+      if (claimedIds.length >= settings.ticketDefaults.maxClaimedModerators) {
+        await interaction.editReply(
+          `❌ This ticket already has the maximum of **${settings.ticketDefaults.maxClaimedModerators}** moderators assisting.`,
+        );
+        return;
+      }
     }
 
     const messageId =
@@ -1548,25 +1545,30 @@ async function transition(
       newStatus ===
       'claimed'
     ) {
-      newTopic =
-        setField(
-          newTopic,
-          'claimed_by',
-          interaction.user.id,
-        );
+      const existingClaimants = (getField(oldTopic, 'claimed_by') ?? '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean);
+      if (!existingClaimants.includes(interaction.user.id)) {
+        existingClaimants.push(interaction.user.id);
+      }
 
-      newTopic =
-        setField(
-          newTopic,
-          'claimed_at',
-          new Date().toISOString(),
-        );
+      newTopic = setField(
+        newTopic,
+        'claimed_by',
+        existingClaimants.join(','),
+      );
 
-      newTopic =
-        removeField(
-          newTopic,
-          'pending_since',
-        );
+      newTopic = setField(
+        newTopic,
+        'claimed_at',
+        new Date().toISOString(),
+      );
+
+      newTopic = removeField(
+        newTopic,
+        'pending_since',
+      );
     }
 
     if (
