@@ -14,15 +14,12 @@ import { resetReportState } from './reportService';
 
 const DATA_DIR = join(process.cwd(), 'data');
 
-const KNOWN_NAMES = new Set([
-  'Support Forge',
-  'support-panel',
-  '📄 support-transcripts',
-  '📒 supportforge-audit-log',
-  'audit-log-general',
-  'audit-log-dev',
-  'supportforge-settings',
-]);
+/*
+ * Factory reset must only delete resources SupportForge can positively
+ * identify through persisted IDs, managed topics, or managed-category ancestry.
+ * Names alone are never ownership proof because Discord users can create
+ * unrelated resources with identical names.
+ */
 
 const SUPPORTFORGE_CATEGORY_PREFIXES = [
   'SupportForge.',
@@ -47,8 +44,6 @@ const TOPIC_PREFIXES = [
 
 function isSupportForgeChannel(channel: GuildBasedChannel, configuredIds: Set<string>, configuredCategoryIds: Set<string>): boolean {
   if (configuredIds.has(channel.id) || configuredCategoryIds.has(channel.id)) return true;
-
-  if (KNOWN_NAMES.has(channel.name)) return true;
 
   if (
     channel.type === ChannelType.GuildText &&
