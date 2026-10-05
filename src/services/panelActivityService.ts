@@ -29,12 +29,14 @@ export async function recordTicketMessageForPanel(message: Message): Promise<voi
   if (!settings.panelActivity.enabled) return;
   let state = states.get(channel.id);
   if (!state) {
-    state = {
-      anchorMessageId: panelMessageId,
+    const initialAnchorMessageId = panelMessageId ?? message.id;
+    const initialState: ActivityState = {
+      anchorMessageId: initialAnchorMessageId,
       messages: 0,
       visualLines: 0,
       moving: false,
     };
+    state = initialState;
 
     try {
       const recent = await channel.messages.fetch({ limit: 50 });
@@ -80,6 +82,9 @@ export async function recordTicketMessageForPanel(message: Message): Promise<voi
 
     states.set(channel.id, state);
   }
+
+  if (!state) return;
+
   state.messages += 1; state.visualLines += estimateVisualLines(message);
   const reachedVisualBudget = state.visualLines >= settings.panelActivity.visualLineBudget;
   const reachedMessageBudget = state.messages >= settings.panelActivity.messageBudget && state.messages >= settings.panelActivity.minimumMessagesBeforeMove;
