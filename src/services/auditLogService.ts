@@ -1391,8 +1391,7 @@ async function generateOverallAuditSummary(
       (
         managedChannelIds.has(channel.id) ||
         (channel.type === ChannelType.GuildText &&
-          channel.topic?.startsWith('supportforge:ticket')) ||
-          );
+          channel.topic?.startsWith('supportforge:ticket'))
       ),
   ).size;
 
