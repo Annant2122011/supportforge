@@ -65,8 +65,14 @@ async function reconcileDepartmentTickets(
       getField(topic, 'status') ??
       'open';
 
-    // Archived tickets stay in the dedicated archive bucket.
-    if (status === 'archived' || channel.parentId === category.id) {
+    /*
+     * Closed and archived tickets belong to historical storage, not the live
+     * department category. Only active lifecycle states are reconciled here.
+     */
+    if (
+      !['open', 'claimed', 'pending', 'reopened'].includes(status) ||
+      channel.parentId === category.id
+    ) {
       continue;
     }
 
