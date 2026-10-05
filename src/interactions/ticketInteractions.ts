@@ -3062,19 +3062,19 @@ async function changeTicketDepartment(interaction: StringSelectMenuInteraction):
   const tags = Object.values(department.tags ?? {}).sort((x, y) => x.name.localeCompare(y.name));
   if (!tags.length) { await replyError(interaction, '❌ The destination department has no tags. Add at least one tag first.'); return; }
   if (tags.length > 1) {
-    await interaction.editReply({ content: '🏷️ **Choose the tag for ' + department.name + '**', components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder().setCustomId('ticket:routing-tag:select:' + department.id).setPlaceholder('Choose a tag').addOptions(tags.slice(0, 25).map((t) => ({ label: t.name.slice(0, 100), value: t.id, description: 'Subcategory of ' + department.name })) ))] });
+    await renderRoutingTagSelector(interaction, 0, department.id);
     return;
   }
   await applyTicketRouting(interaction, department, tags[0].id, status, topic);
 }
 
-async function renderRoutingTagSelector(interaction: ButtonInteraction | StringSelectMenuInteraction, page: number): Promise<void> {
+async function renderRoutingTagSelector(interaction: ButtonInteraction | StringSelectMenuInteraction, page: number, departmentIdOverride?: string): Promise<void> {
   if (!interaction.replied && !interaction.deferred) {
     await interaction.deferUpdate();
   }
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) { await replyError(interaction, '❌ This action can only be used inside a ticket.'); return; }
   const channel = interaction.channel as TextChannel; const topic = channel.topic ?? '';
-  const departmentId = getField(topic, 'department'); const config = await getGuildConfig(interaction.guild.id); const department = departmentId ? config.departments[departmentId] : undefined;
+  const departmentId = departmentIdOverride ?? getField(topic, 'department'); const config = await getGuildConfig(interaction.guild.id); const department = departmentId ? config.departments[departmentId] : undefined;
   if (!department) { await replyError(interaction, '❌ This ticket department no longer exists.'); return; }
   const tags = Object.values(department.tags ?? {}).sort((x, y) => x.name.localeCompare(y.name));
   if (!tags.length) { await replyError(interaction, '❌ This department has no tags configured.'); return; }
@@ -3083,8 +3083,8 @@ async function renderRoutingTagSelector(interaction: ButtonInteraction | StringS
   const menu = new StringSelectMenuBuilder().setCustomId('ticket:routing-tag:select:' + department.id).setPlaceholder('Choose a tag').setMinValues(1).setMaxValues(1)
     .addOptions(tags.slice(p * size, (p + 1) * size).map((t) => ({ label: t.name.slice(0, 100), value: t.id, description: 'Subcategory of ' + department.name, default: t.id === currentTag })));
   const nav = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId('ticket:routing-tag:page:' + (p - 1)).setLabel('Previous').setStyle(ButtonStyle.Secondary).setDisabled(p === 0),
-    new ButtonBuilder().setCustomId('ticket:routing-tag:page:' + (p + 1)).setLabel('Next').setStyle(ButtonStyle.Secondary).setDisabled(p >= count - 1),
+    new ButtonBuilder().setCustomId('ticket:routing-tag:page:' + (p - 1) + ':' + department.id).setLabel('Previous').setStyle(ButtonStyle.Secondary).setDisabled(p === 0),
+    new ButtonBuilder().setCustomId('ticket:routing-tag:page:' + (p + 1) + ':' + department.id).setLabel('Next').setStyle(ButtonStyle.Secondary).setDisabled(p >= count - 1),
     new ButtonBuilder().setCustomId('ticket:routing-tag:cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
   );
   const payload = { content: '🏷️ **Tag • ' + department.name + '**\nTags are subcategories of this department. Changing a tag does not create or move a Discord category.', components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu), nav] };
@@ -3583,9 +3583,11 @@ async function handlePanelButton(
   }
 
   if (id.startsWith('ticket:routing-tag:page:')) {
-    const page = Number(id.slice('ticket:routing-tag:page:'.length));
+    const parts = id.slice('ticket:routing-tag:page:'.length).split(':');
+    const page = Number(parts[0] ?? '0');
+    const departmentId = parts[1] ?? undefined;
     await interaction.deferUpdate();
-    await renderRoutingTagSelector(interaction, Number.isInteger(page) ? page : 0);
+    await renderRoutingTagSelector(interaction, Number.isInteger(page) ? page : 0, departmentId);
     return;
   }
 
