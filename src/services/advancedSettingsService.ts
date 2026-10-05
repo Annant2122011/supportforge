@@ -189,6 +189,11 @@ function cloneDefaults(): AdvancedGuildSettings {
     statusCategories: { ...DEFAULTS.statusCategories },
     appearance: { ...DEFAULTS.appearance },
     ticketDefaults: { ...DEFAULTS.ticketDefaults },
+    reports: {
+      ...DEFAULTS.reports,
+      categories: Object.fromEntries(Object.entries(DEFAULTS.reports.categories).map(([id, category]) => [id, { ...category, subcategories: { ...category.subcategories } }])),
+      flagRules: { ...DEFAULTS.reports.flagRules },
+    },
     priorityRoles: { ...DEFAULTS.priorityRoles },
     customTags: {},
   };
