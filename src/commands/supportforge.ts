@@ -775,7 +775,7 @@ export const data =
                   'Internal note',
                 )
                 .setRequired(true)
-                .setMaxLength(500),
+                .setMaxLength(4000),
             ),
         )
 
