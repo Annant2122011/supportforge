@@ -2175,6 +2175,48 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       return true;
     }
 
+    const current = await load();
+    const store = getGuildStore(current, interaction.guild.id);
+    const isEnabled = store.developerViewers.includes(interaction.user.id);
+
+    /*
+     * Merely opening Developer View Options must not create the private
+     * developer role/channel. Provisioning happens only when a moderator
+     * enables the feature, or when an already-enabled moderator opens a page.
+     */
+    if (interaction.customId === AUDIT_DEVELOPER_CUSTOM_ID) {
+      await interaction.editReply({
+        content:
+          '🛠️ **Developer View Options**\n\n' +
+          'One continuous developer audit stream is used. When enabled, you receive the retained history already recorded plus all new developer audit events. There are no **Now Only**, **Past and Now**, or split-history modes.',
+        components: [
+          new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setCustomId(
+                isEnabled
+                  ? AUDIT_DEVELOPER_OFF_CUSTOM_ID
+                  : AUDIT_DEVELOPER_ON_CUSTOM_ID,
+              )
+              .setLabel(isEnabled ? 'Disable Developer View' : 'Enable Developer View')
+              .setEmoji(isEnabled ? '🛑' : '🛠️')
+              .setStyle(isEnabled ? ButtonStyle.Danger : ButtonStyle.Primary),
+          ),
+        ],
+      });
+      return true;
+    }
+
+    if (
+      interaction.customId.startsWith(AUDIT_DEVELOPER_PAGE_PREFIX) &&
+      !isEnabled
+    ) {
+      await interaction.editReply({
+        content:
+          '❌ Enable your Developer View before using its pages.',
+      });
+      return true;
+    }
+
     const infrastructure = await ensureAuditDeveloperInfrastructure(
       interaction.guild,
       config.supportCategoryId ?? interaction.channel.parentId ?? interaction.guild.id,
@@ -2190,18 +2232,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       return true;
     }
 
-    const current = await load();
-    const store = getGuildStore(current, interaction.guild.id);
-    const isEnabled = store.developerViewers.includes(interaction.user.id);
-
     if (interaction.customId.startsWith(AUDIT_DEVELOPER_PAGE_PREFIX)) {
-      if (!isEnabled) {
-        await interaction.editReply({
-          content:
-            '❌ Enable your Developer View before using its pages.',
-        });
-        return true;
-      }
 
       const requestedPage = Number(
         interaction.customId.slice(AUDIT_DEVELOPER_PAGE_PREFIX.length),
