@@ -2464,7 +2464,6 @@ async function showTicketTagSelector(interaction: ButtonInteraction, departmentI
   await interaction.editReply({
     content: '🏷️ **Choose a tag for your ' + department.name + ' ticket**\nTags are subcategories inside the department and do not create Discord categories.',
     components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
-    flags: MessageFlags.Ephemeral,
   });
 }
 
