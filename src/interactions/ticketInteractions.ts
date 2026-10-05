@@ -4088,16 +4088,6 @@ async function handlePanelModal(
   }
 
   if (
-    interaction.guild &&
-    !isPremiumOrHigher(await getTier(interaction.guild.id))
-  ) {
-    await interaction.editReply(
-      '🔒 Internal notes are available in Premium/Pro demo mode.',
-    );
-    return;
-  }
-
-  if (
     !interaction.guild ||
     interaction.channel?.type !==
       ChannelType.GuildText
@@ -4172,6 +4162,16 @@ async function handlePanelModal(
 
     const id =
       interaction.customId;
+
+    if (
+      id === 'ticket:panel-modal:note' &&
+      !isPremiumOrHigher(await getTier(interaction.guild!.id))
+    ) {
+      await interaction.editReply(
+        '🔒 Internal notes are available in Premium/Pro demo mode.',
+      );
+      return;
+    }
 
     /* ---------------------------------------------------------------------- */
     /* Add user                                                               */
