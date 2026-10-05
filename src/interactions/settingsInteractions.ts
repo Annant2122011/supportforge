@@ -835,6 +835,96 @@ async function showTags(interaction: SettingsViewInteraction): Promise<void> {
   ]);
 }
 
+async function showDepartmentPicker(
+  interaction: SettingsViewInteraction,
+  page = 0,
+): Promise<void> {
+  const config = await getGuildConfig(interaction.guild!.id);
+  const departments = Object.values(config.departments).sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
+  if (!departments.length) {
+    await renderSettingsView(
+      interaction,
+      [new EmbedBuilder().setTitle('📂 Departments').setDescription('No departments configured.')],
+      [backButton()],
+    );
+    return;
+  }
+
+  const pageSize = 25;
+  const pageCount = Math.max(1, Math.ceil(departments.length / pageSize));
+  const safePage = Math.min(Math.max(page, 0), pageCount - 1);
+  const visible = departments.slice(
+    safePage * pageSize,
+    (safePage + 1) * pageSize,
+  );
+
+  const components: Array<
+    ActionRowBuilder<StringSelectMenuBuilder> |
+    ActionRowBuilder<ButtonBuilder>
+  > = [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('sf:settings:department:select')
+        .setPlaceholder('Choose a department')
+        .addOptions(
+          visible.map((d) => ({
+            label: d.name.slice(0, 100),
+            value: d.id,
+            description: Object.keys(d.tags ?? {}).length + ' tag(s)',
+          })),
+        ),
+    ),
+  ];
+
+  if (pageCount > 1) {
+    components.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId('sf:settings:departments:manage:page:' + (safePage - 1))
+          .setLabel('Previous')
+          .setEmoji('⬅️')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(safePage === 0),
+        new ButtonBuilder()
+          .setCustomId('sf:settings:departments:manage:page:' + safePage)
+          .setLabel('Page ' + (safePage + 1) + ' / ' + pageCount)
+          .setEmoji('📄')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(true),
+        new ButtonBuilder()
+          .setCustomId('sf:settings:departments:manage:page:' + (safePage + 1))
+          .setLabel('Next')
+          .setEmoji('➡️')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(safePage >= pageCount - 1),
+      ),
+    );
+  }
+
+  components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()));
+
+  await renderSettingsView(
+    interaction,
+    [new EmbedBuilder()
+      .setTitle('⚙️ Manage Departments')
+      .setDescription(
+        'Select a department to manage it.' +
+        (pageCount > 1
+          ? '\nShowing departments ' +
+            (safePage * pageSize + 1) +
+            '–' +
+            Math.min((safePage + 1) * pageSize, departments.length) +
+            ' of ' +
+            departments.length +
+            '.'
+          : ''),
+      )],
+    components,
+  );
+}
+
 async function showDepartmentManager(interaction: SettingsViewInteraction, departmentId: string): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
   const d = config.departments[departmentId];
@@ -1323,15 +1413,17 @@ export async function handleSettingsInteraction(
     }
 
     if (id === 'sf:settings:departments:manage') {
-      const config = await getGuildConfig(guild.id);
-      const departments = Object.values(config.departments).sort((a, b) => a.name.localeCompare(b.name));
-      await interaction.reply({
-        content: 'Select a department to manage its tags and routing.',
-        components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-          new StringSelectMenuBuilder().setCustomId('sf:settings:department:select').setPlaceholder('Choose a department').addOptions(departments.slice(0, 25).map((d) => ({ label: d.name.slice(0, 100), value: d.id, description: Object.keys(d.tags ?? {}).length + ' tag(s)' }))),
-        ), new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
-        flags: MessageFlags.Ephemeral,
-      });
+      await showDepartmentPicker(interaction, 0);
+      return true;
+    }
+
+    if (id.startsWith('sf:settings:departments:manage:page:')) {
+      const page = Number(id.slice('sf:settings:departments:manage:page:'.length));
+      if (!Number.isInteger(page)) {
+        await reject(interaction, '❌ Invalid department page.');
+        return true;
+      }
+      await showDepartmentPicker(interaction, page);
       return true;
     }
 
