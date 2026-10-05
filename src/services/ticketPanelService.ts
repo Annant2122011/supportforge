@@ -50,7 +50,7 @@ export function buildTicketPanelEmbed(
   const claimedBy = getField(topic, 'claimed_by');
   const claimedModerators = (claimedBy ?? '').split(',').map((id) => id.trim()).filter(Boolean);
   const priority = getField(topic, 'priority') ?? 'normal';
-  const tagId = getField(topic, 'tag');
+  const tagId = getField(topic, 'tags');
   const ticketTag = department?.tags?.[tagId ?? ''];
   const users = getField(topic, 'users') ?? '';
   const pendingSince = getField(topic, 'pending_since');
