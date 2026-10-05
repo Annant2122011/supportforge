@@ -1812,7 +1812,16 @@ export async function handleSettingsInteraction(
         );
         return true;
       }
-      await updateGuildConfig(guild.id, (current) => { delete current.departments[departmentId]; });
+      await updateGuildConfig(guild.id, (current) => {
+        const department = current.departments[departmentId];
+        if (department?.categoryId) {
+          current.retiredCategoryIds = Array.from(new Set([
+            ...(current.retiredCategoryIds ?? []),
+            department.categoryId,
+          ]));
+        }
+        delete current.departments[departmentId];
+      });
       await refreshSettingsChannel(guild); await syncPanel(guild); await showTags(interaction);
       await auditSettingsAction(guild, interaction, 'DEPARTMENT_REMOVED', 'Removed department ' + d.name + '. Its Discord category was retained.');
       return true;
