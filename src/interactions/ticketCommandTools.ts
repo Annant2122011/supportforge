@@ -147,6 +147,10 @@ async function getTicketContext(
       topic,
       'claimed_by',
     ),
+    claimedByIds: (getField(topic, 'claimed_by') ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean),
     assignedAt: getField(
       topic,
       'assigned_at',
@@ -599,10 +603,7 @@ export async function executeTicketCommand(
         return;
       }
 
-      const claimedIds = (context.claimedBy ?? '')
-        .split(',')
-        .map((id) => id.trim())
-        .filter(Boolean);
+      const claimedIds = context.claimedByIds;
 
       if (claimedIds.includes(interaction.user.id)) {
         await interaction.editReply(
@@ -689,10 +690,7 @@ export async function executeTicketCommand(
         return;
       }
 
-      const claimedIds = (context.claimedBy ?? '')
-        .split(',')
-        .map((id) => id.trim())
-        .filter(Boolean);
+      const claimedIds = context.claimedByIds;
 
       if (
         !claimedIds.includes(interaction.user.id) &&
