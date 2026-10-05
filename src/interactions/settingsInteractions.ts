@@ -1071,6 +1071,22 @@ export async function handleSettingsInteraction(
 
   const guild = interaction.guild;
 
+  if (interaction.isStringSelectMenu() && interaction.customId.startsWith('sf:settings:reports:subcategory:pick:')) {
+    const categoryId = interaction.customId.slice('sf:settings:reports:subcategory:pick:'.length);
+    const subcategoryId = interaction.values[0];
+    const settings = await getAdvancedSettings(guild.id);
+    const sub = settings.reports.categories[categoryId]?.subcategories[subcategoryId];
+    if (!sub) { await reject(interaction, '❌ Report subcategory not found.'); return true; }
+    await interaction.editReply({
+      content: 'Edit or remove **' + sub.name + '**.',
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:edit:' + categoryId + ':' + subcategoryId).setLabel('Edit').setEmoji('✏️').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:remove:' + categoryId + ':' + subcategoryId).setLabel('Remove').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+      )],
+    });
+    return true;
+  }
+
   if (interaction.isButton()) {
     const id = interaction.customId;
 
@@ -1777,6 +1793,63 @@ export async function handleSettingsInteraction(
       return true;
     }
 
+    if (interaction.customId === 'sf:settings:modal:team') {
+      const maxModerators = Number(interaction.fields.getTextInputValue('maxModerators'));
+      if (!Number.isInteger(maxModerators) || maxModerators < 1 || maxModerators > 3) {
+        await reject(interaction, '❌ The moderator limit must be a whole number from 1 to 3.');
+        return true;
+      }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await updateAdvancedSettings(guild.id, (settings) => { settings.ticketDefaults.maxClaimedModerators = maxModerators; });
+      await refreshSettingsChannel(guild);
+      await interaction.editReply({
+        embeds: [new EmbedBuilder().setTitle('✅ Team & Voice Updated').setDescription('Tickets may now have up to **' + maxModerators + '** simultaneous moderators. Private voice capacity is **' + (maxModerators + 1) + '**.')],
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+      });
+      await auditSettingsAction(guild, interaction, 'TEAM_LIMIT_CHANGED', 'Maximum simultaneous ticket moderators changed to ' + maxModerators + '.');
+      return true;
+    }
+
+    if (interaction.customId === 'sf:settings:modal:report-rules') {
+      const ticketThreshold = Number(interaction.fields.getTextInputValue('tickets'));
+      const serverThreshold = Number(interaction.fields.getTextInputValue('server'));
+      const channelThreshold = Number(interaction.fields.getTextInputValue('channel'));
+      const rawChannel = interaction.fields.getTextInputValue('channelId').trim();
+      const channelMention = rawChannel.match(/^<#(\d+)>$/);
+      const channelId = channelMention?.[1] ?? (/^\d{15,25}$/.test(rawChannel) ? rawChannel : null);
+
+      if (![ticketThreshold, serverThreshold, channelThreshold].every((value) => Number.isInteger(value) && value >= 0 && value <= 100000) || (channelThreshold > 0 && !channelId)) {
+        await reject(interaction, '❌ Thresholds must be whole numbers from 0 to 100000. A channel must be supplied when channel restriction is enabled.');
+        return true;
+      }
+
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const now = new Date().toISOString();
+      await updateAdvancedSettings(guild.id, (settings) => {
+        for (const rule of Object.values(settings.reports.flagRules)) rule.enabled = false;
+        const ensureRule = (id: string, action: 'tickets' | 'server' | 'channel', threshold: number, targetChannelId: string | null) => {
+          if (threshold <= 0) return;
+          const existing = settings.reports.flagRules[id];
+          settings.reports.flagRules[id] = existing ?? { id, threshold, action, channelId: targetChannelId, enabled: true, createdAt: now, updatedAt: now };
+          settings.reports.flagRules[id].threshold = threshold;
+          settings.reports.flagRules[id].action = action;
+          settings.reports.flagRules[id].channelId = targetChannelId;
+          settings.reports.flagRules[id].enabled = true;
+          settings.reports.flagRules[id].updatedAt = now;
+        };
+        ensureRule('tickets-default', 'tickets', ticketThreshold, null);
+        ensureRule('server-default', 'server', serverThreshold, null);
+        ensureRule('channel-default', 'channel', channelThreshold, channelId);
+      });
+      await refreshSettingsChannel(guild);
+      await interaction.editReply({
+        embeds: [new EmbedBuilder().setTitle('✅ Report Flag Rules Updated').setDescription('Automatic actions now trigger at the configured flag thresholds. Set a threshold to **0** to disable that action.')],
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+      });
+      await auditSettingsAction(guild, interaction, 'REPORT_RULES_CHANGED', 'Updated automatic report flag thresholds and actions.');
+      return true;
+    }
+
     if (interaction.customId === 'sf:settings:modal:defaults') {
       const priority = interaction.fields.getTextInputValue('priority').trim().toLowerCase() as TicketPriority;
       if (!['low', 'normal', 'high', 'urgent', 'critical'].includes(priority)) {
@@ -1794,6 +1867,67 @@ export async function handleSettingsInteraction(
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
       await auditSettingsAction(guild, interaction, 'TICKET_DEFAULTS_CHANGED', 'Default ticket priority changed to ' + priority + '.');
+      return true;
+    }
+
+    if (interaction.customId.startsWith('sf:settings:modal:report-subcategory:add:')) {
+      const categoryId = interaction.customId.slice('sf:settings:modal:report-subcategory:add:'.length);
+      const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
+      if (!name) { await reject(interaction, '❌ Subcategory name cannot be empty.'); return true; }
+      const subId = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);
+      if (!subId) { await reject(interaction, '❌ Subcategory name must contain letters or numbers.'); return true; }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await updateAdvancedSettings(guild.id, (settings) => {
+        const category = settings.reports.categories[categoryId];
+        if (!category) return;
+        if (category.subcategories[subId]) throw new Error('A report subcategory with that name already exists.');
+        category.subcategories[subId] = { id: subId, name, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      }).catch(async (error) => { throw error; });
+      await refreshSettingsChannel(guild);
+      await interaction.editReply({
+        embeds: [new EmbedBuilder().setTitle('✅ Report Subcategory Added').setDescription('Added **' + name + '**.')],
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+      });
+      await auditSettingsAction(guild, interaction, 'REPORT_SUBCATEGORY_ADDED', 'Added report subcategory ' + name + '.');
+      return true;
+    }
+
+    if (interaction.customId.startsWith('sf:settings:reports:subcategory:edit:')) {
+      const parts = interaction.customId.split(':'); const categoryId = parts[5] ?? ''; const subcategoryId = parts[6] ?? '';
+      const sub = (await getAdvancedSettings(guild.id)).reports.categories[categoryId]?.subcategories[subcategoryId];
+      if (!sub) { await reject(interaction, '❌ Report subcategory not found.'); return true; }
+      await openModal(interaction, 'sf:settings:modal:report-subcategory:edit:' + categoryId + ':' + subcategoryId, 'Edit Report Subcategory', [
+        new TextInputBuilder().setCustomId('name').setLabel('Subcategory name').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(sub.name),
+      ]);
+      return true;
+    }
+
+    if (interaction.customId.startsWith('sf:settings:reports:subcategory:remove:')) {
+      const parts = interaction.customId.split(':'); const categoryId = parts[5] ?? ''; const subcategoryId = parts[6] ?? '';
+      const settings = await getAdvancedSettings(guild.id);
+      const category = settings.reports.categories[categoryId];
+      if (!category || !category.subcategories[subcategoryId]) { await reject(interaction, '❌ Report subcategory not found.'); return true; }
+      if (Object.keys(category.subcategories).length <= 1) { await reject(interaction, '❌ Each report category must keep at least one subcategory.'); return true; }
+      await interaction.deferUpdate();
+      await updateAdvancedSettings(guild.id, (current) => { const item = current.reports.categories[categoryId]; if (item) delete item.subcategories[subcategoryId]; });
+      await refreshSettingsChannel(guild);
+      await showReportCategorySettings(interaction, categoryId);
+      return true;
+    }
+
+    if (interaction.customId.startsWith('sf:settings:modal:report-subcategory:edit:')) {
+      const parts = interaction.customId.split(':'); const categoryId = parts[4] ?? ''; const subcategoryId = parts[5] ?? '';
+      const sub = (await getAdvancedSettings(guild.id)).reports.categories[categoryId]?.subcategories[subcategoryId];
+      if (!sub) { await reject(interaction, '❌ Report subcategory not found.'); return true; }
+      const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
+      if (!name) { await reject(interaction, '❌ Subcategory name cannot be empty.'); return true; }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await updateAdvancedSettings(guild.id, (settings) => { const item = settings.reports.categories[categoryId]?.subcategories[subcategoryId]; if (item) { item.name = name; item.updatedAt = new Date().toISOString(); } });
+      await refreshSettingsChannel(guild);
+      await interaction.editReply({
+        embeds: [new EmbedBuilder().setTitle('✅ Report Subcategory Updated').setDescription('Renamed the report subcategory to **' + name + '**.')],
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+      });
       return true;
     }
 
