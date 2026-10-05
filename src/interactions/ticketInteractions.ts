@@ -2959,6 +2959,10 @@ async function applyTicketRouting(interaction: StringSelectMenuInteraction, depa
 }
 
 async function changeTicketRoutingTag(interaction: StringSelectMenuInteraction): Promise<void> {
+  if (!interaction.replied && !interaction.deferred) {
+    await interaction.deferUpdate();
+  }
+
   const parts = interaction.customId.split(':'); const departmentId = parts[3] ?? ''; const tagId = interaction.values[0] ?? '';
   const config = await getGuildConfig(interaction.guild!.id); const department = config.departments[departmentId];
   if (!department?.tags?.[tagId]) { await replyError(interaction, '❌ That tag is not valid for this department.'); return; }
