@@ -46,7 +46,7 @@ import {
   updatePersistedTicketMetadata,
 } from '../services/ticketPersistenceService';
 
-import { setChannelTopic } from '../services/discordChannelService';
+import { setChannelPermissionOverwrite, setChannelTopic } from '../services/discordChannelService';
 
 import {
   ensureArchiveCategory,
@@ -226,7 +226,7 @@ async function syncCommandTicketVisibility(
       status === 'claimed'
         ? 'Hide claimed ticket from unassigned department staff'
         : 'Restore department staff access to ticket',
-    ).catch((error) => {
+    ).catch((error: unknown) => {
       console.warn('⚠️ Could not synchronize ticket staff visibility:', error);
     });
   }
@@ -253,7 +253,7 @@ async function syncCommandTicketVisibility(
       [],
       1,
       'Synchronize SupportForge ticket participant access',
-    ).catch((error) => {
+    ).catch((error: unknown) => {
       console.warn('⚠️ Could not grant ticket participant visibility:', error);
     });
   }
@@ -268,7 +268,7 @@ async function syncCommandTicketVisibility(
       [],
       1,
       'Clear former SupportForge ticket claimant access',
-    ).catch((error) => {
+    ).catch((error: unknown) => {
       console.warn('⚠️ Could not clear former claimant visibility:', error);
     });
   }
