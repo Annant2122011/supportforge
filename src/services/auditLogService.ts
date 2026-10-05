@@ -827,12 +827,30 @@ async function sendAuditEntry(
     ? `<@${event.actorId}>`
     : event.actorName;
 
+  const fixedLines = [
+    '**User:** ' + actor,
+    '**User ID:** \`' + event.actorId + '\`',
+    '**When:** <t:' + Math.floor(new Date(event.timestamp).getTime() / 1000) + ':F>',
+    event.ticketNumber ? '**Ticket:** #' + event.ticketNumber : null,
+  ].filter(Boolean) as string[];
+
+  const detail = event.detail?.trim();
+  const detailPrefix = detail ? '**Details:** ' : '';
+  const maxDescriptionLength = 3900;
+  const maxDetailLength = Math.max(
+    0,
+    maxDescriptionLength - fixedLines.join('\n').length - '\n'.length - detailPrefix.length,
+  );
+
+  const detailText = detail
+    ? detail.length > maxDetailLength
+      ? detail.slice(0, Math.max(0, maxDetailLength - 24)) + '\n[…details truncated…]'
+      : detail
+    : null;
+
   const description = [
-    `**User:** ${actor}`,
-    `**User ID:** \`${event.actorId}\``,
-    `**When:** <t:${Math.floor(new Date(event.timestamp).getTime() / 1000)}:F>`,
-    event.ticketNumber ? `**Ticket:** #${event.ticketNumber}` : null,
-    event.detail ? `**Details:** ${event.detail}` : null,
+    ...fixedLines,
+    detailText ? detailPrefix + detailText : null,
   ]
     .filter(Boolean)
     .join('\n');
