@@ -43,6 +43,7 @@ import {
 import { resetPanelActivity } from '../services/panelActivityService';
 import { getAdvancedSettings, type TicketPriority } from '../services/advancedSettingsService';
 import { ensureDepartmentCategory } from '../services/departmentCategoryService';
+import { endTicketVoiceMode, startTicketVoiceMode } from '../services/voiceModeService';
 
 import {
   getPersistedTicketStatus,
@@ -692,6 +693,7 @@ async function updateMainMessage(
         components:
           buildTicketPanelComponents(
             status,
+            topic,
           ),
       }),
       DISCORD_OPERATION_TIMEOUT_MS,
@@ -776,6 +778,55 @@ function buildOpenOverwrites(
   }
 
   return overwrites;
+}
+
+
+async function applyTicketVisibilityMode(
+  channel: TextChannel,
+  topic: string,
+  mode: 'unclaimed' | 'claimed',
+  formerClaimedBy?: string,
+): Promise<void> {
+  const staffRoleId = getField(topic, 'staff');
+  const ownerId = getField(topic, 'owner');
+  const claimedBy = getField(topic, 'claimed_by');
+  const users = (getField(topic, 'users') ?? '').split(',').map((value) => value.trim()).filter(Boolean);
+
+  if (!channel.guild.members.me || !ownerId) {
+    throw new Error('Ticket privacy could not resolve the bot or ticket owner.');
+  }
+
+  const textPermissions = [
+    PermissionFlagsBits.ViewChannel,
+    PermissionFlagsBits.SendMessages,
+    PermissionFlagsBits.ReadMessageHistory,
+  ];
+  const memberAllow = [
+    ...textPermissions,
+    PermissionFlagsBits.AttachFiles,
+    PermissionFlagsBits.EmbedLinks,
+  ];
+
+  if (mode === 'claimed' && staffRoleId && staffRoleId !== 'none') {
+    await setChannelPermissionOverwrite(channel.id, staffRoleId, [], textPermissions, 0, 'Restrict claimed ticket to its participants');
+  } else if (staffRoleId && staffRoleId !== 'none') {
+    await setChannelPermissionOverwrite(channel.id, staffRoleId, textPermissions, [], 0, 'Restore department staff access to ticket');
+  }
+
+  if (formerClaimedBy && formerClaimedBy !== ownerId && formerClaimedBy !== claimedBy) {
+    await setChannelPermissionOverwrite(channel.id, formerClaimedBy, [], [], 1, 'Clear former claimant ticket override');
+  }
+
+  const participants = new Set<string>([
+    ownerId,
+    ...users,
+    ...(mode === 'claimed' && claimedBy ? [claimedBy] : []),
+  ]);
+
+  for (const userId of participants) {
+    if (!userId || userId === channel.guild.members.me.id) continue;
+    await setChannelPermissionOverwrite(channel.id, userId, memberAllow, [], 1, 'Grant ticket participant access');
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1068,6 +1119,7 @@ async function createTicket(
             components:
               buildTicketPanelComponents(
                 'open',
+                topic,
               ),
           }),
           DISCORD_OPERATION_TIMEOUT_MS,
@@ -1647,6 +1699,23 @@ async function transition(
      * The topic remains descriptive metadata and is still used by older
      * tickets and other ticket metadata operations.
      */
+    if (newStatus === 'claimed') {
+      await applyTicketVisibilityMode(channel, newTopic, 'claimed');
+    } else if (newStatus === 'open' || newStatus === 'pending' || newStatus === 'reopened') {
+      await applyTicketVisibilityMode(channel, newTopic, 'unclaimed', getField(oldTopic, 'claimed_by'));
+    }
+
+    if (newStatus !== 'claimed' && getField(oldTopic, 'voice_channel_id')) {
+      newTopic = await endTicketVoiceMode(
+        interaction.guild!,
+        channel,
+        newTopic,
+        newStatus,
+        'SupportForge voice mode ended because ticket status changed',
+      );
+      updateRuntimeTicketState(channel, newTopic, newStatus);
+    }
+
     await setPersistedTicketStatus(
       channel.id,
       newStatus,
@@ -2124,11 +2193,21 @@ async function closeTicket(
      * Discord channel PATCH. The lifecycle state is persisted locally so the
      * closed-ticket message guard continues to work after a restart.
      */
+    const voiceClearedTopic = getField(topic, 'voice_channel_id')
+      ? await endTicketVoiceMode(
+          interaction.guild!,
+          channel,
+          topic,
+          'closed',
+          'SupportForge voice mode ended because ticket was closed',
+        )
+      : topic;
+
     const closedTopic =
       setField(
         setField(
           setField(
-            topic,
+            voiceClearedTopic,
             'status',
             'closed',
           ),
@@ -2708,11 +2787,159 @@ async function applyTicketPriority(
   );
 }
 
+
+async function handleTicketVoiceStart(interaction: ButtonInteraction): Promise<void> {
+  await interaction.deferUpdate();
+  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
+    await replyError(interaction, '❌ Voice mode is only available inside a ticket.');
+    return;
+  }
+  const channel = interaction.channel as TextChannel;
+  const topic = channel.topic ?? '';
+  const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
+  if (!isTicketTopic(topic) || status !== 'claimed') {
+    await replyError(interaction, '❌ Voice mode is available only for claimed tickets.');
+    return;
+  }
+  if (!getStaffContext(interaction, topic).authorized) {
+    await replyError(interaction, '❌ Only configured staff or administrators can start voice mode.');
+    return;
+  }
+  if (!getField(topic, 'claimed_by')) {
+    await replyError(interaction, '❌ Claim the ticket before starting voice mode.');
+    return;
+  }
+  try {
+    const result = await startTicketVoiceMode(interaction.guild, channel, topic);
+    channel.topic = result.topic;
+    const ticketNumber = getField(result.topic, 'number') ?? 'unknown';
+    await updateMainMessage(channel, getField(result.topic, 'message'), status, result.topic);
+    await channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle('🎙️ Private Voice Mode Active')
+          .setDescription('A private voice room has been created for this ticket. Only the ticket owner and assigned moderator can connect. The room has a **2-person limit** and supports screen sharing.')
+          .addFields({ name: 'Voice channel', value: result.voiceChannel.toString() })
+          .setTimestamp(),
+      ],
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Join Private Voice').setEmoji('🎙️')
+            .setURL('https://discord.com/channels/' + interaction.guild.id + '/' + result.voiceChannel.id),
+        ),
+      ],
+      allowedMentions: { parse: [] },
+    });
+    const config = await getGuildConfig(interaction.guild.id);
+    if (config.supportCategoryId) {
+      await logTicketEvent(interaction.guild, config.supportCategoryId, {
+        ticketNumber,
+        event: 'ticket_voice_started',
+        actor: interaction.user.tag,
+        actorId: interaction.user.id,
+        actorName: interaction.user.tag,
+        detail: 'Created private voice channel ' + result.voiceChannel.name + ' for the owner and assigned moderator. User limit=2; screen sharing enabled.',
+      });
+    }
+  } catch (error) {
+    console.error('❌ Failed to start ticket voice mode:', error);
+    await replyError(interaction, '❌ SupportForge could not start private voice mode. The ticket itself was not changed.');
+  }
+}
+
+async function handleTicketVoiceEnd(interaction: ButtonInteraction): Promise<void> {
+  await interaction.deferUpdate();
+  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
+    await replyError(interaction, '❌ Voice mode is only available inside a ticket.');
+    return;
+  }
+  const channel = interaction.channel as TextChannel;
+  const topic = channel.topic ?? '';
+  const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
+  if (!isTicketTopic(topic) || status !== 'claimed') {
+    await replyError(interaction, '❌ This ticket is no longer using an active voice session.');
+    return;
+  }
+  if (!getStaffContext(interaction, topic).authorized) {
+    await replyError(interaction, '❌ Only configured staff or administrators can end voice mode.');
+    return;
+  }
+  try {
+    const newTopic = await endTicketVoiceMode(interaction.guild, channel, topic, status, 'SupportForge voice mode ended');
+    channel.topic = newTopic;
+    await updateMainMessage(channel, getField(newTopic, 'message'), status, newTopic);
+    await channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle('🔚 Private Voice Mode Ended')
+          .setDescription('The temporary private voice room has been removed. This ticket is back to normal text mode.')
+          .setTimestamp(),
+      ],
+    });
+    const config = await getGuildConfig(interaction.guild.id);
+    if (config.supportCategoryId) {
+      await logTicketEvent(interaction.guild, config.supportCategoryId, {
+        ticketNumber: getField(newTopic, 'number') ?? 'unknown',
+        event: 'ticket_voice_ended',
+        actor: interaction.user.tag,
+        actorId: interaction.user.id,
+        actorName: interaction.user.tag,
+        detail: 'Private voice channel deleted and ticket returned to text mode.',
+      });
+    }
+  } catch (error) {
+    console.error('❌ Failed to end ticket voice mode:', error);
+    await replyError(interaction, '❌ SupportForge could not end voice mode safely.');
+  }
+}
+
+async function handleTicketVoiceJoin(interaction: ButtonInteraction): Promise<void> {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
+    await interaction.editReply('❌ Voice mode is only available inside a ticket.');
+    return;
+  }
+  const channel = interaction.channel as TextChannel;
+  const topic = channel.topic ?? '';
+  const voiceId = getField(topic, 'voice_channel_id');
+  const claimedBy = getField(topic, 'claimed_by');
+  const ownerId = getField(topic, 'owner');
+  if (!voiceId || !claimedBy || !ownerId) {
+    await interaction.editReply('❌ No active private voice session was found for this ticket.');
+    return;
+  }
+  const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+  const staffRoleIds = new Set(
+    Object.values((await getGuildConfig(interaction.guild.id)).departments)
+      .map((d) => d.staffRoleId)
+      .filter((id): id is string => Boolean(id)),
+  );
+  const allowed = interaction.user.id === ownerId || interaction.user.id === claimedBy ||
+    Boolean(member?.roles.cache.some((role) => staffRoleIds.has(role.id)));
+  if (!allowed) {
+    await interaction.editReply('❌ Only the ticket owner and assigned moderator can use this private voice session.');
+    return;
+  }
+  const voiceChannel = interaction.guild.channels.cache.get(voiceId);
+  if (voiceChannel?.type !== ChannelType.GuildVoice) {
+    await interaction.editReply('❌ The private voice channel is no longer available.');
+    return;
+  }
+  await interaction.editReply('🎙️ **Private Voice Channel**
+' + voiceChannel + '
+
+This room is limited to the ticket owner and assigned moderator.');
+}
+
 async function handlePanelButton(
   interaction: ButtonInteraction,
 ): Promise<void> {
   const id =
     interaction.customId;
+
+  if (id === 'ticket:panel:voice:start') { await handleTicketVoiceStart(interaction); return; }
+  if (id === 'ticket:panel:voice:end') { await handleTicketVoiceEnd(interaction); return; }
+  if (id === 'ticket:panel:voice:join') { await handleTicketVoiceJoin(interaction); return; }
 
   if (id === 'ticket:panel:priority') {
     if (!(await safeDeferReply(interaction))) {
@@ -3410,8 +3637,12 @@ export async function handleTicketInteraction(
      */
     if (
       interaction.isButton() &&
-      (interaction.customId === 'ticket:panel:move-bottom' ||
-        interaction.customId === 'ticket:panel:restore-move')
+      (
+        interaction.customId === 'ticket:panel:move-bottom' ||
+        interaction.customId === 'ticket:panel:restore-move' ||
+        interaction.customId === 'ticket:panel:voice:start' ||
+        interaction.customId === 'ticket:panel:voice:end'
+      )
     ) {
       if (!(await safeDeferReply(interaction))) {
         return;
