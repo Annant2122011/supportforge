@@ -15,6 +15,8 @@ import {
   isPremiumOrHigher,
 } from '../services/configService';
 
+import { getAdvancedSettings } from '../services/advancedSettingsService';
+
 import {
   getOrCreateAuditChannel,
   getTicketAuditHistory,
