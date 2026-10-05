@@ -4253,6 +4253,33 @@ export async function handleTicketInteraction(
     }
 
     if (
+      interaction.isButton() &&
+      interaction.customId.startsWith('ticket:create-tag:page:')
+    ) {
+      const parts = interaction.customId.split(':');
+      const departmentId = parts[3] ?? '';
+      const page = Number(parts[4] ?? '0');
+
+      await showTicketTagSelector(
+        interaction,
+        departmentId,
+        Number.isInteger(page) ? page : 0,
+      );
+      return;
+    }
+
+    if (
+      interaction.isButton() &&
+      interaction.customId === 'ticket:create-tag:cancel'
+    ) {
+      await interaction.update({
+        content: 'Ticket tag selection cancelled.',
+        components: [],
+      });
+      return;
+    }
+
+    if (
       interaction.isButton()
     ) {
       /*
