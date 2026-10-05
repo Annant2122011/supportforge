@@ -1063,15 +1063,19 @@ export async function executeTicketCommand(
       ) {
         users.add(target.id);
 
-        await context.channel.permissionOverwrites.edit(
+        await setChannelPermissionOverwrite(
+          context.channel.id,
           target.id,
-          {
-            ViewChannel: true,
-            SendMessages: true,
-            ReadMessageHistory: true,
-            AttachFiles: true,
-            EmbedLinks: true,
-          },
+          [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.ReadMessageHistory,
+            PermissionFlagsBits.AttachFiles,
+            PermissionFlagsBits.EmbedLinks,
+          ],
+          [],
+          1,
+          'SupportForge add ticket participant',
         );
 
         await context.channel.send(
@@ -1082,8 +1086,13 @@ export async function executeTicketCommand(
           target.id,
         );
 
-        await context.channel.permissionOverwrites.delete(
+        await setChannelPermissionOverwrite(
+          context.channel.id,
           target.id,
+          [],
+          [],
+          1,
+          'SupportForge remove ticket participant',
         );
 
         await context.channel.send(
