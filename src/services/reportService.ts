@@ -86,7 +86,15 @@ async function load(): Promise<ReportStore> {
     }
 
     state = { version: 1, guilds };
-  } catch {
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') {
+      throw new Error(
+        'SupportForge report data could not be loaded safely. The existing file was not replaced.',
+        { cause: error },
+      );
+    }
+
     state = { version: 1, guilds: {} };
     await persist();
   }
