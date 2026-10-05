@@ -3662,7 +3662,29 @@ async function handlePanelButton(
         );
       }
 
-      await interaction.message.edit({ components: rows });
+      const pageSettings = await getAdvancedSettings(interaction.guild.id);
+      const pageEmbed = interaction.message.embeds[0]
+        ? EmbedBuilder.from(interaction.message.embeds[0])
+        : new EmbedBuilder();
+
+      const pageLines = visibleDepartments.length
+        ? visibleDepartments.map((department) => `🎫 **${department.name}**`).join('\n') +
+          (pageCount > 1
+            ? '\n\nPage **' + (safePage + 1) + ' / ' + pageCount + '** • Use the buttons below to browse departments.'
+            : '')
+        : 'No ticket departments configured.';
+
+      pageEmbed.setDescription(
+        `Welcome to **${interaction.guild.name}** support.\n\n` +
+          pageSettings.appearance.panelDescription + '\n\n' +
+          pageLines + '\n\n' +
+          `🔒 Tickets are visible only to the ticket owner, assigned support staff, and administrators.`,
+      );
+
+      await interaction.message.edit({
+        embeds: [pageEmbed],
+        components: rows,
+      });
       await interaction.editReply({}).catch(() => undefined);
     } catch (error) {
       console.error('❌ Failed to change support panel page:', error);
