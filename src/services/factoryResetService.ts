@@ -21,12 +21,6 @@ const DATA_DIR = join(process.cwd(), 'data');
  * unrelated resources with identical names.
  */
 
-const SUPPORTFORGE_CATEGORY_PREFIXES = [
-  'SupportForge.',
-  'SupportForge • Closed',
-  'SupportForge • Archive',
-];
-
 const resettingGuilds = new Set<string>();
 
 export function isFactoryResetInProgress(guildId: string): boolean {
@@ -54,15 +48,11 @@ function isSupportForgeChannel(channel: GuildBasedChannel, configuredIds: Set<st
 
   if (channel.parentId && configuredCategoryIds.has(channel.parentId)) return true;
 
-  if (
-    channel.type === ChannelType.GuildCategory &&
-    SUPPORTFORGE_CATEGORY_PREFIXES.some((prefix) =>
-      channel.name.toLowerCase().startsWith(prefix.toLowerCase()),
-    )
-  ) {
-    return true;
-  }
-
+  /*
+   * Never treat a category name/prefix as ownership proof. Orphaned
+   * SupportForge categories whose IDs are no longer persisted cannot be safely
+   * distinguished from unrelated categories created by administrators.
+   */
   return false;
 }
 
