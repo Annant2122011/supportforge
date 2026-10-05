@@ -3310,6 +3310,19 @@ async function handlePanelButton(
 
     try {
       const config = await getGuildConfig(interaction.guild.id);
+      const panelChannel = interaction.channel as TextChannel;
+      const isSupportPanel =
+        panelChannel.id === config.panelChannelId ||
+        panelChannel.topic?.startsWith('supportforge:panel');
+
+      if (!isSupportPanel) {
+        await replyError(
+          interaction,
+          '❌ This pagination control can only be used on the SupportForge support panel.',
+        );
+        return;
+      }
+
       const departments = Object.values(config.departments).sort((a, b) =>
         a.name.localeCompare(b.name),
       );
