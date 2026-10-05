@@ -999,11 +999,11 @@ async function showResetFinal(interaction: ButtonInteraction): Promise<void> {
         new ActionRowBuilder<TextInputBuilder>().addComponents(
           new TextInputBuilder()
             .setCustomId('confirmation')
-            .setLabel('Type DELETE SUPPORTFORGE to continue')
+            .setLabel('Type DELETE SUPPORT FORGE to continue')
             .setStyle(TextInputStyle.Short)
             .setRequired(true)
-            .setPlaceholder('DELETE SUPPORTFORGE')
-            .setMaxLength(19),
+            .setPlaceholder('DELETE SUPPORT FORGE')
+            .setMaxLength(20),
         ),
       ),
   );
@@ -2066,8 +2066,8 @@ export async function handleSettingsInteraction(
     if (interaction.customId === 'sf:settings:modal:reset') {
       const confirmation = interaction.fields.getTextInputValue('confirmation').trim().toUpperCase();
 
-      if (confirmation !== 'DELETE SUPPORTFORGE') {
-        await reject(interaction, '❌ Final confirmation did not match. No data was deleted.');
+      if (confirmation !== 'DELETE SUPPORT FORGE') {
+        await reject(interaction, '❌ Final confirmation did not match. Type **DELETE SUPPORT FORGE** exactly. No data was deleted.');
         return true;
       }
 
@@ -2084,32 +2084,37 @@ export async function handleSettingsInteraction(
          * Use a webhook follow-up instead, which is independent of the
          * deleted SupportForge channel.
          */
+        await interaction.editReply({
+          content:
+            '⏳ **SupportForge reset is being completed.** All SupportForge-managed infrastructure and stored data are being removed. The final confirmation will be sent separately after the destructive operation finishes.',
+        });
+
         await performFactoryReset(guild, accumulateAuditData);
         pendingResetAuditChoice.delete(guild.id);
 
-        await interaction.followUp({
+        /*
+         * The reset intentionally destroys the Settings channel that hosted
+         * this interaction. Do not rely on the interaction webhook for a
+         * post-reset follow-up: Discord can return 10008 Unknown Message once
+         * the hosting infrastructure has disappeared. Send the completion
+         * notice through the user's DM instead.
+         */
+        await interaction.user.send({
           content:
             '✅ SupportForge has been completely reset. All SupportForge-managed messages, channels, categories, and stored data were deleted.',
-          flags: MessageFlags.Ephemeral,
-        }).catch((followUpError) => {
+        }).catch((deliveryError) => {
           console.warn(
-            '⚠️ Factory reset completed, but the confirmation follow-up could not be delivered:',
-            followUpError,
+            '⚠️ Factory reset completed, but the completion DM could not be delivered:',
+            deliveryError,
           );
         });
       } catch (error) {
         console.error('❌ SupportForge factory reset failed:', error);
 
-        await interaction.followUp({
+        await interaction.editReply({
           content:
             '❌ The complete reset encountered an error. Check the bot console for details.',
-          flags: MessageFlags.Ephemeral,
-        }).catch((followUpError) => {
-          console.warn(
-            '⚠️ Factory reset error response could not be delivered:',
-            followUpError,
-          );
-        });
+        }).catch(() => undefined);
       }
       return true;
     }
