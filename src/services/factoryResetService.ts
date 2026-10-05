@@ -112,14 +112,19 @@ export async function performFactoryReset(guild: Guild, accumulateAuditData = fa
      * before resetting advanced settings so a factory reset cannot leave
      * orphaned "SupportForge • ... Tickets" roles behind.
      */
+    const configuredPriorityRoleIds = new Set(
+      Object.values(settings.priorityRoles).filter(
+        (id): id is string => Boolean(id),
+      ),
+    );
+
     const managedPriorityRoles = [
       ...guild.roles.cache.values(),
     ].filter(
       (role) =>
         !role.managed &&
         (
-          role.name.toLowerCase().startsWith('supportforge •') ||
-          role.name.toLowerCase() === 'developer-mode audit-log' ||
+          configuredPriorityRoleIds.has(role.id) ||
           role.id === config.auditDeveloperRoleId
         ),
     );
