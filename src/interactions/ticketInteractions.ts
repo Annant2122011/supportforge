@@ -2850,12 +2850,6 @@ async function showTicketHistory(
     const topic = channel.topic ?? '';
     const ticketNumber = getField(topic, 'number') ?? 'unknown';
 
-    /*
-     * Read the durable audit store instead of the visible audit channel.
-     * Developer-only/internal events are intentionally absent from the
-     * standard Discord audit feed, so message scraping cannot provide a
-     * complete ticket history.
-     */
     const events = await getTicketAuditHistory(
       interaction.guild.id,
       ticketNumber,
@@ -2865,12 +2859,12 @@ async function showTicketHistory(
 
     if (!recent.length) {
       await interaction.editReply(
-        `📜 **Ticket #${ticketNumber} History**\n\nNo audit events have been recorded for this ticket yet.`,
+        '📜 **Ticket #' + ticketNumber + ' History**\n\nNo audit events have been recorded for this ticket yet.',
       );
       return;
     }
 
-    const lines = recent.map((event: Awaited<ReturnType<typeof getTicketAuditHistory>>[number]) => {
+    const lines = recent.map((event) => {
       const timestamp = Math.floor(new Date(event.timestamp).getTime() / 1000);
       const detail = event.detail?.trim();
 
@@ -2884,20 +2878,41 @@ async function showTicketHistory(
           .join(' ') +
         '** • ' +
         (event.actorName || 'Unknown') +
-        (detail ? ' • ' + detail.slice(0, 220) : '')
+        (detail ? ' • ' + detail.slice(0, 160) : '')
       );
     });
 
-    await interaction.editReply(
-      `📜 **Ticket #${ticketNumber} History**\n\n` +
-        lines.join('\n'),
+    /* Discord message content is capped at 2,000 characters. */
+    const chunks: string[] = [];
+    let current = '';
+    for (const line of lines) {
+      const candidate = current ? current + '\n' + line : line;
+      if (candidate.length > 2800 && current) {
+        chunks.push(current);
+        current = line;
+      } else {
+        current = candidate;
+      }
+    }
+    if (current) chunks.push(current);
+
+    const embeds = chunks.slice(0, 2).map((chunk, index) =>
+      new EmbedBuilder()
+        .setTitle(
+          index === 0
+            ? '📜 Ticket #' + ticketNumber + ' History'
+            : '📜 Ticket #' + ticketNumber + ' History • Continued',
+        )
+        .setDescription(chunk)
+        .setFooter({ text: 'Showing the ' + recent.length + ' most recent audit events.' }),
     );
+
+    await interaction.editReply({ content: '', embeds });
   } catch (error) {
     console.error('❌ Failed to load ticket history:', error);
     await replyError(interaction, '❌ SupportForge could not load this ticket history.');
   }
 }
-
 
 async function renderDepartmentSelector(interaction: ButtonInteraction | StringSelectMenuInteraction, page = 0): Promise<void> {
   if (!interaction.replied && !interaction.deferred) {
