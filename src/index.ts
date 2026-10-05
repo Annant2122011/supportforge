@@ -384,9 +384,10 @@ client.on('roleDelete', async (role) => {
 
 
 function formatExactMessageContent(content: string): string {
-  const runs = content.match(new RegExp(bt + '+', 'g')) ?? [];
+  const backtick = String.fromCharCode(96);
+  const runs = content.match(new RegExp(backtick + '+', 'g')) ?? [];
   const longestRun = runs.reduce((max, run) => Math.max(max, run.length), 0);
-  const fence = bt.repeat(Math.max(3, longestRun + 1));
+  const fence = backtick.repeat(Math.max(3, longestRun + 1));
   return fence + '\n' + content + '\n' + fence;
 }
 
