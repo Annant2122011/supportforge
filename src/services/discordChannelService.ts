@@ -433,6 +433,20 @@ async function discordRequest<T = unknown>(
   }
 }
 
+export async function setChannelUserLimit(
+  channelId: string,
+  userLimit: number,
+  operation: string,
+): Promise<void> {
+  await discordRequest(
+    channelId,
+    'PATCH',
+    '/channels/' + channelId,
+    { user_limit: userLimit },
+    operation,
+  );
+}
+
 export async function setChannelName(
   channelId: string,
   name: string,
