@@ -2732,7 +2732,7 @@ async function showTicketCreationModal(
   }
 }
 
-async function showReportTargetSelector(interaction: ButtonInteraction): Promise<void> {
+async function showReportTargetSelector(interaction: ButtonInteraction, page = 0): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
     await replyError(interaction, '❌ Reporting is only available inside a ticket.');
@@ -2750,27 +2750,57 @@ async function showReportTargetSelector(interaction: ButtonInteraction): Promise
     getField(topic, 'owner'),
     ...(getField(topic, 'users') ?? '').split(',').filter(Boolean),
     ...(getField(topic, 'claimed_by') ?? '').split(',').filter(Boolean),
-  ].filter((id): id is string => Boolean(id) && id !== interaction.user.id))).slice(0, 25);
+  ].filter((id): id is string => Boolean(id) && id !== interaction.user.id)));
 
   if (!targetIds.length) {
     await replyError(interaction, '❌ There are no other reportable participants on this ticket.');
     return;
   }
 
-  await interaction.editReply({
-    content: '🚩 **Report a user**\nChoose the participant whose behaviour you want to report.',
-    components: [
-      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-        new StringSelectMenuBuilder()
-          .setCustomId('ticket:report:target')
-          .setPlaceholder('Choose the reported user')
-          .addOptions(targetIds.map((id) => ({
-            label: 'User ' + id.slice(-6),
-            value: id,
-            description: id === getField(topic, 'owner') ? 'Ticket owner' : 'Ticket participant',
-          }))),
+  const pageSize = 25;
+  const pageCount = Math.max(1, Math.ceil(targetIds.length / pageSize));
+  const safePage = Math.min(Math.max(page, 0), pageCount - 1);
+  const visibleTargets = targetIds.slice(safePage * pageSize, (safePage + 1) * pageSize);
+
+  const components: Array<ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<ButtonBuilder>> = [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('ticket:report:target')
+        .setPlaceholder('Choose the reported user')
+        .addOptions(visibleTargets.map((id) => ({
+          label: 'User ' + id.slice(-6),
+          value: id,
+          description: id === getField(topic, 'owner') ? 'Ticket owner' : 'Ticket participant',
+        }))),
+    ),
+  ];
+
+  if (pageCount > 1) {
+    components.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId('ticket:panel:report:page:' + (safePage - 1))
+          .setLabel('Previous')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(safePage === 0),
+        new ButtonBuilder()
+          .setCustomId('ticket:panel:report:page:' + safePage)
+          .setLabel('Page ' + (safePage + 1) + ' / ' + pageCount)
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(true),
+        new ButtonBuilder()
+          .setCustomId('ticket:panel:report:page:' + (safePage + 1))
+          .setLabel('Next')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(safePage >= pageCount - 1),
       ),
-    ],
+    );
+  }
+
+  await interaction.editReply({
+    content: '🚩 **Report a user**\nChoose the participant whose behaviour you want to report.' +
+      (pageCount > 1 ? '\nPage ' + (safePage + 1) + ' of ' + pageCount + '.' : ''),
+    components,
   });
 }
 
@@ -3539,7 +3569,11 @@ async function handlePanelButton(
   if (id === 'ticket:panel:voice:start') { await handleTicketVoiceStart(interaction); return; }
   if (id === 'ticket:panel:voice:end') { await handleTicketVoiceEnd(interaction); return; }
   if (id === 'ticket:panel:voice:join') { await handleTicketVoiceJoin(interaction); return; }
-  if (id === 'ticket:panel:report') { await showReportTargetSelector(interaction); return; }
+  if (id === 'ticket:panel:report' || id.startsWith('ticket:panel:report:page:')) {
+    const page = id.startsWith('ticket:panel:report:page:') ? Number(id.slice('ticket:panel:report:page:'.length)) : 0;
+    await showReportTargetSelector(interaction, Number.isInteger(page) ? page : 0);
+    return;
+  }
   if (id.startsWith('ticket:report:decision:')) { await handleReportDecision(interaction); return; }
 
   if (id === 'ticket:panel:priority') {
