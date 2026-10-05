@@ -2449,19 +2449,19 @@ async function closeTicket(
 /* -------------------------------------------------------------------------- */
 
 async function showTicketTagSelector(interaction: ButtonInteraction, departmentId: string): Promise<void> {
+  if (!(await safeDeferReply(interaction))) return;
   if (!interaction.guild) { await replyError(interaction, '❌ This action must be used inside a server.'); return; }
   const config = await getGuildConfig(interaction.guild.id);
   const department = config.departments[departmentId];
   if (!department) { await replyError(interaction, '❌ This department no longer exists.'); return; }
   const tags = Object.values(department.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
   if (!tags.length) { await replyError(interaction, '❌ This department has no tags configured. Ask an administrator to add one.'); return; }
-  if (tags.length === 1) { await showTicketCreationModal(interaction, departmentId, tags[0].id); return; }
   const menu = new StringSelectMenuBuilder()
     .setCustomId('ticket:create-tag:select:' + departmentId)
     .setPlaceholder('Choose a tag')
     .setMinValues(1).setMaxValues(1)
     .addOptions(tags.slice(0, 25).map((tag) => ({ label: tag.name.slice(0, 100), value: tag.id, description: 'Subcategory of ' + department.name })));
-  await interaction.reply({
+  await interaction.editReply({
     content: '🏷️ **Choose a tag for your ' + department.name + ' ticket**\nTags are subcategories inside the department and do not create Discord categories.',
     components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
     flags: MessageFlags.Ephemeral,
