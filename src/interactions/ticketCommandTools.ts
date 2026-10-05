@@ -544,42 +544,37 @@ export async function executeTicketCommand(
         return;
       }
 
+      const claimedIds = (context.claimedBy ?? '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean);
+
       if (
-        context.claimedBy !==
-          interaction.user.id &&
+        !claimedIds.includes(interaction.user.id) &&
         !context.isAdmin
       ) {
         await interaction.editReply(
-          '❌ Only the current claimant or an administrator can unclaim this ticket.',
+          '❌ Only an assisting moderator or an administrator can unclaim this ticket.',
         );
         return;
       }
 
-      let topic = setField(
-        context.topic,
-        'status',
-        'open',
-      );
+      const remaining = context.isAdmin && !claimedIds.includes(interaction.user.id)
+        ? []
+        : claimedIds.filter((id) => id !== interaction.user.id);
 
-      topic = removeField(
-        topic,
-        'claimed_by',
-      );
+      let topic: string;
 
-      topic = removeField(
-        topic,
-        'claimed_at',
-      );
-
-      topic = removeField(
-        topic,
-        'assigned_at',
-      );
-
-      topic = removeField(
-        topic,
-        'previous_assignee',
-      );
+      if (remaining.length) {
+        topic = setField(context.topic, 'claimed_by', remaining.join(','));
+        topic = setField(topic, 'status', 'claimed');
+      } else {
+        topic = setField(context.topic, 'status', 'open');
+        topic = removeField(topic, 'claimed_by');
+        topic = removeField(topic, 'claimed_at');
+        topic = removeField(topic, 'assigned_at');
+        topic = removeField(topic, 'previous_assignee');
+      }
 
       await saveTopic(
         context,
@@ -587,17 +582,23 @@ export async function executeTicketCommand(
       );
 
       await context.channel.send(
-        `↩️ Ticket #${context.ticketNumber} was unclaimed by ${interaction.user}.`,
+        remaining.length
+          ? `↩️ ${interaction.user} left ticket #${context.ticketNumber}. Other assigned moderators remain on it.`
+          : `↩️ Ticket #${context.ticketNumber} was fully unclaimed by ${interaction.user}.`,
       );
 
       await audit(
         interaction,
         context,
-        `Ticket unclaimed by ${interaction.user.tag}`,
+        remaining.length
+          ? `Moderator left ticket #${context.ticketNumber}`
+          : `Ticket fully unclaimed by ${interaction.user.tag}`,
       );
 
       await interaction.editReply(
-        `✅ Ticket #${context.ticketNumber} is now **open**.`,
+        remaining.length
+          ? `✅ You left ticket #${context.ticketNumber}. It remains claimed by the other assisting moderator(s).`
+          : `✅ Ticket #${context.ticketNumber} is now **open**.`,
       );
 
       return;
