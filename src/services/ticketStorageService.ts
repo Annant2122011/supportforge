@@ -140,6 +140,25 @@ export async function ensureOpenCategory(
     saved?.type === ChannelType.GuildCategory &&
     saved.children.cache.size < MAX_CHANNELS_PER_CATEGORY
   ) {
+    const bot = guild.members.me;
+    if (!bot) {
+      throw new Error('SupportForge bot member could not be resolved.');
+    }
+
+    await saved.permissionOverwrites.edit(guild.roles.everyone.id, {
+      ViewChannel: false,
+      SendMessages: false,
+      ReadMessageHistory: false,
+    });
+    await saved.permissionOverwrites.edit(bot.id, {
+      ViewChannel: true,
+      SendMessages: true,
+      ReadMessageHistory: true,
+      ManageChannels: true,
+      ManageMessages: true,
+      EmbedLinks: true,
+      AttachFiles: true,
+    });
     return saved;
   }
 
@@ -259,6 +278,20 @@ export async function ensureOptionalStatusCategory(
     saved?.type === ChannelType.GuildCategory &&
     saved.children.cache.size < MAX_CHANNELS_PER_CATEGORY
   ) {
+    await saved.permissionOverwrites.edit(guild.roles.everyone.id, {
+      ViewChannel: false,
+      SendMessages: false,
+      ReadMessageHistory: false,
+    });
+    await saved.permissionOverwrites.edit(bot.id, {
+      ViewChannel: true,
+      SendMessages: true,
+      ReadMessageHistory: true,
+      ManageChannels: true,
+      ManageMessages: true,
+      EmbedLinks: true,
+      AttachFiles: true,
+    });
     return saved;
   }
 
