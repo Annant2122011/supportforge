@@ -897,7 +897,8 @@ async function createTicket(
   ticketCreationLocks.add(
     lockKey,
   );
-\n  if (await isTicketCreationRestricted(guild.id, interaction.user.id)) {
+
+  if (await isTicketCreationRestricted(guild.id, interaction.user.id)) {
     const flags = await getUserFlagCount(guild.id, interaction.user.id);
     await replyError(
       interaction,
