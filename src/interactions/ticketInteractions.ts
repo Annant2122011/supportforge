@@ -835,8 +835,27 @@ async function applyTicketVisibilityMode(
     );
   }
 
-  if (formerClaimedBy && formerClaimedBy !== ownerId && formerClaimedBy !== claimedBy) {
-    await setChannelPermissionOverwrite(channel.id, formerClaimedBy, [], [], 1, 'Clear former claimant ticket override');
+  const formerClaimantIds = (formerClaimedBy ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+
+  for (const formerClaimantId of formerClaimantIds) {
+    if (
+      formerClaimantId === ownerId ||
+      claimedModerators.includes(formerClaimantId)
+    ) {
+      continue;
+    }
+
+    await setChannelPermissionOverwrite(
+      channel.id,
+      formerClaimantId,
+      [],
+      [],
+      1,
+      'Clear former claimant ticket override',
+    );
   }
 
   const participants = new Set<string>([
