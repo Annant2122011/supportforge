@@ -1397,8 +1397,32 @@ export async function handleSettingsInteraction(
       const config = await getGuildConfig(guild.id); const d = config.departments[departmentId];
       if (!d) { await reject(interaction, '❌ Department not found.'); return true; }
       if (Object.keys(config.departments).length <= 1) { await reject(interaction, '❌ At least one department must remain.'); return true; }
-      const active = [...guild.channels.cache.values()].filter((c) => c.type === ChannelType.GuildText && c.topic?.startsWith('supportforge:ticket') && getField(c.topic, 'department') === departmentId && ['open','claimed','pending','reopened'].includes(getField(c.topic, 'status') ?? ''));
-      if (active.length) { await reject(interaction, '❌ Cannot remove this department while it has active tickets. Reassign them first.'); return true; }
+      const active: string[] = [];
+      for (const channel of guild.channels.cache.values()) {
+        if (
+          channel.type !== ChannelType.GuildText ||
+          !channel.topic?.startsWith('supportforge:ticket') ||
+          getField(channel.topic, 'department') !== departmentId
+        ) {
+          continue;
+        }
+
+        const status =
+          (await getPersistedTicketStatus(channel.id)) ??
+          getTicketStatus(channel.topic);
+
+        if (['open', 'claimed', 'pending', 'reopened'].includes(status)) {
+          active.push(channel.id);
+        }
+      }
+
+      if (active.length) {
+        await reject(
+          interaction,
+          '❌ Cannot remove this department while it has active tickets. Reassign them first.',
+        );
+        return true;
+      }
       await updateGuildConfig(guild.id, (current) => { delete current.departments[departmentId]; });
       await refreshSettingsChannel(guild); await syncPanel(guild); await showTags(interaction);
       await auditSettingsAction(guild, interaction, 'DEPARTMENT_REMOVED', 'Removed department ' + d.name + '. Its Discord category was retained.');
