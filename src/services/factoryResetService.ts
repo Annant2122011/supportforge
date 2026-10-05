@@ -46,12 +46,10 @@ function isSupportForgeChannel(channel: GuildBasedChannel, configuredIds: Set<st
     return true;
   }
 
-  if (channel.parentId && configuredCategoryIds.has(channel.parentId)) return true;
-
   /*
-   * Never treat a category name/prefix as ownership proof. Orphaned
-   * SupportForge categories whose IDs are no longer persisted cannot be safely
-   * distinguished from unrelated categories created by administrators.
+   * Parent-category membership is not ownership proof. Administrators may move
+   * unrelated channels into SupportForge-managed categories, and a factory
+   * reset must never delete those channels merely because of their parent.
    */
   return false;
 }
