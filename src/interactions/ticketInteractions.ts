@@ -43,7 +43,7 @@ import {
 import { resetPanelActivity } from '../services/panelActivityService';
 import { getAdvancedSettings, type TicketPriority } from '../services/advancedSettingsService';
 import { ensureDepartmentCategory } from '../services/departmentCategoryService';
-import { endTicketVoiceMode, startTicketVoiceMode } from '../services/voiceModeService';
+import { endTicketVoiceMode, startTicketVoiceMode, syncTicketVoiceParticipants } from '../services/voiceModeService';
 import { getUserFlagCount, isTicketCreationRestricted, recordReport } from '../services/reportService';
 
 import {
@@ -180,6 +180,19 @@ async function runChannelMutation<T>(
  * Prevents duplicate ticket creation requests from the same user for the
  * same department.
  */
+interface PendingReportDecision {
+  guildId: string;
+  channelId: string;
+  targetUserId: string;
+  categoryId: string;
+  subcategoryId: string;
+  description: string;
+  reporterUserId: string;
+  ticketNumber?: string;
+}
+
+const pendingReportDecisions = new Map<string, PendingReportDecision>();
+
 const ticketCreationLocks = new Set<string>();
 
 interface RuntimeTicketState {
@@ -1327,6 +1340,62 @@ async function createTicket(
       lockKey,
     );
   }
+}
+
+async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
+  if (!(await safeDeferReply(interaction))) return;
+  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
+    await replyError(interaction, '❌ This action can only be used inside a ticket.');
+    return;
+  }
+
+  const channel = interaction.channel as TextChannel;
+  const topic = channel.topic ?? '';
+  const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
+  if (status !== 'claimed') {
+    await replyError(interaction, '❌ This ticket is not currently claimed.');
+    return;
+  }
+
+  const claimants = (getField(topic, 'claimed_by') ?? '').split(',').map((id) => id.trim()).filter(Boolean);
+  if (!claimants.includes(interaction.user.id)) {
+    await replyError(interaction, '❌ You are not currently assisting on this ticket.');
+    return;
+  }
+
+  const remaining = claimants.filter((id) => id !== interaction.user.id);
+  let newTopic = topic;
+
+  if (remaining.length) {
+    newTopic = setField(newTopic, 'claimed_by', remaining.join(','));
+    await setChannelTopic(channel.id, newTopic, 'SupportForge moderator unclaimed from multi-moderator ticket').catch(() => undefined);
+    channel.topic = newTopic;
+    updateRuntimeTicketState(channel, newTopic, 'claimed');
+    await syncTicketVoiceParticipants(interaction.guild, newTopic);
+    await updateMainMessage(channel, getField(newTopic, 'message'), 'claimed', newTopic);
+    await interaction.editReply('✅ You left the ticket. Other assigned moderators remain on it.');
+    return;
+  }
+
+  newTopic = removeField(newTopic, 'claimed_by');
+  newTopic = removeField(newTopic, 'claimed_at');
+  newTopic = setField(newTopic, 'status', 'open');
+
+  await setChannelTopic(channel.id, newTopic, 'SupportForge last moderator unclaimed ticket').catch(() => undefined);
+  channel.topic = newTopic;
+  await setPersistedTicketStatus(channel.id, 'open');
+  await applyTicketVisibilityMode(channel, newTopic, 'unclaimed', interaction.user.id);
+  updateRuntimeTicketState(channel, newTopic, 'open');
+
+  const number = getField(newTopic, 'number') ?? 'unknown';
+  void queueTicketChannelRename(
+    channel,
+    getTicketChannelName(number, 'open', getTopicPriority(newTopic)),
+    'Ticket returned to open after final moderator unclaimed',
+  ).catch(() => undefined);
+
+  await updateMainMessage(channel, getField(newTopic, 'message'), 'open', newTopic);
+  await interaction.editReply('✅ You left the ticket. It is now open for another moderator to claim.');
 }
 
 /* -------------------------------------------------------------------------- */
@@ -2490,6 +2559,209 @@ async function showTicketCreationModal(
   }
 }
 
+async function showReportTargetSelector(interaction: ButtonInteraction): Promise<void> {
+  if (!(await safeDeferReply(interaction))) return;
+  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
+    await replyError(interaction, '❌ Reporting is only available inside a ticket.');
+    return;
+  }
+
+  const topic = interaction.channel.topic ?? '';
+  const staff = getStaffContext(interaction, topic);
+  if (!staff.authorized) {
+    await replyError(interaction, '❌ Only configured moderators or administrators can submit a report.');
+    return;
+  }
+
+  const targetIds = Array.from(new Set([
+    getField(topic, 'owner'),
+    ...(getField(topic, 'users') ?? '').split(',').filter(Boolean),
+    ...(getField(topic, 'claimed_by') ?? '').split(',').filter(Boolean),
+  ].filter((id): id is string => Boolean(id) && id !== interaction.user.id))).slice(0, 25);
+
+  if (!targetIds.length) {
+    await replyError(interaction, '❌ There are no other reportable participants on this ticket.');
+    return;
+  }
+
+  await interaction.editReply({
+    content: '🚩 **Report a user**\nChoose the participant whose behaviour you want to report.',
+    components: [
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('ticket:report:target')
+          .setPlaceholder('Choose the reported user')
+          .addOptions(targetIds.map((id) => ({
+            label: 'User ' + id.slice(-6),
+            value: id,
+            description: id === getField(topic, 'owner') ? 'Ticket owner' : 'Ticket participant',
+          }))),
+      ),
+    ],
+  });
+}
+
+async function handleReportTargetSelection(interaction: StringSelectMenuInteraction): Promise<void> {
+  await interaction.deferUpdate();
+  const targetId = interaction.values[0];
+  const topic = interaction.channel?.type === ChannelType.GuildText ? interaction.channel.topic ?? '' : '';
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+
+  const rows = Object.values(settings.reports.categories).slice(0, 25);
+  await interaction.editReply({
+    content: '🚩 **Report category**\nChoose the category that best describes the behaviour. The category set is built into SupportForge and is separate from ticket use-case/departments.',
+    components: [
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('ticket:report:category:' + targetId)
+          .setPlaceholder('Choose a report category')
+          .addOptions(rows.map((category) => ({
+            label: category.name.slice(0, 100),
+            value: category.id,
+            emoji: category.emoji,
+            description: 'Select a subcategory next',
+          }))),
+      ),
+    ],
+  });
+}
+
+async function handleReportCategorySelection(interaction: StringSelectMenuInteraction): Promise<void> {
+  await interaction.deferUpdate();
+  const parts = interaction.customId.split(':');
+  const targetId = parts[3] ?? '';
+  const categoryId = interaction.values[0];
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const category = settings.reports.categories[categoryId];
+
+  if (!category) {
+    await interaction.editReply({ content: '❌ That report category is no longer available.', components: [] });
+    return;
+  }
+
+  await interaction.editReply({
+    content: '🚩 **Report subcategory**\nChoose the most specific reason.',
+    components: [
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('ticket:report:subcategory:' + targetId + ':' + categoryId)
+          .setPlaceholder('Choose a report subcategory')
+          .addOptions(Object.values(category.subcategories).slice(0, 25).map((sub) => ({
+            label: sub.name.slice(0, 100),
+            value: sub.id,
+            description: category.name,
+          }))),
+      ),
+    ],
+  });
+}
+
+async function handleReportSubcategorySelection(interaction: StringSelectMenuInteraction): Promise<void> {
+  await interaction.deferUpdate();
+  const parts = interaction.customId.split(':');
+  const targetId = parts[3] ?? '';
+  const categoryId = parts[4] ?? '';
+  const subcategoryId = interaction.values[0];
+
+  await interaction.showModal(
+    new ModalBuilder()
+      .setCustomId('ticket:report:modal:' + targetId + ':' + categoryId + ':' + subcategoryId)
+      .setTitle('Report User')
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId('description')
+            .setLabel('What happened? (optional)')
+            .setPlaceholder('Briefly describe the behaviour. Maximum 500 characters.')
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(false)
+            .setMaxLength(500),
+        ),
+      ),
+  );
+}
+
+async function handleReportModal(interaction: ModalSubmitInteraction): Promise<void> {
+  if (!(await safeDeferReply(interaction))) return;
+  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
+    await replyError(interaction, '❌ This report can only be submitted from a ticket.');
+    return;
+  }
+
+  const parts = interaction.customId.split(':');
+  const targetUserId = parts[3] ?? '';
+  const categoryId = parts[4] ?? '';
+  const subcategoryId = parts[5] ?? '';
+  const topic = interaction.channel.topic ?? '';
+  const staff = getStaffContext(interaction, topic);
+  if (!staff.authorized) {
+    await replyError(interaction, '❌ Only configured moderators or administrators can submit reports.');
+    return;
+  }
+
+  const nonce = Math.random().toString(36).slice(2, 10);
+  pendingReportDecisions.set(nonce, {
+    guildId: interaction.guild.id,
+    channelId: interaction.channel.id,
+    targetUserId,
+    categoryId,
+    subcategoryId,
+    description: interaction.fields.getTextInputValue('description').trim().slice(0, 500),
+    reporterUserId: interaction.user.id,
+    ticketNumber: getField(topic, 'number'),
+  });
+
+  await interaction.editReply({
+    content: '🚩 **Review report**\nChoose whether this incident should count as a serious violation (a flag) or simply be recorded without adding a flag.',
+    components: [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId('ticket:report:decision:' + nonce + ':flag').setLabel('Flag Violation').setEmoji('🚩').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('ticket:report:decision:' + nonce + ':record').setLabel('Record Only').setEmoji('📝').setStyle(ButtonStyle.Secondary),
+      ),
+    ],
+  });
+}
+
+async function handleReportDecision(interaction: ButtonInteraction): Promise<void> {
+  if (!(await safeDeferReply(interaction))) return;
+  const parts = interaction.customId.split(':');
+  const nonce = parts[3] ?? '';
+  const decision = parts[4] ?? '';
+  const pending = pendingReportDecisions.get(nonce);
+
+  if (!pending || pending.reporterUserId !== interaction.user.id) {
+    await replyError(interaction, '❌ This report review has expired or is not assigned to you.');
+    return;
+  }
+
+  pendingReportDecisions.delete(nonce);
+
+  const result = await recordReport(interaction.guild!, {
+    targetUserId: pending.targetUserId,
+    reporterUserId: pending.reporterUserId,
+    reporterName: interaction.user.tag,
+    categoryId: pending.categoryId,
+    subcategoryId: pending.subcategoryId,
+    description: pending.description,
+    flagged: decision === 'flag',
+    channelId: pending.channelId,
+    ticketNumber: pending.ticketNumber,
+  });
+
+  const actions = result.appliedRules.length
+    ? '\n\n⚙️ Automatic action(s): ' + result.appliedRules.map((rule) => rule.action + ' at ' + rule.threshold + ' flags').join(', ')
+    : '';
+
+  await interaction.editReply({
+    content:
+      (decision === 'flag' ? '🚩 **Violation flagged.**' : '📝 **Report recorded without a flag.**') +
+      '\nReported user: <@' + pending.targetUserId + '>' +
+      '\nCurrent flag count: **' + result.flagCount + '**' +
+      actions,
+    components: [],
+  });
+}
+
 /* -------------------------------------------------------------------------- */
 /* Panel button handlers                                                      */
 /* -------------------------------------------------------------------------- */
@@ -2954,6 +3226,8 @@ async function handlePanelButton(
   if (id === 'ticket:panel:voice:start') { await handleTicketVoiceStart(interaction); return; }
   if (id === 'ticket:panel:voice:end') { await handleTicketVoiceEnd(interaction); return; }
   if (id === 'ticket:panel:voice:join') { await handleTicketVoiceJoin(interaction); return; }
+  if (id === 'ticket:panel:report') { await showReportTargetSelector(interaction); return; }
+  if (id.startsWith('ticket:report:decision:')) { await handleReportDecision(interaction); return; }
 
   if (id === 'ticket:panel:priority') {
     if (!(await safeDeferReply(interaction))) {
@@ -3043,10 +3317,7 @@ async function handlePanelButton(
     id ===
     'ticket:unclaim'
   ) {
-    await transition(
-      interaction,
-      'open',
-    );
+    await unclaimModerator(interaction);
     return;
   }
 
@@ -3664,6 +3935,18 @@ export async function handleTicketInteraction(
     }
 
     if (interaction.isStringSelectMenu()) {
+      if (interaction.customId === 'ticket:report:target') {
+        await handleReportTargetSelection(interaction);
+        return;
+      }
+      if (interaction.customId.startsWith('ticket:report:category:')) {
+        await handleReportCategorySelection(interaction);
+        return;
+      }
+      if (interaction.customId.startsWith('ticket:report:subcategory:')) {
+        await handleReportSubcategorySelection(interaction);
+        return;
+      }
       if (interaction.customId === 'ticket:create-tag:select') {
         await handleTicketTagSelection(interaction);
         return;
@@ -3746,6 +4029,15 @@ export async function handleTicketInteraction(
        * Panel tool buttons.
        */
       if (
+        interaction.customId === 'ticket:panel:report' ||
+        interaction.customId.startsWith('ticket:report:category:') ||
+        interaction.customId.startsWith('ticket:report:decision:')
+      ) {
+        await handlePanelButton(interaction);
+        return;
+      }
+
+      if (
         interaction.customId.startsWith('ticket:priority:set:') ||
         interaction.customId === 'ticket:priority:cancel'
       ) {
@@ -3810,6 +4102,11 @@ export async function handleTicketInteraction(
           tagId,
         );
 
+        return;
+      }
+
+      if (interaction.customId.startsWith('ticket:report:modal:')) {
+        await handleReportModal(interaction);
         return;
       }
 
