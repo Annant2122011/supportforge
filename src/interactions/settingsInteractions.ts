@@ -847,7 +847,7 @@ async function showDepartmentPicker(
     await renderSettingsView(
       interaction,
       [new EmbedBuilder().setTitle('📂 Departments').setDescription('No departments configured.')],
-      [backButton()],
+      [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
     );
     return;
   }
