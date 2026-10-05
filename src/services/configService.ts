@@ -137,7 +137,7 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
       department.categoryId = null;
       migrated = true;
     }
-    if (!department.tags) {
+    if (!department.tags || Object.keys(department.tags).length === 0) {
       const tagId = newTagId();
       department.tags = {
         [tagId]: {
