@@ -138,7 +138,7 @@ export async function requestRetentionApproval(
   if (eligibleChannels.length === 0) return;
 
   const settings = await getAdvancedSettings(guild.id);
-  if (settings.retention.pendingApprovals[scope]) return;
+  if (settings.retention.pendingApprovals[scope]?.status === 'pending') return;
 
   const channel = await findSettingsChannel(guild);
   if (!channel) return;
