@@ -259,25 +259,12 @@ export async function ensureOptionalStatusCategory(
     return saved;
   }
 
-  const candidates = [...guild.channels.cache.values()]
-    .filter(
-      (channel): channel is CategoryChannel =>
-        channel.type === ChannelType.GuildCategory &&
-        channel.name.toLowerCase().startsWith(config.name.toLowerCase()),
-    )
-    .sort((a, b) => a.position - b.position);
-
-  const available = candidates.find(
-    (category) => category.children.cache.size < MAX_CHANNELS_PER_CATEGORY,
-  );
-
-  if (available) {
-    await updateAdvancedSettings(guild.id, (current) => {
-      current.statusCategories[config.setting] = available.id;
-    });
-    return available;
-  }
-
+  /*
+   * Optional status categories are SupportForge-owned infrastructure too.
+   * Reusing an unrelated category based solely on its display name could
+   * expose private tickets to the wrong users.
+   */
+  const candidates: CategoryChannel[] = [];
   const suffix = candidates.length + 1;
   const name =
     suffix === 1
