@@ -2756,6 +2756,15 @@ async function showReportTargetSelector(interaction: ButtonInteraction, page = 0
   }
 
   const topic = interaction.channel.topic ?? '';
+  const reportSettings = await getAdvancedSettings(interaction.guild.id);
+
+  if (!reportSettings.reports.enabled) {
+    await interaction.editReply(
+      '🛡️ User reporting is currently disabled by the server administrators.',
+    );
+    return;
+  }
+
   const staff = getStaffContext(interaction, topic);
   if (!staff.authorized) {
     await replyError(interaction, '❌ Only configured moderators or administrators can submit a report.');
