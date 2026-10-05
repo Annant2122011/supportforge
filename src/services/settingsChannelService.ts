@@ -186,11 +186,11 @@ export function buildSettingsDashboardEmbed(
 
   const closed =
     settings.retention.closedDays === 0
-      ? 'Never'
+      ? 'Unlimited/forever'
       : settings.retention.closedDays + ' days';
   const archive =
     settings.retention.archiveDays === 0
-      ? 'Never'
+      ? 'Unlimited/forever'
       : settings.retention.archiveDays + ' days';
 
   const claimed = settings.statusCategories.claimedCategoryId
