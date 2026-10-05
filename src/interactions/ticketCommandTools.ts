@@ -17,6 +17,7 @@ import {
 
 import {
   getOrCreateAuditChannel,
+  getTicketAuditHistory,
   logTicketEvent,
 } from '../services/auditLogService';
 
@@ -1101,68 +1102,45 @@ export async function executeTicketCommand(
     /* ------------------------------------------------------------------ */
 
     if (subcommand === 'history') {
-      const auditId =
-        context.config.auditChannelId;
+      const events = await getTicketAuditHistory(
+        context.guild.id,
+        context.ticketNumber,
+      );
 
-      const auditChannel =
-        auditId
-          ? context.guild.channels.cache.get(
-              auditId,
-            )
-          : null;
+      const recent = events.slice(-20).reverse();
 
-      if (
-        !auditChannel ||
-        auditChannel.type !==
-          ChannelType.GuildText
-      ) {
+      if (!recent.length) {
         await interaction.editReply(
-          'ℹ️ No audit history exists for this ticket yet.',
+          `📜 **Recent history for ticket #${context.ticketNumber}**
+
+No audit events have been recorded for this ticket yet.`,
         );
         return;
       }
 
-      const messages =
-        await auditChannel.messages.fetch({
-          limit: 50,
-        });
+      const lines = recent.map((event) => {
+        const timestamp = Math.floor(new Date(event.timestamp).getTime() / 1000);
+        const detail = event.detail?.trim();
 
-      const matching =
-        messages
-          .filter(
-            (
-              message,
-            ) =>
-              message.embeds.some(
-                (embed) =>
-                  embed.description?.includes(
-                    `Ticket #${context.ticketNumber}`,
-                  ) ??
-                  false,
-              ),
-          )
-          .first(10);
-
-      const lines =
-        matching.length
-          ? matching
-              .map(
-                (
-                  message,
-                ) =>
-                  `${message.createdAt.toLocaleString(
-                    'en-IN',
-                  )} • ${
-                    message.embeds[0]
-                      ?.description ??
-                    'Event'
-                  }`,
-              )
-              .join('\n')
-          : 'No recent audit events found.';
+        return (
+          '• <t:' +
+          timestamp +
+          ':f> • **' +
+          event.action
+            .split('_')
+            .map((part) => part.charAt(0) + part.slice(1).toLowerCase())
+            .join(' ') +
+          '** • ' +
+          (event.actorName || 'Unknown') +
+          (detail ? ' • ' + detail.slice(0, 220) : '')
+        );
+      });
 
       await interaction.editReply(
-        `📜 **Recent history for ticket #${context.ticketNumber}**\n\n${lines}`,
+        `📜 **Recent history for ticket #${context.ticketNumber}**
+
+` +
+          lines.join('\n'),
       );
 
       return;
