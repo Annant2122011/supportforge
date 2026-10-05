@@ -761,18 +761,94 @@ async function showReportCategorySettings(interaction: ButtonInteraction, catego
   ]);
 }
 
-async function showReportSubcategorySelector(interaction: ButtonInteraction, categoryId: string): Promise<void> {
+async function showReportSubcategorySelector(
+  interaction: ButtonInteraction,
+  categoryId: string,
+  page = 0,
+): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
   const category = settings.reports.categories[categoryId];
-  if (!category) { await reject(interaction, '❌ Report category not found.'); return; }
-  await interaction.reply({
-    content: 'Select the report subcategory to edit or remove.',
-    components: [
-      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-        new StringSelectMenuBuilder().setCustomId('sf:settings:reports:subcategory:pick:' + categoryId).setPlaceholder('Choose a subcategory').addOptions(Object.values(category.subcategories).slice(0, 25).map((sub) => ({ label: sub.name.slice(0, 100), value: sub.id }))),
+  if (!category) {
+    await reject(interaction, '❌ Report category not found.');
+    return;
+  }
+
+  const subcategories = Object.values(category.subcategories);
+  const pageSize = 25;
+  const pageCount = Math.max(1, Math.ceil(subcategories.length / pageSize));
+  const safePage = Math.min(Math.max(page, 0), pageCount - 1);
+  const visible = subcategories.slice(
+    safePage * pageSize,
+    (safePage + 1) * pageSize,
+  );
+
+  const components: Array<
+    ActionRowBuilder<StringSelectMenuBuilder> |
+    ActionRowBuilder<ButtonBuilder>
+  > = [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(
+          'sf:settings:reports:subcategory:pick:' + categoryId,
+        )
+        .setPlaceholder('Choose a subcategory')
+        .addOptions(
+          visible.map((sub) => ({
+            label: sub.name.slice(0, 100),
+            value: sub.id,
+          })),
+        ),
+    ),
+  ];
+
+  if (pageCount > 1) {
+    components.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(
+            'sf:settings:reports:subcategory:select:' +
+              categoryId +
+              ':' +
+              (safePage - 1),
+          )
+          .setLabel('Previous')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(safePage === 0),
+        new ButtonBuilder()
+          .setCustomId(
+            'sf:settings:reports:subcategory:select:' +
+              categoryId +
+              ':' +
+              safePage,
+          )
+          .setLabel('Page ' + (safePage + 1) + ' / ' + pageCount)
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(true),
+        new ButtonBuilder()
+          .setCustomId(
+            'sf:settings:reports:subcategory:select:' +
+              categoryId +
+              ':' +
+              (safePage + 1),
+          )
+          .setLabel('Next')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(safePage >= pageCount - 1),
       ),
-      new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()),
-    ],
+    );
+  }
+
+  components.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()),
+  );
+
+  await interaction.reply({
+    content:
+      'Select the report subcategory to edit or remove.' +
+      (pageCount > 1
+        ? ' Page ' + (safePage + 1) + ' of ' + pageCount + '.'
+        : ''),
+    components,
     flags: MessageFlags.Ephemeral,
   });
 }
@@ -1461,7 +1537,17 @@ export async function handleSettingsInteraction(
     }
 
     if (id.startsWith('sf:settings:reports:subcategory:select:')) {
-      await showReportSubcategorySelector(interaction, id.slice('sf:settings:reports:subcategory:select:'.length));
+      const remainder = id.slice(
+        'sf:settings:reports:subcategory:select:'.length,
+      );
+      const parts = remainder.split(':');
+      const categoryId = parts[0] ?? '';
+      const page = Number(parts[1] ?? '0');
+      await showReportSubcategorySelector(
+        interaction,
+        categoryId,
+        Number.isInteger(page) ? page : 0,
+      );
       return true;
     }
 
