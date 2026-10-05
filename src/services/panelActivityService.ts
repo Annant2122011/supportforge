@@ -21,9 +21,12 @@ function estimateVisualLines(message: Message): number {
 export function resetPanelActivity(channelId: string, anchorMessageId: string): void { states.set(channelId, { anchorMessageId, messages: 0, visualLines: 0, moving: false }); }
 export async function recordTicketMessageForPanel(message: Message): Promise<void> {
   if (!message.guild || message.author.bot || message.channel.type !== ChannelType.GuildText) return;
-  const channel = message.channel as TextChannel; const topic = channel.topic ?? ''; const panelMessageId = getField(topic, 'message');
-  if (!topic.startsWith('supportforge:ticket') || !panelMessageId) return;
-  const settings = await getAdvancedSettings(message.guild.id); if (!settings.panelActivity.enabled) return;
+  const channel = message.channel as TextChannel;
+  const topic = channel.topic ?? '';
+  const panelMessageId = getField(topic, 'message');
+  if (!topic.startsWith('supportforge:ticket')) return;
+  const settings = await getAdvancedSettings(message.guild.id);
+  if (!settings.panelActivity.enabled) return;
   let state = states.get(channel.id);
   if (!state) {
     state = {
@@ -36,14 +39,25 @@ export async function recordTicketMessageForPanel(message: Message): Promise<voi
     try {
       const recent = await channel.messages.fetch({ limit: 50 });
       const anchor =
-        recent.get(panelMessageId) ??
+        (panelMessageId ? recent.get(panelMessageId) : undefined) ??
         recent.find(
           (item) =>
             item.author.id === channel.client.user?.id &&
-            item.embeds.some(
-              (embed) =>
-                embed.title ===
-                `🎫 SupportForge Ticket #${getField(topic, 'number') ?? 'unknown'}`,
+            (
+              item.embeds.some(
+                (embed) =>
+                  embed.title ===
+                  `🎫 SupportForge Ticket #${getField(topic, 'number') ?? 'unknown'}`,
+              ) ||
+              item.components.some(
+                (row) =>
+                  row.type === 1 &&
+                  row.components.some(
+                    (component) =>
+                      'customId' in component &&
+                      component.customId === 'ticket:panel:restore-move',
+                  ),
+              )
             ),
         );
 
@@ -88,7 +102,7 @@ export async function recordTicketMessageForPanel(message: Message): Promise<voi
     );
     resetPanelActivity(
       channel.id,
-      restore?.id ?? channel.lastMessageId ?? panelMessageId,
+      restore?.id ?? channel.lastMessageId ?? panelMessageId ?? state.anchorMessageId,
     );
 
     const config = await getGuildConfig(channel.guild.id);
