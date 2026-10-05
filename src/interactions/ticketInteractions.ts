@@ -1365,6 +1365,14 @@ async function createTicket(
             recoveryError,
           );
         });
+
+        await interaction.editReply({
+          content:
+            `✅ Your ticket channel was created: ${ticketChannel}
+⚠️ One setup step did not complete, so SupportForge preserved the ticket for recovery instead of reporting a false creation failure.`,
+        }).catch(() => undefined);
+
+        return;
       }
 
       throw error;
