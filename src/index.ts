@@ -15,11 +15,13 @@ import {
 } from './interactions/ticketInteractions';
 import {
   getTicketStatus,
+  getField,
   isTicketTopic,
 } from './services/ticketStateService';
 
 import {
   getPersistedTicketStatus,
+  markPersistedTicketDeleted,
 } from './services/ticketPersistenceService';
 
 import { getGuildConfig } from './services/configService';
@@ -259,6 +261,47 @@ client.on('channelDelete', async (channel) => {
   );
 
   if (!managed) return;
+
+  const deletedTicketTopic =
+    guildChannel.type === ChannelType.GuildText
+      ? guildChannel.topic ?? ''
+      : '';
+
+  if (isTicketTopic(deletedTicketTopic)) {
+    /*
+     * Manual ticket deletion must update durable lifecycle storage and remove
+     * any temporary voice room owned by the deleted ticket.
+     */
+    await markPersistedTicketDeleted(
+      guildChannel.id,
+      'SupportForge ticket channel deleted',
+    ).catch((error) => {
+      console.warn(
+        `⚠️ Could not mark deleted ticket ${guildChannel.id} in persistent storage:`,
+        error,
+      );
+    });
+
+    const voiceChannelId = getField(
+      deletedTicketTopic,
+      'voice_channel_id',
+    );
+
+    if (voiceChannelId) {
+      const voiceChannel = guildChannel.guild.channels.cache.get(voiceChannelId);
+
+      if (voiceChannel) {
+        await voiceChannel.delete(
+          'SupportForge cleanup after ticket deletion',
+        ).catch((error) => {
+          console.warn(
+            `⚠️ Could not delete orphaned ticket voice channel ${voiceChannelId}:`,
+            error,
+          );
+        });
+      }
+    }
+  }
 
   const deletedWasSettings =
     guildChannel.type === ChannelType.GuildText &&
