@@ -3679,12 +3679,18 @@ async function handlePanelButton(
           ),
       );
     } else if (id === 'ticket:panel:department') {
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      }
       await renderDepartmentSelector(interaction, 0);
       return;
     } else if (
       id ===
       'ticket:panel:tag'
     ) {
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      }
       await renderRoutingTagSelector(interaction, 0);
       return;
     } else {
