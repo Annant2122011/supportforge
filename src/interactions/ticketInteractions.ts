@@ -1883,23 +1883,10 @@ async function transition(
      */
     try {
       if (newStatus === 'closed') {
-        const currentConfig = await getGuildConfig(interaction.guild!.id);
-        const departmentId = getField(newTopic, 'department');
-        const departmentConfig = departmentId
-          ? currentConfig.departments[departmentId]
-          : undefined;
-        const departmentCategory = departmentConfig?.categoryId
-          ? interaction.guild!.channels.cache.get(departmentConfig.categoryId)
-          : undefined;
-
-        if (departmentCategory?.type === ChannelType.GuildCategory) {
-          await moveTicketToCategory(channel, departmentCategory);
-        } else {
-          await moveTicketToCategory(
-            channel,
-            await ensureClosedCategory(interaction.guild!),
-          );
-        }
+        await moveTicketToCategory(
+          channel,
+          await ensureClosedCategory(interaction.guild!),
+        );
       } else if (newStatus === 'archived') {
         await moveTicketToCategory(
           channel,
