@@ -1375,19 +1375,24 @@ async function generateOverallAuditSummary(
     (channel) => channel.type === ChannelType.GuildCategory,
   ).size;
 
+  const managedChannelIds = new Set(
+    [
+      config.panelChannelId,
+      config.transcriptChannelId,
+      config.auditChannelId,
+      config.auditDevChannelId,
+      settings.settingsChannelId,
+    ].filter((id): id is string => Boolean(id)),
+  );
+
   const managedChannels = guild.channels.cache.filter(
     (channel) =>
       channel.type !== ChannelType.GuildCategory &&
       (
+        managedChannelIds.has(channel.id) ||
         (channel.type === ChannelType.GuildText &&
-          channel.topic?.startsWith('supportforge:')) ||
-        channel.name === '📄 support-transcripts' ||
-        channel.name === 'audit-log-general' || channel.name === 'audit-log-dev' ||
-        channel.name === 'supportforge-settings' ||
-        channel.name.startsWith('SupportForge.') ||
-        channel.name.startsWith('SupportForge • Closed') ||
-        channel.name.startsWith('SupportForge • Archive') ||
-        (channel.parentId && managedCategoryIds.has(channel.parentId))
+          channel.topic?.startsWith('supportforge:ticket')) ||
+          );
       ),
   ).size;
 
