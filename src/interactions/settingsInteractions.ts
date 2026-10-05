@@ -345,24 +345,17 @@ async function enforcePriorityRoleHierarchy(guild: Guild): Promise<void> {
 
 function findPriorityRole(
   guild: Guild,
-  priority: TicketPriority,
+  _priority: TicketPriority,
   configuredRoleId?: string,
 ) {
-  const configured =
-    configuredRoleId
-      ? guild.roles.cache.get(configuredRoleId)
-      : undefined;
-
-  if (configured) return configured;
-
-  const expectedName =
-    'SupportForge • ' + PRIORITY_ROLE_DEFINITIONS[priority].label + ' Tickets';
-
-  return guild.roles.cache.find(
-    (role) =>
-      !role.managed &&
-      role.name === expectedName,
-  );
+  /*
+   * A role name is not ownership proof. Only a persisted role ID identifies a
+   * SupportForge-managed priority role, so an unrelated role with a matching
+   * display name can never be deleted or treated as configured infrastructure.
+   */
+  if (!configuredRoleId) return undefined;
+  const configured = guild.roles.cache.get(configuredRoleId);
+  return configured && !configured.managed ? configured : undefined;
 }
 
 async function showManual(interaction: SettingsViewInteraction): Promise<void> {
