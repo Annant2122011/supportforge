@@ -103,13 +103,6 @@ const migrations: readonly Migration[] = [
         legacyTicketsPath + '.pre-sqlite-' + Date.now() + '.backup';
       copyFileSync(legacyTicketsPath, backupPath);
 
-      const insert = db.prepare(
-        'INSERT OR IGNORE INTO tickets (' +
-        'id, guild_id, channel_id, ticket_number, status, department_id, tag_id, owner_id, priority, ' +
-        'claimed_by_json, participant_ids_json, metadata_json, created_at, updated_at, deleted_at, deletion_reason' +
-        ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-      );
-
       const stringOrNull = (value: unknown): string | null =>
         typeof value === 'string' && value.trim() ? value : null;
 
@@ -125,41 +118,50 @@ const migrations: readonly Migration[] = [
           ? value as Record<string, unknown>
           : {};
 
-      try {
-        for (const [channelId, rawTicket] of Object.entries(parsed.tickets)) {
-          const ticket = rawTicket ?? {};
-          const now = new Date().toISOString();
-          const status =
-            ticket.status === 'claimed' ||
-            ticket.status === 'pending' ||
-            ticket.status === 'reopened' ||
-            ticket.status === 'closed' ||
-            ticket.status === 'archived'
-              ? ticket.status
-              : 'open';
+      const insert = db.prepare(
+        'INSERT OR IGNORE INTO tickets (' +
+        'id, guild_id, channel_id, ticket_number, status, department_id, tag_id, owner_id, priority, ' +
+        'claimed_by_json, participant_ids_json, metadata_json, created_at, updated_at, deleted_at, deletion_reason' +
+        ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      );
 
-          insert.run(
-            'legacy:' + channelId,
-            stringOrNull(ticket.guildId) ?? 'unknown',
-            channelId,
-            stringOrNull(ticket.ticketNumber),
-            status,
-            stringOrNull(ticket.departmentId),
-            stringOrNull(ticket.tagId),
-            stringOrNull(ticket.ownerId),
-            stringOrNull(ticket.priority),
-            JSON.stringify(stringArray(ticket.claimedByIds)),
-            JSON.stringify(stringArray(ticket.participantIds)),
-            JSON.stringify(metadataObject(ticket.metadata)),
-            stringOrNull(ticket.createdAt) ?? now,
-            stringOrNull(ticket.updatedAt) ?? now,
-            stringOrNull(ticket.deletedAt),
-            stringOrNull(ticket.deletionReason),
-          );
-        }
-      } finally {
-        insert.close();
+      for (const [channelId, rawTicket] of Object.entries(parsed.tickets)) {
+        const ticket = rawTicket ?? {};
+        const now = new Date().toISOString();
+        const status =
+          ticket.status === 'claimed' ||
+          ticket.status === 'pending' ||
+          ticket.status === 'reopened' ||
+          ticket.status === 'closed' ||
+          ticket.status === 'archived'
+            ? ticket.status
+            : 'open';
+
+        insert.run(
+          'legacy:' + channelId,
+          stringOrNull(ticket.guildId) ?? 'unknown',
+          channelId,
+          stringOrNull(ticket.ticketNumber),
+          status,
+          stringOrNull(ticket.departmentId),
+          stringOrNull(ticket.tagId),
+          stringOrNull(ticket.ownerId),
+          stringOrNull(ticket.priority),
+          JSON.stringify(stringArray(ticket.claimedByIds)),
+          JSON.stringify(stringArray(ticket.participantIds)),
+          JSON.stringify(metadataObject(ticket.metadata)),
+          stringOrNull(ticket.createdAt) ?? now,
+          stringOrNull(ticket.updatedAt) ?? now,
+          stringOrNull(ticket.deletedAt),
+          stringOrNull(ticket.deletionReason),
+        );
       }
+
+      /*
+       * DatabaseSync statements do not expose a close() method. They are
+       * short-lived handles and are released by the runtime.
+       */
+      void backupPath;
     },
   },
 ];
@@ -176,11 +178,9 @@ export function runMigrations(
     ') STRICT;'
   );
 
-  const appliedStatement = db.prepare(
-    'SELECT id FROM schema_migrations ORDER BY id ASC',
-  );
-  const appliedRows = appliedStatement.all();
-  appliedStatement.close();
+  const appliedRows = db
+    .prepare('SELECT id FROM schema_migrations ORDER BY id ASC')
+    .all();
 
   const appliedIds = new Set(
     appliedRows
@@ -196,18 +196,13 @@ export function runMigrations(
     try {
       migration.up(db, legacyTicketsPath);
 
-      const insert = db.prepare(
+      db.prepare(
         'INSERT INTO schema_migrations (id, name, applied_at) VALUES (?, ?, ?)',
+      ).run(
+        migration.id,
+        migration.name,
+        new Date().toISOString(),
       );
-      try {
-        insert.run(
-          migration.id,
-          migration.name,
-          new Date().toISOString(),
-        );
-      } finally {
-        insert.close();
-      }
 
       db.exec('COMMIT');
     } catch (error) {
