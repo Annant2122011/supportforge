@@ -227,7 +227,7 @@ test('legacy tickets migrate with claimant, participant, and metadata fields int
         );
         assert.deepEqual(
           markerStatement.all().map((row) => Number(row.id)),
-          [1, 2],
+          [1, 2, 3],
         )
       } finally {
         if (reopened.isOpen) reopened.close();
@@ -299,7 +299,7 @@ test('malformed legacy JSON fails safely and can be retried after repair', async
       );
       assert.deepEqual(
         markerStatement.all().map((row) => Number(row.id)),
-        [1, 2],
+        [1, 2, 3],
       );
     } finally {
       if (repaired.isOpen) repaired.close();
