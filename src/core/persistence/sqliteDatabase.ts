@@ -10,7 +10,6 @@ export interface SqliteStatement {
   };
   get(...parameters: unknown[]): Record<string, unknown> | undefined;
   all(...parameters: unknown[]): Array<Record<string, unknown>>;
-  close(): void;
 }
 
 export interface SqliteDatabase {
