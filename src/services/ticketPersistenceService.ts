@@ -132,25 +132,9 @@ export async function setPersistedTicketStatus(
   const now = new Date().toISOString();
 
   if (!current) {
-    getRepository().upsert({
-      id: randomUUID(),
-      guildId: 'unknown',
-      channelId,
-      ticketNumber: null,
-      status,
-      departmentId: null,
-      tagId: null,
-      ownerId: null,
-      priority: null,
-      claimedByIds: [],
-      participantIds: [],
-      metadata: {},
-      createdAt: now,
-      updatedAt: now,
-      deletedAt: null,
-      deletionReason: null,
-    });
-    return;
+    throw new Error(
+      `Cannot transition SupportForge ticket ${channelId}: durable ticket record does not exist.`,
+    );
   }
 
   getRepository().transitionStatus(channelId, status, now, actor);
