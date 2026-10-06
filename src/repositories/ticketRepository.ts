@@ -39,6 +39,7 @@ export interface TicketRepository {
   listAll(): TicketRepositoryRecord[];
   upsert(record: TicketRepositoryRecord): void;
   create(record: TicketRepositoryRecord, actor?: EventActor): void;
+  listEvents(channelId: string, limit?: number): import('../core/events/domainEvents').DomainEvent[];
   setStatus(channelId: string, status: TicketStatus, updatedAt: string): void;
   transitionStatus(
     channelId: string,
@@ -242,6 +243,14 @@ export class SqliteTicketRepository implements TicketRepository {
       }
       throw error;
     }
+  }
+
+  public listEvents(
+    channelId: string,
+    limit = 500,
+  ): import('../core/events/domainEvents').DomainEvent[] {
+    const record = this.getByChannelId(channelId);
+    return record ? this.events.listTicketEvents(record.id, limit) : [];
   }
 
   public upsert(record: TicketRepositoryRecord): void {
