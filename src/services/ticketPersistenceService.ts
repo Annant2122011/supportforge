@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { TicketPriority } from './advancedSettingsService';
@@ -167,10 +167,7 @@ async function persistState(): Promise<void> {
       );
     } finally {
       try {
-        await rename(
-          temporaryPath,
-          temporaryPath + '.abandoned',
-        );
+        await unlink(temporaryPath);
       } catch {
         // The temporary file was normally consumed by the atomic rename.
       }
