@@ -1,8 +1,8 @@
-import { getSupportForgeDatabase } from '../core/persistence/sqliteDatabase';
+import { getSupportForgeDatabase } from '../persistence/sqliteDatabase';
 import {
   SqliteEventRepository,
-} from '../repositories/eventRepository';
-import type { OutboxEvent } from '../core/events/domainEvents';
+} from '../../repositories/eventRepository';
+import type { OutboxEvent } from './domainEvents';
 
 const MAX_BATCH_SIZE = 100;
 const MAX_RETRY_DELAY_MS = 15 * 60_000;
