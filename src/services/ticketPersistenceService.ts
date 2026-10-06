@@ -34,6 +34,8 @@ export interface TicketRegistration {
   ownerId: string;
   priority: TicketPriority;
   createdAt: string;
+  claimedByIds?: string[];
+  participantIds?: string[];
 }
 
 let repository: SqliteTicketRepository | null = null;
@@ -96,8 +98,8 @@ export async function registerTicket(
     tagId: current?.tagId ?? registration.tagId,
     ownerId: current?.ownerId ?? registration.ownerId,
     priority: current?.priority ?? registration.priority,
-    claimedByIds: current?.claimedByIds ?? [],
-    participantIds: current?.participantIds ?? [],
+    claimedByIds: current?.claimedByIds ?? registration.claimedByIds ?? [],
+    participantIds: current?.participantIds ?? registration.participantIds ?? [],
     metadata: current?.metadata ?? {},
     deletedAt: current?.deletedAt ?? null,
     deletionReason: current?.deletionReason ?? null,
