@@ -27,3 +27,6 @@ jobs:
 
       - name: TypeScript build
         run: npm run build
+
+      - name: Automated tests
+        run: npm test
