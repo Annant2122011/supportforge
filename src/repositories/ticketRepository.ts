@@ -1,4 +1,9 @@
-import type { TicketStatus } from '../core/domain/ticketLifecycle';
+import {
+  assertTicketStatusTransition,
+  type TicketStatus,
+} from '../core/domain/ticketLifecycle';
+import { randomUUID } from 'node:crypto';
+import { SqliteEventRepository, type EventActor } from './eventRepository';
 import {
   getSupportForgeDatabase,
   type SqliteDatabase,
@@ -34,6 +39,12 @@ export interface TicketRepository {
   listAll(): TicketRepositoryRecord[];
   upsert(record: TicketRepositoryRecord): void;
   setStatus(channelId: string, status: TicketStatus, updatedAt: string): void;
+  transitionStatus(
+    channelId: string,
+    status: TicketStatus,
+    updatedAt: string,
+    actor?: EventActor,
+  ): void;
   updateMetadata(
     channelId: string,
     updates: Partial<
@@ -119,9 +130,11 @@ function fromRow(row: TicketRow): TicketRepositoryRecord {
 
 export class SqliteTicketRepository implements TicketRepository {
   private readonly database: SqliteDatabase;
+  private readonly events: SqliteEventRepository;
 
   public constructor(database = getSupportForgeDatabase()) {
     this.database = database;
+    this.events = new SqliteEventRepository(database);
   }
 
   public getByChannelId(channelId: string): TicketRepositoryRecord | undefined {
@@ -215,11 +228,71 @@ export class SqliteTicketRepository implements TicketRepository {
     status: TicketStatus,
     updatedAt: string,
   ): void {
-    this.database
-      .prepare(
-        'UPDATE tickets SET status = ?, updated_at = ? WHERE channel_id = ?',
-      )
-      .run(status, updatedAt, channelId);
+    this.transitionStatus(channelId, status, updatedAt);
+  }
+
+  public transitionStatus(
+    channelId: string,
+    status: TicketStatus,
+    updatedAt: string,
+    actor: EventActor = {
+      id: 'supportforge-system',
+      attribution: 'actorKnown',
+      confidence: 'high',
+    },
+  ): void {
+    const current = this.getByChannelId(channelId);
+    if (!current) {
+      throw new Error(
+        `Cannot transition SupportForge ticket ${channelId}: ticket does not exist in durable storage.`,
+      );
+    }
+
+    if (current.status === status) {
+      return;
+    }
+
+    assertTicketStatusTransition(current.status, status);
+
+    this.database.exec('BEGIN IMMEDIATE');
+
+    try {
+      const result = this.database.prepare(
+        'UPDATE tickets SET status = ?, updated_at = ? WHERE channel_id = ? AND status = ?',
+      ).run(status, updatedAt, channelId, current.status);
+
+      if (Number(result.changes) !== 1) {
+        throw new Error(
+          `Ticket ${channelId} changed concurrently while transitioning from ${current.status} to ${status}.`,
+        );
+      }
+
+      this.events.append({
+        id: randomUUID(),
+        type: 'ticket.status_changed',
+        aggregateType: 'ticket',
+        aggregateId: current.id,
+        guildId: current.guildId,
+        channelId: current.channelId,
+        actorId: actor.id,
+        actorAttribution: actor.attribution ?? 'actorUnknown',
+        actorConfidence: actor.confidence ?? 'none',
+        payload: {
+          from: current.status,
+          to: status,
+        },
+        occurredAt: updatedAt,
+      });
+
+      this.database.exec('COMMIT');
+    } catch (error) {
+      try {
+        this.database.exec('ROLLBACK');
+      } catch {
+        // Preserve the original error.
+      }
+      throw error;
+    }
   }
 
   public updateMetadata(
