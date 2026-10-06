@@ -108,9 +108,6 @@ async function getEffectiveTicketPriority(
 /* Constants                                                                  */
 /* -------------------------------------------------------------------------- */
 
-const DISCORD_OPERATION_TIMEOUT_MS = 15_000;
-const TRANSCRIPT_TIMEOUT_MS = 60_000;
-
 const ACTIVE_TICKET_STATUSES: readonly TicketStatus[] = [
   'open',
   'claimed',
@@ -169,11 +166,7 @@ async function runChannelMutation<T>(
       `🔧 Ticket mutation: ${operation} [${channel.id}]`,
     );
 
-    return await withTimeout(
-      action(),
-      DISCORD_OPERATION_TIMEOUT_MS,
-      operation,
-    );
+    return await action();
   } finally {
     release();
 
@@ -235,37 +228,6 @@ function isTerminalTicketStatus(
 /* -------------------------------------------------------------------------- */
 /* Timeout helper                                                             */
 /* -------------------------------------------------------------------------- */
-
-async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  operation: string,
-): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-
-  const timeout = new Promise<never>(
-    (_, reject) => {
-      timer = setTimeout(() => {
-        reject(
-          new Error(
-            `${operation} timed out after ${timeoutMs}ms.`,
-          ),
-        );
-      }, timeoutMs);
-    },
-  );
-
-  try {
-    return await Promise.race([
-      promise,
-      timeout,
-    ]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
-}
 
 /* -------------------------------------------------------------------------- */
 /* Runtime ticket state                                                       */
@@ -626,34 +588,22 @@ async function updateMainMessage(
 
   try {
     const config =
-      await withTimeout(
-        getGuildConfig(
+      await getGuildConfig(
           channel.guild.id,
-        ),
-        DISCORD_OPERATION_TIMEOUT_MS,
-        'Guild configuration load',
-      );
+        );
 
     let message;
     try {
       message =
         channel.messages.cache.get(messageId) ??
-        await withTimeout(
-          channel.messages.fetch(messageId),
-          DISCORD_OPERATION_TIMEOUT_MS,
-          'Ticket panel fetch',
-        );
+        await channel.messages.fetch(messageId);
     } catch {
       /*
        * Closed-ticket controls are moved to the bottom as a new message.
        * The historical message= topic field intentionally remains stable,
        * so recover the current panel by scanning recent messages.
        */
-      const recent = await withTimeout(
-        channel.messages.fetch({ limit: 100 }),
-        DISCORD_OPERATION_TIMEOUT_MS,
-        'Recent ticket panel search',
-      );
+      const recent = await channel.messages.fetch({ limit: 100 });
 
       const ticketNumber =
         getField(topic, 'number') ?? 'unknown';
@@ -720,8 +670,7 @@ async function updateMainMessage(
       ? setField(panelTopic, 'priority', persistedPriority)
       : panelTopic;
 
-    await withTimeout(
-      message.edit({
+    await message.edit({
         embeds: [
           buildTicketPanelEmbed(
             channel.guild,
@@ -735,10 +684,7 @@ async function updateMainMessage(
             status,
             effectivePanelTopic,
           ),
-      }),
-      DISCORD_OPERATION_TIMEOUT_MS,
-      'Ticket panel update',
-    );
+      });
   } catch (error) {
     console.error(
       '⚠️ Failed to update ticket panel:',
@@ -959,13 +905,9 @@ async function createTicket(
 
   try {
     const config =
-      await withTimeout(
-        getGuildConfig(
+      await getGuildConfig(
           guild.id,
-        ),
-        DISCORD_OPERATION_TIMEOUT_MS,
-        'Guild configuration load',
-      );
+        );
 
     const department =
       config.departments[
@@ -1089,13 +1031,9 @@ async function createTicket(
     }
 
     const number =
-      await withTimeout(
-        allocateTicketNumber(
+      await allocateTicketNumber(
           guild.id,
-        ),
-        DISCORD_OPERATION_TIMEOUT_MS,
-        'Ticket number allocation',
-      );
+        );
 
     const now =
       new Date().toISOString();
@@ -1160,8 +1098,7 @@ async function createTicket(
 
     try {
       ticketChannel =
-        (await withTimeout(
-          guild.channels.create({
+        (await guild.channels.create({
             name:
               getTicketChannelName(
                 String(number).padStart(4, '0'),
@@ -1177,14 +1114,10 @@ async function createTicket(
               overwrites,
             reason:
               `SupportForge ticket #${number}`,
-          }),
-          DISCORD_OPERATION_TIMEOUT_MS,
-          'Ticket channel creation',
-        )) as TextChannel;
+          })) as TextChannel;
 
       const panel =
-        await withTimeout(
-          ticketChannel.send({
+        await ticketChannel.send({
             embeds: [
               buildTicketPanelEmbed(
                 guild,
@@ -1198,10 +1131,7 @@ async function createTicket(
                 'open',
                 topic,
               ),
-          }),
-          DISCORD_OPERATION_TIMEOUT_MS,
-          'Ticket panel creation',
-        );
+          });
 
       const finalTopic =
         setField(
@@ -1266,8 +1196,7 @@ async function createTicket(
         },
       );
 
-      await withTimeout(
-        ticketChannel.send({
+      await ticketChannel.send({
           allowedMentions: {
             parse: [],
           },
@@ -1303,10 +1232,7 @@ async function createTicket(
                 },
               ),
           ],
-        }),
-        DISCORD_OPERATION_TIMEOUT_MS,
-        'Ticket description message',
-      );
+        });
 
       await interaction.editReply({
         content:
@@ -2225,13 +2151,9 @@ async function closeTicket(
       );
 
     const config =
-      await withTimeout(
-        getGuildConfig(
+      await getGuildConfig(
           interaction.guild.id,
-        ),
-        DISCORD_OPERATION_TIMEOUT_MS,
-        'Guild configuration load',
-      );
+        );
 
     const transcriptChannelId =
       config.transcriptChannelId;
@@ -2325,8 +2247,7 @@ async function closeTicket(
      */
 
     const transcript =
-      await withTimeout(
-        generateTranscript({
+      await generateTranscript({
           channel,
           ticketNumber,
           subject,
@@ -2336,22 +2257,15 @@ async function closeTicket(
             interaction.user.tag,
           openedAt,
           closedAt,
-        }),
-        TRANSCRIPT_TIMEOUT_MS,
-        'Transcript generation',
-      );
+        });
 
-    const transcriptMessage = await withTimeout(
-      transcriptChannel.send({
+    const transcriptMessage = await transcriptChannel.send({
         content:
           `📄 Transcript for ticket **#${ticketNumber}**`,
         files: [
           transcript,
         ],
-      }),
-      DISCORD_OPERATION_TIMEOUT_MS,
-      'Transcript upload',
-    );
+      });
 
     /*
      * Transcript successfully uploaded.
@@ -4351,8 +4265,7 @@ async function handlePanelModal(
         return;
       }
 
-      await withTimeout(
-        channel.send({
+      await channel.send({
           embeds: [
             new EmbedBuilder()
               .setTitle(
@@ -4367,10 +4280,7 @@ async function handlePanelModal(
               })
               .setTimestamp(),
           ],
-        }),
-        DISCORD_OPERATION_TIMEOUT_MS,
-        'Internal note creation',
-      );
+        });
 
       /*
        * Also record the note in the staff-only audit history so the History
