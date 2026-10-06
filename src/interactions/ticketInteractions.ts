@@ -197,9 +197,26 @@ interface PendingReportDecision {
   description: string;
   reporterUserId: string;
   ticketNumber?: string;
+  expiresAt: number;
 }
 
+const MAX_PENDING_REPORT_DECISIONS = 1_000;
+const PENDING_REPORT_DECISION_TTL_MS = 15 * 60_000;
 const pendingReportDecisions = new Map<string, PendingReportDecision>();
+
+function prunePendingReportDecisions(now = Date.now()): void {
+  for (const [nonce, pending] of pendingReportDecisions) {
+    if (pending.expiresAt <= now) {
+      pendingReportDecisions.delete(nonce);
+    }
+  }
+
+  while (pendingReportDecisions.size > MAX_PENDING_REPORT_DECISIONS) {
+    const oldest = pendingReportDecisions.keys().next().value;
+    if (typeof oldest !== 'string') break;
+    pendingReportDecisions.delete(oldest);
+  }
+}
 
 const ticketCreationLocks = new Set<string>();
 
@@ -209,7 +226,23 @@ interface RuntimeTicketState {
   updatedAt: number;
 }
 
+const MAX_RUNTIME_TICKET_CACHE_ENTRIES = 5_000;
 const ticketRuntimeCache = new Map<string, RuntimeTicketState>();
+
+function setRuntimeTicketState(
+  channelId: string,
+  state: RuntimeTicketState,
+): void {
+  ticketRuntimeCache.delete(channelId);
+
+  while (ticketRuntimeCache.size >= MAX_RUNTIME_TICKET_CACHE_ENTRIES) {
+    const oldest = ticketRuntimeCache.keys().next().value;
+    if (typeof oldest !== 'string') break;
+    ticketRuntimeCache.delete(oldest);
+  }
+
+  ticketRuntimeCache.set(channelId, state);
+}
 
 /* -------------------------------------------------------------------------- */
 /* Status helpers                                                             */
@@ -256,10 +289,7 @@ function getRuntimeTicketState(
     updatedAt: Date.now(),
   };
 
-  ticketRuntimeCache.set(
-    channel.id,
-    state,
-  );
+  setRuntimeTicketState(channel.id, state);
 
   return state;
 }
@@ -269,14 +299,11 @@ function updateRuntimeTicketState(
   topic: string,
   status: TicketStatus,
 ): void {
-  ticketRuntimeCache.set(
-    channel.id,
-    {
-      topic,
-      status,
-      updatedAt: Date.now(),
-    },
-  );
+  setRuntimeTicketState(channel.id, {
+    topic,
+    status,
+    updatedAt: Date.now(),
+  });
 }
 
 function clearRuntimeTicketState(
@@ -2905,6 +2932,8 @@ async function handleReportModal(interaction: ModalSubmitInteraction): Promise<v
   }
 
   const nonce = Math.random().toString(36).slice(2, 10);
+  prunePendingReportDecisions();
+
   pendingReportDecisions.set(nonce, {
     guildId: interaction.guild.id,
     channelId: interaction.channel.id,
@@ -2914,6 +2943,7 @@ async function handleReportModal(interaction: ModalSubmitInteraction): Promise<v
     description: interaction.fields.getTextInputValue('description').trim().slice(0, 500),
     reporterUserId: interaction.user.id,
     ticketNumber: getField(topic, 'number'),
+    expiresAt: Date.now() + PENDING_REPORT_DECISION_TTL_MS,
   });
 
   await interaction.editReply({
@@ -2932,9 +2962,14 @@ async function handleReportDecision(interaction: ButtonInteraction): Promise<voi
   const parts = interaction.customId.split(':');
   const nonce = parts[3] ?? '';
   const decision = parts[4] ?? '';
+  prunePendingReportDecisions();
   const pending = pendingReportDecisions.get(nonce);
 
-  if (!pending || pending.reporterUserId !== interaction.user.id) {
+  if (
+    !pending ||
+    pending.expiresAt <= Date.now() ||
+    pending.reporterUserId !== interaction.user.id
+  ) {
     await replyError(interaction, '❌ This report review has expired or is not assigned to you.');
     return;
   }
