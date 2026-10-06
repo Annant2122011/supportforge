@@ -179,3 +179,19 @@ test('outbox claiming prevents duplicate workers and stale processing can recove
     assert.equal(events.listPendingOutbox().length, 1);
   });
 });
+test('deleting a ticket atomically purges its durable events and outbox records', async () => {
+  await withDatabase(async (db) => {
+    const tickets = new SqliteTicketRepository(db);
+    tickets.create(record());
+
+    const events = new SqliteEventRepository(db);
+    assert.equal(events.listTicketEvents('ticket-c-1').length, 1);
+    assert.equal(events.listOutbox('pending').length, 1);
+
+    tickets.remove('channel-c-1');
+
+    assert.equal(tickets.getByChannelId('channel-c-1'), undefined);
+    assert.equal(events.listTicketEvents('ticket-c-1').length, 0);
+    assert.equal(events.listOutbox('pending').length, 0);
+  });
+});
