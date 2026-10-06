@@ -138,8 +138,8 @@ const DEFAULTS: AdvancedGuildSettings = {
     minimumMessagesBeforeMove: 6,
   },
   retention: {
-    closedDays: 0,
-    archiveDays: 0,
+    closedDays: 180,
+    archiveDays: 180,
     closedEffectiveFrom: null,
     archiveEffectiveFrom: null,
     pendingApprovals: {
@@ -260,6 +260,12 @@ async function load(): Promise<SettingsFile> {
   return state;
 }
 
+function normalizeRetentionDays(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) return fallback;
+  return Math.min(365, Math.max(0, parsed));
+}
+
 function normalizeExistingSettings(
   settings: Partial<AdvancedGuildSettings>,
 ): AdvancedGuildSettings {
@@ -274,6 +280,14 @@ function normalizeExistingSettings(
     retention: {
       ...DEFAULTS.retention,
       ...(settings.retention ?? {}),
+      closedDays: normalizeRetentionDays(
+        settings.retention?.closedDays,
+        DEFAULTS.retention.closedDays,
+      ),
+      archiveDays: normalizeRetentionDays(
+        settings.retention?.archiveDays,
+        DEFAULTS.retention.archiveDays,
+      ),
       pendingApprovals: {
         ...DEFAULTS.retention.pendingApprovals,
         ...(settings.retention?.pendingApprovals ?? {}),
