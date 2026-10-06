@@ -1,5 +1,5 @@
 import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { runMigrations } from './migrations';
 
@@ -43,6 +43,36 @@ export function getDatabasePath(): string {
   return DATABASE_PATH;
 }
 
+/**
+ * Open and migrate an explicitly supplied SQLite database.
+ *
+ * The application uses getSupportForgeDatabase() for its singleton database.
+ * Tests and maintenance tooling can use this factory with an isolated path,
+ * without mutating process.cwd().
+ */
+export function createSupportForgeDatabase(
+  databasePath: string,
+  legacyTicketsPath?: string,
+): SqliteDatabase {
+  mkdirSync(dirname(databasePath), { recursive: true });
+
+  const instance = new DatabaseSync(databasePath, {
+    enableForeignKeyConstraints: true,
+    timeout: 5_000,
+  });
+
+  instance.exec(
+    'PRAGMA foreign_keys = ON; ' +
+    'PRAGMA journal_mode = WAL; ' +
+    'PRAGMA busy_timeout = 5000; ' +
+    'PRAGMA synchronous = NORMAL;',
+  );
+
+  runMigrations(instance, legacyTicketsPath);
+
+  return instance;
+}
+
 export function getSupportForgeDatabase(): SqliteDatabase {
   if (database?.isOpen) {
     return database;
@@ -50,19 +80,7 @@ export function getSupportForgeDatabase(): SqliteDatabase {
 
   mkdirSync(DATA_DIR, { recursive: true });
 
-  database = new DatabaseSync(DATABASE_PATH, {
-    enableForeignKeyConstraints: true,
-    timeout: 5_000,
-  });
-
-  database.exec(
-    'PRAGMA foreign_keys = ON; ' +
-    'PRAGMA journal_mode = WAL; ' +
-    'PRAGMA busy_timeout = 5000; ' +
-    'PRAGMA synchronous = NORMAL;'
-  );
-
-  runMigrations(database);
+  database = createSupportForgeDatabase(DATABASE_PATH);
 
   return database;
 }
