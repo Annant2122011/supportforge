@@ -185,13 +185,10 @@ export async function updatePersistedTicketMetadata(
 export async function getPersistedTicketRecords(
   guildId?: string,
 ): Promise<PersistedTicket[]> {
-  if (!guildId) {
-    return [];
-  }
-
-  return getRepository()
-    .listByGuildId(guildId)
-    .map(toPersistedTicket);
+  return (guildId
+    ? getRepository().listByGuildId(guildId)
+    : getRepository().listAll()
+  ).map(toPersistedTicket);
 }
 
 export async function markPersistedTicketDeleted(
