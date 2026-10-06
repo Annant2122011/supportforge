@@ -45,12 +45,27 @@ import { ensureSettingsChannel } from './services/settingsChannelService';
 import { isFactoryResetInProgress } from './services/factoryResetService';
 import { startSupportForgeUpdateMonitor } from './services/updateService';
 import type { GuildBasedChannel, TextChannel } from 'discord.js';
+import { getSupportForgeDatabase } from './core/persistence/sqliteDatabase';
 
 const token = process.env.DISCORD_TOKEN;
 
 if (!token) {
   throw new Error(
     'DISCORD_TOKEN is missing from .env',
+  );
+}
+
+/*
+ * Initialize durable persistence before the Discord client connects. This
+ * forces schema migrations and legacy-data validation to happen before the
+ * bot can accept any ticket interactions.
+ */
+try {
+  getSupportForgeDatabase();
+} catch (error) {
+  throw new Error(
+    'SupportForge durable database initialization failed. The bot will not start with unverified persistence.',
+    { cause: error },
   );
 }
 
