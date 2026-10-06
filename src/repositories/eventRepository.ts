@@ -140,14 +140,14 @@ export class SqliteEventRepository {
 
   public listPendingOutbox(limit = 100): OutboxEvent[] {
     return this.database.prepare(
-      "SELECT * FROM outbox_events WHERE status = 'pending' AND available_at <= ? ORDER BY created_at ASC LIMIT ?",
+      "SELECT * FROM outbox_events WHERE status IN ('pending', 'failed') AND available_at <= ? ORDER BY created_at ASC LIMIT ?",
     ).all(new Date().toISOString(), Math.max(1, Math.min(limit, 500)))
       .map((row) => fromOutboxRow(row as OutboxRow));
   }
 
   public markOutboxProcessing(id: string): boolean {
     const result = this.database.prepare(
-      "UPDATE outbox_events SET status = 'processing', attempts = attempts + 1 WHERE id = ? AND status = 'pending'",
+      "UPDATE outbox_events SET status = 'processing', attempts = attempts + 1 WHERE id = ? AND status IN ('pending', 'failed')",
     ).run(id);
     return Number(result.changes) === 1;
   }
