@@ -1240,10 +1240,10 @@ async function showRetention(interaction: ButtonInteraction): Promise<void> {
   await renderSettingsView(interaction, [
     new EmbedBuilder()
       .setTitle('🧹 Retention')
-      .setDescription('Set how long closed and archived tickets remain before automatic deletion. **0 means unlimited retention (never automatically delete).**')
+      .setDescription('Set how long closed and archived tickets remain before deletion approval. **0 means no configured timer; the one-year maximum retention policy still applies.**')
       .addFields(
-        { name: 'Closed', value: settings.retention.closedDays === 0 ? 'Unlimited' : settings.retention.closedDays + ' days', inline: true },
-        { name: 'Archived', value: settings.retention.archiveDays === 0 ? 'Unlimited' : settings.retention.archiveDays + ' days', inline: true },
+        { name: 'Closed', value: settings.retention.closedDays === 0 ? 'No timer • 365-day maximum' : settings.retention.closedDays + ' days', inline: true },
+        { name: 'Archived', value: settings.retention.archiveDays === 0 ? 'No timer • 365-day maximum' : settings.retention.archiveDays + ' days', inline: true },
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -1828,8 +1828,8 @@ export async function handleSettingsInteraction(
     if (id === 'sf:settings:retention:edit') {
       const settings = await getAdvancedSettings(guild.id);
       await openModal(interaction, 'sf:settings:modal:retention', 'Ticket Retention', [
-        new TextInputBuilder().setCustomId('closed').setLabel('Closed ticket days (0 = unlimited)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.retention.closedDays)),
-        new TextInputBuilder().setCustomId('archive').setLabel('Archived ticket days (0 = unlimited)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.retention.archiveDays)),
+        new TextInputBuilder().setCustomId('closed').setLabel('Closed ticket days (0–365; 0 = no timer)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.retention.closedDays)),
+        new TextInputBuilder().setCustomId('archive').setLabel('Archived ticket days (0–365; 0 = no timer)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.retention.archiveDays)),
       ]);
       return true;
     }
@@ -1998,13 +1998,13 @@ export async function handleSettingsInteraction(
       await openModal(interaction, 'sf:settings:modal:retention', 'Ticket Retention', [
         new TextInputBuilder()
           .setCustomId('closed')
-          .setLabel('Closed ticket days (0 = unlimited)')
+          .setLabel('Closed ticket days (0–365; 0 = no timer)')
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
           .setValue(String(settings.retention.closedDays)),
         new TextInputBuilder()
           .setCustomId('archive')
-          .setLabel('Archived ticket days (0 = unlimited)')
+          .setLabel('Archived ticket days (0–365; 0 = no timer)')
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
           .setValue(String(settings.retention.archiveDays)),
@@ -2525,10 +2525,10 @@ export async function handleSettingsInteraction(
       const archive = Number(interaction.fields.getTextInputValue('archive'));
 
       if (
-        !Number.isInteger(closed) || closed < 0 || closed > 3650 ||
-        !Number.isInteger(archive) || archive < 0 || archive > 3650
+        !Number.isInteger(closed) || closed < 0 || closed > 365 ||
+        !Number.isInteger(archive) || archive < 0 || archive > 365
       ) {
-        await reject(interaction, '❌ Retention values must be whole numbers from 0 to 3650.');
+        await reject(interaction, '❌ Retention values must be whole numbers from 0 to 365.');
         return true;
       }
 
@@ -2543,7 +2543,7 @@ export async function handleSettingsInteraction(
       });
       await refreshSettingsChannel(guild);
       await interaction.editReply({
-        embeds: [new EmbedBuilder().setTitle('✅ Retention Updated').setDescription('Closed: **' + (closed === 0 ? 'Unlimited' : closed) + '** days • Archive: **' + (archive === 0 ? 'Unlimited' : archive) + '** days.')],
+        embeds: [new EmbedBuilder().setTitle('✅ Retention Updated').setDescription('Closed: **' + (closed === 0 ? 'No timer (365-day maximum)' : closed + ' days') + '** • Archive: **' + (archive === 0 ? 'No timer (365-day maximum)' : archive + ' days') + '**.')],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
       await auditSettingsAction(guild, interaction, 'RETENTION_CHANGED', 'Closed retention=' + closed + ' days; archive retention=' + archive + ' days.');
