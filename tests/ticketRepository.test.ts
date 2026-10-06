@@ -77,6 +77,36 @@ test('SQLite schema is migrated and repository preserves structured ticket data'
     assert.deepEqual(repository.getByChannelId('channel-1'), original);
     assert.deepEqual(repository.listByGuildId('guild-1'), [original]);
     assert.deepEqual(repository.listAll(), [original]);
+
+    repository.updateMetadata(
+      'channel-1',
+      {
+        priority: 'high',
+        claimedByIds: ['moderator-2'],
+        participantIds: ['user-1', 'moderator-2'],
+        metadata: { updated: true },
+      },
+      '2026-10-06T11:00:00.000Z',
+    );
+
+    const updated = repository.getByChannelId('channel-1');
+    assert.ok(updated);
+    assert.equal(updated.priority, 'high');
+    assert.deepEqual(updated.claimedByIds, ['moderator-2']);
+    assert.deepEqual(updated.participantIds, ['user-1', 'moderator-2']);
+    assert.deepEqual(updated.metadata, { updated: true });
+    assert.equal(updated.updatedAt, '2026-10-06T11:00:00.000Z');
+
+    repository.markDeleted(
+      'channel-1',
+      '2026-10-06T12:00:00.000Z',
+      'manual deletion',
+    );
+
+    const deleted = repository.getByChannelId('channel-1');
+    assert.ok(deleted);
+    assert.equal(deleted.deletedAt, '2026-10-06T12:00:00.000Z');
+    assert.equal(deleted.deletionReason, 'manual deletion');
   });
 });
 
@@ -120,11 +150,6 @@ test('active owner/department lookup excludes closed and deleted tickets', async
 
 test('legacy tickets migrate with claimant, participant, and metadata fields intact', async () => {
   await withTempDatabase(async (database, directory, legacyTicketsPath) => {
-    /*
-     * The database is already migrated by the helper. This test exercises the
-     * same migration contract directly with a fresh second database so the
-     * legacy import migration actually runs.
-     */
     database.close();
 
     const secondDatabasePath = join(directory, 'migrated.sqlite');
@@ -187,13 +212,37 @@ test('legacy tickets migrate with claimant, participant, and metadata fields int
         'utf8',
       );
       assert.match(sourceAfterMigration, /channel-legacy/);
+
+      migrated.close();
+
+      const reopened = createSupportForgeDatabase(
+        secondDatabasePath,
+        legacyTicketsPath,
+      );
+      try {
+        const reopenedRepository = new SqliteTicketRepository(reopened);
+        assert.ok(reopenedRepository.getByChannelId('channel-legacy'));
+        const markerStatement = reopened.prepare(
+          'SELECT id FROM schema_migrations ORDER BY id',
+        );
+        try {
+          assert.deepEqual(
+            markerStatement.all().map((row) => Number(row.id)),
+            [1, 2],
+          );
+        } finally {
+          markerStatement.close();
+        }
+      } finally {
+        if (reopened.isOpen) reopened.close();
+      }
     } finally {
       if (migrated.isOpen) migrated.close();
     }
   });
 });
 
-test('malformed legacy JSON fails safely without creating a migration marker for the import', async () => {
+test('malformed legacy JSON fails safely and records no import marker', async () => {
   await withTempDatabase(async (database, directory, legacyTicketsPath) => {
     database.close();
 
@@ -214,13 +263,17 @@ test('malformed legacy JSON fails safely without creating a migration marker for
       /legacy file is invalid JSON/,
     );
 
-    const recoveryDatabase = createSupportForgeDatabase(
-      join(directory, 'recovery.sqlite'),
+    /*
+     * Migration 1 is committed before migration 2 begins. The failed import
+     * therefore leaves a valid schema but never records migration 2.
+     */
+    const inspection = createSupportForgeDatabase(
+      brokenDatabasePath,
       join(directory, 'missing-tickets.json'),
     );
 
     try {
-      const statement = recoveryDatabase.prepare(
+      const statement = inspection.prepare(
         'SELECT id FROM schema_migrations ORDER BY id',
       );
       try {
@@ -232,7 +285,14 @@ test('malformed legacy JSON fails safely without creating a migration marker for
         statement.close();
       }
     } finally {
-      if (recoveryDatabase.isOpen) recoveryDatabase.close();
+      if (inspection.isOpen) inspection.close();
     }
+
+    assert.equal(
+      (await readdir(directory)).some((name) =>
+        name.startsWith('tickets.json.pre-sqlite-')
+      ),
+      false,
+    );
   });
 });
