@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { EventActor } from '../core/events/domainEvents';
 
 import type { TicketPriority } from './advancedSettingsService';
 import type { TicketStatus } from './ticketStateService';
@@ -96,7 +97,7 @@ export async function registerTicket(
   const current = getRepository().getByChannelId(channelId);
   const createdAt = current?.createdAt ?? registration.createdAt;
 
-  getRepository().upsert({
+  const record: TicketRepositoryRecord = {
     id: current?.id ?? randomUUID(),
     guildId: current?.guildId ?? registration.guildId,
     channelId,
@@ -113,12 +114,19 @@ export async function registerTicket(
     metadata: current?.metadata ?? {},
     deletedAt: current?.deletedAt ?? null,
     deletionReason: current?.deletionReason ?? null,
-  });
+  };
+
+  if (current) {
+    getRepository().upsert(record);
+  } else {
+    getRepository().create(record);
+  }
 }
 
 export async function setPersistedTicketStatus(
   channelId: string,
   status: TicketStatus,
+  actor?: EventActor,
 ): Promise<void> {
   const current = getRepository().getByChannelId(channelId);
   const now = new Date().toISOString();
@@ -145,7 +153,7 @@ export async function setPersistedTicketStatus(
     return;
   }
 
-  getRepository().setStatus(channelId, status, now);
+  getRepository().transitionStatus(channelId, status, now, actor);
 }
 
 export async function updatePersistedTicketMetadata(
@@ -222,4 +230,18 @@ export async function removePersistedTicket(
 
 export async function resetTicketPersistenceState(): Promise<void> {
   getRepository().clearAll();
+}
+
+
+export async function getPersistedTicketEventHistory(
+  channelId: string,
+  limit = 500,
+): Promise<import('../core/events/domainEvents').DomainEvent[]> {
+  const record = getRepository().getByChannelId(channelId);
+  if (!record) return [];
+
+  const { SqliteEventRepository } = await import('../repositories/eventRepository');
+  return new SqliteEventRepository(
+    (getRepository() as unknown as { database: import('../core/persistence/sqliteDatabase').SqliteDatabase }).database,
+  ).listTicketEvents(record.id, limit);
 }
