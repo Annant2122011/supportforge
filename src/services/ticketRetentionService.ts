@@ -46,9 +46,12 @@ function effectiveDeletionAt(
     : 0;
   const hardMaximum = Date.parse(createdAt) + MAX_TICKET_RETENTION_DAYS * DAY_MS;
 
+  const policyDeadline = Number.isFinite(countdownDeadline)
+    ? Math.max(normalDeadline, countdownDeadline)
+    : normalDeadline;
+
   return Math.min(
-    normalDeadline,
-    Number.isFinite(countdownDeadline) ? Math.max(normalDeadline, countdownDeadline) : normalDeadline,
+    policyDeadline,
     Number.isFinite(hardMaximum) ? hardMaximum : Number.POSITIVE_INFINITY,
   );
 }
