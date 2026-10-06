@@ -997,13 +997,23 @@ async function sendAuditEntry(
   channel: TextChannel,
   event: PersistedAuditEntry,
 ): Promise<void> {
-  const actor = event.actorName === 'Unknown'
-    ? `<@${event.actorId}>`
-    : event.actorName;
+  const actor =
+    event.actorAttribution === 'actorUnknown'
+      ? 'Unknown actor'
+      : event.actorName || 'Unknown actor';
 
   const fixedLines = [
     '**User:** ' + actor,
-    '**User ID:** \`' + event.actorId + '\`',
+    event.actorId !== 'unknown'
+      ? '**User ID:** \`' + event.actorId + '\`'
+      : null,
+    '**Attribution:** ' +
+      event.actorAttribution +
+      ' • confidence: ' +
+      event.actorConfidence,
+    event.discordAuditLogId
+      ? '**Discord audit-log ID:** \`' + event.discordAuditLogId + '\`'
+      : null,
     '**When:** <t:' + Math.floor(new Date(event.timestamp).getTime() / 1000) + ':F>',
     event.ticketNumber ? '**Ticket:** #' + event.ticketNumber : null,
   ].filter(Boolean) as string[];
@@ -1416,7 +1426,16 @@ async function buildPrivateDeveloperAuditPage(
             },
             {
               name: 'Actor',
-              value: event.actorName || 'Unknown',
+              value: event.actorName || 'Unknown actor',
+              inline: true,
+            },
+            {
+              name: 'Attribution',
+              value:
+                event.actorAttribution +
+                ' • ' +
+                event.actorConfidence +
+                (event.discordAuditLogId ? '\nAudit ID: ' + event.discordAuditLogId : ''),
               inline: true,
             },
             {
