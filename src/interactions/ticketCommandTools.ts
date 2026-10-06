@@ -1116,6 +1116,10 @@ export async function executeTicketCommand(
         topic,
       );
 
+      await updatePersistedTicketMetadata(context.channel.id, {
+        participantIds: [...users],
+      });
+
       await audit(
         interaction,
         context,
