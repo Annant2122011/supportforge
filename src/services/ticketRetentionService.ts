@@ -11,7 +11,7 @@ import {
 } from 'discord.js';
 
 import { getAdvancedSettings, updateAdvancedSettings, type AdvancedGuildSettings } from './advancedSettingsService';
-import { getPersistedTicketStatus, markPersistedTicketDeleted } from './ticketPersistenceService';
+import { getPersistedTicketRecords, removePersistedTicket } from './ticketPersistenceService';
 import { getField, getTicketStatus, isTicketTopic } from './ticketStateService';
 
 export type RetentionScope = 'closed' | 'archive';
@@ -31,17 +31,26 @@ function retentionDays(settings: AdvancedGuildSettings, scope: RetentionScope): 
     : settings.retention.archiveDays;
 }
 
+const MAX_TICKET_RETENTION_DAYS = 365;
+
 function effectiveDeletionAt(
   timestamp: number,
+  createdAt: string,
   days: number,
   effectiveFrom: string | null,
 ): number {
-  const normalDeadline = timestamp + days * DAY_MS;
-  const countdownDeadline = effectiveFrom
+  const normalDeadline =
+    days === 0 ? Number.POSITIVE_INFINITY : timestamp + days * DAY_MS;
+  const countdownDeadline = effectiveFrom && days > 0
     ? Date.parse(effectiveFrom) + days * DAY_MS
     : 0;
+  const hardMaximum = Date.parse(createdAt) + MAX_TICKET_RETENTION_DAYS * DAY_MS;
 
-  return Math.max(normalDeadline, Number.isFinite(countdownDeadline) ? countdownDeadline : 0);
+  return Math.min(
+    normalDeadline,
+    Number.isFinite(countdownDeadline) ? Math.max(normalDeadline, countdownDeadline) : normalDeadline,
+    Number.isFinite(hardMaximum) ? hardMaximum : Number.POSITIVE_INFINITY,
+  );
 }
 
 function timestampForScope(
@@ -58,7 +67,8 @@ async function findEligibleTickets(
 ): Promise<TextChannel[]> {
   const resolvedSettings = settings ?? (await getAdvancedSettings(guild.id));
   const days = retentionDays(resolvedSettings, scope);
-  if (days <= 0) return [];
+  const persistedTickets = await getPersistedTicketRecords(guild.id);
+  const persistedByChannelId = new Map(persistedTickets.map((ticket) => [ticket.channelId, ticket]));
 
   const eligible: TextChannel[] = [];
   const requiredStatus = scope === 'closed' ? 'closed' : 'archived';
@@ -76,11 +86,10 @@ async function findEligibleTickets(
 
     if (!isTicketTopic(topic)) continue;
 
-    const status =
-      (await getPersistedTicketStatus(text.id)) ??
-      getTicketStatus(topic);
+    const persistedTicket = persistedByChannelId.get(text.id);
+    const status = persistedTicket?.status ?? getTicketStatus(topic);
 
-    if (status !== requiredStatus) continue;
+    if (status !== requiredStatus || !persistedTicket) continue;
 
     const timestampField = timestampForScope(topic, scope);
     if (!timestampField) continue;
@@ -88,7 +97,7 @@ async function findEligibleTickets(
     const timestamp = Date.parse(timestampField);
     if (!Number.isFinite(timestamp)) continue;
 
-    if (now >= effectiveDeletionAt(timestamp, days, effectiveFrom)) {
+    if (now >= effectiveDeletionAt(timestamp, persistedTicket.createdAt, days, effectiveFrom)) {
       eligible.push(text);
     }
   }
@@ -223,10 +232,7 @@ export async function approveRetentionDeletion(
       .delete('SupportForge approved retention cleanup')
       .then(async () => {
         deleted += 1;
-        await markPersistedTicketDeleted(
-          channel.id,
-          'Approved SupportForge retention cleanup',
-        );
+        await removePersistedTicket(channel.id);
       })
       .catch((error) => {
         console.warn(`⚠️ Retention could not delete ${channel.id}:`, error);
