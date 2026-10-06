@@ -1,7 +1,6 @@
 import type { TicketStatus } from '../core/domain/ticketLifecycle';
 import {
   getSupportForgeDatabase,
-  withTransaction,
   type SqliteDatabase,
 } from '../core/persistence/sqliteDatabase';
 
@@ -167,8 +166,10 @@ export class SqliteTicketRepository implements TicketRepository {
   }
 
   public upsert(record: TicketRepositoryRecord): void {
-    withTransaction((db) => {
-      db.prepare(
+    this.database.exec('BEGIN IMMEDIATE');
+
+    try {
+      this.database.prepare(
         'INSERT INTO tickets (' +
         'id, guild_id, channel_id, ticket_number, status, department_id, tag_id, owner_id, priority, ' +
         'claimed_by_json, participant_ids_json, metadata_json, created_at, updated_at, deleted_at, deletion_reason' +
@@ -197,7 +198,16 @@ export class SqliteTicketRepository implements TicketRepository {
         record.deletedAt,
         record.deletionReason,
       );
-    });
+
+      this.database.exec('COMMIT');
+    } catch (error) {
+      try {
+        this.database.exec('ROLLBACK');
+      } catch {
+        // Preserve the original persistence error.
+      }
+      throw error;
+    }
   }
 
   public setStatus(
