@@ -51,8 +51,10 @@ import { endTicketVoiceMode, startTicketVoiceMode, syncTicketVoiceParticipants }
 import { getUserFlagCount, isTicketCreationRestricted, recordReport } from '../services/reportService';
 
 import {
+  findActivePersistedTickets,
   getPersistedTicketPriority,
   getPersistedTicketStatus,
+  markPersistedTicketDeleted,
   registerTicket,
   setPersistedTicketStatus,
   updatePersistedTicketMetadata,
@@ -959,36 +961,58 @@ async function createTicket(
     }
 
     /*
-     * Only active tickets block creation.
-     * Closed and archived tickets do not.
+     * Only active tickets block creation. Prefer the indexed durable store,
+     * then verify the small candidate set against Discord. The topic scan is
+     * retained only as a compatibility fallback for legacy tickets that were
+     * created before durable ticket persistence existed.
      */
     let existing: TextChannel | undefined;
 
-    for (const channel of guild.channels.cache.values()) {
-      if (channel.type !== ChannelType.GuildText) {
-        continue;
-      }
+    const persistedCandidates = await findActivePersistedTickets(
+      guild.id,
+      interaction.user.id,
+      departmentId,
+    );
 
-      const topic = channel.topic ?? '';
+    for (const candidate of persistedCandidates) {
+      const channel =
+        guild.channels.cache.get(candidate.channelId) ??
+        await guild.channels.fetch(candidate.channelId).catch(() => null);
 
       if (
-        !isTicketTopic(topic) ||
-        getField(topic, 'owner') !== interaction.user.id ||
-        getField(topic, 'department') !== departmentId
+        channel?.type === ChannelType.GuildText &&
+        isTicketTopic(channel.topic ?? '')
       ) {
-        continue;
-      }
-
-      const persistedStatus =
-        await getPersistedTicketStatus(channel.id);
-
-      const status =
-        persistedStatus ??
-        getTicketStatus(topic);
-
-      if (isActiveTicketStatus(status)) {
         existing = channel;
         break;
+      }
+
+      await markPersistedTicketDeleted(
+        candidate.channelId,
+        'Active ticket channel no longer exists during duplicate-ticket reconciliation.',
+      );
+    }
+
+    if (!existing) {
+      for (const channel of guild.channels.cache.values()) {
+        if (channel.type !== ChannelType.GuildText) {
+          continue;
+        }
+
+        const topic = channel.topic ?? '';
+
+        if (
+          !isTicketTopic(topic) ||
+          getField(topic, 'owner') !== interaction.user.id ||
+          getField(topic, 'department') !== departmentId
+        ) {
+          continue;
+        }
+
+        if (isActiveTicketStatus(getTicketStatus(topic))) {
+          existing = channel;
+          break;
+        }
       }
     }
 
