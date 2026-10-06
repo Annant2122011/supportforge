@@ -256,7 +256,7 @@ test('malformed legacy JSON fails safely and records no import marker', async ()
           brokenDatabasePath,
           legacyTicketsPath,
         ),
-      /legacy file is invalid JSON/,
+      /database migration 2 \(import_legacy_ticket_json\) failed/,
     );
 
     /*
