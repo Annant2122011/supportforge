@@ -1,5 +1,9 @@
 import type { TicketStatus } from '../core/domain/ticketLifecycle';
-import { getSupportForgeDatabase, withTransaction, type SqliteDatabase } from '../core/persistence/sqliteDatabase';
+import {
+  getSupportForgeDatabase,
+  withTransaction,
+  type SqliteDatabase,
+} from '../core/persistence/sqliteDatabase';
 
 export interface TicketRepositoryRecord {
   id: string;
@@ -33,7 +37,18 @@ export interface TicketRepository {
   setStatus(channelId: string, status: TicketStatus, updatedAt: string): void;
   updateMetadata(
     channelId: string,
-    updates: Partial<Pick<TicketRepositoryRecord, 'departmentId' | 'tagId' | 'ownerId' | 'priority' | 'claimedByIds' | 'participantIds' | 'metadata'>>,
+    updates: Partial<
+      Pick<
+        TicketRepositoryRecord,
+        | 'departmentId'
+        | 'tagId'
+        | 'ownerId'
+        | 'priority'
+        | 'claimedByIds'
+        | 'participantIds'
+        | 'metadata'
+      >
+    >,
     updatedAt: string,
   ): void;
   markDeleted(channelId: string, deletedAt: string, reason: string): void;
@@ -111,26 +126,18 @@ export class SqliteTicketRepository implements TicketRepository {
   }
 
   public getByChannelId(channelId: string): TicketRepositoryRecord | undefined {
-    const statement = this.database.prepare(
-      'SELECT * FROM tickets WHERE channel_id = ? LIMIT 1',
-    );
-    try {
-      const row = statement.get(channelId) as TicketRow | undefined;
-      return row ? fromRow(row) : undefined;
-    } finally {
-      statement.close();
-    }
+    const row = this.database
+      .prepare('SELECT * FROM tickets WHERE channel_id = ? LIMIT 1')
+      .get(channelId) as TicketRow | undefined;
+
+    return row ? fromRow(row) : undefined;
   }
 
   public listByGuildId(guildId: string): TicketRepositoryRecord[] {
-    const statement = this.database.prepare(
-      'SELECT * FROM tickets WHERE guild_id = ? ORDER BY created_at ASC',
-    );
-    try {
-      return statement.all(guildId).map((row) => fromRow(row as TicketRow));
-    } finally {
-      statement.close();
-    }
+    return this.database
+      .prepare('SELECT * FROM tickets WHERE guild_id = ? ORDER BY created_at ASC')
+      .all(guildId)
+      .map((row) => fromRow(row as TicketRow));
   }
 
   public findActiveByOwnerAndDepartment(
@@ -138,38 +145,30 @@ export class SqliteTicketRepository implements TicketRepository {
     ownerId: string,
     departmentId: string,
   ): TicketRepositoryRecord[] {
-    const statement = this.database.prepare(
-      "SELECT * FROM tickets " +
-      "WHERE guild_id = ? " +
-      "AND owner_id = ? " +
-      "AND department_id = ? " +
-      "AND deleted_at IS NULL " +
-      "AND status IN ('open', 'claimed', 'pending', 'reopened') " +
-      "ORDER BY created_at ASC",
-    );
-    try {
-      return statement
-        .all(guildId, ownerId, departmentId)
-        .map((row) => fromRow(row as TicketRow));
-    } finally {
-      statement.close();
-    }
+    return this.database
+      .prepare(
+        "SELECT * FROM tickets " +
+        "WHERE guild_id = ? " +
+        "AND owner_id = ? " +
+        "AND department_id = ? " +
+        "AND deleted_at IS NULL " +
+        "AND status IN ('open', 'claimed', 'pending', 'reopened') " +
+        "ORDER BY created_at ASC",
+      )
+      .all(guildId, ownerId, departmentId)
+      .map((row) => fromRow(row as TicketRow));
   }
 
   public listAll(): TicketRepositoryRecord[] {
-    const statement = this.database.prepare(
-      'SELECT * FROM tickets ORDER BY created_at ASC',
-    );
-    try {
-      return statement.all().map((row) => fromRow(row as TicketRow));
-    } finally {
-      statement.close();
-    }
+    return this.database
+      .prepare('SELECT * FROM tickets ORDER BY created_at ASC')
+      .all()
+      .map((row) => fromRow(row as TicketRow));
   }
 
   public upsert(record: TicketRepositoryRecord): void {
     withTransaction((db) => {
-      const statement = db.prepare(
+      db.prepare(
         'INSERT INTO tickets (' +
         'id, guild_id, channel_id, ticket_number, status, department_id, tag_id, owner_id, priority, ' +
         'claimed_by_json, participant_ids_json, metadata_json, created_at, updated_at, deleted_at, deletion_reason' +
@@ -179,47 +178,54 @@ export class SqliteTicketRepository implements TicketRepository {
         'tag_id = excluded.tag_id, owner_id = excluded.owner_id, priority = excluded.priority, ' +
         'claimed_by_json = excluded.claimed_by_json, participant_ids_json = excluded.participant_ids_json, ' +
         'metadata_json = excluded.metadata_json, updated_at = excluded.updated_at, deleted_at = excluded.deleted_at, ' +
-        'deletion_reason = excluded.deletion_reason'
+        'deletion_reason = excluded.deletion_reason',
+      ).run(
+        record.id,
+        record.guildId,
+        record.channelId,
+        record.ticketNumber,
+        record.status,
+        record.departmentId,
+        record.tagId,
+        record.ownerId,
+        record.priority,
+        JSON.stringify(record.claimedByIds),
+        JSON.stringify(record.participantIds),
+        JSON.stringify(record.metadata),
+        record.createdAt,
+        record.updatedAt,
+        record.deletedAt,
+        record.deletionReason,
       );
-      try {
-        statement.run(
-          record.id,
-          record.guildId,
-          record.channelId,
-          record.ticketNumber,
-          record.status,
-          record.departmentId,
-          record.tagId,
-          record.ownerId,
-          record.priority,
-          JSON.stringify(record.claimedByIds),
-          JSON.stringify(record.participantIds),
-          JSON.stringify(record.metadata),
-          record.createdAt,
-          record.updatedAt,
-          record.deletedAt,
-          record.deletionReason,
-        );
-      } finally {
-        statement.close();
-      }
     });
   }
 
-  public setStatus(channelId: string, status: TicketStatus, updatedAt: string): void {
-    const statement = this.database.prepare(
-      'UPDATE tickets SET status = ?, updated_at = ? WHERE channel_id = ?',
-    );
-    try {
-      statement.run(status, updatedAt, channelId);
-    } finally {
-      statement.close();
-    }
+  public setStatus(
+    channelId: string,
+    status: TicketStatus,
+    updatedAt: string,
+  ): void {
+    this.database
+      .prepare(
+        'UPDATE tickets SET status = ?, updated_at = ? WHERE channel_id = ?',
+      )
+      .run(status, updatedAt, channelId);
   }
 
   public updateMetadata(
     channelId: string,
-    updates: Partial<Pick<TicketRepositoryRecord, 'departmentId' | 'tagId' | 'ownerId' | 'priority' | 'claimedByIds' | 'participantIds' | 'metadata'>>,
+    updates: Partial<
+      Pick<
+        TicketRepositoryRecord,
+        | 'departmentId'
+        | 'tagId'
+        | 'ownerId'
+        | 'priority'
+        | 'claimedByIds'
+        | 'participantIds'
+        | 'metadata'
+      >
+    >,
     updatedAt: string,
   ): void {
     const assignments: string[] = [];
@@ -234,52 +240,51 @@ export class SqliteTicketRepository implements TicketRepository {
     if (updates.tagId !== undefined) add('tag_id', updates.tagId);
     if (updates.ownerId !== undefined) add('owner_id', updates.ownerId);
     if (updates.priority !== undefined) add('priority', updates.priority);
-    if (updates.claimedByIds !== undefined) add('claimed_by_json', JSON.stringify(updates.claimedByIds));
-    if (updates.participantIds !== undefined) add('participant_ids_json', JSON.stringify(updates.participantIds));
-    if (updates.metadata !== undefined) add('metadata_json', JSON.stringify(updates.metadata));
+    if (updates.claimedByIds !== undefined) add(
+      'claimed_by_json',
+      JSON.stringify(updates.claimedByIds),
+    );
+    if (updates.participantIds !== undefined) add(
+      'participant_ids_json',
+      JSON.stringify(updates.participantIds),
+    );
+    if (updates.metadata !== undefined) add(
+      'metadata_json',
+      JSON.stringify(updates.metadata),
+    );
 
     assignments.push('updated_at = ?');
     parameters.push(updatedAt);
     parameters.push(channelId);
 
-    const statement = this.database.prepare(
-      'UPDATE tickets SET ' + assignments.join(', ') + ' WHERE channel_id = ?',
-    );
-    try {
-      statement.run(...parameters);
-    } finally {
-      statement.close();
-    }
+    this.database
+      .prepare(
+        'UPDATE tickets SET ' +
+        assignments.join(', ') +
+        ' WHERE channel_id = ?',
+      )
+      .run(...parameters);
   }
 
-  public markDeleted(channelId: string, deletedAt: string, reason: string): void {
-    const statement = this.database.prepare(
-      'UPDATE tickets SET deleted_at = ?, deletion_reason = ?, updated_at = ? WHERE channel_id = ?',
-    );
-    try {
-      statement.run(deletedAt, reason, deletedAt, channelId);
-    } finally {
-      statement.close();
-    }
+  public markDeleted(
+    channelId: string,
+    deletedAt: string,
+    reason: string,
+  ): void {
+    this.database
+      .prepare(
+        'UPDATE tickets SET deleted_at = ?, deletion_reason = ?, updated_at = ? WHERE channel_id = ?',
+      )
+      .run(deletedAt, reason, deletedAt, channelId);
   }
 
   public remove(channelId: string): void {
-    const statement = this.database.prepare(
-      'DELETE FROM tickets WHERE channel_id = ?',
-    );
-    try {
-      statement.run(channelId);
-    } finally {
-      statement.close();
-    }
+    this.database
+      .prepare('DELETE FROM tickets WHERE channel_id = ?')
+      .run(channelId);
   }
 
   public clearAll(): void {
-    const statement = this.database.prepare('DELETE FROM tickets');
-    try {
-      statement.run();
-    } finally {
-      statement.close();
-    }
+    this.database.prepare('DELETE FROM tickets').run();
   }
 }
