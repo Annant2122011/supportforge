@@ -6,7 +6,7 @@ import type { SqliteDatabase } from './sqliteDatabase';
 interface Migration {
   id: number;
   name: string;
-  up: (db: SqliteDatabase) => void;
+  up: (db: SqliteDatabase, legacyTicketsPath: string) => void;
 }
 
 interface LegacyTicket {
@@ -19,13 +19,16 @@ interface LegacyTicket {
   tagId?: unknown;
   ownerId?: unknown;
   priority?: unknown;
+  claimedByIds?: unknown;
+  participantIds?: unknown;
+  metadata?: unknown;
   deletedAt?: unknown;
   deletionReason?: unknown;
 }
 
 interface LegacyTicketState {
   version?: unknown;
-  tickets?: Record<string, LegacyTicket>;
+  tickets?: Record<string, LegacyTicket | null>;
 }
 
 const DATA_DIR = join(process.cwd(), 'data');
@@ -66,10 +69,10 @@ const migrations: readonly Migration[] = [
   {
     id: 2,
     name: 'import_legacy_ticket_json',
-    up: (db) => {
-      if (!existsSync(LEGACY_TICKETS_PATH)) return;
+    up: (db, legacyTicketsPath) => {
+      if (!existsSync(legacyTicketsPath)) return;
 
-      const raw = readFileSync(LEGACY_TICKETS_PATH, 'utf8');
+      const raw = readFileSync(legacyTicketsPath, 'utf8');
       let parsed: LegacyTicketState;
 
       try {
@@ -81,16 +84,24 @@ const migrations: readonly Migration[] = [
         );
       }
 
-      if (!parsed.tickets || typeof parsed.tickets !== 'object' || Array.isArray(parsed.tickets)) {
+      if (
+        !parsed.tickets ||
+        typeof parsed.tickets !== 'object' ||
+        Array.isArray(parsed.tickets)
+      ) {
         throw new Error(
           'SupportForge could not migrate data/tickets.json because its tickets collection is malformed. The file was not modified.',
         );
       }
 
-      copyFileSync(
-        LEGACY_TICKETS_PATH,
-        LEGACY_TICKETS_PATH + '.pre-sqlite-' + Date.now() + '.backup',
-      );
+      /*
+       * Validate the complete source before touching either the database or
+       * the legacy file. The backup is intentionally retained even if the DB
+       * transaction later fails, because recovery is preferable to cleanup.
+       */
+      const backupPath =
+        legacyTicketsPath + '.pre-sqlite-' + Date.now() + '.backup';
+      copyFileSync(legacyTicketsPath, backupPath);
 
       const insert = db.prepare(
         'INSERT OR IGNORE INTO tickets (' +
@@ -101,6 +112,18 @@ const migrations: readonly Migration[] = [
 
       const stringOrNull = (value: unknown): string | null =>
         typeof value === 'string' && value.trim() ? value : null;
+
+      const stringArray = (value: unknown): string[] =>
+        Array.isArray(value)
+          ? value.filter((item): item is string => typeof item === 'string')
+          : [];
+
+      const metadataObject = (value: unknown): Record<string, unknown> =>
+        value &&
+        typeof value === 'object' &&
+        !Array.isArray(value)
+          ? value as Record<string, unknown>
+          : {};
 
       try {
         for (const [channelId, rawTicket] of Object.entries(parsed.tickets)) {
@@ -125,9 +148,9 @@ const migrations: readonly Migration[] = [
             stringOrNull(ticket.tagId),
             stringOrNull(ticket.ownerId),
             stringOrNull(ticket.priority),
-            '[]',
-            '[]',
-            '{}',
+            JSON.stringify(stringArray(ticket.claimedByIds)),
+            JSON.stringify(stringArray(ticket.participantIds)),
+            JSON.stringify(metadataObject(ticket.metadata)),
             stringOrNull(ticket.createdAt) ?? now,
             stringOrNull(ticket.updatedAt) ?? now,
             stringOrNull(ticket.deletedAt),
@@ -141,7 +164,10 @@ const migrations: readonly Migration[] = [
   },
 ];
 
-export function runMigrations(db: SqliteDatabase): void {
+export function runMigrations(
+  db: SqliteDatabase,
+  legacyTicketsPath = LEGACY_TICKETS_PATH,
+): void {
   db.exec(
     'CREATE TABLE IF NOT EXISTS schema_migrations (' +
     'id INTEGER PRIMARY KEY, ' +
@@ -157,28 +183,46 @@ export function runMigrations(db: SqliteDatabase): void {
   appliedStatement.close();
 
   const appliedIds = new Set(
-    appliedRows.map((row) => Number(row.id)).filter((id) => Number.isInteger(id)),
+    appliedRows
+      .map((row) => Number(row.id))
+      .filter((id) => Number.isInteger(id)),
   );
 
   for (const migration of migrations) {
     if (appliedIds.has(migration.id)) continue;
 
     db.exec('BEGIN IMMEDIATE');
+
     try {
-      migration.up(db);
+      migration.up(db, legacyTicketsPath);
+
       const insert = db.prepare(
-        'INSERT INTO schema_migrations (id, name, applied_at) VALUES (?, ?, ?)'
+        'INSERT INTO schema_migrations (id, name, applied_at) VALUES (?, ?, ?)',
       );
       try {
-        insert.run(migration.id, migration.name, new Date().toISOString());
+        insert.run(
+          migration.id,
+          migration.name,
+          new Date().toISOString(),
+        );
       } finally {
         insert.close();
       }
+
       db.exec('COMMIT');
     } catch (error) {
-      try { db.exec('ROLLBACK'); } catch { /* Preserve migration failure. */ }
+      try {
+        db.exec('ROLLBACK');
+      } catch {
+        // Preserve migration failure.
+      }
+
       throw new Error(
-        'SupportForge database migration ' + migration.id + ' (' + migration.name + ') failed. No migration marker was recorded.',
+        'SupportForge database migration ' +
+          migration.id +
+          ' (' +
+          migration.name +
+          ') failed. No migration marker was recorded.',
         { cause: error },
       );
     }
