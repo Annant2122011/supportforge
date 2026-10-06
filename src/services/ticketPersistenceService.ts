@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { TicketPriority } from './advancedSettingsService';
@@ -25,6 +25,7 @@ interface TicketStateFile {
 
 const DATA_DIR = join(process.cwd(), 'data');
 const TICKETS_PATH = join(DATA_DIR, 'tickets.json');
+const TICKETS_BACKUP_PATH = join(DATA_DIR, 'tickets.backup.json');
 
 let state: TicketStateFile | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
@@ -36,9 +37,55 @@ async function loadState(): Promise<TicketStateFile> {
 
   await mkdir(DATA_DIR, { recursive: true });
 
+  let raw: string | null = null;
+  let primaryError: unknown = null;
+
   try {
-    const raw = await readFile(TICKETS_PATH, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<TicketStateFile>;
+    raw = await readFile(TICKETS_PATH, 'utf8');
+  } catch (error) {
+    primaryError = error;
+  }
+
+  if (raw === null) {
+    try {
+      raw = await readFile(TICKETS_BACKUP_PATH, 'utf8');
+    } catch (backupError) {
+      const primaryCode = (primaryError as NodeJS.ErrnoException | null)?.code;
+      const backupCode = (backupError as NodeJS.ErrnoException).code;
+
+      if (primaryCode !== 'ENOENT' || backupCode !== 'ENOENT') {
+        throw new Error(
+          'SupportForge ticket persistence could not be loaded safely. Existing state was not replaced.',
+          { cause: primaryError ?? backupError },
+        );
+      }
+    }
+  }
+
+  if (raw !== null) {
+    let parsed: Partial<TicketStateFile>;
+
+    try {
+      parsed = JSON.parse(raw) as Partial<TicketStateFile>;
+    } catch (error) {
+      if (primaryError === null) {
+        try {
+          const backupRaw = await readFile(TICKETS_BACKUP_PATH, 'utf8');
+          parsed = JSON.parse(backupRaw) as Partial<TicketStateFile>;
+          raw = backupRaw;
+        } catch (backupError) {
+          throw new Error(
+            'SupportForge ticket persistence contains invalid data and its backup could not be recovered.',
+            { cause: backupError },
+          );
+        }
+      } else {
+        throw new Error(
+          'SupportForge ticket persistence backup contains invalid data. Existing state was not replaced.',
+          { cause: error },
+        );
+      }
+    }
 
     const rawTickets = parsed.tickets ?? {};
     const normalizedTickets: Record<string, PersistedTicket> = {};
@@ -64,22 +111,16 @@ async function loadState(): Promise<TicketStateFile> {
       version: 1,
       tickets: normalizedTickets,
     };
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') {
-      throw new Error(
-        'SupportForge ticket persistence could not be loaded safely. The existing file was not replaced.',
-        { cause: error },
-      );
-    }
 
-    state = {
-      version: 1,
-      tickets: {},
-    };
-
-    await persistState();
+    return state;
   }
+
+  state = {
+    version: 1,
+    tickets: {},
+  };
+
+  await persistState();
 
   return state;
 }
@@ -91,11 +132,49 @@ async function persistState(): Promise<void> {
 
   writeQueue = writeQueue.catch(() => undefined).then(async () => {
     await mkdir(DATA_DIR, { recursive: true });
+
+    const serialized = JSON.stringify(state, null, 2);
+    const temporaryPath =
+      TICKETS_PATH + '.tmp-' + process.pid + '-' + Date.now();
+
     await writeFile(
-      TICKETS_PATH,
-      JSON.stringify(state, null, 2),
+      temporaryPath,
+      serialized,
       'utf8',
     );
+
+    try {
+      try {
+        await copyFile(
+          TICKETS_PATH,
+          TICKETS_BACKUP_PATH,
+        );
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT') {
+          throw error;
+        }
+      }
+
+      /*
+       * Swap the fully written temporary file into place. The previous
+       * generation remains available as tickets.backup.json, so a crash or
+       * malformed write does not require inventing ticket state.
+       */
+      await rename(
+        temporaryPath,
+        TICKETS_PATH,
+      );
+    } finally {
+      try {
+        await rename(
+          temporaryPath,
+          temporaryPath + '.abandoned',
+        );
+      } catch {
+        // The temporary file was normally consumed by the atomic rename.
+      }
+    }
   });
 
   await writeQueue;
