@@ -513,7 +513,7 @@ async function resolveDiscordAuditActor(
         Date.now() - candidate.createdTimestamp < 15_000,
     );
 
-    if (matches.length !== 1) {
+    if (matches.size !== 1) {
       return {
         attribution: 'actorUnknown',
         actorId: 'unknown',
@@ -522,7 +522,16 @@ async function resolveDiscordAuditActor(
       };
     }
 
-    const entry = matches[0];
+    const entry = matches.first();
+
+    if (!entry) {
+      return {
+        attribution: 'actorUnknown',
+        actorId: 'unknown',
+        actorName: 'Unknown actor',
+        confidence: 'none',
+      };
+    }
     const executor = entry.executor;
 
     if (!executor) {
