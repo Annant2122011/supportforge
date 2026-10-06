@@ -156,12 +156,6 @@ const migrations: readonly Migration[] = [
           stringOrNull(ticket.deletionReason),
         );
       }
-
-      /*
-       * DatabaseSync statements do not expose a close() method. They are
-       * short-lived handles and are released by the runtime.
-       */
-      void backupPath;
     },
   },
 ];
