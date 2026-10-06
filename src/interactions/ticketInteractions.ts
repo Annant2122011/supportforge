@@ -1218,6 +1218,7 @@ async function createTicket(
           ownerId: interaction.user.id,
           priority: advancedSettings.ticketDefaults.priority,
           createdAt: now,
+          participantIds: [interaction.user.id],
         },
       );
 
@@ -1390,6 +1391,13 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
       interaction.user.id,
     );
     updateRuntimeTicketState(channel, newTopic, 'claimed');
+    await updatePersistedTicketMetadata(channel.id, {
+      claimedByIds: remaining,
+      participantIds: (getField(newTopic, 'users') ?? '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean),
+    });
     await syncTicketVoiceParticipants(interaction.guild, newTopic);
     await updateMainMessage(channel, getField(newTopic, 'message'), 'claimed', newTopic);
     await interaction.editReply('✅ You left the ticket. Other assigned moderators remain on it.');
@@ -1413,6 +1421,13 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
   await setChannelTopic(channel.id, newTopic, 'SupportForge last moderator unclaimed ticket').catch(() => undefined);
   channel.topic = newTopic;
   await setPersistedTicketStatus(channel.id, 'open');
+  await updatePersistedTicketMetadata(channel.id, {
+    claimedByIds: [],
+    participantIds: (getField(newTopic, 'users') ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean),
+  });
   await applyTicketVisibilityMode(channel, newTopic, 'unclaimed', interaction.user.id);
   updateRuntimeTicketState(channel, newTopic, 'open');
 
@@ -1857,6 +1872,17 @@ async function transition(
       channel.id,
       newStatus,
     );
+
+    await updatePersistedTicketMetadata(channel.id, {
+      claimedByIds: (getField(newTopic, 'claimed_by') ?? '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean),
+      participantIds: (getField(newTopic, 'users') ?? '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean),
+    });
 
     /*
      * Keep the local runtime state immediately consistent with the persisted
@@ -4263,6 +4289,10 @@ async function handlePanelModal(
         newTopic,
         state.status,
       );
+
+      await updatePersistedTicketMetadata(channel.id, {
+        participantIds: users,
+      });
 
       await interaction.editReply(
         `✅ <@${userId}> has been added to the ticket.`,
