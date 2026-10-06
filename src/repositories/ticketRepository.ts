@@ -23,6 +23,7 @@ export interface TicketRepositoryRecord {
 export interface TicketRepository {
   getByChannelId(channelId: string): TicketRepositoryRecord | undefined;
   listByGuildId(guildId: string): TicketRepositoryRecord[];
+  listAll(): TicketRepositoryRecord[];
   upsert(record: TicketRepositoryRecord): void;
   setStatus(channelId: string, status: TicketStatus, updatedAt: string): void;
   updateMetadata(
@@ -122,6 +123,17 @@ export class SqliteTicketRepository implements TicketRepository {
     );
     try {
       return statement.all(guildId).map((row) => fromRow(row as TicketRow));
+    } finally {
+      statement.close();
+    }
+  }
+
+  public listAll(): TicketRepositoryRecord[] {
+    const statement = this.database.prepare(
+      'SELECT * FROM tickets ORDER BY created_at ASC',
+    );
+    try {
+      return statement.all().map((row) => fromRow(row as TicketRow));
     } finally {
       statement.close();
     }
