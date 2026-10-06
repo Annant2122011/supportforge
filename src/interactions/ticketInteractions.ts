@@ -26,6 +26,8 @@ import {
   updateGuildConfig,
 } from '../services/configService';
 
+import { assertTicketStatusTransition } from '../core/domain/ticketLifecycle';
+
 import { generateTranscript } from '../services/transcriptService';
 
 import {
@@ -49,8 +51,10 @@ import { endTicketVoiceMode, startTicketVoiceMode, syncTicketVoiceParticipants }
 import { getUserFlagCount, isTicketCreationRestricted, recordReport } from '../services/reportService';
 
 import {
+  findActivePersistedTickets,
   getPersistedTicketPriority,
   getPersistedTicketStatus,
+  markPersistedTicketDeleted,
   registerTicket,
   setPersistedTicketStatus,
   updatePersistedTicketMetadata,
@@ -107,9 +111,6 @@ async function getEffectiveTicketPriority(
 /* -------------------------------------------------------------------------- */
 /* Constants                                                                  */
 /* -------------------------------------------------------------------------- */
-
-const DISCORD_OPERATION_TIMEOUT_MS = 15_000;
-const TRANSCRIPT_TIMEOUT_MS = 60_000;
 
 const ACTIVE_TICKET_STATUSES: readonly TicketStatus[] = [
   'open',
@@ -169,11 +170,7 @@ async function runChannelMutation<T>(
       `🔧 Ticket mutation: ${operation} [${channel.id}]`,
     );
 
-    return await withTimeout(
-      action(),
-      DISCORD_OPERATION_TIMEOUT_MS,
-      operation,
-    );
+    return await action();
   } finally {
     release();
 
@@ -202,9 +199,26 @@ interface PendingReportDecision {
   description: string;
   reporterUserId: string;
   ticketNumber?: string;
+  expiresAt: number;
 }
 
+const MAX_PENDING_REPORT_DECISIONS = 1_000;
+const PENDING_REPORT_DECISION_TTL_MS = 15 * 60_000;
 const pendingReportDecisions = new Map<string, PendingReportDecision>();
+
+function prunePendingReportDecisions(now = Date.now()): void {
+  for (const [nonce, pending] of pendingReportDecisions) {
+    if (pending.expiresAt <= now) {
+      pendingReportDecisions.delete(nonce);
+    }
+  }
+
+  while (pendingReportDecisions.size > MAX_PENDING_REPORT_DECISIONS) {
+    const oldest = pendingReportDecisions.keys().next().value;
+    if (typeof oldest !== 'string') break;
+    pendingReportDecisions.delete(oldest);
+  }
+}
 
 const ticketCreationLocks = new Set<string>();
 
@@ -214,7 +228,23 @@ interface RuntimeTicketState {
   updatedAt: number;
 }
 
+const MAX_RUNTIME_TICKET_CACHE_ENTRIES = 5_000;
 const ticketRuntimeCache = new Map<string, RuntimeTicketState>();
+
+function setRuntimeTicketState(
+  channelId: string,
+  state: RuntimeTicketState,
+): void {
+  ticketRuntimeCache.delete(channelId);
+
+  while (ticketRuntimeCache.size >= MAX_RUNTIME_TICKET_CACHE_ENTRIES) {
+    const oldest = ticketRuntimeCache.keys().next().value;
+    if (typeof oldest !== 'string') break;
+    ticketRuntimeCache.delete(oldest);
+  }
+
+  ticketRuntimeCache.set(channelId, state);
+}
 
 /* -------------------------------------------------------------------------- */
 /* Status helpers                                                             */
@@ -230,41 +260,6 @@ function isTerminalTicketStatus(
   status: TicketStatus,
 ): boolean {
   return TERMINAL_TICKET_STATUSES.includes(status);
-}
-
-/* -------------------------------------------------------------------------- */
-/* Timeout helper                                                             */
-/* -------------------------------------------------------------------------- */
-
-async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  operation: string,
-): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-
-  const timeout = new Promise<never>(
-    (_, reject) => {
-      timer = setTimeout(() => {
-        reject(
-          new Error(
-            `${operation} timed out after ${timeoutMs}ms.`,
-          ),
-        );
-      }, timeoutMs);
-    },
-  );
-
-  try {
-    return await Promise.race([
-      promise,
-      timeout,
-    ]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -296,10 +291,7 @@ function getRuntimeTicketState(
     updatedAt: Date.now(),
   };
 
-  ticketRuntimeCache.set(
-    channel.id,
-    state,
-  );
+  setRuntimeTicketState(channel.id, state);
 
   return state;
 }
@@ -309,14 +301,11 @@ function updateRuntimeTicketState(
   topic: string,
   status: TicketStatus,
 ): void {
-  ticketRuntimeCache.set(
-    channel.id,
-    {
-      topic,
-      status,
-      updatedAt: Date.now(),
-    },
-  );
+  setRuntimeTicketState(channel.id, {
+    topic,
+    status,
+    updatedAt: Date.now(),
+  });
 }
 
 function clearRuntimeTicketState(
@@ -626,34 +615,22 @@ async function updateMainMessage(
 
   try {
     const config =
-      await withTimeout(
-        getGuildConfig(
+      await getGuildConfig(
           channel.guild.id,
-        ),
-        DISCORD_OPERATION_TIMEOUT_MS,
-        'Guild configuration load',
-      );
+        );
 
     let message;
     try {
       message =
         channel.messages.cache.get(messageId) ??
-        await withTimeout(
-          channel.messages.fetch(messageId),
-          DISCORD_OPERATION_TIMEOUT_MS,
-          'Ticket panel fetch',
-        );
+        await channel.messages.fetch(messageId);
     } catch {
       /*
        * Closed-ticket controls are moved to the bottom as a new message.
        * The historical message= topic field intentionally remains stable,
        * so recover the current panel by scanning recent messages.
        */
-      const recent = await withTimeout(
-        channel.messages.fetch({ limit: 100 }),
-        DISCORD_OPERATION_TIMEOUT_MS,
-        'Recent ticket panel search',
-      );
+      const recent = await channel.messages.fetch({ limit: 100 });
 
       const ticketNumber =
         getField(topic, 'number') ?? 'unknown';
@@ -720,8 +697,7 @@ async function updateMainMessage(
       ? setField(panelTopic, 'priority', persistedPriority)
       : panelTopic;
 
-    await withTimeout(
-      message.edit({
+    await message.edit({
         embeds: [
           buildTicketPanelEmbed(
             channel.guild,
@@ -735,10 +711,7 @@ async function updateMainMessage(
             status,
             effectivePanelTopic,
           ),
-      }),
-      DISCORD_OPERATION_TIMEOUT_MS,
-      'Ticket panel update',
-    );
+      });
   } catch (error) {
     console.error(
       '⚠️ Failed to update ticket panel:',
@@ -959,13 +932,9 @@ async function createTicket(
 
   try {
     const config =
-      await withTimeout(
-        getGuildConfig(
+      await getGuildConfig(
           guild.id,
-        ),
-        DISCORD_OPERATION_TIMEOUT_MS,
-        'Guild configuration load',
-      );
+        );
 
     const department =
       config.departments[
@@ -992,36 +961,58 @@ async function createTicket(
     }
 
     /*
-     * Only active tickets block creation.
-     * Closed and archived tickets do not.
+     * Only active tickets block creation. Prefer the indexed durable store,
+     * then verify the small candidate set against Discord. The topic scan is
+     * retained only as a compatibility fallback for legacy tickets that were
+     * created before durable ticket persistence existed.
      */
     let existing: TextChannel | undefined;
 
-    for (const channel of guild.channels.cache.values()) {
-      if (channel.type !== ChannelType.GuildText) {
-        continue;
-      }
+    const persistedCandidates = await findActivePersistedTickets(
+      guild.id,
+      interaction.user.id,
+      departmentId,
+    );
 
-      const topic = channel.topic ?? '';
+    for (const candidate of persistedCandidates) {
+      const channel =
+        guild.channels.cache.get(candidate.channelId) ??
+        await guild.channels.fetch(candidate.channelId).catch(() => null);
 
       if (
-        !isTicketTopic(topic) ||
-        getField(topic, 'owner') !== interaction.user.id ||
-        getField(topic, 'department') !== departmentId
+        channel?.type === ChannelType.GuildText &&
+        isTicketTopic(channel.topic ?? '')
       ) {
-        continue;
-      }
-
-      const persistedStatus =
-        await getPersistedTicketStatus(channel.id);
-
-      const status =
-        persistedStatus ??
-        getTicketStatus(topic);
-
-      if (isActiveTicketStatus(status)) {
         existing = channel;
         break;
+      }
+
+      await markPersistedTicketDeleted(
+        candidate.channelId,
+        'Active ticket channel no longer exists during duplicate-ticket reconciliation.',
+      );
+    }
+
+    if (!existing) {
+      for (const channel of guild.channels.cache.values()) {
+        if (channel.type !== ChannelType.GuildText) {
+          continue;
+        }
+
+        const topic = channel.topic ?? '';
+
+        if (
+          !isTicketTopic(topic) ||
+          getField(topic, 'owner') !== interaction.user.id ||
+          getField(topic, 'department') !== departmentId
+        ) {
+          continue;
+        }
+
+        if (isActiveTicketStatus(getTicketStatus(topic))) {
+          existing = channel;
+          break;
+        }
       }
     }
 
@@ -1089,13 +1080,9 @@ async function createTicket(
     }
 
     const number =
-      await withTimeout(
-        allocateTicketNumber(
+      await allocateTicketNumber(
           guild.id,
-        ),
-        DISCORD_OPERATION_TIMEOUT_MS,
-        'Ticket number allocation',
-      );
+        );
 
     const now =
       new Date().toISOString();
@@ -1160,8 +1147,7 @@ async function createTicket(
 
     try {
       ticketChannel =
-        (await withTimeout(
-          guild.channels.create({
+        (await guild.channels.create({
             name:
               getTicketChannelName(
                 String(number).padStart(4, '0'),
@@ -1177,14 +1163,10 @@ async function createTicket(
               overwrites,
             reason:
               `SupportForge ticket #${number}`,
-          }),
-          DISCORD_OPERATION_TIMEOUT_MS,
-          'Ticket channel creation',
-        )) as TextChannel;
+          })) as TextChannel;
 
       const panel =
-        await withTimeout(
-          ticketChannel.send({
+        await ticketChannel.send({
             embeds: [
               buildTicketPanelEmbed(
                 guild,
@@ -1198,10 +1180,7 @@ async function createTicket(
                 'open',
                 topic,
               ),
-          }),
-          DISCORD_OPERATION_TIMEOUT_MS,
-          'Ticket panel creation',
-        );
+          });
 
       const finalTopic =
         setField(
@@ -1263,11 +1242,11 @@ async function createTicket(
           ownerId: interaction.user.id,
           priority: advancedSettings.ticketDefaults.priority,
           createdAt: now,
+          participantIds: [interaction.user.id],
         },
       );
 
-      await withTimeout(
-        ticketChannel.send({
+      await ticketChannel.send({
           allowedMentions: {
             parse: [],
           },
@@ -1303,10 +1282,7 @@ async function createTicket(
                 },
               ),
           ],
-        }),
-        DISCORD_OPERATION_TIMEOUT_MS,
-        'Ticket description message',
-      );
+        });
 
       await interaction.editReply({
         content:
@@ -1439,6 +1415,13 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
       interaction.user.id,
     );
     updateRuntimeTicketState(channel, newTopic, 'claimed');
+    await updatePersistedTicketMetadata(channel.id, {
+      claimedByIds: remaining,
+      participantIds: (getField(newTopic, 'users') ?? '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean),
+    });
     await syncTicketVoiceParticipants(interaction.guild, newTopic);
     await updateMainMessage(channel, getField(newTopic, 'message'), 'claimed', newTopic);
     await interaction.editReply('✅ You left the ticket. Other assigned moderators remain on it.');
@@ -1462,6 +1445,13 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
   await setChannelTopic(channel.id, newTopic, 'SupportForge last moderator unclaimed ticket').catch(() => undefined);
   channel.topic = newTopic;
   await setPersistedTicketStatus(channel.id, 'open');
+  await updatePersistedTicketMetadata(channel.id, {
+    claimedByIds: [],
+    participantIds: (getField(newTopic, 'users') ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean),
+  });
   await applyTicketVisibilityMode(channel, newTopic, 'unclaimed', interaction.user.id);
   updateRuntimeTicketState(channel, newTopic, 'open');
 
@@ -1574,6 +1564,12 @@ async function transition(
         `ℹ️ This ticket is already **${capitalize(newStatus)}**.`,
       );
       return;
+    }
+
+    if (
+      !(newStatus === 'claimed' && interaction.customId === 'ticket:claim' && oldStatus === 'claimed')
+    ) {
+      assertTicketStatusTransition(oldStatus, newStatus);
     }
 
     /*
@@ -1901,6 +1897,17 @@ async function transition(
       newStatus,
     );
 
+    await updatePersistedTicketMetadata(channel.id, {
+      claimedByIds: (getField(newTopic, 'claimed_by') ?? '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean),
+      participantIds: (getField(newTopic, 'users') ?? '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean),
+    });
+
     /*
      * Keep the local runtime state immediately consistent with the persisted
      * lifecycle state. The panel is refreshed from newTopic below.
@@ -2194,6 +2201,15 @@ async function closeTicket(
       return;
     }
 
+    try {
+      assertTicketStatusTransition(status, 'closed');
+    } catch {
+      await interaction.editReply(
+        `❌ Ticket #${getField(topic, 'number') ?? 'unknown'} cannot be closed from its current state (**${capitalize(status)}**).`,
+      );
+      return;
+    }
+
     const staff =
       getStaffContext(
         interaction,
@@ -2225,13 +2241,9 @@ async function closeTicket(
       );
 
     const config =
-      await withTimeout(
-        getGuildConfig(
+      await getGuildConfig(
           interaction.guild.id,
-        ),
-        DISCORD_OPERATION_TIMEOUT_MS,
-        'Guild configuration load',
-      );
+        );
 
     const transcriptChannelId =
       config.transcriptChannelId;
@@ -2325,8 +2337,7 @@ async function closeTicket(
      */
 
     const transcript =
-      await withTimeout(
-        generateTranscript({
+      await generateTranscript({
           channel,
           ticketNumber,
           subject,
@@ -2336,22 +2347,15 @@ async function closeTicket(
             interaction.user.tag,
           openedAt,
           closedAt,
-        }),
-        TRANSCRIPT_TIMEOUT_MS,
-        'Transcript generation',
-      );
+        });
 
-    const transcriptMessage = await withTimeout(
-      transcriptChannel.send({
+    const transcriptMessage = await transcriptChannel.send({
         content:
           `📄 Transcript for ticket **#${ticketNumber}**`,
         files: [
           transcript,
         ],
-      }),
-      DISCORD_OPERATION_TIMEOUT_MS,
-      'Transcript upload',
-    );
+      });
 
     /*
      * Transcript successfully uploaded.
@@ -2978,6 +2982,8 @@ async function handleReportModal(interaction: ModalSubmitInteraction): Promise<v
   }
 
   const nonce = Math.random().toString(36).slice(2, 10);
+  prunePendingReportDecisions();
+
   pendingReportDecisions.set(nonce, {
     guildId: interaction.guild.id,
     channelId: interaction.channel.id,
@@ -2987,6 +2993,7 @@ async function handleReportModal(interaction: ModalSubmitInteraction): Promise<v
     description: interaction.fields.getTextInputValue('description').trim().slice(0, 500),
     reporterUserId: interaction.user.id,
     ticketNumber: getField(topic, 'number'),
+    expiresAt: Date.now() + PENDING_REPORT_DECISION_TTL_MS,
   });
 
   await interaction.editReply({
@@ -3005,9 +3012,14 @@ async function handleReportDecision(interaction: ButtonInteraction): Promise<voi
   const parts = interaction.customId.split(':');
   const nonce = parts[3] ?? '';
   const decision = parts[4] ?? '';
+  prunePendingReportDecisions();
   const pending = pendingReportDecisions.get(nonce);
 
-  if (!pending || pending.reporterUserId !== interaction.user.id) {
+  if (
+    !pending ||
+    pending.expiresAt <= Date.now() ||
+    pending.reporterUserId !== interaction.user.id
+  ) {
     await replyError(interaction, '❌ This report review has expired or is not assigned to you.');
     return;
   }
@@ -4302,6 +4314,10 @@ async function handlePanelModal(
         state.status,
       );
 
+      await updatePersistedTicketMetadata(channel.id, {
+        participantIds: users,
+      });
+
       await interaction.editReply(
         `✅ <@${userId}> has been added to the ticket.`,
       );
@@ -4351,8 +4367,7 @@ async function handlePanelModal(
         return;
       }
 
-      await withTimeout(
-        channel.send({
+      await channel.send({
           embeds: [
             new EmbedBuilder()
               .setTitle(
@@ -4367,10 +4382,7 @@ async function handlePanelModal(
               })
               .setTimestamp(),
           ],
-        }),
-        DISCORD_OPERATION_TIMEOUT_MS,
-        'Internal note creation',
-      );
+        });
 
       /*
        * Also record the note in the staff-only audit history so the History

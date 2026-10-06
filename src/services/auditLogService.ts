@@ -15,7 +15,8 @@ import {
   type Role,
   type TextChannel,
 } from 'discord.js';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { getGuildConfig, updateGuildConfig } from './configService';
 import { getAdvancedSettings } from './advancedSettingsService';
@@ -37,6 +38,9 @@ export interface AuditEvent {
   actor?: string;
   actorId?: string;
   actorName?: string;
+  actorAttribution?: AuditActorAttribution;
+  actorConfidence?: 'high' | 'low' | 'none';
+  discordAuditLogId?: string;
   detail?: string;
   category?: 'ticket' | 'settings' | 'system';
 }
@@ -48,6 +52,11 @@ export interface SettingsAuditEvent {
   detail?: string;
 }
 
+type AuditActorAttribution =
+  | 'actorKnown'
+  | 'actorInferred'
+  | 'actorUnknown';
+
 interface PersistedAuditEntry {
   id: string;
   guildId: string;
@@ -55,6 +64,9 @@ interface PersistedAuditEntry {
   action: string;
   actorId: string;
   actorName: string;
+  actorAttribution: AuditActorAttribution;
+  actorConfidence: 'high' | 'low' | 'none';
+  discordAuditLogId?: string;
   timestamp: string;
   ticketNumber?: string;
   detail?: string;
@@ -99,6 +111,60 @@ let state: AuditStore | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 let dailyScheduler: NodeJS.Timeout | null = null;
 
+function normalizeAuditActor(
+  category: PersistedAuditEntry['category'],
+  actorId: unknown,
+  actorName: unknown,
+  attribution: unknown,
+  confidence: unknown,
+  discordAuditLogId: unknown,
+): Pick<
+  PersistedAuditEntry,
+  'actorId' | 'actorName' | 'actorAttribution' | 'actorConfidence' | 'discordAuditLogId'
+> {
+  const normalizedAttribution: AuditActorAttribution =
+    attribution === 'actorKnown' ||
+    attribution === 'actorInferred' ||
+    attribution === 'actorUnknown'
+      ? attribution
+      : actorId === 'discord-system'
+        ? 'actorUnknown'
+        : actorId === 'supportforge-system'
+        ? 'actorKnown'
+        : category === 'system'
+          ? 'actorInferred'
+          : 'actorKnown';
+
+  const normalizedConfidence =
+    confidence === 'high' || confidence === 'low' || confidence === 'none'
+      ? confidence
+      : normalizedAttribution === 'actorKnown'
+        ? 'high'
+        : normalizedAttribution === 'actorInferred'
+          ? 'low'
+          : 'none';
+
+  return {
+    actorId:
+      typeof actorId === 'string' && actorId.trim()
+        ? actorId
+        : normalizedAttribution === 'actorUnknown'
+          ? 'unknown'
+          : 'unknown',
+    actorName:
+      typeof actorName === 'string' && actorName.trim()
+        ? actorName
+        : normalizedAttribution === 'actorUnknown'
+          ? 'Unknown actor'
+          : 'Unknown actor',
+    actorAttribution: normalizedAttribution,
+    actorConfidence: normalizedConfidence,
+    ...(typeof discordAuditLogId === 'string' && discordAuditLogId.trim()
+      ? { discordAuditLogId }
+      : {}),
+  };
+}
+
 function cloneGuildStore(): AuditGuildStore {
   return {
     events: [],
@@ -122,24 +188,36 @@ async function persist(): Promise<void> {
   writeQueue = writeQueue
     .catch(() => undefined)
     .then(async () => {
-    await mkdir(DATA_DIR, { recursive: true });
-    const persistedState = JSON.parse(JSON.stringify(state)) as AuditStore;
-    for (const store of Object.values(persistedState.guilds)) {
-      if (!store.accumulationEnabled) {
-        store.events = [];
-      }
-    }
-    const serialized = JSON.stringify(persistedState, null, 2);
+      await mkdir(DATA_DIR, { recursive: true });
+      const persistedState = JSON.parse(JSON.stringify(state)) as AuditStore;
 
-    /*
-     * Keep a second local copy so a damaged/missing primary audit file does
-     * not destroy the historical record. This backup is deliberately
-     * separate from Discord's channels and survives SupportForge channel
-     * deletion.
-     */
-    await writeFile(AUDIT_PATH, serialized, 'utf8');
-    await writeFile(AUDIT_BACKUP_PATH, serialized, 'utf8');
-  });
+      for (const store of Object.values(persistedState.guilds)) {
+        if (!store.accumulationEnabled) {
+          store.events = [];
+        }
+      }
+
+      const serialized = JSON.stringify(persistedState, null, 2);
+      const temporaryPath =
+        AUDIT_PATH + '.tmp-' + process.pid + '-' + Date.now();
+
+      await writeFile(temporaryPath, serialized, 'utf8');
+
+      try {
+        try {
+          await copyFile(AUDIT_PATH, AUDIT_BACKUP_PATH);
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code !== 'ENOENT') {
+            throw error;
+          }
+        }
+
+        await rename(temporaryPath, AUDIT_PATH);
+      } finally {
+        await unlink(temporaryPath).catch(() => undefined);
+      }
+    });
 
   await writeQueue;
 }
@@ -172,7 +250,45 @@ async function load(): Promise<AuditStore> {
     for (const [guildId, rawStore] of Object.entries(rawGuilds)) {
       const store = rawStore as Partial<AuditGuildStore>;
       guilds[guildId] = {
-        events: store.events ?? [],
+        events: Array.isArray(store.events)
+          ? store.events.map((rawEvent) => {
+              const event = rawEvent as Partial<PersistedAuditEntry>;
+              return {
+                id: typeof event.id === 'string' ? event.id : randomUUID(),
+                guildId,
+                category:
+                  event.category === 'ticket' ||
+                  event.category === 'settings' ||
+                  event.category === 'system'
+                    ? event.category
+                    : 'system',
+                action:
+                  typeof event.action === 'string' ? event.action : 'UNKNOWN',
+                ...normalizeAuditActor(
+                  event.category === 'ticket' ||
+                    event.category === 'settings' ||
+                    event.category === 'system'
+                    ? event.category
+                    : 'system',
+                  event.actorId,
+                  event.actorName,
+                  event.actorAttribution,
+                  event.actorConfidence,
+                  event.discordAuditLogId,
+                ),
+                timestamp:
+                  typeof event.timestamp === 'string'
+                    ? event.timestamp
+                    : new Date().toISOString(),
+                ...(typeof event.ticketNumber === 'string'
+                  ? { ticketNumber: event.ticketNumber }
+                  : {}),
+                ...(typeof event.detail === 'string'
+                  ? { detail: event.detail }
+                  : {}),
+              };
+            })
+          : [],
         summaries: store.summaries ?? {},
         overallSummary: store.overallSummary ?? null,
         accumulationEnabled: store.accumulationEnabled ?? true,
@@ -366,7 +482,15 @@ type DiscordAuditTarget =
   | GuildBasedChannel
   | Role;
 
-async function findRecentAuditExecutor(
+interface AuditActorResolution {
+  attribution: AuditActorAttribution;
+  actorId: string;
+  actorName: string;
+  confidence: 'high' | 'low' | 'none';
+  discordAuditLogId?: string;
+}
+
+async function resolveDiscordAuditActor(
   guild: Guild,
   auditType:
     | AuditLogEvent.ChannelCreate
@@ -376,33 +500,67 @@ async function findRecentAuditExecutor(
     | AuditLogEvent.RoleUpdate
     | AuditLogEvent.RoleDelete,
   targetId: string,
-): Promise<{ id: string; name: string } | null> {
+): Promise<AuditActorResolution> {
   try {
     const logs = await guild.fetchAuditLogs({
       type: auditType,
       limit: 10,
     });
 
-    const entry = logs.entries.find(
+    const matches = logs.entries.filter(
       (candidate) =>
         candidate.targetId === targetId &&
         Date.now() - candidate.createdTimestamp < 15_000,
     );
 
-    const executor = entry?.executor;
+    if (matches.size !== 1) {
+      return {
+        attribution: 'actorUnknown',
+        actorId: 'unknown',
+        actorName: 'Unknown actor',
+        confidence: 'none',
+      };
+    }
+
+    const entry = matches.first();
+
+    if (!entry) {
+      return {
+        attribution: 'actorUnknown',
+        actorId: 'unknown',
+        actorName: 'Unknown actor',
+        confidence: 'none',
+      };
+    }
+    const executor = entry.executor;
 
     if (!executor) {
-      return null;
+      return {
+        attribution: 'actorUnknown',
+        actorId: 'unknown',
+        actorName: 'Unknown actor',
+        confidence: 'none',
+        discordAuditLogId: entry.id,
+      };
     }
 
     return {
-      id: executor.id,
-      name: executor.tag || executor.username || executor.id,
+      attribution: 'actorInferred',
+      actorId: executor.id,
+      actorName: executor.tag || executor.username || executor.id,
+      confidence: 'low',
+      discordAuditLogId: entry.id,
     };
   } catch {
-    return null;
+    return {
+      attribution: 'actorUnknown',
+      actorId: 'unknown',
+      actorName: 'Unknown actor',
+      confidence: 'none',
+    };
   }
 }
+
 
 export async function isSupportForgeManagedRole(
   guild: Guild,
@@ -440,7 +598,7 @@ export async function logDiscordMutation(
       return;
     }
 
-    const executor = await findRecentAuditExecutor(
+    const actor = await resolveDiscordAuditActor(
       guild,
       auditType,
       target.id,
@@ -451,8 +609,11 @@ export async function logDiscordMutation(
       config.supportCategoryId,
       {
         event: action,
-        actorId: executor?.id ?? 'discord-system',
-        actorName: executor?.name ?? 'Discord / SupportForge',
+        actorId: actor.actorId,
+        actorName: actor.actorName,
+        actorAttribution: actor.attribution,
+        actorConfidence: actor.confidence,
+        discordAuditLogId: actor.discordAuditLogId,
         detail,
         category: 'system',
       },
@@ -845,13 +1006,23 @@ async function sendAuditEntry(
   channel: TextChannel,
   event: PersistedAuditEntry,
 ): Promise<void> {
-  const actor = event.actorName === 'Unknown'
-    ? `<@${event.actorId}>`
-    : event.actorName;
+  const actor =
+    event.actorAttribution === 'actorUnknown'
+      ? 'Unknown actor'
+      : event.actorName || 'Unknown actor';
 
   const fixedLines = [
     '**User:** ' + actor,
-    '**User ID:** \`' + event.actorId + '\`',
+    event.actorId !== 'unknown'
+      ? '**User ID:** \`' + event.actorId + '\`'
+      : null,
+    '**Attribution:** ' +
+      event.actorAttribution +
+      ' • confidence: ' +
+      event.actorConfidence,
+    event.discordAuditLogId
+      ? '**Discord audit-log ID:** \`' + event.discordAuditLogId + '\`'
+      : null,
     '**When:** <t:' + Math.floor(new Date(event.timestamp).getTime() / 1000) + ':F>',
     event.ticketNumber ? '**Ticket:** #' + event.ticketNumber : null,
   ].filter(Boolean) as string[];
@@ -1264,7 +1435,16 @@ async function buildPrivateDeveloperAuditPage(
             },
             {
               name: 'Actor',
-              value: event.actorName || 'Unknown',
+              value: event.actorName || 'Unknown actor',
+              inline: true,
+            },
+            {
+              name: 'Attribution',
+              value:
+                event.actorAttribution +
+                ' • ' +
+                event.actorConfidence +
+                (event.discordAuditLogId ? '\nAudit ID: ' + event.discordAuditLogId : ''),
               inline: true,
             },
             {
@@ -1708,13 +1888,21 @@ async function recordAndPublish(
   const actorId = event.actorId ?? 'unknown';
   const actorName = event.actorName ?? event.actor ?? 'Unknown';
 
+  const actor = normalizeAuditActor(
+    category,
+    actorId,
+    actorName,
+    event.actorAttribution,
+    event.actorConfidence,
+    event.discordAuditLogId,
+  );
+
   const record: PersistedAuditEntry = {
     id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     guildId: guild.id,
     category,
     action: event.event.toUpperCase(),
-    actorId,
-    actorName,
+    ...actor,
     timestamp,
     ticketNumber: event.ticketNumber,
     detail: event.detail,

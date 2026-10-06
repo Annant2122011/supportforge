@@ -7,3 +7,7 @@ dist/
 # Runtime-generated SupportForge state
 data/*.json
 !data/config.json
+
+# Runtime-generated SQLite state
+data/*.sqlite
+data/*.sqlite-*

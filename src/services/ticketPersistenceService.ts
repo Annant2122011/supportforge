@@ -1,10 +1,15 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 import type { TicketPriority } from './advancedSettingsService';
 import type { TicketStatus } from './ticketStateService';
+import {
+  SqliteTicketRepository,
+  type TicketRepositoryRecord,
+} from '../repositories/ticketRepository';
 
 export interface PersistedTicket {
+  id: string;
+  channelId: string;
   guildId: string | null;
   status: TicketStatus;
   updatedAt: string;
@@ -14,105 +19,11 @@ export interface PersistedTicket {
   tagId: string | null;
   ownerId: string | null;
   priority: TicketPriority | null;
+  claimedByIds: string[];
+  participantIds: string[];
+  metadata: Record<string, unknown>;
   deletedAt: string | null;
   deletionReason: string | null;
-}
-
-interface TicketStateFile {
-  version: 1;
-  tickets: Record<string, PersistedTicket>;
-}
-
-const DATA_DIR = join(process.cwd(), 'data');
-const TICKETS_PATH = join(DATA_DIR, 'tickets.json');
-
-let state: TicketStateFile | null = null;
-let writeQueue: Promise<void> = Promise.resolve();
-
-async function loadState(): Promise<TicketStateFile> {
-  if (state) {
-    return state;
-  }
-
-  await mkdir(DATA_DIR, { recursive: true });
-
-  try {
-    const raw = await readFile(TICKETS_PATH, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<TicketStateFile>;
-
-    const rawTickets = parsed.tickets ?? {};
-    const normalizedTickets: Record<string, PersistedTicket> = {};
-
-    for (const [channelId, ticket] of Object.entries(rawTickets)) {
-      const legacy = ticket as Partial<PersistedTicket>;
-      normalizedTickets[channelId] = {
-        guildId: legacy.guildId ?? null,
-        status: legacy.status ?? 'open',
-        updatedAt: legacy.updatedAt ?? new Date().toISOString(),
-        createdAt: legacy.createdAt ?? legacy.updatedAt ?? new Date().toISOString(),
-        ticketNumber: legacy.ticketNumber ?? null,
-        departmentId: legacy.departmentId ?? null,
-        tagId: legacy.tagId ?? null,
-        ownerId: legacy.ownerId ?? null,
-        priority: legacy.priority ?? null,
-        deletedAt: legacy.deletedAt ?? null,
-        deletionReason: legacy.deletionReason ?? null,
-      };
-    }
-
-    state = {
-      version: 1,
-      tickets: normalizedTickets,
-    };
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') {
-      throw new Error(
-        'SupportForge ticket persistence could not be loaded safely. The existing file was not replaced.',
-        { cause: error },
-      );
-    }
-
-    state = {
-      version: 1,
-      tickets: {},
-    };
-
-    await persistState();
-  }
-
-  return state;
-}
-
-async function persistState(): Promise<void> {
-  if (!state) {
-    return;
-  }
-
-  writeQueue = writeQueue.catch(() => undefined).then(async () => {
-    await mkdir(DATA_DIR, { recursive: true });
-    await writeFile(
-      TICKETS_PATH,
-      JSON.stringify(state, null, 2),
-      'utf8',
-    );
-  });
-
-  await writeQueue;
-}
-
-export async function getPersistedTicketStatus(
-  channelId: string,
-): Promise<TicketStatus | undefined> {
-  const current = await loadState();
-  return current.tickets[channelId]?.status;
-}
-
-export async function getPersistedTicketPriority(
-  channelId: string,
-): Promise<TicketPriority | undefined> {
-  const current = await loadState();
-  return current.tickets[channelId]?.priority ?? undefined;
 }
 
 export interface TicketRegistration {
@@ -123,130 +34,192 @@ export interface TicketRegistration {
   ownerId: string;
   priority: TicketPriority;
   createdAt: string;
+  claimedByIds?: string[];
+  participantIds?: string[];
+}
+
+let repository: SqliteTicketRepository | null = null;
+
+function getRepository(): SqliteTicketRepository {
+  return (repository ??= new SqliteTicketRepository());
+}
+
+function toPersistedTicket(record: TicketRepositoryRecord): PersistedTicket {
+  return {
+    id: record.id,
+    channelId: record.channelId,
+    guildId: record.guildId,
+    status: record.status,
+    updatedAt: record.updatedAt,
+    createdAt: record.createdAt,
+    ticketNumber: record.ticketNumber,
+    departmentId: record.departmentId,
+    tagId: record.tagId,
+    ownerId: record.ownerId,
+    priority: record.priority as TicketPriority | null,
+    claimedByIds: [...record.claimedByIds],
+    participantIds: [...record.participantIds],
+    metadata: { ...record.metadata },
+    deletedAt: record.deletedAt,
+    deletionReason: record.deletionReason,
+  };
+}
+
+export async function getPersistedTicketStatus(
+  channelId: string,
+): Promise<TicketStatus | undefined> {
+  return getRepository().getByChannelId(channelId)?.status;
+}
+
+export async function getPersistedTicketPriority(
+  channelId: string,
+): Promise<TicketPriority | undefined> {
+  return getRepository().getByChannelId(channelId)?.priority as
+    | TicketPriority
+    | undefined;
+}
+
+export async function findActivePersistedTickets(
+  guildId: string,
+  ownerId: string,
+  departmentId: string,
+): Promise<PersistedTicket[]> {
+  return getRepository()
+    .findActiveByOwnerAndDepartment(guildId, ownerId, departmentId)
+    .map(toPersistedTicket);
 }
 
 export async function registerTicket(
   channelId: string,
   registration: TicketRegistration,
 ): Promise<void> {
-  const current = await loadState();
-  const existing = current.tickets[channelId];
+  const current = getRepository().getByChannelId(channelId);
+  const createdAt = current?.createdAt ?? registration.createdAt;
 
-  current.tickets[channelId] = {
-    guildId: existing?.guildId ?? registration.guildId,
-    status: existing?.status ?? 'open',
+  getRepository().upsert({
+    id: current?.id ?? randomUUID(),
+    guildId: current?.guildId ?? registration.guildId,
+    channelId,
+    status: current?.status ?? 'open',
     updatedAt: registration.createdAt,
-    createdAt: existing?.createdAt ?? registration.createdAt,
-    ticketNumber: existing?.ticketNumber ?? registration.ticketNumber,
-    departmentId: existing?.departmentId ?? registration.departmentId,
-    tagId: existing?.tagId ?? registration.tagId,
-    ownerId: existing?.ownerId ?? registration.ownerId,
-    priority: existing?.priority ?? registration.priority,
-    deletedAt: existing?.deletedAt ?? null,
-    deletionReason: existing?.deletionReason ?? null,
-  };
-
-  await persistState();
+    createdAt,
+    ticketNumber: current?.ticketNumber ?? registration.ticketNumber,
+    departmentId: current?.departmentId ?? registration.departmentId,
+    tagId: current?.tagId ?? registration.tagId,
+    ownerId: current?.ownerId ?? registration.ownerId,
+    priority: current?.priority ?? registration.priority,
+    claimedByIds: current?.claimedByIds ?? registration.claimedByIds ?? [],
+    participantIds: current?.participantIds ?? registration.participantIds ?? [],
+    metadata: current?.metadata ?? {},
+    deletedAt: current?.deletedAt ?? null,
+    deletionReason: current?.deletionReason ?? null,
+  });
 }
 
 export async function setPersistedTicketStatus(
   channelId: string,
   status: TicketStatus,
 ): Promise<void> {
-  const current = await loadState();
-  const existing = current.tickets[channelId];
+  const current = getRepository().getByChannelId(channelId);
   const now = new Date().toISOString();
 
-  current.tickets[channelId] = {
-    guildId: existing?.guildId ?? null,
-    status,
-    updatedAt: now,
-    createdAt: existing?.createdAt ?? now,
-    ticketNumber: existing?.ticketNumber ?? null,
-    departmentId: existing?.departmentId ?? null,
-    tagId: existing?.tagId ?? null,
-    ownerId: existing?.ownerId ?? null,
-    priority: existing?.priority ?? null,
-    deletedAt: existing?.deletedAt ?? null,
-    deletionReason: existing?.deletionReason ?? null,
-  };
+  if (!current) {
+    getRepository().upsert({
+      id: randomUUID(),
+      guildId: 'unknown',
+      channelId,
+      ticketNumber: null,
+      status,
+      departmentId: null,
+      tagId: null,
+      ownerId: null,
+      priority: null,
+      claimedByIds: [],
+      participantIds: [],
+      metadata: {},
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+      deletionReason: null,
+    });
+    return;
+  }
 
-  await persistState();
+  getRepository().setStatus(channelId, status, now);
 }
+
 export async function updatePersistedTicketMetadata(
   channelId: string,
   updates: Partial<
     Pick<
       PersistedTicket,
-      'departmentId' | 'tagId' | 'ownerId' | 'priority'
+      | 'departmentId'
+      | 'tagId'
+      | 'ownerId'
+      | 'priority'
+      | 'claimedByIds'
+      | 'participantIds'
+      | 'metadata'
     >
   >,
 ): Promise<void> {
-  const current = await loadState();
-  const existing = current.tickets[channelId];
+  const current = getRepository().getByChannelId(channelId);
   const now = new Date().toISOString();
 
-  current.tickets[channelId] = {
-    guildId: existing?.guildId ?? null,
-    status: existing?.status ?? 'open',
-    updatedAt: now,
-    createdAt: existing?.createdAt ?? now,
-    ticketNumber: existing?.ticketNumber ?? null,
-    departmentId:
-      updates.departmentId ?? existing?.departmentId ?? null,
-    tagId:
-      updates.tagId ?? existing?.tagId ?? null,
-    ownerId:
-      updates.ownerId ?? existing?.ownerId ?? null,
-    priority:
-      updates.priority ?? existing?.priority ?? null,
-    deletedAt: existing?.deletedAt ?? null,
-    deletionReason: existing?.deletionReason ?? null,
-  };
+  if (!current) {
+    getRepository().upsert({
+      id: randomUUID(),
+      guildId: 'unknown',
+      channelId,
+      ticketNumber: null,
+      status: 'open',
+      departmentId: updates.departmentId ?? null,
+      tagId: updates.tagId ?? null,
+      ownerId: updates.ownerId ?? null,
+      priority:
+        updates.priority === undefined
+          ? null
+          : String(updates.priority),
+      claimedByIds: updates.claimedByIds ?? [],
+      participantIds: updates.participantIds ?? [],
+      metadata: updates.metadata ?? {},
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+      deletionReason: null,
+    });
+    return;
+  }
 
-  await persistState();
+  getRepository().updateMetadata(channelId, updates, now);
 }
 
-
-export async function getPersistedTicketRecords(guildId?: string): Promise<PersistedTicket[]> {
-  const current = await loadState();
-  return Object.values(current.tickets)
-    .filter((ticket) => !guildId || ticket.guildId === guildId)
-    .map((ticket) => ({ ...ticket }));
+export async function getPersistedTicketRecords(
+  guildId?: string,
+): Promise<PersistedTicket[]> {
+  return (guildId
+    ? getRepository().listByGuildId(guildId)
+    : getRepository().listAll()
+  ).map(toPersistedTicket);
 }
 
 export async function markPersistedTicketDeleted(
   channelId: string,
   reason: string,
 ): Promise<void> {
-  const current = await loadState();
-  const existing = current.tickets[channelId];
-  if (!existing) return;
+  const current = getRepository().getByChannelId(channelId);
+  if (!current) return;
 
-  current.tickets[channelId] = {
-    ...existing,
-    deletedAt: new Date().toISOString(),
-    deletionReason: reason,
-  };
-
-  await persistState();
+  const now = new Date().toISOString();
+  getRepository().markDeleted(channelId, now, reason);
 }
 
 export async function removePersistedTicket(
   channelId: string,
 ): Promise<void> {
-  const current = await loadState();
-
-  if (!(channelId in current.tickets)) {
-    return;
-  }
-
-  delete current.tickets[channelId];
-  await persistState();
+  getRepository().remove(channelId);
 }
 
 export async function resetTicketPersistenceState(): Promise<void> {
-  await writeQueue.catch(() => undefined);
-  state = null;
-  writeQueue = Promise.resolve();
+  getRepository().clearAll();
 }

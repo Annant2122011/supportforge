@@ -1,13 +1,9 @@
 
-export const TICKET_PREFIX = 'supportforge:ticket';
+import type { TicketStatus } from '../core/domain/ticketLifecycle';
 
-export type TicketStatus =
-  | 'open'
-  | 'claimed'
-  | 'pending'
-  | 'closed'
-  | 'reopened'
-  | 'archived';
+export { type TicketStatus } from '../core/domain/ticketLifecycle';
+
+export const TICKET_PREFIX = 'supportforge:ticket';
 
 export interface TicketFields {
   status: TicketStatus;
