@@ -11,6 +11,12 @@ export type EventActorAttribution =
 
 export type EventActorConfidence = 'high' | 'low' | 'none';
 
+export interface EventActor {
+  id: string;
+  attribution?: EventActorAttribution;
+  confidence?: EventActorConfidence;
+}
+
 export interface DomainEvent<TPayload extends Record<string, unknown> = Record<string, unknown>> {
   id: string;
   type: DomainEventType;
