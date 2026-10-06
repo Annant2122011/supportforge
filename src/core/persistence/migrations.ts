@@ -158,6 +158,44 @@ const migrations: readonly Migration[] = [
       }
     },
   },
+  {
+    id: 3,
+    name: 'create_domain_events_and_outbox',
+    up: (db) => {
+      db.exec(
+        'CREATE TABLE IF NOT EXISTS ticket_events (' +
+        'id TEXT PRIMARY KEY, ' +
+        'ticket_id TEXT NOT NULL, ' +
+        'guild_id TEXT NOT NULL, ' +
+        'channel_id TEXT NOT NULL, ' +
+        'event_type TEXT NOT NULL, ' +
+        'actor_id TEXT NOT NULL, ' +
+        "actor_attribution TEXT NOT NULL CHECK (actor_attribution IN ('actorKnown', 'actorInferred', 'actorUnknown')), " +
+        "actor_confidence TEXT NOT NULL CHECK (actor_confidence IN ('high', 'low', 'none')), " +
+        "payload_json TEXT NOT NULL DEFAULT '{}', " +
+        'created_at TEXT NOT NULL' +
+        ') STRICT; ' +
+        'CREATE INDEX IF NOT EXISTS idx_ticket_events_ticket_created ON ticket_events(ticket_id, created_at); ' +
+        'CREATE INDEX IF NOT EXISTS idx_ticket_events_guild_created ON ticket_events(guild_id, created_at); ' +
+        'CREATE TABLE IF NOT EXISTS outbox_events (' +
+        'id TEXT PRIMARY KEY, ' +
+        'aggregate_type TEXT NOT NULL, ' +
+        'aggregate_id TEXT NOT NULL, ' +
+        'guild_id TEXT NOT NULL, ' +
+        'event_type TEXT NOT NULL, ' +
+        "payload_json TEXT NOT NULL DEFAULT '{}', " +
+        "status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'published', 'failed')), " +
+        'attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0), ' +
+        'available_at TEXT NOT NULL, ' +
+        'created_at TEXT NOT NULL, ' +
+        'processed_at TEXT, ' +
+        'last_error TEXT' +
+        ') STRICT; ' +
+        'CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox_events(status, available_at, created_at); ' +
+        'CREATE INDEX IF NOT EXISTS idx_outbox_aggregate ON outbox_events(aggregate_type, aggregate_id, created_at);'
+      );
+    },
+  },
 ];
 
 export function runMigrations(
