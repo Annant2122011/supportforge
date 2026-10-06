@@ -438,9 +438,35 @@ export class SqliteTicketRepository implements TicketRepository {
   }
 
   public remove(channelId: string): void {
-    this.database
-      .prepare('DELETE FROM tickets WHERE channel_id = ?')
-      .run(channelId);
+    const current = this.getByChannelId(channelId);
+    if (!current) return;
+
+    this.database.exec('BEGIN IMMEDIATE');
+
+    try {
+      this.database
+        .prepare(
+          "DELETE FROM outbox_events WHERE aggregate_type = 'ticket' AND aggregate_id = ?",
+        )
+        .run(current.id);
+
+      this.database
+        .prepare('DELETE FROM ticket_events WHERE ticket_id = ?')
+        .run(current.id);
+
+      this.database
+        .prepare('DELETE FROM tickets WHERE channel_id = ?')
+        .run(channelId);
+
+      this.database.exec('COMMIT');
+    } catch (error) {
+      try {
+        this.database.exec('ROLLBACK');
+      } catch {
+        // Preserve the original deletion error.
+      }
+      throw error;
+    }
   }
 
   public clearAll(): void {
