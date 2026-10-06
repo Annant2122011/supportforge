@@ -3,7 +3,8 @@ import {
   type TicketStatus,
 } from '../core/domain/ticketLifecycle';
 import { randomUUID } from 'node:crypto';
-import { SqliteEventRepository, type EventActor } from './eventRepository';
+import { SqliteEventRepository } from './eventRepository';
+import type { EventActor } from '../core/events/domainEvents';
 import {
   getSupportForgeDatabase,
   type SqliteDatabase,
