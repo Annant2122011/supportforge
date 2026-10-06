@@ -134,6 +134,16 @@ export class SqliteEventRepository {
       .map((row) => fromEventRow(row as EventRow));
   }
 
+  public recoverStaleProcessing(
+    olderThan: string,
+    availableAt = new Date().toISOString(),
+  ): number {
+    const result = this.database.prepare(
+      "UPDATE outbox_events SET status = 'pending', available_at = ? WHERE status = 'processing' AND available_at < ?",
+    ).run(availableAt, olderThan);
+    return Number(result.changes);
+  }
+
   public listPendingOutbox(limit = 100): OutboxEvent[] {
     return this.database.prepare(
       "SELECT * FROM outbox_events WHERE status = 'pending' AND available_at <= ? ORDER BY created_at ASC LIMIT ?",
@@ -167,6 +177,12 @@ export class SqliteEventRepository {
   public requeueProcessing(id: string, availableAt: string): void {
     this.database.prepare(
       "UPDATE outbox_events SET status = 'pending', available_at = ? WHERE id = ? AND status = 'processing'",
+    ).run(availableAt, id);
+  }
+
+  public requeueFailed(id: string, availableAt: string): void {
+    this.database.prepare(
+      "UPDATE outbox_events SET status = 'pending', available_at = ?, last_error = NULL WHERE id = ? AND status = 'failed'",
     ).run(availableAt, id);
   }
 
