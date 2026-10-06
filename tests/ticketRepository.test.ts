@@ -225,14 +225,10 @@ test('legacy tickets migrate with claimant, participant, and metadata fields int
         const markerStatement = reopened.prepare(
           'SELECT id FROM schema_migrations ORDER BY id',
         );
-        try {
-          assert.deepEqual(
-            markerStatement.all().map((row) => Number(row.id)),
-            [1, 2],
-          );
-        } finally {
-          markerStatement.close();
-        }
+        assert.deepEqual(
+          markerStatement.all().map((row) => Number(row.id)),
+          [1, 2],
+        )
       } finally {
         if (reopened.isOpen) reopened.close();
       }
@@ -276,14 +272,10 @@ test('malformed legacy JSON fails safely and records no import marker', async ()
       const statement = inspection.prepare(
         'SELECT id FROM schema_migrations ORDER BY id',
       );
-      try {
-        assert.deepEqual(
-          statement.all().map((row) => Number(row.id)),
-          [1],
-        );
-      } finally {
-        statement.close();
-      }
+      assert.deepEqual(
+        statement.all().map((row) => Number(row.id)),
+        [1],
+      )
     } finally {
       if (inspection.isOpen) inspection.close();
     }
