@@ -23,6 +23,11 @@ export interface TicketRepositoryRecord {
 export interface TicketRepository {
   getByChannelId(channelId: string): TicketRepositoryRecord | undefined;
   listByGuildId(guildId: string): TicketRepositoryRecord[];
+  findActiveByOwnerAndDepartment(
+    guildId: string,
+    ownerId: string,
+    departmentId: string,
+  ): TicketRepositoryRecord[];
   listAll(): TicketRepositoryRecord[];
   upsert(record: TicketRepositoryRecord): void;
   setStatus(channelId: string, status: TicketStatus, updatedAt: string): void;
@@ -123,6 +128,29 @@ export class SqliteTicketRepository implements TicketRepository {
     );
     try {
       return statement.all(guildId).map((row) => fromRow(row as TicketRow));
+    } finally {
+      statement.close();
+    }
+  }
+
+  public findActiveByOwnerAndDepartment(
+    guildId: string,
+    ownerId: string,
+    departmentId: string,
+  ): TicketRepositoryRecord[] {
+    const statement = this.database.prepare(
+      "SELECT * FROM tickets " +
+      "WHERE guild_id = ? " +
+      "AND owner_id = ? " +
+      "AND department_id = ? " +
+      "AND deleted_at IS NULL " +
+      "AND status IN ('open', 'claimed', 'pending', 'reopened') " +
+      "ORDER BY created_at ASC",
+    );
+    try {
+      return statement
+        .all(guildId, ownerId, departmentId)
+        .map((row) => fromRow(row as TicketRow));
     } finally {
       statement.close();
     }
