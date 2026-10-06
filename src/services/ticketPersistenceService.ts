@@ -233,15 +233,10 @@ export async function resetTicketPersistenceState(): Promise<void> {
 }
 
 
+
 export async function getPersistedTicketEventHistory(
   channelId: string,
   limit = 500,
 ): Promise<import('../core/events/domainEvents').DomainEvent[]> {
-  const record = getRepository().getByChannelId(channelId);
-  if (!record) return [];
-
-  const { SqliteEventRepository } = await import('../repositories/eventRepository');
-  return new SqliteEventRepository(
-    (getRepository() as unknown as { database: import('../core/persistence/sqliteDatabase').SqliteDatabase }).database,
-  ).listTicketEvents(record.id, limit);
+  return getRepository().listEvents(channelId, limit);
 }
