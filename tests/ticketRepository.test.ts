@@ -238,7 +238,7 @@ test('legacy tickets migrate with claimant, participant, and metadata fields int
   });
 });
 
-test('malformed legacy JSON fails safely and records no import marker', async () => {
+test('malformed legacy JSON fails safely and can be retried after repair', async () => {
   await withTempDatabase(async (database, directory, legacyTicketsPath) => {
     database.close();
 
@@ -260,31 +260,56 @@ test('malformed legacy JSON fails safely and records no import marker', async ()
     );
 
     /*
-     * Migration 1 is committed before migration 2 begins. The failed import
-     * therefore leaves a valid schema but never records migration 2.
+     * Migration 2 must not be marked as applied after the failed import.
+     * Repairing the source and reopening the same database must therefore
+     * execute the import exactly once and finish at migration 2.
      */
-    const inspection = createSupportForgeDatabase(
+    await writeFile(
+      legacyTicketsPath,
+      JSON.stringify({
+        version: 1,
+        tickets: {
+          'channel-repaired': {
+            guildId: 'guild-repaired',
+            status: 'open',
+            createdAt: '2026-10-06T12:00:00.000Z',
+            updatedAt: '2026-10-06T12:00:00.000Z',
+            ticketNumber: '100',
+            departmentId: 'billing',
+            tagId: 'refund',
+            ownerId: 'user-repaired',
+            priority: 'normal',
+          },
+        },
+      }),
+      'utf8',
+    );
+
+    const repaired = createSupportForgeDatabase(
       brokenDatabasePath,
-      join(directory, 'missing-tickets.json'),
+      legacyTicketsPath,
     );
 
     try {
-      const statement = inspection.prepare(
+      const repository = new SqliteTicketRepository(repaired);
+      assert.ok(repository.getByChannelId('channel-repaired'));
+
+      const markerStatement = repaired.prepare(
         'SELECT id FROM schema_migrations ORDER BY id',
       );
       assert.deepEqual(
-        statement.all().map((row) => Number(row.id)),
-        [1],
-      )
+        markerStatement.all().map((row) => Number(row.id)),
+        [1, 2],
+      );
     } finally {
-      if (inspection.isOpen) inspection.close();
+      if (repaired.isOpen) repaired.close();
     }
 
     assert.equal(
       (await readdir(directory)).some((name) =>
         name.startsWith('tickets.json.pre-sqlite-')
       ),
-      false,
+      true,
     );
   });
 });
