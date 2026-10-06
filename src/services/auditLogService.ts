@@ -16,6 +16,7 @@ import {
   type TextChannel,
 } from 'discord.js';
 import { copyFile, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { getGuildConfig, updateGuildConfig } from './configService';
 import { getAdvancedSettings } from './advancedSettingsService';
@@ -37,6 +38,9 @@ export interface AuditEvent {
   actor?: string;
   actorId?: string;
   actorName?: string;
+  actorAttribution?: AuditActorAttribution;
+  actorConfidence?: 'high' | 'low' | 'none';
+  discordAuditLogId?: string;
   detail?: string;
   category?: 'ticket' | 'settings' | 'system';
 }
@@ -125,6 +129,8 @@ function normalizeAuditActor(
       ? attribution
       : actorId === 'discord-system'
         ? 'actorUnknown'
+        : actorId === 'supportforge-system'
+        ? 'actorKnown'
         : category === 'system'
           ? 'actorInferred'
           : 'actorKnown';
@@ -248,7 +254,7 @@ async function load(): Promise<AuditStore> {
           ? store.events.map((rawEvent) => {
               const event = rawEvent as Partial<PersistedAuditEntry>;
               return {
-                id: typeof event.id === 'string' ? event.id : crypto.randomUUID(),
+                id: typeof event.id === 'string' ? event.id : randomUUID(),
                 guildId,
                 category:
                   event.category === 'ticket' ||
@@ -1854,13 +1860,21 @@ async function recordAndPublish(
   const actorId = event.actorId ?? 'unknown';
   const actorName = event.actorName ?? event.actor ?? 'Unknown';
 
+  const actor = normalizeAuditActor(
+    category,
+    actorId,
+    actorName,
+    event.actorAttribution,
+    event.actorConfidence,
+    event.discordAuditLogId,
+  );
+
   const record: PersistedAuditEntry = {
     id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     guildId: guild.id,
     category,
     action: event.event.toUpperCase(),
-    actorId,
-    actorName,
+    ...actor,
     timestamp,
     ticketNumber: event.ticketNumber,
     detail: event.detail,
