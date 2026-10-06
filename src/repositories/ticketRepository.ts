@@ -38,6 +38,7 @@ export interface TicketRepository {
   ): TicketRepositoryRecord[];
   listAll(): TicketRepositoryRecord[];
   upsert(record: TicketRepositoryRecord): void;
+  create(record: TicketRepositoryRecord, actor?: EventActor): void;
   setStatus(channelId: string, status: TicketStatus, updatedAt: string): void;
   transitionStatus(
     channelId: string,
@@ -176,6 +177,71 @@ export class SqliteTicketRepository implements TicketRepository {
       .prepare('SELECT * FROM tickets ORDER BY created_at ASC')
       .all()
       .map((row) => fromRow(row as TicketRow));
+  }
+
+  public create(
+    record: TicketRepositoryRecord,
+    actor: EventActor = {
+      id: 'supportforge-system',
+      attribution: 'actorKnown',
+      confidence: 'high',
+    },
+  ): void {
+    this.database.exec('BEGIN IMMEDIATE');
+
+    try {
+      this.database.prepare(
+        'INSERT INTO tickets (' +
+        'id, guild_id, channel_id, ticket_number, status, department_id, tag_id, owner_id, priority, ' +
+        'claimed_by_json, participant_ids_json, metadata_json, created_at, updated_at, deleted_at, deletion_reason' +
+        ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      ).run(
+        record.id,
+        record.guildId,
+        record.channelId,
+        record.ticketNumber,
+        record.status,
+        record.departmentId,
+        record.tagId,
+        record.ownerId,
+        record.priority,
+        JSON.stringify(record.claimedByIds),
+        JSON.stringify(record.participantIds),
+        JSON.stringify(record.metadata),
+        record.createdAt,
+        record.updatedAt,
+        record.deletedAt,
+        record.deletionReason,
+      );
+
+      this.events.append({
+        id: randomUUID(),
+        type: 'ticket.created',
+        aggregateType: 'ticket',
+        aggregateId: record.id,
+        guildId: record.guildId,
+        channelId: record.channelId,
+        actorId: actor.id,
+        actorAttribution: actor.attribution ?? 'actorUnknown',
+        actorConfidence: actor.confidence ?? 'none',
+        payload: {
+          status: record.status,
+          ticketNumber: record.ticketNumber ?? '',
+          departmentId: record.departmentId ?? '',
+          ownerId: record.ownerId ?? '',
+        },
+        occurredAt: record.createdAt,
+      });
+
+      this.database.exec('COMMIT');
+    } catch (error) {
+      try {
+        this.database.exec('ROLLBACK');
+      } catch {
+        // Preserve the original error.
+      }
+      throw error;
+    }
   }
 
   public upsert(record: TicketRepositoryRecord): void {
