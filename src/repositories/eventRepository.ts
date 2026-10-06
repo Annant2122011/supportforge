@@ -81,12 +81,6 @@ function fromOutboxRow(row: OutboxRow): OutboxEvent {
   };
 }
 
-export interface EventActor {
-  id: string;
-  attribution?: EventActorAttribution;
-  confidence?: EventActorConfidence;
-}
-
 export class SqliteEventRepository {
   public constructor(private readonly database: SqliteDatabase) {}
 
