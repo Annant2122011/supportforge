@@ -79,6 +79,16 @@ export async function getPersistedTicketPriority(
     | undefined;
 }
 
+export async function findActivePersistedTickets(
+  guildId: string,
+  ownerId: string,
+  departmentId: string,
+): Promise<PersistedTicket[]> {
+  return getRepository()
+    .findActiveByOwnerAndDepartment(guildId, ownerId, departmentId)
+    .map(toPersistedTicket);
+}
+
 export async function registerTicket(
   channelId: string,
   registration: TicketRegistration,
