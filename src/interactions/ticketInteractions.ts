@@ -26,6 +26,8 @@ import {
   updateGuildConfig,
 } from '../services/configService';
 
+import { assertTicketStatusTransition } from '../core/domain/ticketLifecycle';
+
 import { generateTranscript } from '../services/transcriptService';
 
 import {
@@ -1498,6 +1500,12 @@ async function transition(
       return;
     }
 
+    if (
+      !(newStatus === 'claimed' && interaction.customId === 'ticket:claim' && oldStatus === 'claimed')
+    ) {
+      assertTicketStatusTransition(oldStatus, newStatus);
+    }
+
     /*
      * Archived tickets are terminal.
      */
@@ -2112,6 +2120,15 @@ async function closeTicket(
     ) {
       await interaction.editReply(
         '❌ This ticket is archived.',
+      );
+      return;
+    }
+
+    try {
+      assertTicketStatusTransition(status, 'closed');
+    } catch {
+      await interaction.editReply(
+        `❌ Ticket #${getField(topic, 'number') ?? 'unknown'} cannot be closed from its current state (**${capitalize(status)}**).`,
       );
       return;
     }
