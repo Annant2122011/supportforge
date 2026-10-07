@@ -324,28 +324,40 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
     updatedAt: string,
     actor?: EventActor,
   ): Promise<void> {
-    const current = await this.getByChannelId(channelId);
-    if (!current) {
-      throw new Error(
-        `Cannot update SupportForge ticket ${channelId}: durable ticket record does not exist.`,
-      );
-    }
-
-    const next: TicketRepositoryRecord = {
-      ...current,
-      ...updates,
-      claimedByIds: updates.claimedByIds ?? current.claimedByIds,
-      participantIds: updates.participantIds ?? current.participantIds,
-      metadata: updates.metadata ?? current.metadata,
-      updatedAt,
-    };
-
     const client = await getPostgresPool().connect();
 
     try {
       await client.query('BEGIN');
 
-      await client.query(
+      /*
+       * Lock the current row inside the transaction. A simple read followed
+       * by an update can lose concurrent metadata changes from another bot
+       * process. Row-level locking keeps the merged update and its audit event
+       * based on one authoritative snapshot.
+       */
+      const currentResult = await client.query<TicketRow>(
+        'SELECT * FROM tickets WHERE channel_id = $1 FOR UPDATE',
+        [channelId],
+      );
+      const current = currentResult.rows[0];
+
+      if (!current) {
+        throw new Error(
+          `Cannot update SupportForge ticket ${channelId}: durable ticket record does not exist.`,
+        );
+      }
+
+      const currentRecord = fromRow(current);
+      const next: TicketRepositoryRecord = {
+        ...currentRecord,
+        ...updates,
+        claimedByIds: updates.claimedByIds ?? currentRecord.claimedByIds,
+        participantIds: updates.participantIds ?? currentRecord.participantIds,
+        metadata: updates.metadata ?? currentRecord.metadata,
+        updatedAt,
+      };
+
+      const result = await client.query(
         'UPDATE tickets SET department_id = $1, tag_id = $2, owner_id = $3, priority = $4, claimed_by_ids = $5::text[], participant_ids = $6::text[], metadata = $7::jsonb, updated_at = $8::timestamptz WHERE channel_id = $9',
         [
           next.departmentId,
@@ -359,6 +371,12 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
           channelId,
         ],
       );
+
+      if ((result.rowCount ?? 0) !== 1) {
+        throw new Error(
+          `SupportForge ticket ${channelId} disappeared during metadata update.`,
+        );
+      }
 
       const changedFields = (
         [
@@ -378,9 +396,9 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
           id: randomUUID(),
           type: 'ticket.metadata_changed',
           aggregateType: 'ticket',
-          aggregateId: current.id,
-          guildId: current.guildId,
-          channelId: current.channelId,
+          aggregateId: currentRecord.id,
+          guildId: currentRecord.guildId,
+          channelId: currentRecord.channelId,
           actorId: resolved.id,
           actorAttribution: resolved.attribution,
           actorConfidence: resolved.confidence,
