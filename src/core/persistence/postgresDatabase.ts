@@ -103,16 +103,18 @@ export async function withUnpooledPostgres<T>(
     query: <R extends QueryResultRow = QueryResultRow>(
       text: string,
       values?: readonly unknown[],
-    ): Promise<QueryResult<R>> => client.query<R>(text, values as unknown[] | undefined),
+    ): Promise<QueryResult<R>> =>
+      client.query<R>(text, values as unknown[] | undefined),
     release: () => {
-      void client.end();
+      // The enclosing helper owns this direct connection and closes it in the
+      // finally block below. A no-op release prevents accidental early close.
     },
   });
 
   try {
     return await action(executor);
   } finally {
-    executor.release();
+    await client.end();
   }
 }
 
