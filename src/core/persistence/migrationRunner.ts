@@ -12,9 +12,15 @@ export async function migratePostgres(): Promise<PostgresMigrationResult> {
   let applied = 0;
 
   await withUnpooledPostgres(async (db) => {
-    const before = await db.query<{ id: number }>(
-      'SELECT id FROM schema_migrations ORDER BY id ASC',
-    ).catch(() => ({ rows: [] } as { rows: { id: number }[] }));
+    const schemaState = await db.query<{ exists: boolean }>(
+      "SELECT to_regclass('public.schema_migrations') IS NOT NULL AS exists",
+    );
+
+    const before = schemaState.rows[0]?.exists
+      ? await db.query<{ id: number }>(
+          'SELECT id FROM schema_migrations ORDER BY id ASC',
+        )
+      : { rows: [] as { id: number }[] };
 
     await runPostgresMigrations(db);
 
