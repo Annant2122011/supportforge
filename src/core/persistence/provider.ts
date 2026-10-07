@@ -88,18 +88,18 @@ class SqliteTicketRepositoryAdapter implements AsyncTicketRepository {
     channelId: string,
     updates: Parameters<SqliteTicketRepository['updateMetadata']>[1],
     updatedAt: string,
-    _actor?: EventActor,
+    actor?: EventActor,
   ) {
-    this.repository.updateMetadata(channelId, updates, updatedAt);
+    this.repository.updateMetadata(channelId, updates, updatedAt, actor);
   }
 
   async markDeleted(
     channelId: string,
     deletedAt: string,
     reason: string,
-    _actor?: EventActor,
+    actor?: EventActor,
   ) {
-    this.repository.markDeleted(channelId, deletedAt, reason);
+    this.repository.markDeleted(channelId, deletedAt, reason, actor);
   }
 
   async remove(channelId: string) {
