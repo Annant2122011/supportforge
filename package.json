@@ -16,11 +16,15 @@
     "test": "node --import tsx --test"
   },
   "dependencies": {
+    "@neon/config": "^1.8.4",
+    "@neon/env": "^1.5.1",
     "discord.js": "^14.27.0",
-    "dotenv": "^17.4.2"
+    "dotenv": "^17.4.2",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",
+    "@types/pg": "^8.23.1",
     "tsx": "^4.23.13",
     "typescript": "^5.8.3"
   }

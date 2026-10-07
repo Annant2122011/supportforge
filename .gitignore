@@ -11,3 +11,4 @@ data/*.json
 # Runtime-generated SQLite state
 data/*.sqlite
 data/*.sqlite-*
+.neon
