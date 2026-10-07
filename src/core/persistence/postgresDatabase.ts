@@ -1,9 +1,6 @@
-import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from 'pg';
+import { Pool, type QueryResult, type QueryResultRow } from 'pg';
 
-import type {
-  DatabaseExecutor,
-  TransactionExecutor,
-} from './database';
+import type { TransactionExecutor } from './database';
 
 const DEFAULT_POOL_MAX = 10;
 const DEFAULT_IDLE_TIMEOUT_MS = 30_000;
@@ -61,7 +58,15 @@ export function getPostgresPool(): Pool {
   return pool;
 }
 
-function toTransactionExecutor(client: PoolClient): TransactionExecutor {
+interface ReleasableQueryClient {
+  query<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<QueryResult<T>>;
+  release(): void;
+}
+
+function toTransactionExecutor(client: ReleasableQueryClient): TransactionExecutor {
   return {
     query<T extends QueryResultRow = QueryResultRow>(
       text: string,
