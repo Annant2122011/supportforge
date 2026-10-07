@@ -15,7 +15,8 @@
     "deploy-commands": "tsx src/deploy-commands.ts",
     "test": "node --import tsx --test",
     "db:migrate": "tsx scripts/migrate-postgres.ts",
-    "db:migrate:sqlite": "tsx scripts/migrate-sqlite-to-postgres.ts"
+    "db:migrate:sqlite": "tsx scripts/migrate-sqlite-to-postgres.ts",
+    "db:verify": "tsx scripts/verify-postgres.ts"
   },
   "dependencies": {
     "@neon/config": "^1.8.4",
