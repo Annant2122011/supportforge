@@ -45,7 +45,7 @@ import { ensureSettingsChannel } from './services/settingsChannelService';
 import { isFactoryResetInProgress } from './services/factoryResetService';
 import { startSupportForgeUpdateMonitor } from './services/updateService';
 import type { GuildBasedChannel, TextChannel } from 'discord.js';
-import { getSupportForgeDatabase } from './core/persistence/sqliteDatabase';
+import { initializePersistence } from './core/persistence/provider';
 
 const token = process.env.DISCORD_TOKEN;
 
@@ -61,7 +61,7 @@ if (!token) {
  * bot can accept any ticket interactions.
  */
 try {
-  getSupportForgeDatabase();
+  await initializePersistence();
 } catch (error) {
   throw new Error(
     'SupportForge durable database initialization failed. The bot will not start with unverified persistence.',
