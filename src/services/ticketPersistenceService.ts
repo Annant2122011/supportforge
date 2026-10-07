@@ -4,9 +4,10 @@ import type { EventActor } from '../core/events/domainEvents';
 import type { TicketPriority } from './advancedSettingsService';
 import type { TicketStatus } from './ticketStateService';
 import {
-  SqliteTicketRepository,
-  type TicketRepositoryRecord,
-} from '../repositories/ticketRepository';
+  getTicketPersistenceRepository,
+  initializePersistence,
+} from '../core/persistence/provider';
+import type { TicketRepositoryRecord } from '../repositories/ticketRepository';
 
 export interface PersistedTicket {
   id: string;
@@ -39,10 +40,9 @@ export interface TicketRegistration {
   participantIds?: string[];
 }
 
-let repository: SqliteTicketRepository | null = null;
-
-function getRepository(): SqliteTicketRepository {
-  return (repository ??= new SqliteTicketRepository());
+async function getRepository() {
+  await initializePersistence();
+  return getTicketPersistenceRepository();
 }
 
 function toPersistedTicket(record: TicketRepositoryRecord): PersistedTicket {
@@ -69,13 +69,15 @@ function toPersistedTicket(record: TicketRepositoryRecord): PersistedTicket {
 export async function getPersistedTicketStatus(
   channelId: string,
 ): Promise<TicketStatus | undefined> {
-  return getRepository().getByChannelId(channelId)?.status;
+  const repository = await getRepository();
+  return (await repository.getByChannelId(channelId))?.status;
 }
 
 export async function getPersistedTicketPriority(
   channelId: string,
 ): Promise<TicketPriority | undefined> {
-  return getRepository().getByChannelId(channelId)?.priority as
+  const repository = await getRepository();
+  return (await repository.getByChannelId(channelId))?.priority as
     | TicketPriority
     | undefined;
 }
@@ -85,16 +87,20 @@ export async function findActivePersistedTickets(
   ownerId: string,
   departmentId: string,
 ): Promise<PersistedTicket[]> {
-  return getRepository()
-    .findActiveByOwnerAndDepartment(guildId, ownerId, departmentId)
-    .map(toPersistedTicket);
+  const repository = await getRepository();
+  return (await repository.findActiveByOwnerAndDepartment(
+    guildId,
+    ownerId,
+    departmentId,
+  )).map(toPersistedTicket);
 }
 
 export async function registerTicket(
   channelId: string,
   registration: TicketRegistration,
 ): Promise<void> {
-  const current = getRepository().getByChannelId(channelId);
+  const repository = await getRepository();
+  const current = await repository.getByChannelId(channelId);
   const createdAt = current?.createdAt ?? registration.createdAt;
 
   const record: TicketRepositoryRecord = {
@@ -117,9 +123,9 @@ export async function registerTicket(
   };
 
   if (current) {
-    getRepository().upsert(record);
+    await repository.upsert(record);
   } else {
-    getRepository().create(record);
+    await repository.create(record);
   }
 }
 
@@ -128,7 +134,8 @@ export async function setPersistedTicketStatus(
   status: TicketStatus,
   actor?: EventActor,
 ): Promise<void> {
-  const current = getRepository().getByChannelId(channelId);
+  const repository = await getRepository();
+  const current = await repository.getByChannelId(channelId);
   const now = new Date().toISOString();
 
   if (!current) {
@@ -137,7 +144,7 @@ export async function setPersistedTicketStatus(
     );
   }
 
-  getRepository().transitionStatus(channelId, status, now, actor);
+  await repository.transitionStatus(channelId, status, now, actor);
 }
 
 export async function updatePersistedTicketMetadata(
@@ -154,73 +161,61 @@ export async function updatePersistedTicketMetadata(
       | 'metadata'
     >
   >,
+  actor?: EventActor,
 ): Promise<void> {
-  const current = getRepository().getByChannelId(channelId);
+  const repository = await getRepository();
+  const current = await repository.getByChannelId(channelId);
   const now = new Date().toISOString();
 
   if (!current) {
-    getRepository().upsert({
-      id: randomUUID(),
-      guildId: 'unknown',
-      channelId,
-      ticketNumber: null,
-      status: 'open',
-      departmentId: updates.departmentId ?? null,
-      tagId: updates.tagId ?? null,
-      ownerId: updates.ownerId ?? null,
-      priority:
-        updates.priority === undefined
-          ? null
-          : String(updates.priority),
-      claimedByIds: updates.claimedByIds ?? [],
-      participantIds: updates.participantIds ?? [],
-      metadata: updates.metadata ?? {},
-      createdAt: now,
-      updatedAt: now,
-      deletedAt: null,
-      deletionReason: null,
-    });
-    return;
+    throw new Error(
+      `Cannot update SupportForge ticket ${channelId}: durable ticket record does not exist.`,
+    );
   }
 
-  getRepository().updateMetadata(channelId, updates, now);
+  await repository.updateMetadata(channelId, updates, now, actor);
 }
 
 export async function getPersistedTicketRecords(
   guildId?: string,
 ): Promise<PersistedTicket[]> {
+  const repository = await getRepository();
   return (guildId
-    ? getRepository().listByGuildId(guildId)
-    : getRepository().listAll()
+    ? await repository.listByGuildId(guildId)
+    : await repository.listAll()
   ).map(toPersistedTicket);
 }
 
 export async function markPersistedTicketDeleted(
   channelId: string,
   reason: string,
+  actor?: EventActor,
 ): Promise<void> {
-  const current = getRepository().getByChannelId(channelId);
-  if (!current) return;
-
-  const now = new Date().toISOString();
-  getRepository().markDeleted(channelId, now, reason);
+  const repository = await getRepository();
+  await repository.markDeleted(
+    channelId,
+    new Date().toISOString(),
+    reason,
+    actor,
+  );
 }
 
 export async function removePersistedTicket(
   channelId: string,
 ): Promise<void> {
-  getRepository().remove(channelId);
+  const repository = await getRepository();
+  await repository.remove(channelId);
 }
 
 export async function resetTicketPersistenceState(): Promise<void> {
-  getRepository().clearAll();
+  const repository = await getRepository();
+  await repository.clearAll();
 }
-
-
 
 export async function getPersistedTicketEventHistory(
   channelId: string,
   limit = 500,
 ): Promise<import('../core/events/domainEvents').DomainEvent[]> {
-  return getRepository().listEvents(channelId, limit);
+  const repository = await getRepository();
+  return repository.listEvents(channelId, limit);
 }
