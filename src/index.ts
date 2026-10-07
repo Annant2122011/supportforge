@@ -60,13 +60,17 @@ if (!token) {
  * forces schema migrations and legacy-data validation to happen before the
  * bot can accept any ticket interactions.
  */
-try {
-  await initializePersistence();
-} catch (error) {
-  throw new Error(
-    'SupportForge durable database initialization failed. The bot will not start with unverified persistence.',
-    { cause: error },
-  );
+async function initializeAndLogin(): Promise<void> {
+  try {
+    await initializePersistence();
+  } catch (error) {
+    throw new Error(
+      'SupportForge durable database initialization failed. The bot will not start with unverified persistence.',
+      { cause: error },
+    );
+  }
+
+  await client.login(token);
 }
 
 const client = new Client({
@@ -625,4 +629,7 @@ client.on(
   },
 );
 
-void client.login(token);
+void initializeAndLogin().catch((error) => {
+  console.error('❌ SupportForge startup failed:', error);
+  process.exitCode = 1;
+});
