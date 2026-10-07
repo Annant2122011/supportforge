@@ -4,7 +4,7 @@ import {
 } from './postgresDatabase';
 import { runPostgresMigrations } from './postgresMigrations';
 
-const MIGRATION_LOCK_KEY = 7_191_026_202_026n;
+export const POSTGRES_MIGRATION_LOCK_KEY = '71910262026';
 
 export interface PostgresMigrationResult {
   applied: number;
@@ -14,14 +14,9 @@ export async function migratePostgres(): Promise<PostgresMigrationResult> {
   let applied = 0;
 
   await withUnpooledPostgres(async (db) => {
-    /*
-     * Multiple SupportForge processes can start against the same Neon branch
-     * after a deployment. Serialize schema migrations so they never race over
-     * schema_migrations or partially observe another process's DDL.
-     */
     await db.query(
       'SELECT pg_advisory_lock($1::bigint)',
-      [MIGRATION_LOCK_KEY.toString()],
+      [POSTGRES_MIGRATION_LOCK_KEY],
     );
 
     try {
@@ -48,7 +43,7 @@ export async function migratePostgres(): Promise<PostgresMigrationResult> {
     } finally {
       await db.query(
         'SELECT pg_advisory_unlock($1::bigint)',
-        [MIGRATION_LOCK_KEY.toString()],
+        [POSTGRES_MIGRATION_LOCK_KEY],
       ).catch(() => undefined);
     }
   });
