@@ -1,7 +1,7 @@
 import { getSupportForgeDatabase } from '../persistence/sqliteDatabase';
-import {
-  SqliteEventRepository,
-} from '../../repositories/eventRepository';
+import { getPersistenceProvider } from '../persistence/provider';
+import { SqliteEventRepository } from '../../repositories/eventRepository';
+import { PostgresEventRepository } from '../../repositories/postgresEventRepository';
 import type { OutboxEvent } from './domainEvents';
 
 const MAX_BATCH_SIZE = 100;
@@ -27,21 +27,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/**
- * Publishes durable outbox records. Claiming is conditional, so duplicate
- * workers cannot both process the same pending record.
- *
- * Delivery is intentionally at-least-once. Consumers must use the durable
- * outbox event id as their idempotency key because a crash can happen after
- * an external side effect but before the published marker is committed.
- */
-export async function processOutboxBatch(
+async function processSqliteOutboxBatch(
   publisher: OutboxPublisher,
-  limit = MAX_BATCH_SIZE,
+  safeLimit: number,
 ): Promise<OutboxProcessResult> {
   const database = getSupportForgeDatabase();
   const repository = new SqliteEventRepository(database);
-  const safeLimit = Math.max(1, Math.min(limit, MAX_BATCH_SIZE));
 
   repository.recoverStaleProcessing(
     new Date(Date.now() - STALE_PROCESSING_MS).toISOString(),
@@ -74,11 +65,71 @@ export async function processOutboxBatch(
   return { claimed, published, failed };
 }
 
+async function processPostgresOutboxBatch(
+  publisher: OutboxPublisher,
+  safeLimit: number,
+): Promise<OutboxProcessResult> {
+  const repository = new PostgresEventRepository();
+
+  await repository.recoverStaleProcessing(
+    new Date(Date.now() - STALE_PROCESSING_MS).toISOString(),
+  );
+
+  /*
+   * Claiming is transactional and uses FOR UPDATE SKIP LOCKED. Once an event
+   * is returned here it is already in the processing state and has an
+   * incremented attempt count.
+   */
+  const events = await repository.claimPendingOutbox(safeLimit);
+  let published = 0;
+  let failed = 0;
+
+  for (const event of events) {
+    try {
+      await publisher.publish(event);
+      if (await repository.markOutboxPublished(event.id)) {
+        published += 1;
+      }
+    } catch (error) {
+      failed += 1;
+      const delay = retryDelayMs(event.attempts);
+      await repository.markOutboxFailed(
+        event.id,
+        errorMessage(error),
+        new Date(Date.now() + delay).toISOString(),
+      );
+    }
+  }
+
+  return {
+    claimed: events.length,
+    published,
+    failed,
+  };
+}
+
 /**
- * A small bounded scheduler for process-level workers. The scheduler does not
- * own business state, and stopping it never loses events because events remain
- * durable until successfully published.
+ * Publishes durable outbox records.
+ *
+ * SQLite keeps the original conditional-claim implementation for the
+ * migration window. PostgreSQL uses an atomic SKIP LOCKED claim so multiple
+ * worker processes can safely drain the same outbox without double-claiming.
+ *
+ * Delivery remains at-least-once. Consumers must use the durable outbox
+ * event id as their idempotency key because a crash may happen after an
+ * external side effect but before the published marker is persisted.
  */
+export async function processOutboxBatch(
+  publisher: OutboxPublisher,
+  limit = MAX_BATCH_SIZE,
+): Promise<OutboxProcessResult> {
+  const safeLimit = Math.max(1, Math.min(limit, MAX_BATCH_SIZE));
+
+  return getPersistenceProvider() === 'postgres'
+    ? processPostgresOutboxBatch(publisher, safeLimit)
+    : processSqliteOutboxBatch(publisher, safeLimit);
+}
+
 export function startOutboxProcessor(
   publisher: OutboxPublisher,
   intervalMs = 5_000,
