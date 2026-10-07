@@ -165,15 +165,7 @@ export async function updatePersistedTicketMetadata(
   actor?: EventActor,
 ): Promise<void> {
   const repository = await getRepository();
-  const current = await repository.getByChannelId(channelId);
   const now = new Date().toISOString();
-
-  if (!current) {
-    throw new Error(
-      `Cannot update SupportForge ticket ${channelId}: durable ticket record does not exist.`,
-    );
-  }
-
   await repository.updateMetadata(channelId, updates, now, actor);
 }
 
