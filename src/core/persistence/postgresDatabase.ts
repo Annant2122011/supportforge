@@ -2,7 +2,6 @@ import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from 'pg
 
 import type {
   DatabaseExecutor,
-  PostgresDatabase,
   TransactionExecutor,
 } from './database';
 
@@ -72,34 +71,6 @@ function toTransactionExecutor(client: PoolClient): TransactionExecutor {
     },
     release(): void {
       client.release();
-    },
-  };
-}
-
-export async function connectPostgresTransaction(): Promise<TransactionExecutor> {
-  return toTransactionExecutor(await getPostgresPool().connect());
-}
-
-export async function getPostgresDatabase(): Promise<PostgresDatabase> {
-  const currentPool = getPostgresPool();
-
-  return {
-    query<T extends QueryResultRow = QueryResultRow>(
-      text: string,
-      values?: readonly unknown[],
-    ): Promise<QueryResult<T>> {
-      return currentPool.query<T>(text, values as unknown[] | undefined);
-    },
-    connect(): Promise<TransactionExecutor & { query: DatabaseExecutor['query'] }> {
-      return currentPool.connect().then((client) => {
-        const executor = toTransactionExecutor(client);
-        return executor as TransactionExecutor & {
-          query: DatabaseExecutor['query'];
-        };
-      });
-    },
-    async close(): Promise<void> {
-      await closePostgresDatabase();
     },
   };
 }
