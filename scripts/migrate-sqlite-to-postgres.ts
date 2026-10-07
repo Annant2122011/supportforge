@@ -248,6 +248,47 @@ function rowTicketSnapshot(row: SqliteRow): TicketSnapshot {
   };
 }
 
+function postgresString(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) return value.toISOString();
+  return String(value);
+}
+
+function rowPostgresTicketSnapshot(row: QueryResultRow): TicketSnapshot {
+  const id = requireNonEmpty(postgresString(row.id), 'tickets.id');
+
+  return {
+    id,
+    guild_id: requireNonEmpty(postgresString(row.guild_id), 'tickets.guild_id'),
+    channel_id: requireNonEmpty(postgresString(row.channel_id), 'tickets.channel_id'),
+    status: requireNonEmpty(postgresString(row.status), 'tickets.status'),
+    ticket_number: postgresString(row.ticket_number),
+    department_id: postgresString(row.department_id),
+    tag_id: postgresString(row.tag_id),
+    owner_id: postgresString(row.owner_id),
+    priority: postgresString(row.priority),
+    claimed_by_json: JSON.stringify(
+      Array.isArray(row.claimed_by_ids) ? row.claimed_by_ids : [],
+    ),
+    participant_ids_json: JSON.stringify(
+      Array.isArray(row.participant_ids) ? row.participant_ids : [],
+    ),
+    metadata_json: JSON.stringify(
+      stableObject(
+        row.metadata &&
+        typeof row.metadata === 'object' &&
+        !Array.isArray(row.metadata)
+          ? row.metadata
+          : {},
+      ),
+    ),
+    created_at: requireNonEmpty(postgresString(row.created_at), 'tickets.created_at'),
+    updated_at: requireNonEmpty(postgresString(row.updated_at), 'tickets.updated_at'),
+    deleted_at: postgresString(row.deleted_at),
+    deletion_reason: postgresString(row.deletion_reason),
+  };
+}
+
 async function main(): Promise<void> {
   if (!existsSync(sqlitePath)) {
     throw new Error(`SQLite source database does not exist: ${sqlitePath}`);
@@ -459,8 +500,8 @@ async function main(): Promise<void> {
             );
           }
 
-          const targetTicketIds = await client.query<QueryResultRow>(
-            'SELECT id FROM tickets ORDER BY created_at ASC, id ASC',
+          const targetTicketRows = await client.query<QueryResultRow>(
+            'SELECT id, guild_id, channel_id, status, ticket_number, department_id, tag_id, owner_id, priority, claimed_by_ids, participant_ids, metadata, created_at, updated_at, deleted_at, deletion_reason FROM tickets ORDER BY created_at ASC, id ASC',
           );
           const targetEventIds = await client.query<QueryResultRow>(
             'SELECT id FROM ticket_events ORDER BY created_at ASC, id ASC',
@@ -469,18 +510,25 @@ async function main(): Promise<void> {
             'SELECT id FROM outbox_events ORDER BY created_at ASC, id ASC',
           );
 
-          const sourceTicketIds = tickets.map((row) => requireNonEmpty(stringOrNull(row.id), 'tickets.id'));
-          const sourceEventIds = ticketEvents.map((row) => requireNonEmpty(stringOrNull(row.id), 'ticket_events.id'));
-          const sourceOutboxIds = outboxEvents.map((row) => requireNonEmpty(stringOrNull(row.id), 'outbox_events.id'));
+          const targetTicketSnapshots = targetTicketRows.rows.map(
+            rowPostgresTicketSnapshot,
+          );
+          const sourceEventIds = ticketEvents.map((row) =>
+            requireNonEmpty(stringOrNull(row.id), 'ticket_events.id'),
+          );
+          const sourceOutboxIds = outboxEvents.map((row) =>
+            requireNonEmpty(stringOrNull(row.id), 'outbox_events.id'),
+          );
 
           const targetIds = {
-            tickets: targetTicketIds.rows.map((row) => String(row.id)),
             events: targetEventIds.rows.map((row) => String(row.id)),
             outbox: targetOutboxIds.rows.map((row) => String(row.id)),
           };
 
-          if (digest(sourceTicketIds) !== digest(targetIds.tickets)) {
-            throw new Error('Ticket ID verification failed.');
+          if (digest(ticketSnapshots) !== digest(targetTicketSnapshots)) {
+            throw new Error(
+              'Ticket content verification failed. The migrated ticket records do not exactly match the source snapshot.',
+            );
           }
           if (digest(sourceEventIds) !== digest(targetIds.events)) {
             throw new Error('Ticket event ID verification failed.');
@@ -512,7 +560,7 @@ async function main(): Promise<void> {
           console.log(`Tickets migrated: ${tickets.length}`);
           console.log(`Ticket events migrated: ${ticketEvents.length}`);
           console.log(`Outbox events migrated: ${outboxEvents.length}`);
-          console.log(`Verified ticket fingerprint: ${digest(ticketSnapshots)}`);
+          console.log(`Verified ticket fingerprint: ${digest(targetTicketSnapshots)}`);
           console.log('✅ Ticket/event/outbox IDs verified.');
           console.log('✅ Referential-integrity checks passed.');
           console.log('✅ SQLite source database was not modified.');
