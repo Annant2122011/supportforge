@@ -1244,6 +1244,11 @@ async function createTicket(
           createdAt: now,
           participantIds: [interaction.user.id],
         },
+        {
+          id: interaction.user.id,
+          attribution: 'actorKnown',
+          confidence: 'high',
+        },
       );
 
       await ticketChannel.send({
