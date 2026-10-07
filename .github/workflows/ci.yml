@@ -12,6 +12,26 @@ jobs:
   verify:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: supportforge_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d supportforge_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/supportforge_test
+      DATABASE_URL_UNPOOLED: postgresql://postgres:postgres@localhost:5432/supportforge_test
+      SUPPORTFORGE_DATABASE_PROVIDER: postgres
+
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -30,3 +50,6 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Verify database
+        run: npm run db:verify
