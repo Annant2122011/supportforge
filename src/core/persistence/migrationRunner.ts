@@ -12,31 +12,20 @@ export async function migratePostgres(): Promise<PostgresMigrationResult> {
   let applied = 0;
 
   await withUnpooledPostgres(async (db) => {
-    await db.query('BEGIN');
+    const before = await db.query<{ id: number }>(
+      'SELECT id FROM schema_migrations ORDER BY id ASC',
+    ).catch(() => ({ rows: [] } as { rows: { id: number }[] }));
 
-    try {
-      const before = await db.query<{ id: number }>(
-        'SELECT id FROM schema_migrations ORDER BY id ASC',
-      ).catch(() => ({ rows: [] } as { rows: { id: number }[] }));
+    await runPostgresMigrations(db);
 
-      await db.query('ROLLBACK');
+    const after = await db.query<{ id: number }>(
+      'SELECT id FROM schema_migrations ORDER BY id ASC',
+    );
 
-      await runPostgresMigrations(db);
-
-      const after = await db.query<{ id: number }>(
-        'SELECT id FROM schema_migrations ORDER BY id ASC',
-      );
-
-      const beforeIds = new Set(before.rows.map((row) => Number(row.id)));
-      applied = after.rows.filter((row) => !beforeIds.has(Number(row.id))).length;
-    } catch (error) {
-      try {
-        await db.query('ROLLBACK');
-      } catch {
-        // Preserve the migration failure.
-      }
-      throw error;
-    }
+    const beforeIds = new Set(before.rows.map((row) => Number(row.id)));
+    applied = after.rows.filter(
+      (row) => !beforeIds.has(Number(row.id)),
+    ).length;
   });
 
   return { applied };
