@@ -98,6 +98,7 @@ export async function findActivePersistedTickets(
 export async function registerTicket(
   channelId: string,
   registration: TicketRegistration,
+  actor?: EventActor,
 ): Promise<void> {
   const repository = await getRepository();
   const current = await repository.getByChannelId(channelId);
@@ -125,7 +126,7 @@ export async function registerTicket(
   if (current) {
     await repository.upsert(record);
   } else {
-    await repository.create(record);
+    await repository.create(record, actor);
   }
 }
 
