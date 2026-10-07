@@ -113,19 +113,28 @@ class SqliteTicketRepositoryAdapter implements AsyncTicketRepository {
 
 let repository: AsyncTicketRepository | null = null;
 let initialized = false;
+let initializationPromise: Promise<void> | null = null;
 
 export async function initializePersistence(): Promise<void> {
   if (initialized) return;
 
-  const provider = getPersistenceProvider();
+  if (!initializationPromise) {
+    initializationPromise = (async () => {
+      const provider = getPersistenceProvider();
 
-  if (provider === 'postgres') {
-    await migratePostgres();
-  } else {
-    getSupportForgeDatabase();
+      if (provider === 'postgres') {
+        await migratePostgres();
+      } else {
+        getSupportForgeDatabase();
+      }
+
+      initialized = true;
+    })().finally(() => {
+      initializationPromise = null;
+    });
   }
 
-  initialized = true;
+  await initializationPromise;
 }
 
 export function getTicketPersistenceRepository(): AsyncTicketRepository {
