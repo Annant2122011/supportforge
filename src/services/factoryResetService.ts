@@ -136,7 +136,12 @@ function isSupportForgeChannel(
     return true;
   }
 
-  return looksLikeManagedCategory(channel, guild);
+  /*
+   * Destructive reset intentionally refuses to infer ownership from names or
+   * permission fingerprints. Explicit persisted IDs, managed-category ledger
+   * entries, or SupportForge topic metadata are the only ownership proofs.
+   */
+  return false;
 }
 
 function getErrorMessage(error: unknown): string {
