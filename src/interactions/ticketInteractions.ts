@@ -2472,6 +2472,8 @@ async function closeTicket(
       );
     });
 
+    channel.topic = closedTopic;
+
     /*
      * The dedicated close flow does not use transition('closed'), so it must
      * explicitly move the ticket into the configured Closed storage bucket.
