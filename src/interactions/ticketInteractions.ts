@@ -52,6 +52,7 @@ import { getUserFlagCount, isTicketCreationRestricted, recordReport } from '../s
 
 import {
   findActivePersistedTickets,
+  getPersistedTicket,
   getPersistedTicketPriority,
   getPersistedTicketStatus,
   markPersistedTicketDeleted,
@@ -334,6 +335,60 @@ function isAdmin(
         PermissionFlagsBits.ManageGuild,
       ),
   );
+}
+
+function interactionActor(
+  interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
+): {
+  id: string;
+  attribution: 'actorKnown';
+  confidence: 'high';
+} {
+  return {
+    id: interaction.user.id,
+    attribution: 'actorKnown',
+    confidence: 'high',
+  };
+}
+
+async function getEffectiveTicketTopic(
+  channel: TextChannel,
+  topic: string,
+): Promise<string> {
+  const persisted = await (async () => {
+    try {
+      const repository = await import('../services/ticketPersistenceService');
+      return repository.getPersistedTicket(channel.id);
+    } catch {
+      return undefined;
+    }
+  })();
+
+  if (!persisted) return topic;
+
+  let effective = setField(topic, 'status', persisted.status);
+
+  if (persisted.priority) effective = setField(effective, 'priority', persisted.priority);
+  if (persisted.departmentId) effective = setField(effective, 'department', persisted.departmentId);
+  if (persisted.tagId) {
+    effective = setField(effective, 'tag', persisted.tagId);
+    effective = setField(effective, 'tags', persisted.tagId);
+  }
+  if (persisted.ownerId) effective = setField(effective, 'owner', persisted.ownerId);
+
+  if (persisted.participantIds.length) {
+    effective = setField(effective, 'users', persisted.participantIds.join(','));
+  } else {
+    effective = removeField(effective, 'users');
+  }
+
+  if (persisted.claimedByIds.length) {
+    effective = setField(effective, 'claimed_by', persisted.claimedByIds.join(','));
+  } else {
+    effective = removeField(effective, 'claimed_by');
+  }
+
+  return effective;
 }
 
 function getStaffContext(
@@ -898,7 +953,7 @@ async function createTicket(
     interaction.guild;
 
   const lockKey =
-    `${guild.id}:${interaction.user.id}:${departmentId}:${tagId}`;
+    `${guild.id}:${interaction.user.id}:${departmentId}`;
 
   if (
     ticketCreationLocks.has(
@@ -1426,7 +1481,7 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
         .split(',')
         .map((id) => id.trim())
         .filter(Boolean),
-    });
+    }, interactionActor(interaction));
     await syncTicketVoiceParticipants(interaction.guild, newTopic);
     await updateMainMessage(channel, getField(newTopic, 'message'), 'claimed', newTopic);
     await interaction.editReply('✅ You left the ticket. Other assigned moderators remain on it.');
@@ -1456,7 +1511,7 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
       .split(',')
       .map((id) => id.trim())
       .filter(Boolean),
-  });
+  }, interactionActor(interaction));
   await applyTicketVisibilityMode(channel, newTopic, 'unclaimed', interaction.user.id);
   updateRuntimeTicketState(channel, newTopic, 'open');
 
@@ -1900,6 +1955,7 @@ async function transition(
     await setPersistedTicketStatus(
       channel.id,
       newStatus,
+      interactionActor(interaction),
     );
 
     await updatePersistedTicketMetadata(channel.id, {
@@ -2397,6 +2453,7 @@ async function closeTicket(
     await setPersistedTicketStatus(
       channel.id,
       'closed',
+      interactionActor(interaction),
     );
 
     /*
@@ -3285,7 +3342,7 @@ async function applyTicketRouting(interaction: StringSelectMenuInteraction, depa
     await updatePersistedTicketMetadata(channel.id, {
       departmentId: department.id,
       tagId,
-    });
+    }, interactionActor(interaction));
     await updateMainMessage(channel, getField(newTopic, 'message'), status, newTopic);
     await interaction.editReply({ content: '✅ Ticket routed to **' + department.name + ' → ' + (department.tags[tagId]?.name ?? 'tag') + '**.', components: [] });
     if (config.supportCategoryId) await logTicketEvent(interaction.guild!, config.supportCategoryId, { ticketNumber: getField(newTopic, 'number') ?? 'unknown', event: 'ticket_routing_changed', actor: interaction.user.tag, actorId: interaction.user.id, actorName: interaction.user.tag, detail: 'Department=' + department.name + '; tag=' + (department.tags[tagId]?.name ?? tagId) + '.' });
@@ -3415,6 +3472,7 @@ async function applyTicketPriority(
   await updatePersistedTicketMetadata(
     channel.id,
     { priority },
+    interactionActor(interaction),
   );
 
   channel.topic = newTopic;
