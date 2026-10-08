@@ -3239,6 +3239,7 @@ async function showTicketHistory(
     const events = await getTicketAuditHistory(
       interaction.guild.id,
       ticketNumber,
+      channel.id,
     );
 
     const recent = events.slice(-20).reverse();
