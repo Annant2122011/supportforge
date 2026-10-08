@@ -31,6 +31,7 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/supportforge_test
       DATABASE_URL_UNPOOLED: postgresql://postgres:postgres@localhost:5432/supportforge_test
       SUPPORTFORGE_DATABASE_PROVIDER: postgres
+      SUPPORTFORGE_POSTGRES_TEST: "1"
 
     steps:
       - name: Checkout
