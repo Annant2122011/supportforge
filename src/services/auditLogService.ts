@@ -34,6 +34,7 @@ import {
 
 export interface AuditEvent {
   ticketNumber?: string;
+  ticketChannelId?: string;
   event: string;
   actor?: string;
   actorId?: string;
@@ -69,6 +70,7 @@ interface PersistedAuditEntry {
   discordAuditLogId?: string;
   timestamp: string;
   ticketNumber?: string;
+  ticketChannelId?: string;
   detail?: string;
 }
 
@@ -1974,7 +1976,8 @@ async function recordAndPublish(
     action: event.event.toUpperCase(),
     ...actor,
     timestamp,
-    ticketNumber: event.ticketNumber,
+    ...(event.ticketNumber ? { ticketNumber: event.ticketNumber } : {}),
+    ...(inferredTicketChannelId ? { ticketChannelId: inferredTicketChannelId } : {}),
     detail: event.detail,
   };
 
@@ -2050,14 +2053,29 @@ async function recordAndPublish(
 export async function getTicketAuditHistory(
   guildId: string,
   ticketNumber: string,
+  ticketChannelId?: string,
 ): Promise<PersistedAuditEntry[]> {
   const current = await load();
   const store = getGuildStore(current, guildId);
 
-  return store.events.filter(
-    (event) =>
-      event.ticketNumber === ticketNumber,
+  const matching = store.events.filter(
+    (event) => event.ticketNumber === ticketNumber,
   );
+
+  if (!ticketChannelId) return matching;
+
+  const exact = matching.filter(
+    (event) => event.ticketChannelId === ticketChannelId,
+  );
+
+  /*
+   * Older audit records did not have the channel identity. Only use those
+   * legacy records when there are no channel-specific records, preventing a
+   * post-reset ticket number collision from mixing two tickets' histories.
+   */
+  return exact.length
+    ? exact
+    : matching.filter((event) => !event.ticketChannelId);
 }
 
 export async function logTicketEvent(
@@ -2069,6 +2087,7 @@ export async function logTicketEvent(
     await recordAndPublish(guild, parentCategoryId, {
       ...event,
       category: event.category ?? 'ticket',
+      ...(event.ticketChannelId ? { ticketChannelId: event.ticketChannelId } : {}),
     });
   } catch (error) {
     console.error('❌ Failed to write audit log:', error);
