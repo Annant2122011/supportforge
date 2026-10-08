@@ -1314,6 +1314,7 @@ export async function executeTicketCommand(
       const events = await getTicketAuditHistory(
         context.guild.id,
         context.ticketNumber,
+        context.channel.id,
       );
 
       const recent = events.slice(-20).reverse();
@@ -1327,11 +1328,15 @@ No audit events have been recorded for this ticket yet.`,
         return;
       }
 
-      const lines = recent.map((event) => {
-        const timestamp = Math.floor(new Date(event.timestamp).getTime() / 1000);
+      const lines: string[] = [];
+      for (const event of recent) {
+        const timestampValue = new Date(event.timestamp).getTime();
+        const timestamp = Number.isFinite(timestampValue)
+          ? Math.floor(timestampValue / 1000)
+          : Math.floor(Date.now() / 1000);
         const detail = event.detail?.trim();
 
-        return (
+        const line =
           '• <t:' +
           timestamp +
           ':f> • **' +
@@ -1341,15 +1346,26 @@ No audit events have been recorded for this ticket yet.`,
             .join(' ') +
           '** • ' +
           (event.actorName || 'Unknown') +
-          (detail ? ' • ' + detail.slice(0, 220) : '')
-        );
-      });
+          (detail ? ' • ' + detail.slice(0, 180) : '');
 
+        const projected = lines.length
+          ? lines.join('\n') + '\n' + line
+          : line;
+
+        if (projected.length > 1_850) {
+          break;
+        }
+
+        lines.push(line);
+      }
+
+      const omitted = recent.length - lines.length;
       await interaction.editReply(
         `📜 **Recent history for ticket #${context.ticketNumber}**
 
 ` +
-          lines.join('\n'),
+          lines.join('\n') +
+          (omitted > 0 ? '\n\n…and ' + omitted + ' older event(s) were omitted to fit Discord’s message limit.' : ''),
       );
 
       return;
