@@ -355,26 +355,24 @@ async function getEffectiveTicketTopic(
   channel: TextChannel,
   topic: string,
 ): Promise<string> {
-  const persisted = await (async () => {
-    try {
-      const repository = await import('../services/ticketPersistenceService');
-      return repository.getPersistedTicket(channel.id);
-    } catch {
-      return undefined;
-    }
-  })();
-
+  const persisted = await getPersistedTicket(channel.id).catch(() => undefined);
   if (!persisted) return topic;
 
   let effective = setField(topic, 'status', persisted.status);
 
-  if (persisted.priority) effective = setField(effective, 'priority', persisted.priority);
-  if (persisted.departmentId) effective = setField(effective, 'department', persisted.departmentId);
+  if (persisted.priority) {
+    effective = setField(effective, 'priority', persisted.priority);
+  }
+  if (persisted.departmentId) {
+    effective = setField(effective, 'department', persisted.departmentId);
+  }
   if (persisted.tagId) {
     effective = setField(effective, 'tag', persisted.tagId);
     effective = setField(effective, 'tags', persisted.tagId);
   }
-  if (persisted.ownerId) effective = setField(effective, 'owner', persisted.ownerId);
+  if (persisted.ownerId) {
+    effective = setField(effective, 'owner', persisted.ownerId);
+  }
 
   if (persisted.participantIds.length) {
     effective = setField(effective, 'users', persisted.participantIds.join(','));
@@ -1440,8 +1438,8 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
   }
 
   const channel = interaction.channel as TextChannel;
-  const topic = channel.topic ?? '';
-  const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
+  const topic = await getEffectiveTicketTopic(channel, channel.topic ?? '');
+  const status = getTicketStatus(topic);
   if (status !== 'claimed') {
     await replyError(interaction, '❌ This ticket is not currently claimed.');
     return;
@@ -2211,8 +2209,10 @@ async function closeTicket(
       );
 
     const topic =
-      latestTopic ||
-      state.topic;
+      await getEffectiveTicketTopic(
+        channel,
+        latestTopic || state.topic,
+      );
 
     const topicStatus =
       getTicketStatus(
@@ -3246,8 +3246,9 @@ async function changeTicketDepartment(interaction: StringSelectMenuInteraction):
   }
 
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) { await replyError(interaction, '❌ This action can only be used inside a ticket.'); return; }
-  const channel = interaction.channel as TextChannel; const topic = channel.topic ?? '';
-  const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
+  const channel = interaction.channel as TextChannel;
+  const topic = await getEffectiveTicketTopic(channel, channel.topic ?? '');
+  const status = getTicketStatus(topic);
   if (!isTicketTopic(topic) || !isActiveTicketStatus(status)) { await replyError(interaction, '❌ Only active tickets can be rerouted.'); return; }
   const staff = getStaffContext(interaction, topic);
   if (!staff.authorized) { await replyError(interaction, '❌ Only configured staff or administrators can change the department.'); return; }
@@ -3269,7 +3270,8 @@ async function renderRoutingTagSelector(interaction: ButtonInteraction | StringS
     await interaction.deferUpdate();
   }
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) { await replyError(interaction, '❌ This action can only be used inside a ticket.'); return; }
-  const channel = interaction.channel as TextChannel; const topic = channel.topic ?? '';
+  const channel = interaction.channel as TextChannel;
+  const topic = await getEffectiveTicketTopic(channel, channel.topic ?? '');
   const departmentId = departmentIdOverride ?? getField(topic, 'department'); const config = await getGuildConfig(interaction.guild.id); const department = departmentId ? config.departments[departmentId] : undefined;
   if (!department) { await replyError(interaction, '❌ This ticket department no longer exists.'); return; }
   const tags = Object.values(department.tags ?? {}).sort((x, y) => x.name.localeCompare(y.name));
@@ -3357,7 +3359,9 @@ async function changeTicketRoutingTag(interaction: StringSelectMenuInteraction):
   const parts = interaction.customId.split(':'); const departmentId = parts[3] ?? ''; const tagId = interaction.values[0] ?? '';
   const config = await getGuildConfig(interaction.guild!.id); const department = config.departments[departmentId];
   if (!department?.tags?.[tagId]) { await replyError(interaction, '❌ That tag is not valid for this department.'); return; }
-  const channel = interaction.channel as TextChannel; const topic = channel.topic ?? ''; const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
+  const channel = interaction.channel as TextChannel;
+  const topic = await getEffectiveTicketTopic(channel, channel.topic ?? '');
+  const status = getTicketStatus(topic);
   const staff = getStaffContext(interaction, topic);
   if (!isTicketTopic(topic) || !isActiveTicketStatus(status) || !staff.authorized) { await replyError(interaction, '❌ Only configured staff or administrators can change ticket tags.'); return; }
   await applyTicketRouting(interaction, department, tagId, status, topic);
@@ -3441,7 +3445,10 @@ async function applyTicketPriority(
 
   const channel = interaction.channel as TextChannel;
   const state = getRuntimeTicketState(channel);
-  const topic = channel.topic ?? state.topic;
+  const topic = await getEffectiveTicketTopic(
+    channel,
+    channel.topic ?? state.topic,
+  );
   const status =
     (await getPersistedTicketStatus(channel.id)) ??
     getTicketStatus(topic);
