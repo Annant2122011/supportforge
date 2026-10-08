@@ -71,6 +71,13 @@ export async function ensureSettingsChannel(
     throw new Error('SupportForge bot member could not be resolved.');
   }
 
+  const parent = guild.channels.cache.get(parentId);
+  if (parent?.type !== ChannelType.GuildCategory) {
+    throw new Error(
+      'SupportForge Settings destination category does not exist or is not a category.',
+    );
+  }
+
   let channel: TextChannel | undefined;
 
   if (settings.settingsChannelId) {
@@ -132,9 +139,10 @@ export async function ensureSettingsChannel(
   });
 
   if (channel.parentId !== parentId) {
-    await channel
-      .setParent(parentId, { lockPermissions: false })
-      .catch(() => undefined);
+    await channel.setParent(
+      parentId,
+      { lockPermissions: false },
+    );
   }
 
   for (const department of Object.values(
@@ -142,31 +150,43 @@ export async function ensureSettingsChannel(
   )) {
     if (!department.staffRoleId) continue;
 
-    await channel.permissionOverwrites
-      .edit(department.staffRoleId, {
-        ViewChannel: true,
-        ReadMessageHistory: true,
-        SendMessages: false,
-      })
-      .catch(() => undefined);
+    try {
+      await channel.permissionOverwrites.edit(
+        department.staffRoleId,
+        {
+          ViewChannel: true,
+          ReadMessageHistory: true,
+          SendMessages: false,
+        },
+      );
+    } catch (error) {
+      console.warn(
+        '⚠️ Could not grant Settings access to department role ' +
+          department.staffRoleId +
+          ':',
+        error,
+      );
+    }
   }
 
-  await channel.permissionOverwrites
-    .edit(guild.roles.everyone.id, {
+  await channel.permissionOverwrites.edit(
+    guild.roles.everyone.id,
+    {
       ViewChannel: false,
       SendMessages: false,
       ReadMessageHistory: false,
-    })
-    .catch(() => undefined);
+    },
+  );
 
-  await channel.permissionOverwrites
-    .edit(bot.id, {
+  await channel.permissionOverwrites.edit(
+    bot.id,
+    {
       ViewChannel: true,
       SendMessages: true,
       ReadMessageHistory: true,
       EmbedLinks: true,
-    })
-    .catch(() => undefined);
+    },
+  );
 
   const currentSettings = await getAdvancedSettings(guild.id);
 
