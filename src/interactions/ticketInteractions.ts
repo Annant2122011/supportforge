@@ -1905,38 +1905,85 @@ async function transition(
       );
 
     /*
-     * Lifecycle status is persisted outside the Discord channel topic.
-     * Discord's /channels PATCH bucket can remain rate-limited for many
-     * minutes, so status changes must not depend on a topic PATCH succeeding.
-     * The topic remains descriptive metadata and is still used by older
-     * tickets and other ticket metadata operations.
+     * Discord channel mutations are secondary side effects. A long Discord
+     * rate limit must never prevent the durable lifecycle transition from
+     * being recorded in PostgreSQL.
+     *
+     * Do not update discord.js' cached topic when the REST write failed.
+     * Pretending the write succeeded creates stale-state bugs on the next
+     * interaction.
      */
+    const sideEffectFailures: string[] = [];
+
     if (newStatus === 'claimed') {
-      await setChannelTopic(
-        channel.id,
-        newTopic,
-        'Persist SupportForge multi-moderator claim metadata',
-      ).catch((error) => {
-        console.warn('⚠️ Claimed ticket metadata topic update was deferred:', error);
-      });
-      channel.topic = newTopic;
-      await applyTicketVisibilityMode(channel, newTopic, 'claimed');
-      await syncTicketVoiceParticipants(interaction.guild!, newTopic);
-    } else if (newStatus === 'open' || newStatus === 'pending' || newStatus === 'reopened') {
-      await setChannelTopic(
-        channel.id,
-        newTopic,
-        'Persist SupportForge ticket lifecycle metadata',
-      ).catch((error) => {
-        console.warn('⚠️ Ticket lifecycle metadata topic update was deferred:', error);
-      });
-      channel.topic = newTopic;
-      await applyTicketVisibilityMode(
-        channel,
-        newTopic,
-        'unclaimed',
-        getField(oldTopic, 'claimed_by'),
-      );
+      try {
+        await setChannelTopic(
+          channel.id,
+          newTopic,
+          'Persist SupportForge multi-moderator claim metadata',
+        );
+        channel.topic = newTopic;
+      } catch (error) {
+        sideEffectFailures.push('ticket metadata topic');
+        console.warn(
+          '⚠️ Claimed ticket metadata topic update deferred; durable state will still be updated:',
+          error,
+        );
+      }
+
+      try {
+        await applyTicketVisibilityMode(channel, newTopic, 'claimed');
+      } catch (error) {
+        sideEffectFailures.push('ticket permissions');
+        console.warn(
+          '⚠️ Claimed ticket permission update deferred; durable state will still be updated:',
+          error,
+        );
+      }
+
+      try {
+        await syncTicketVoiceParticipants(interaction.guild!, newTopic);
+      } catch (error) {
+        sideEffectFailures.push('voice participants');
+        console.warn(
+          '⚠️ Voice participant synchronization deferred:',
+          error,
+        );
+      }
+    } else if (
+      newStatus === 'open' ||
+      newStatus === 'pending' ||
+      newStatus === 'reopened'
+    ) {
+      try {
+        await setChannelTopic(
+          channel.id,
+          newTopic,
+          'Persist SupportForge ticket lifecycle metadata',
+        );
+        channel.topic = newTopic;
+      } catch (error) {
+        sideEffectFailures.push('ticket metadata topic');
+        console.warn(
+          '⚠️ Ticket lifecycle metadata topic update deferred; durable state will still be updated:',
+          error,
+        );
+      }
+
+      try {
+        await applyTicketVisibilityMode(
+          channel,
+          newTopic,
+          'unclaimed',
+          getField(oldTopic, 'claimed_by'),
+        );
+      } catch (error) {
+        sideEffectFailures.push('ticket permissions');
+        console.warn(
+          '⚠️ Ticket permission update deferred; durable state will still be updated:',
+          error,
+        );
+      }
     }
 
     if (newStatus !== 'claimed' && getField(oldTopic, 'voice_channel_id')) {
@@ -2062,18 +2109,29 @@ async function transition(
      * closed ticket is reopened after a long conversation: the old panel
      * may be hundreds of messages above the current activity.
      */
-    await updateMainMessage(
-      channel,
-      messageId,
-      newStatus,
-      newTopic,
-    );
-
+    try {
+      await updateMainMessage(
+        channel,
+        messageId,
+        newStatus,
+        newTopic,
+      );
+    } catch (error) {
+      sideEffectFailures.push('ticket panel refresh');
+      console.warn(
+        '⚠️ Ticket panel refresh was deferred; durable state is already updated:',
+        error,
+      );
+    }
 
     await interaction.editReply(
-      `✅ Ticket status changed to **${capitalize(
-        newStatus,
-      )}**.`,
+      sideEffectFailures.length
+        ? `⚠️ Ticket status changed to **${capitalize(
+            newStatus,
+          )}** in durable storage. Discord could not immediately apply: ${sideEffectFailures.join(', ')}. The durable ticket state was preserved.`
+        : `✅ Ticket status changed to **${capitalize(
+            newStatus,
+          )}**.`,
     );
 
     /*
