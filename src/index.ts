@@ -26,11 +26,16 @@ import {
 
 import { getGuildConfig } from './services/configService';
 
-import { recordTicketMessageForPanel } from './services/panelActivityService';
+import {
+  clearPanelActivity,
+  recordTicketMessageForPanel,
+} from './services/panelActivityService';
 import { ensureDefaultChannelPurpose } from './services/channelPurposeService';
 
 
 import { startTicketRetentionScheduler } from './services/ticketRetentionService';
+import { clearTicketRenameState } from './services/ticketPanelService';
+import { clearVoiceTopicRetryState } from './services/voiceModeService';
 import { removeLegacyCustomCommands } from './services/advancedSettingsService';
 import {
   handleAuditInteraction,
@@ -287,6 +292,10 @@ client.on('channelDelete', async (channel) => {
       : '';
 
   if (isTicketTopic(deletedTicketTopic)) {
+    clearPanelActivity(guildChannel.id);
+    clearTicketRenameState(guildChannel.id);
+    clearVoiceTopicRetryState(guildChannel.id);
+
     /*
      * Manual ticket deletion must update durable lifecycle storage and remove
      * any temporary voice room owned by the deleted ticket.
