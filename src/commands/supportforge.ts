@@ -36,6 +36,7 @@ import {
 import {
   ensureArchiveCategory,
   ensureClosedCategory,
+  ensureOpenCategory,
 } from '../services/ticketStorageService';
 
 import {
@@ -1047,6 +1048,7 @@ export async function execute(
         supportCategory.id,
       );
 
+      await ensureOpenCategory(guild);
       await ensureClosedCategory(guild);
       await ensureArchiveCategory(guild);
       await ensureSettingsChannel(guild, supportCategory.id);
@@ -1283,24 +1285,38 @@ export async function execute(
           ),
         );
 
-      const lines =
-        departments.length
-          ? departments
-              .map(
-                (department) =>
-                  `• **${
-                    department.name
-                  }** — staff: ${
-                    department.staffRoleId
-                      ? `<@&${department.staffRoleId}>`
-                      : 'Administrators only'
-                  }`,
-              )
-              .join('\n')
-          : 'No departments configured.';
+      const lines = departments.length
+        ? departments
+            .map(
+              (department) =>
+                `• **${department.name}** — staff: ${department.staffRoleId ? `<@&${department.staffRoleId}>` : 'Administrators only'}`,
+            )
+            .join('\n')
+        : 'No departments configured.';
+
+      let visible = lines;
+      if (lines.length > 1_700) {
+        const entries: string[] = [];
+        let length = 0;
+
+        for (const department of departments) {
+          const line =
+            `• **${department.name}** — staff: ${department.staffRoleId ? `<@&${department.staffRoleId}>` : 'Administrators only'}`;
+          const nextLength = length + line.length + (entries.length ? 1 : 0);
+          if (nextLength > 1_700) break;
+          entries.push(line);
+          length = nextLength;
+        }
+
+        visible =
+          entries.join('\n') +
+          '\n\n…and ' +
+          Math.max(0, departments.length - entries.length) +
+          ' more department(s).';
+      }
 
       await interaction.editReply(
-        `📂 **SupportForge departments**\n\n${lines}`,
+        `📂 **SupportForge departments**\n\n${visible}`,
       );
 
       return;
