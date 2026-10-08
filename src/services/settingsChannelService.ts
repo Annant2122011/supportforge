@@ -338,11 +338,17 @@ function isSettingsDashboardMessage(message: {
   );
 }
 
-function isSettingsPurposeMessage(message: {
-  author: { id: string };
-  embeds: readonly { title?: string | null; footer?: { text?: string | null } | null }[];
-}): boolean {
-  return message.author.id === message.author.id &&
+function isSettingsPurposeMessage(
+  message: {
+    author: { id: string };
+    embeds: readonly {
+      title?: string | null;
+      footer?: { text?: string | null } | null;
+    }[];
+  },
+  botId: string,
+): boolean {
+  return message.author.id === botId &&
     message.embeds.some(
       (embed) =>
         embed.title === '📝 SupportForge Channel Purpose' &&
@@ -507,7 +513,7 @@ export async function restoreSettingsChannelToBottom(guild: Guild): Promise<void
       message.author.id === botId &&
       message.id !== dashboard?.id &&
       !isSettingsDashboardMessage(message, botId) &&
-      !isSettingsPurposeMessage(message),
+      !isSettingsPurposeMessage(message, botId),
   );
 
   /*
