@@ -2612,7 +2612,39 @@ export async function handleSettingsInteraction(
             '⏳ **SupportForge reset is being completed.** All SupportForge-managed infrastructure and stored data are being removed. The final confirmation will be sent separately after the destructive operation finishes.',
         });
 
-        await performFactoryReset(guild, accumulateAuditData);
+        const resetResult = await performFactoryReset(
+          guild,
+          accumulateAuditData,
+        );
+
+        if (!resetResult.complete) {
+          const failures = resetResult.failed
+            .slice(0, 5)
+            .map(
+              (failure) =>
+                '• ' +
+                failure.name +
+                ' (' +
+                failure.id +
+                '): ' +
+                failure.error,
+            )
+            .join('\n');
+
+          await interaction.editReply({
+            content:
+              '⚠️ **SupportForge reset was only partially completed.**\n' +
+              'Some managed resources could not be deleted, so SupportForge preserved its state for a safe retry.\n\n' +
+              (failures || 'No detailed failure information was returned.') +
+              (resetResult.failed.length > 5
+                ? '\n\n…and ' +
+                  (resetResult.failed.length - 5) +
+                  ' more.'
+                : ''),
+          }).catch(() => undefined);
+          return true;
+        }
+
         pendingResetAuditChoice.delete(guild.id);
 
         /*
