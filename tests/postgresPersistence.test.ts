@@ -11,12 +11,27 @@ import { PostgresTicketRepository } from '../src/repositories/postgresTicketRepo
 import type { TicketRepositoryRecord } from '../src/repositories/ticketRepository';
 
 const hasPostgres =
+  process.env.SUPPORTFORGE_POSTGRES_TEST === '1' &&
   Boolean(process.env.DATABASE_URL) &&
   Boolean(process.env.DATABASE_URL_UNPOOLED);
 
+const isLocalPostgres =
+  /@(localhost|127\.0\.0\.1)(:\d+)?\//i.test(
+    process.env.DATABASE_URL ?? '',
+  );
+
+const postgresIntegrationEnabled = hasPostgres && isLocalPostgres;
+
+if (hasPostgres && !isLocalPostgres) {
+  throw new Error(
+    'Refusing destructive PostgreSQL integration tests against a non-local database. ' +
+      'Use a local PostgreSQL instance for SUPPORTFORGE_POSTGRES_TEST=1.',
+  );
+}
+
 test(
   'PostgreSQL persistence lifecycle is transactional and durable',
-  { skip: !hasPostgres },
+  { skip: !postgresIntegrationEnabled },
   async () => {
     await migratePostgres();
 
@@ -110,7 +125,7 @@ test(
 );
 
 test.after(async () => {
-  if (!hasPostgres) return;
+  if (!postgresIntegrationEnabled) return;
 
   try {
     await getPostgresPool().query('TRUNCATE TABLE tickets CASCADE');
