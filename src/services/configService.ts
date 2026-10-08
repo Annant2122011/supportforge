@@ -200,6 +200,27 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
 
   }
 
+  const normalizedManagedCategoryIds = Array.from(
+    new Set(
+      (current.guilds[guildId].managedCategoryIds ?? []).filter(
+        (id): id is string =>
+          typeof id === 'string' && id.trim().length > 0,
+      ),
+    ),
+  );
+
+  if (
+    normalizedManagedCategoryIds.length !==
+    (current.guilds[guildId].managedCategoryIds ?? []).length
+  ) {
+    current.guilds[guildId].managedCategoryIds =
+      normalizedManagedCategoryIds;
+    migrated = true;
+  } else {
+    current.guilds[guildId].managedCategoryIds =
+      normalizedManagedCategoryIds;
+  }
+
   if (migrated) {
     await persistState();
   }
