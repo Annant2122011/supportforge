@@ -1765,12 +1765,14 @@ export async function handleSettingsInteraction(
       if (Object.keys(d.tags).length <= 1) { await reject(interaction, '❌ Each department must keep at least one tag.'); return true; }
       const replacement = Object.values(d.tags).find((t) => t.id !== tagId);
       if (!replacement) { await reject(interaction, '❌ No replacement tag is available.'); return true; }
+      const removedTagName = d.tags[tagId].name;
+      const departmentName = d.name;
       await updateGuildConfig(guild.id, (current) => {
         const item = current.departments[departmentId];
         if (item) delete item.tags[tagId];
       });
       await refreshSettingsChannel(guild); await syncPanel(guild); await showTagManager(interaction, departmentId);
-      await auditSettingsAction(guild, interaction, 'TAG_REMOVED', 'Removed tag ' + d.tags[tagId].name + ' from department ' + d.name + '. Existing tickets keep their historical tag metadata.');
+      await auditSettingsAction(guild, interaction, 'TAG_REMOVED', 'Removed tag ' + removedTagName + ' from department ' + departmentName + '. Existing tickets keep their historical tag metadata.');
       return true;
     }
 
@@ -2155,17 +2157,29 @@ export async function handleSettingsInteraction(
         return true;
       }
 
-      const activeTickets = [...guild.channels.cache.values()].filter((channel) =>
-        channel.type === ChannelType.GuildText &&
-        channel.topic?.startsWith('supportforge:ticket') &&
-        getField(channel.topic, 'department') === departmentId &&
-        ['open', 'claimed', 'pending', 'reopened'].includes(getField(channel.topic, 'status') ?? ''),
-      );
+      const activeTickets: string[] = [];
+      for (const channel of guild.channels.cache.values()) {
+        if (
+          channel.type !== ChannelType.GuildText ||
+          !channel.topic?.startsWith('supportforge:ticket') ||
+          getField(channel.topic, 'department') !== departmentId
+        ) {
+          continue;
+        }
+
+        const status =
+          (await getPersistedTicketStatus(channel.id)) ??
+          getTicketStatus(channel.topic);
+
+        if (['open', 'claimed', 'pending', 'reopened'].includes(status)) {
+          activeTickets.push(channel.id);
+        }
+      }
 
       if (activeTickets.length) {
         await reject(
           interaction,
-          '❌ Cannot remove **' + department.name + '** while it has **' + activeTickets.length + '** active ticket(s). Reassign them first.',
+          '❌ Cannot remove **' + department.name + '** while it has **' + activeTickets.length + '** active ticket(s). Reassign or close them first.',
         );
         return true;
       }
@@ -2203,12 +2217,33 @@ export async function handleSettingsInteraction(
         return true;
       }
 
+      const activeTickets = [...guild.channels.cache.values()].filter((channel) =>
+        channel.type === ChannelType.GuildText &&
+        channel.topic?.startsWith('supportforge:ticket') &&
+        getField(channel.topic, 'department') === departmentId &&
+        ['open', 'claimed', 'pending', 'reopened'].includes(
+          getField(channel.topic, 'status') ?? '',
+        ),
+      );
+
+      for (const channel of activeTickets) {
+        const status = (await getPersistedTicketStatus(channel.id)).toString();
+        if (status && ['open', 'claimed', 'pending', 'reopened'].includes(status)) {
+          await reject(
+            interaction,
+            '❌ Cannot remove **' + department.name + '** while it has active ticket(s). Reassign or close them first.',
+          );
+          return true;
+        }
+      }
+
+      const removedDepartmentName = department.name;
       await updateGuildConfig(guild.id, (current) => {
-        const department = current.departments[departmentId];
-        if (department?.categoryId) {
+        const item = current.departments[departmentId];
+        if (item?.categoryId) {
           current.retiredCategoryIds = Array.from(new Set([
             ...(current.retiredCategoryIds ?? []),
-            department.categoryId,
+            item.categoryId,
           ]));
         }
         delete current.departments[departmentId];
@@ -2216,7 +2251,7 @@ export async function handleSettingsInteraction(
       await syncPanel(guild);
       await refreshSettingsChannel(guild);
       await showDepartments(interaction);
-      await auditSettingsAction(guild, interaction, 'DEPARTMENT_REMOVED', 'Removed department ' + department.name + '. Its Discord category was retained.');
+      await auditSettingsAction(guild, interaction, 'DEPARTMENT_REMOVED', 'Removed department ' + removedDepartmentName + '. Its Discord category was retained.');
       return true;
     }
   }
