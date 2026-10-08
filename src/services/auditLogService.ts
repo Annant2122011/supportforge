@@ -2079,18 +2079,27 @@ export async function getTicketAuditHistory(
 
   if (!ticketChannelId) return matching;
 
-  const exact = matching.filter(
-    (event) => event.ticketChannelId === ticketChannelId,
+  const otherChannelExists = matching.some(
+    (event) =>
+      Boolean(event.ticketChannelId) &&
+      event.ticketChannelId !== ticketChannelId,
   );
 
+  if (!otherChannelExists) {
+    return matching;
+  }
+
   /*
-   * Older audit records did not have the channel identity. Only use those
-   * legacy records when there are no channel-specific records, preventing a
-   * post-reset ticket number collision from mixing two tickets' histories.
+   * Once a reused ticket number is detected across multiple concrete channel
+   * identities, keep the exact ticket's events plus legacy events that predate
+   * the channel-identity field. Exclude only events explicitly tied to a
+   * different channel.
    */
-  return exact.length
-    ? exact
-    : matching.filter((event) => !event.ticketChannelId);
+  return matching.filter(
+    (event) =>
+      !event.ticketChannelId ||
+      event.ticketChannelId === ticketChannelId,
+  );
 }
 
 export async function logTicketEvent(
