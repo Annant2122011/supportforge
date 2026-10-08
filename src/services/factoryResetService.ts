@@ -281,6 +281,7 @@ export async function performFactoryReset(
           (department) => department.categoryId ?? null,
         ),
         ...(config.retiredCategoryIds ?? []),
+        ...(config.managedCategoryIds ?? []),
       ].filter((id): id is string => Boolean(id)),
     );
 
