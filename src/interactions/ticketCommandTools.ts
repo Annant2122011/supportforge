@@ -41,6 +41,7 @@ import {
 } from '../services/voiceModeService';
 
 import {
+  getPersistedTicket,
   getPersistedTicketStatus,
   setPersistedTicketStatus,
   updatePersistedTicketMetadata,
@@ -75,7 +76,28 @@ async function getTicketContext(
     );
   }
 
-  const topic = channel.topic ?? '';
+  const rawTopic = channel.topic ?? '';
+  const persisted = await getPersistedTicket(channel.id).catch(() => undefined);
+
+  /*
+   * Persisted ticket fields are authoritative when available. Discord topic
+   * metadata remains the compatibility fallback for legacy tickets.
+   */
+  let topic = rawTopic;
+  if (persisted) {
+    topic = setField(topic, 'status', persisted.status);
+    if (persisted.priority) topic = setField(topic, 'priority', persisted.priority);
+    if (persisted.departmentId) topic = setField(topic, 'department', persisted.departmentId);
+    if (persisted.tagId) {
+      topic = setField(topic, 'tag', persisted.tagId);
+      topic = setField(topic, 'tags', persisted.tagId);
+    }
+    if (persisted.ownerId) topic = setField(topic, 'owner', persisted.ownerId);
+    if (persisted.participantIds.length) topic = setField(topic, 'users', persisted.participantIds.join(','));
+    else topic = removeField(topic, 'users');
+    if (persisted.claimedByIds.length) topic = setField(topic, 'claimed_by', persisted.claimedByIds.join(','));
+    else topic = removeField(topic, 'claimed_by');
+  }
 
   if (
     !topic.startsWith('supportforge:ticket')
@@ -464,6 +486,11 @@ export async function executeTicketCommand(
       await setPersistedTicketStatus(
         context.channel.id,
         'archived',
+        {
+          id: interaction.user.id,
+          attribution: 'actorKnown',
+          confidence: 'high',
+        },
       );
 
       try {
@@ -1130,6 +1157,10 @@ export async function executeTicketCommand(
 
       await updatePersistedTicketMetadata(context.channel.id, {
         participantIds: [...users],
+      }, {
+        id: interaction.user.id,
+        attribution: 'actorKnown',
+        confidence: 'high',
       });
 
       await audit(
@@ -1185,6 +1216,11 @@ export async function executeTicketCommand(
       await updatePersistedTicketMetadata(
         context.channel.id,
         { priority },
+        {
+          id: interaction.user.id,
+          attribution: 'actorKnown',
+          confidence: 'high',
+        },
       );
 
       context.channel.topic = topic;
