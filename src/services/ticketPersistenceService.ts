@@ -66,11 +66,19 @@ function toPersistedTicket(record: TicketRepositoryRecord): PersistedTicket {
   };
 }
 
+export async function getPersistedTicket(
+  channelId: string,
+): Promise<PersistedTicket | undefined> {
+  const repository = await getRepository();
+  const record = await repository.getByChannelId(channelId);
+  return record ? toPersistedTicket(record) : undefined;
+}
+
 export async function getPersistedTicketStatus(
   channelId: string,
 ): Promise<TicketStatus | undefined> {
-  const repository = await getRepository();
-  return (await repository.getByChannelId(channelId))?.status;
+  const ticket = await getPersistedTicket(channelId);
+  return ticket?.status;
 }
 
 export async function getPersistedTicketPriority(
