@@ -1376,6 +1376,15 @@ export async function execute(
       await updateGuildConfig(
         guild.id,
         (current) => {
+          const currentDepartment = current.departments[department.id];
+
+          if (currentDepartment?.categoryId) {
+            current.retiredCategoryIds = Array.from(new Set([
+              ...(current.retiredCategoryIds ?? []),
+              currentDepartment.categoryId,
+            ]));
+          }
+
           delete current.departments[
             department.id
           ];
