@@ -911,12 +911,26 @@ export async function getOrCreateAuditChannel(
     if (existing.name !== AUDIT_NAME) {
       await existing.setName(AUDIT_NAME, 'SupportForge general audit channel normalization').catch(() => undefined);
     }
-    if (existing.parentId !== parentCategoryId) {
+    const parentCategory = guild.channels.cache.get(parentCategoryId);
+    if (
+      parentCategory?.type === ChannelType.GuildCategory &&
+      existing.parentId !== parentCategory.id
+    ) {
       await existing
-        .setParent(parentCategoryId, { lockPermissions: false })
+        .setParent(parentCategory.id, { lockPermissions: false })
         .catch((error) => {
           console.warn('⚠️ Could not move the SupportForge audit channel into its container:', error);
         });
+    } else if (existing.parentId !== parentCategoryId) {
+      /*
+       * A persisted category ID can become stale after a reset or manual
+       * deletion. Never send a known-deleted category ID to Discord.
+       * The audit channel remains where it is until setup recreates a valid
+       * SupportForge category.
+       */
+      console.warn(
+        `⚠️ SupportForge audit channel parent ${parentCategoryId} is not a valid category; leaving the audit channel in its current location.`,
+      );
     }
 
     await ensureChannelPurposeMessage(
