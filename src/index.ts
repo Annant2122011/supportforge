@@ -601,27 +601,28 @@ client.on(
       );
 
       /*
-       * If Discord has already invalidated the
-       * interaction token, there is nothing useful
-       * we can send back to that interaction.
+       * Every interaction path should leave the user with a visible
+       * failure state. A previously deferred component can still be edited,
+       * which is preferable to silently leaving an old/stale panel on screen.
        */
-      if (
-        !interaction.isRepliable() ||
-        interaction.replied ||
-        interaction.deferred
-      ) {
+      if (!interaction.isRepliable()) {
         return;
       }
 
       try {
-        await interaction.reply({
-          content:
-            '❌ SupportForge encountered an unexpected error.',
-          flags: MessageFlags.Ephemeral,
-        });
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply({
+            content: '❌ SupportForge encountered an unexpected error while processing this action.',
+          });
+        } else {
+          await interaction.reply({
+            content: '❌ SupportForge encountered an unexpected error while processing this action.',
+            flags: MessageFlags.Ephemeral,
+          });
+        }
       } catch (replyError) {
         console.error(
-          '❌ Failed to send error response:',
+          '❌ Failed to send interaction error response:',
           replyError,
         );
       }
