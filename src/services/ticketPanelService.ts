@@ -230,13 +230,70 @@ export async function refreshTicketPanel(
   if (persistedPriority) {
     effectiveTopic = setField(effectiveTopic, 'priority', persistedPriority);
   }
-  const messageId = getField(effectiveTopic, 'message');
-  if (!messageId) return;
-
+  const configuredMessageId = getField(effectiveTopic, 'message');
   const config = await getGuildConfig(channel.guild.id);
-  const message =
-    channel.messages.cache.get(messageId) ??
-    (await channel.messages.fetch(messageId));
+  const ticketNumber = getField(effectiveTopic, 'number') ?? 'unknown';
+
+  let message: Message | undefined;
+
+  if (configuredMessageId) {
+    message =
+      channel.messages.cache.get(configuredMessageId) ??
+      await channel.messages.fetch(configuredMessageId).catch(() => undefined);
+  }
+
+  /*
+   * A panel message is recoverable state, not an irreplaceable record. If a
+   * moderator deleted it manually, find the existing SupportForge panel first
+   * so refresh never creates duplicates.
+   */
+  if (!message) {
+    const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+    message = recent?.find(
+      (candidate) =>
+        candidate.author.id === channel.client.user?.id &&
+        candidate.embeds.some(
+          (embed) => embed.title === '🎫 SupportForge Ticket #' + ticketNumber,
+        ),
+    );
+  }
+
+  if (!message) {
+    message = await channel.send({
+      embeds: [
+        buildTicketPanelEmbed(
+          channel.guild,
+          channel.name,
+          effectiveTopic,
+          config,
+        ),
+      ],
+      components: buildTicketPanelComponents(
+        getTicketStatus(effectiveTopic),
+        effectiveTopic,
+      ),
+    });
+
+    const repairedTopic = setField(
+      effectiveTopic,
+      'message',
+      message.id,
+    );
+    channel.topic = repairedTopic;
+
+    await setChannelTopic(
+      channel.id,
+      repairedTopic,
+      'SupportForge ticket panel message reference repair',
+    ).catch((error) => {
+      console.warn(
+        '⚠️ Ticket panel was recreated, but its message reference could not be persisted:',
+        error,
+      );
+    });
+
+    return;
+  }
 
   await message.edit({
     embeds: [
@@ -332,6 +389,7 @@ async function performQueuedChannelRename(
       return;
     }
 
+    desiredChannelNames.delete(channel.id);
     throw error;
   }
 }
