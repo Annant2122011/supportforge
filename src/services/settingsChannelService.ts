@@ -15,6 +15,7 @@ import {
 } from './advancedSettingsService';
 import { ensureChannelPurposeMessage } from './channelPurposeService';
 import { logSystemEvent } from './auditLogService';
+import { setChannelTopic } from './discordChannelService';
 
 const SETTINGS_TOPIC_PREFIX = 'supportforge:settings';
 const SETTINGS_TITLE = '⚙️ SupportForge Settings';
@@ -79,7 +80,7 @@ export async function ensureSettingsChannel(
     }
   }
 
-  const created = !channel;
+  let created = !channel;
 
   if (!channel) {
     const existing = guild.channels.cache.find(
@@ -88,10 +89,11 @@ export async function ensureSettingsChannel(
         candidate.topic?.startsWith(SETTINGS_TOPIC_PREFIX),
     );
 
-    channel =
-      existing?.type === ChannelType.GuildText
-        ? existing
-        : await guild.channels.create({
+    if (existing?.type === ChannelType.GuildText) {
+      channel = existing;
+      created = false;
+    } else {
+      channel = await guild.channels.create({
             name: 'supportforge-settings',
             type: ChannelType.GuildText,
             parent: parentId,
@@ -115,7 +117,19 @@ export async function ensureSettingsChannel(
               },
             ],
           });
+    }
   }
+
+  await setChannelTopic(
+    channel.id,
+    SETTINGS_TOPIC_PREFIX + ' guild=' + guild.id,
+    'SupportForge settings channel metadata normalization',
+  ).catch((error) => {
+    throw new Error(
+      'SupportForge Settings channel metadata could not be repaired.',
+      { cause: error },
+    );
+  });
 
   if (channel.parentId !== parentId) {
     await channel
