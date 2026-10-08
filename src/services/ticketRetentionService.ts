@@ -11,7 +11,10 @@ import {
 } from 'discord.js';
 
 import { getAdvancedSettings, updateAdvancedSettings, type AdvancedGuildSettings } from './advancedSettingsService';
-import { getPersistedTicketRecords, removePersistedTicket } from './ticketPersistenceService';
+import {
+  getPersistedTicketRecords,
+  markPersistedTicketDeleted,
+} from './ticketPersistenceService';
 import { getField, getTicketStatus, isTicketTopic } from './ticketStateService';
 
 export type RetentionScope = 'closed' | 'archive';
@@ -231,15 +234,25 @@ export async function approveRetentionDeletion(
   let deleted = 0;
 
   for (const channel of eligible) {
-    await channel
-      .delete('SupportForge approved retention cleanup')
-      .then(async () => {
-        deleted += 1;
-        await removePersistedTicket(channel.id);
-      })
-      .catch((error) => {
-        console.warn(`⚠️ Retention could not delete ${channel.id}:`, error);
-      });
+    try {
+      await channel.delete('SupportForge approved retention cleanup');
+      deleted += 1;
+
+      /*
+       * Keep the durable ticket record after the Discord channel disappears.
+       * This preserves lifetime history and lets overall audit summaries retain
+       * the ticket's existence without keeping a live Discord resource.
+       */
+      await markPersistedTicketDeleted(
+        channel.id,
+        'SupportForge approved retention cleanup',
+      );
+    } catch (error) {
+      console.warn(
+        `⚠️ Retention cleanup could not fully process ${channel.id}:`,
+        error,
+      );
+    }
   }
 
   await updateAdvancedSettings(guild.id, (current) => {
