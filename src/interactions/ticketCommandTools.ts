@@ -42,6 +42,7 @@ import {
 
 import {
   getPersistedTicket,
+  getPersistedTicketPriority,
   getPersistedTicketStatus,
   setPersistedTicketStatus,
   updatePersistedTicketMetadata,
