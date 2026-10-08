@@ -394,6 +394,16 @@ async function performQueuedChannelRename(
   }
 }
 
+export function clearTicketRenameState(channelId: string): void {
+  desiredChannelNames.delete(channelId);
+
+  const retryTimer = channelRenameRetryTimers.get(channelId);
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+    channelRenameRetryTimers.delete(channelId);
+  }
+}
+
 export function queueTicketChannelRename(
   channel: TextChannel,
   newName: string,
