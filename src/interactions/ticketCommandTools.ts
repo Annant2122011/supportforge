@@ -205,6 +205,7 @@ async function audit(
     {
       ticketNumber:
         context.ticketNumber,
+      ticketChannelId: context.channel.id,
       event,
       actor:
         interaction.user.tag,
