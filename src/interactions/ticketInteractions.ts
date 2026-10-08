@@ -2814,6 +2814,20 @@ async function showTicketCreationModal(
   }
 }
 
+function isTicketParticipant(topic: string, userId: string, reporterId?: string): boolean {
+  if (!userId || (reporterId && userId === reporterId)) return false;
+
+  const ownerId = getField(topic, 'owner');
+  if (ownerId === userId) return true;
+
+  const participants = [
+    ...(getField(topic, 'users') ?? '').split(','),
+    ...(getField(topic, 'claimed_by') ?? '').split(','),
+  ].map((id) => id.trim()).filter(Boolean);
+
+  return participants.includes(userId);
+}
+
 async function showReportTargetSelector(interaction: ButtonInteraction, page = 0): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
@@ -2821,8 +2835,16 @@ async function showReportTargetSelector(interaction: ButtonInteraction, page = 0
     return;
   }
 
-  const topic = interaction.channel.topic ?? '';
+  const topic = await getEffectiveTicketTopic(
+    interaction.channel as TextChannel,
+    interaction.channel.topic ?? '',
+  );
   const reportSettings = await getAdvancedSettings(interaction.guild.id);
+
+  if (!isTicketTopic(topic) || !isActiveTicketStatus(getTicketStatus(topic))) {
+    await replyError(interaction, '❌ Reporting is only available on an active SupportForge ticket.');
+    return;
+  }
 
   if (!reportSettings.reports.enabled) {
     await interaction.editReply(
@@ -2898,7 +2920,18 @@ async function showReportTargetSelector(interaction: ButtonInteraction, page = 0
 async function handleReportTargetSelection(interaction: StringSelectMenuInteraction): Promise<void> {
   await interaction.deferUpdate();
   const targetId = interaction.values[0];
-  const topic = interaction.channel?.type === ChannelType.GuildText ? interaction.channel.topic ?? '' : '';
+  const topic = interaction.channel?.type === ChannelType.GuildText
+    ? await getEffectiveTicketTopic(
+        interaction.channel as TextChannel,
+        interaction.channel.topic ?? '',
+      )
+    : '';
+
+  if (!isTicketParticipant(topic, targetId, interaction.user.id)) {
+    await replyError(interaction, '❌ That user is no longer a reportable participant on this ticket.');
+    return;
+  }
+
   const settings = await getAdvancedSettings(interaction.guild!.id);
 
   const rows = Object.values(settings.reports.categories).slice(0, 25);
@@ -2997,6 +3030,24 @@ async function handleReportCategorySelection(interaction: StringSelectMenuIntera
   await interaction.deferUpdate();
   const parts = interaction.customId.split(':');
   const targetId = parts[3] ?? '';
+  const topic = interaction.channel?.type === ChannelType.GuildText
+    ? await getEffectiveTicketTopic(
+        interaction.channel as TextChannel,
+        interaction.channel.topic ?? '',
+      )
+    : '';
+
+  if (!isTicketParticipant(topic, targetId, interaction.user.id)) {
+    await replyError(interaction, '❌ That user is no longer a reportable participant on this ticket.');
+    return;
+  }
+
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  if (!settings.reports.categories[interaction.values[0]]) {
+    await replyError(interaction, '❌ That report category is no longer configured.');
+    return;
+  }
+
   const categoryId = interaction.values[0];
   await renderReportSubcategorySelector(interaction, targetId, categoryId, 0);
 }
@@ -3006,6 +3057,21 @@ async function handleReportSubcategorySelection(interaction: StringSelectMenuInt
   const targetId = parts[3] ?? '';
   const categoryId = parts[4] ?? '';
   const subcategoryId = interaction.values[0];
+  const topic = interaction.channel?.type === ChannelType.GuildText
+    ? await getEffectiveTicketTopic(
+        interaction.channel as TextChannel,
+        interaction.channel.topic ?? '',
+      )
+    : '';
+
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  if (
+    !isTicketParticipant(topic, targetId, interaction.user.id) ||
+    !settings.reports.categories[categoryId]?.subcategories[subcategoryId]
+  ) {
+    await replyError(interaction, '❌ This report selection is no longer valid for the current ticket.');
+    return;
+  }
 
   await interaction.showModal(
     new ModalBuilder()
@@ -3040,6 +3106,24 @@ async function handleReportModal(interaction: ModalSubmitInteraction): Promise<v
   const staff = getStaffContext(interaction, topic);
   if (!staff.authorized) {
     await replyError(interaction, '❌ Only configured moderators or administrators can submit reports.');
+    return;
+  }
+
+  if (!isTicketTopic(topic) || !isActiveTicketStatus(getTicketStatus(topic))) {
+    await replyError(interaction, '❌ Reporting is only available on an active SupportForge ticket.');
+    return;
+  }
+
+  if (!isTicketParticipant(topic, targetUserId, interaction.user.id)) {
+    await replyError(interaction, '❌ The reported user is no longer a participant on this ticket.');
+    return;
+  }
+
+  const settings = await getAdvancedSettings(interaction.guild.id);
+  if (
+    !settings.reports.categories[categoryId]?.subcategories[subcategoryId]
+  ) {
+    await replyError(interaction, '❌ The selected report reason is no longer configured.');
     return;
   }
 
@@ -3080,7 +3164,10 @@ async function handleReportDecision(interaction: ButtonInteraction): Promise<voi
   if (
     !pending ||
     pending.expiresAt <= Date.now() ||
-    pending.reporterUserId !== interaction.user.id
+    pending.reporterUserId !== interaction.user.id ||
+    pending.guildId !== interaction.guild?.id ||
+    pending.channelId !== interaction.channel?.id ||
+    (decision !== 'flag' && decision !== 'record')
   ) {
     await replyError(interaction, '❌ This report review has expired or is not assigned to you.');
     return;
