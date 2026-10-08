@@ -9,6 +9,7 @@ import {
   migratePostgres,
   POSTGRES_MIGRATION_LOCK_KEY,
 } from '../src/core/persistence/migrationRunner';
+import { normalizePostgresConnectionString } from '../src/core/persistence/postgresDatabase';
 
 interface SqliteRow {
   [key: string]: unknown;
@@ -360,16 +361,92 @@ async function main(): Promise<void> {
     console.log(`Mode: ${apply ? 'APPLY' : 'DRY RUN'}`);
     console.log('');
 
+    const connectionString = normalizePostgresConnectionString(
+      requireDatabaseUrl(),
+    );
+
+    /*
+     * Dry run is strictly read-only on PostgreSQL. It must not run
+     * migratePostgres(), because that creates schema tables and migration markers.
+     */
+    if (!apply) {
+      const client = new Client({
+        connectionString,
+        keepAlive: true,
+        keepAliveInitialDelayMillis: 10_000,
+        application_name: 'supportforge-sqlite-postgres-dry-run',
+      });
+
+      client.on('error', (error) => {
+        console.error('❌ SupportForge PostgreSQL dry-run connection error:', error);
+      });
+
+      await client.connect();
+
+      try {
+        const tables = await client.query<{ table_name: string }>(
+          "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ANY($1::text[]) ORDER BY table_name",
+          [['schema_migrations', 'tickets', 'ticket_events', 'outbox_events']],
+        );
+        const existingTables = new Set(tables.rows.map((row) => row.table_name));
+
+        if (!existingTables.has('tickets')) {
+          console.log('Target PostgreSQL schema is not initialized yet.');
+          console.log('✅ Dry run completed. No SQLite or PostgreSQL data was modified.');
+          console.log('   The apply step will create the PostgreSQL schema before copying data.');
+          return;
+        }
+
+        const requiredTables = ['schema_migrations', 'tickets', 'ticket_events', 'outbox_events'];
+        const missingTables = requiredTables.filter((table) => !existingTables.has(table));
+        if (missingTables.length > 0) {
+          throw new Error(
+            `Target PostgreSQL schema is partially initialized. Missing tables: ${missingTables.join(', ')}. Refusing a dry run against an incomplete target.`,
+          );
+        }
+
+        const existingTickets = await targetCount(client, 'tickets');
+        const existingEvents = await targetCount(client, 'ticket_events');
+        const existingOutbox = await targetCount(client, 'outbox_events');
+
+        console.log(
+          `Target currently contains tickets=${existingTickets}, events=${existingEvents}, outbox=${existingOutbox}.`,
+        );
+
+        if (existingTickets !== 0 || existingEvents !== 0 || existingOutbox !== 0) {
+          throw new Error(
+            'Target PostgreSQL tables are not empty. Migration refuses to merge or overwrite existing data.',
+          );
+        }
+
+        console.log('✅ Dry run completed. No SQLite or PostgreSQL data was modified.');
+        return;
+      } finally {
+        await client.end();
+      }
+    }
+
+    /*
+     * Apply mode migrates the schema before opening the data-copy client.
+     * This prevents the data-copy TLS socket from sitting idle while a second
+     * connection performs schema migration, which previously caused ECONNRESET.
+     */
+    await migratePostgres();
+
     const client = new Client({
-      connectionString: requireDatabaseUrl(),
+      connectionString,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10_000,
       application_name: 'supportforge-sqlite-postgres-migration',
+    });
+
+    client.on('error', (error) => {
+      console.error('❌ SupportForge PostgreSQL migration connection error:', error);
     });
 
     await client.connect();
 
     try {
-      await migratePostgres();
-
       /*
        * Hold the same advisory lock used by schema migration while checking
        * and copying target data. The runtime remains on SQLite until cutover,
@@ -398,13 +475,6 @@ async function main(): Promise<void> {
           throw new Error(
             'Target PostgreSQL tables are not empty. Migration refuses to merge or overwrite existing data.',
           );
-        }
-
-        if (!apply) {
-          console.log(
-            '✅ Dry run completed. No SQLite or PostgreSQL data was modified.',
-          );
-          return;
         }
 
         await client.query('BEGIN');
