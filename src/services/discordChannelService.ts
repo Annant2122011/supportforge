@@ -65,6 +65,22 @@ function getRemainingCooldown(until: number): number {
   return Math.max(0, until - Date.now());
 }
 
+function pruneExpiredRateLimitState(now = Date.now()): void {
+  for (const [channelId, until] of channelRateLimitUntil) {
+    if (until <= now) channelRateLimitUntil.delete(channelId);
+  }
+
+  for (const [key, until] of bucketRateLimitUntil) {
+    if (until <= now) bucketRateLimitUntil.delete(key);
+  }
+
+  for (const [channelId, timestamp] of lastChannelMutationAt) {
+    if (now - timestamp > CHANNEL_MUTATION_SPACING_MS * 4) {
+      lastChannelMutationAt.delete(channelId);
+    }
+  }
+}
+
 function rememberRateLimit(
   channelId: string,
   retryAfterMs: number,
@@ -120,6 +136,7 @@ function rememberSuccessfulBucket(
 }
 
 function getRateLimitCooldown(channelId: string): number {
+  pruneExpiredRateLimitState();
   let cooldown = Math.max(
     getRemainingCooldown(globalRateLimitUntil),
     getRemainingCooldown(channelRateLimitUntil.get(channelId) ?? 0),
