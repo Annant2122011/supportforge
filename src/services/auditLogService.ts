@@ -227,115 +227,171 @@ async function load(): Promise<AuditStore> {
 
   await mkdir(DATA_DIR, { recursive: true });
 
+  let parsed: Partial<AuditStore> | undefined;
+  let primaryError: unknown;
+
   try {
-    let raw: string;
+    const raw = await readFile(AUDIT_PATH, 'utf8');
+    parsed = JSON.parse(raw) as Partial<AuditStore>;
+  } catch (error) {
+    primaryError = error;
+  }
 
+  if (!parsed) {
     try {
-      raw = await readFile(AUDIT_PATH, 'utf8');
-    } catch {
-      raw = await readFile(AUDIT_BACKUP_PATH, 'utf8');
-    }
-
-    let parsed: Partial<AuditStore>;
-    try {
-      parsed = JSON.parse(raw) as Partial<AuditStore>;
-    } catch {
       const backup = await readFile(AUDIT_BACKUP_PATH, 'utf8');
       parsed = JSON.parse(backup) as Partial<AuditStore>;
+      console.warn('⚠️ SupportForge primary audit data could not be loaded; using the backup audit store.');
+    } catch (backupError) {
+      const primaryCode = (primaryError as NodeJS.ErrnoException | undefined)?.code;
+      const backupCode = (backupError as NodeJS.ErrnoException | undefined)?.code;
+
+      if (primaryCode === 'ENOENT' && backupCode === 'ENOENT') {
+        state = {
+          version: 2,
+          guilds: {},
+        };
+        await persist();
+        return state;
+      }
+
+      throw new Error(
+        'SupportForge audit data could not be loaded safely. The primary and backup audit stores are unavailable or invalid. No audit history was discarded.',
+        { cause: backupError },
+      );
+    }
+  }
+
+  const rawGuilds = parsed?.guilds;
+  if (
+    !rawGuilds ||
+    typeof rawGuilds !== 'object' ||
+    Array.isArray(rawGuilds)
+  ) {
+    throw new Error(
+      'SupportForge audit data is malformed: the guild collection is invalid.',
+    );
+  }
+
+  const guilds: Record<string, AuditGuildStore> = {};
+
+  for (const [guildId, rawStore] of Object.entries(rawGuilds)) {
+    if (!rawStore || typeof rawStore !== 'object' || Array.isArray(rawStore)) {
+      throw new Error(
+        'SupportForge audit data is malformed for guild ' + guildId + '.',
+      );
     }
 
-    const rawGuilds = parsed.guilds ?? {};
-    const guilds: Record<string, AuditGuildStore> = {};
-
-    for (const [guildId, rawStore] of Object.entries(rawGuilds)) {
-      const store = rawStore as Partial<AuditGuildStore>;
-      guilds[guildId] = {
-        events: Array.isArray(store.events)
-          ? store.events.map((rawEvent) => {
-              const event = rawEvent as Partial<PersistedAuditEntry>;
-              return {
-                id: typeof event.id === 'string' ? event.id : randomUUID(),
-                guildId,
-                category:
-                  event.category === 'ticket' ||
+    const store = rawStore as Partial<AuditGuildStore>;
+    guilds[guildId] = {
+      events: Array.isArray(store.events)
+        ? store.events.map((rawEvent) => {
+            const event = rawEvent as Partial<PersistedAuditEntry>;
+            return {
+              id: typeof event.id === 'string' ? event.id : randomUUID(),
+              guildId,
+              category:
+                event.category === 'ticket' ||
+                event.category === 'settings' ||
+                event.category === 'system'
+                  ? event.category
+                  : 'system',
+              action:
+                typeof event.action === 'string' ? event.action : 'UNKNOWN',
+              ...normalizeAuditActor(
+                event.category === 'ticket' ||
                   event.category === 'settings' ||
                   event.category === 'system'
-                    ? event.category
-                    : 'system',
-                action:
-                  typeof event.action === 'string' ? event.action : 'UNKNOWN',
-                ...normalizeAuditActor(
-                  event.category === 'ticket' ||
-                    event.category === 'settings' ||
-                    event.category === 'system'
-                    ? event.category
-                    : 'system',
-                  event.actorId,
-                  event.actorName,
-                  event.actorAttribution,
-                  event.actorConfidence,
-                  event.discordAuditLogId,
-                ),
-                timestamp:
-                  typeof event.timestamp === 'string'
-                    ? event.timestamp
-                    : new Date().toISOString(),
-                ...(typeof event.ticketNumber === 'string'
-                  ? { ticketNumber: event.ticketNumber }
-                  : {}),
-                ...(typeof event.detail === 'string'
-                  ? { detail: event.detail }
-                  : {}),
-              };
-            })
-          : [],
-        summaries: store.summaries ?? {},
-        overallSummary: store.overallSummary ?? null,
-        accumulationEnabled: store.accumulationEnabled ?? true,
-        developerViewers: Array.isArray(store.developerViewers)
-          ? store.developerViewers.filter((id): id is string => typeof id === 'string')
-          : [],
-        developerViewModes:
-          store.developerViewModes &&
-          typeof store.developerViewModes === 'object'
-            ? Object.fromEntries(
-                Object.entries(store.developerViewModes).filter(
-                  ([id, mode]) =>
-                    typeof id === 'string' &&
-                    (mode === 'now' || mode === 'past_and_now'),
-                ),
-              )
-            : {},
-        developerViewStartedAt:
-          store.developerViewStartedAt &&
-          typeof store.developerViewStartedAt === 'object'
-            ? Object.fromEntries(
-                Object.entries(store.developerViewStartedAt).filter(
-                  ([id, timestamp]) =>
-                    typeof id === 'string' &&
-                    typeof timestamp === 'string',
-                ),
-              )
-            : {},
-        panelMessageId: store.panelMessageId ?? null,
-        restoreMessageId: store.restoreMessageId ?? null,
-        panelEventCheckpoint: store.panelEventCheckpoint ?? 0,
-        lastSetupDate: store.lastSetupDate ?? null,
-        developerBackfillChannelId: store.developerBackfillChannelId ?? null,
-      };
-    }
-
-    state = {
-      version: 2,
-      guilds,
+                  ? event.category
+                  : 'system',
+                event.actorId,
+                event.actorName,
+                event.actorAttribution,
+                event.actorConfidence,
+                event.discordAuditLogId,
+              ),
+              timestamp:
+                typeof event.timestamp === 'string'
+                  ? event.timestamp
+                  : new Date().toISOString(),
+              ...(typeof event.ticketNumber === 'string'
+                ? { ticketNumber: event.ticketNumber }
+                : {}),
+              ...(typeof event.detail === 'string'
+                ? { detail: event.detail }
+                : {}),
+            };
+          })
+        : [],
+      summaries:
+        store.summaries &&
+        typeof store.summaries === 'object' &&
+        !Array.isArray(store.summaries)
+          ? store.summaries
+          : {},
+      overallSummary:
+        typeof store.overallSummary === 'string'
+          ? store.overallSummary
+          : null,
+      accumulationEnabled:
+        typeof store.accumulationEnabled === 'boolean'
+          ? store.accumulationEnabled
+          : true,
+      developerViewers: Array.isArray(store.developerViewers)
+        ? store.developerViewers.filter((id): id is string => typeof id === 'string')
+        : [],
+      developerViewModes:
+        store.developerViewModes &&
+        typeof store.developerViewModes === 'object' &&
+        !Array.isArray(store.developerViewModes)
+          ? Object.fromEntries(
+              Object.entries(store.developerViewModes).filter(
+                ([id, mode]) =>
+                  typeof id === 'string' &&
+                  (mode === 'now' || mode === 'past_and_now'),
+              ),
+            )
+          : {},
+      developerViewStartedAt:
+        store.developerViewStartedAt &&
+        typeof store.developerViewStartedAt === 'object' &&
+        !Array.isArray(store.developerViewStartedAt)
+          ? Object.fromEntries(
+              Object.entries(store.developerViewStartedAt).filter(
+                ([id, timestamp]) =>
+                  typeof id === 'string' &&
+                  typeof timestamp === 'string',
+              ),
+            )
+          : {},
+      panelMessageId:
+        typeof store.panelMessageId === 'string'
+          ? store.panelMessageId
+          : null,
+      restoreMessageId:
+        typeof store.restoreMessageId === 'string'
+          ? store.restoreMessageId
+          : null,
+      panelEventCheckpoint:
+        Number.isInteger(store.panelEventCheckpoint) &&
+        Number(store.panelEventCheckpoint) >= 0
+          ? Number(store.panelEventCheckpoint)
+          : 0,
+      lastSetupDate:
+        typeof store.lastSetupDate === 'string'
+          ? store.lastSetupDate
+          : null,
+      developerBackfillChannelId:
+        typeof store.developerBackfillChannelId === 'string'
+          ? store.developerBackfillChannelId
+          : null,
     };
-  } catch {
-    state = {
-      version: 2,
-      guilds: {},
-    };
-    await persist();
   }
+
+  state = {
+    version: 2,
+    guilds,
+  };
 
   return state;
 }
