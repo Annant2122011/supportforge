@@ -18,6 +18,10 @@ function estimateVisualLines(message: Message): number {
   if (message.reference) score += 1;
   return Math.min(10, score);
 }
+export function clearPanelActivity(channelId: string): void {
+  states.delete(channelId);
+}
+
 export function resetPanelActivity(channelId: string, anchorMessageId: string): void { states.set(channelId, { anchorMessageId, messages: 0, visualLines: 0, moving: false }); }
 export async function recordTicketMessageForPanel(message: Message): Promise<void> {
   if (!message.guild || message.author.bot || message.channel.type !== ChannelType.GuildText) return;
