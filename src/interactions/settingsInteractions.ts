@@ -2219,12 +2219,8 @@ export async function handleSettingsInteraction(
 
       const activeTickets = [...guild.channels.cache.values()].filter((channel) =>
         channel.type === ChannelType.GuildText &&
-        channel.type === ChannelType.GuildText &&
         (channel.topic ?? '').startsWith('supportforge:ticket') &&
-        getField(channel.topic ?? '', 'department') === departmentId &&
-        ['open', 'claimed', 'pending', 'reopened'].includes(
-          getField(channel.topic ?? '', 'status') ?? '',
-        ),
+        getField(channel.topic ?? '', 'department') === departmentId,
       );
 
       for (const channel of activeTickets) {
