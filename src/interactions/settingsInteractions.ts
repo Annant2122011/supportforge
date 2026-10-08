@@ -2227,8 +2227,11 @@ export async function handleSettingsInteraction(
       );
 
       for (const channel of activeTickets) {
-        const status = (await getPersistedTicketStatus(channel.id)).toString();
-        if (status && ['open', 'claimed', 'pending', 'reopened'].includes(status)) {
+        const status =
+          (await getPersistedTicketStatus(channel.id)) ??
+          getTicketStatus(channel.topic ?? '');
+
+        if (['open', 'claimed', 'pending', 'reopened'].includes(status)) {
           await reject(
             interaction,
             '❌ Cannot remove **' + department.name + '** while it has active ticket(s). Reassign or close them first.',
