@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import {
   PermissionFlagsBits,
   type Guild,
@@ -263,7 +264,7 @@ export async function recordReport(
   const store = getGuildStore(current, guild.id);
 
   const report: StoredReport = {
-    id: 'report-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
+    id: 'report-' + randomUUID(),
     guildId: guild.id,
     targetUserId: input.targetUserId,
     reporterUserId: input.reporterUserId,
