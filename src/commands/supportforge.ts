@@ -15,6 +15,7 @@ import {
 
 import {
   getGuildConfig,
+  registerManagedCategory,
   getTier,
   newDepartmentId,
   newTagId,
@@ -214,8 +215,10 @@ async function ensureContainer(guild: Guild) {
   await updateGuildConfig(
     guild.id,
     (config) => {
-      config.supportCategoryId =
-        category.id;
+      config.supportCategoryId = category.id;
+      config.managedCategoryIds = Array.from(
+        new Set([...(config.managedCategoryIds ?? []), category.id]),
+      );
     },
   );
 
