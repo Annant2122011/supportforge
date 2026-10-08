@@ -309,6 +309,18 @@ async function saveTopic(
     );
   }
 
+  /*
+   * PostgreSQL is the durable source of truth for ticket metadata. Priority
+   * changes intentionally avoid an immediate Discord channel PATCH because
+   * channel renames/topics are rate-limited. Before any later command writes
+   * the topic, merge the persisted priority back in so a status/assignment
+   * change can never resurrect an older priority from the Discord cache.
+   */
+  const persistedPriority = await getPersistedTicketPriority(context.channel.id);
+  if (persistedPriority) {
+    topic = setField(topic, 'priority', persistedPriority);
+  }
+
   await setChannelTopic(
     context.channel.id,
     topic,
