@@ -1,5 +1,6 @@
 import {
   ChannelType,
+  PermissionFlagsBits,
   type Guild,
   type GuildBasedChannel,
 } from 'discord.js';
