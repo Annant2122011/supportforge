@@ -204,10 +204,35 @@ export async function endTicketVoiceMode(
   const number = getField(topic, 'number') ?? 'unknown';
   const voiceChannel = voiceId ? guild.channels.cache.get(voiceId) : undefined;
 
-  if (voiceChannel?.type === ChannelType.GuildVoice) {
-    await voiceChannel.delete(reason).catch((error) => {
-      console.warn('⚠️ Could not delete SupportForge voice channel ' + voiceId + ':', error);
-    });
+  if (voiceId) {
+    if (voiceChannel?.type === ChannelType.GuildVoice) {
+      try {
+        await voiceChannel.delete(reason);
+      } catch (error) {
+        /*
+         * Never clear the recovery pointer when Discord refused the delete.
+         * Keeping voice_channel_id in the ticket metadata allows a later
+         * repair/retry to find the orphaned room instead of making it
+         * permanently invisible to SupportForge.
+         */
+        console.warn(
+          '⚠️ Could not delete SupportForge voice channel ' + voiceId + ':',
+          error,
+        );
+        throw new Error(
+          'The private voice channel could not be deleted safely. Voice-mode metadata was retained so the channel can be repaired.',
+          { cause: error },
+        );
+      }
+    } else {
+      /*
+       * The referenced voice channel is already gone. Treat that as a
+       * successful cleanup and clear the stale pointer.
+       */
+      console.warn(
+        '⚠️ SupportForge voice channel ' + voiceId + ' was already missing; clearing stale voice metadata.',
+      );
+    }
   }
 
   let newTopic = removeField(topic, 'voice_channel_id');
