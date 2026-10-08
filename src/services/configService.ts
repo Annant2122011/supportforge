@@ -1,5 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 export type SupportForgeTier = 'free' | 'premium-demo' | 'pro-demo';
@@ -32,6 +32,7 @@ export interface GuildConfig {
   nextTicketNumber: number;
   departments: Record<string, DepartmentConfig>;
   retiredCategoryIds: string[];
+  managedCategoryIds: string[];
 }
 
 interface ConfigFile {
@@ -55,6 +56,7 @@ const DEFAULT_CONFIG: GuildConfig = {
   nextTicketNumber: 1000,
   departments: {},
   retiredCategoryIds: [],
+  managedCategoryIds: [],
 };
 
 let state: ConfigFile | null = null;
@@ -64,6 +66,8 @@ function cloneDefaultConfig(): GuildConfig {
   return {
     ...DEFAULT_CONFIG,
     departments: {},
+    retiredCategoryIds: [],
+    managedCategoryIds: [],
   };
 }
 
@@ -76,9 +80,21 @@ async function loadState(): Promise<ConfigFile> {
     const raw = await readFile(CONFIG_PATH, 'utf8');
     const parsed = JSON.parse(raw) as ConfigFile;
 
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      !parsed.guilds ||
+      typeof parsed.guilds !== 'object' ||
+      Array.isArray(parsed.guilds)
+    ) {
+      throw new Error(
+        'SupportForge config is malformed: the guild configuration collection is invalid.',
+      );
+    }
+
     state = {
       version: 1,
-      guilds: parsed.guilds ?? {},
+      guilds: parsed.guilds as Record<string, GuildConfig>,
     };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
@@ -104,7 +120,32 @@ async function persistState(): Promise<void> {
 
   writeQueue = writeQueue.catch(() => undefined).then(async () => {
     await mkdir(DATA_DIR, { recursive: true });
-    await writeFile(CONFIG_PATH, JSON.stringify(state, null, 2), 'utf8');
+
+    const temporaryPath =
+      CONFIG_PATH + '.tmp-' + process.pid + '-' + Date.now();
+
+    await writeFile(
+      temporaryPath,
+      JSON.stringify(state, null, 2),
+      'utf8',
+    );
+
+    try {
+      try {
+        await rename(temporaryPath, CONFIG_PATH);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'EEXIST' && code !== 'EPERM') throw error;
+
+        await unlink(CONFIG_PATH).catch((unlinkError) => {
+          const unlinkCode = (unlinkError as NodeJS.ErrnoException).code;
+          if (unlinkCode !== 'ENOENT') throw unlinkError;
+        });
+        await rename(temporaryPath, CONFIG_PATH);
+      }
+    } finally {
+      await unlink(temporaryPath).catch(() => undefined);
+    }
   });
 
   await writeQueue;
@@ -117,6 +158,14 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
   let migrated = false;
   if (!Array.isArray(current.guilds[guildId].retiredCategoryIds)) {
     current.guilds[guildId].retiredCategoryIds = [];
+    migrated = true;
+  }
+  if (!Array.isArray(current.guilds[guildId].managedCategoryIds)) {
+    current.guilds[guildId].managedCategoryIds = [];
+    migrated = true;
+  }
+  if (!Number.isInteger(current.guilds[guildId].nextTicketNumber) || current.guilds[guildId].nextTicketNumber < 1) {
+    current.guilds[guildId].nextTicketNumber = DEFAULT_CONFIG.nextTicketNumber;
     migrated = true;
   }
 
@@ -206,6 +255,23 @@ export function newDepartmentId(): string {
 
 export function newTagId(): string {
   return randomBytes(4).toString('hex');
+}
+
+export async function registerManagedCategory(
+  guildId: string,
+  categoryId: string,
+): Promise<void> {
+  const cleanId = categoryId.trim();
+  if (!cleanId) return;
+
+  await updateGuildConfig(guildId, (config) => {
+    config.managedCategoryIds = Array.from(
+      new Set([
+        ...(config.managedCategoryIds ?? []),
+        cleanId,
+      ]),
+    );
+  });
 }
 
 export async function allocateTicketNumber(guildId: string): Promise<number> {
