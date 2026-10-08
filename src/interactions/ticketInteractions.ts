@@ -1956,16 +1956,20 @@ async function transition(
       interactionActor(interaction),
     );
 
-    await updatePersistedTicketMetadata(channel.id, {
-      claimedByIds: (getField(newTopic, 'claimed_by') ?? '')
-        .split(',')
-        .map((id) => id.trim())
-        .filter(Boolean),
-      participantIds: (getField(newTopic, 'users') ?? '')
-        .split(',')
-        .map((id) => id.trim())
-        .filter(Boolean),
-    });
+    await updatePersistedTicketMetadata(
+      channel.id,
+      {
+        claimedByIds: (getField(newTopic, 'claimed_by') ?? '')
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+        participantIds: (getField(newTopic, 'users') ?? '')
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+      },
+      interactionActor(interaction),
+    );
 
     /*
      * Keep the local runtime state immediately consistent with the persisted
