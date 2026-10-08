@@ -1970,8 +1970,22 @@ async function recordAndPublish(
     event.discordAuditLogId,
   );
 
+  const inferredTicketChannelId =
+    event.ticketChannelId ??
+    (event.ticketNumber
+      ? (() => {
+          const matches = [...guild.channels.cache.values()].filter(
+            (channel) =>
+              channel.type === ChannelType.GuildText &&
+              channel.topic?.startsWith('supportforge:ticket') &&
+              getField(channel.topic, 'number') === event.ticketNumber,
+          );
+          return matches.length === 1 ? matches[0]!.id : undefined;
+        })()
+      : undefined);
+
   const record: PersistedAuditEntry = {
-    id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    id: randomUUID(),
     guildId: guild.id,
     category,
     action: event.event.toUpperCase(),
