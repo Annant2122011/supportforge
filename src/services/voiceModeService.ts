@@ -80,6 +80,14 @@ function participantOverwrites(
   return overwrites;
 }
 
+export function clearVoiceTopicRetryState(channelId: string): void {
+  const timer = voiceTopicRetryTimers.get(channelId);
+  if (timer) {
+    clearTimeout(timer);
+    voiceTopicRetryTimers.delete(channelId);
+  }
+}
+
 async function updateVoiceTopic(channel: TextChannel, topic: string, reason: string): Promise<string> {
   channel.topic = topic;
   const previous = voiceTopicRetryTimers.get(channel.id);
