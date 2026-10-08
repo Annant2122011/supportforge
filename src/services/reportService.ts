@@ -100,9 +100,22 @@ async function load(): Promise<ReportStore> {
   try {
     const raw = await readFile(REPORT_PATH, 'utf8');
     const parsed = JSON.parse(raw) as Partial<ReportStore>;
+
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      !parsed.guilds ||
+      typeof parsed.guilds !== 'object' ||
+      Array.isArray(parsed.guilds)
+    ) {
+      throw new Error(
+        'SupportForge report data is malformed: the guild collection is invalid.',
+      );
+    }
+
     const guilds: Record<string, ReportGuildStore> = {};
 
-    for (const [guildId, rawStore] of Object.entries(parsed.guilds ?? {})) {
+    for (const [guildId, rawStore] of Object.entries(parsed.guilds)) {
       const store = rawStore as Partial<ReportGuildStore>;
       guilds[guildId] = {
         reports: Array.isArray(store.reports) ? store.reports : [],
