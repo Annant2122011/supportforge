@@ -2217,10 +2217,11 @@ export async function handleSettingsInteraction(
         return true;
       }
 
-      const activeTickets = [...guild.channels.cache.values()].filter((channel) =>
-        channel.type === ChannelType.GuildText &&
-        (channel.topic ?? '').startsWith('supportforge:ticket') &&
-        getField(channel.topic ?? '', 'department') === departmentId,
+      const activeTickets = [...guild.channels.cache.values()].filter(
+        (channel): channel is import('discord.js').TextChannel =>
+          channel.type === ChannelType.GuildText &&
+          (channel.topic ?? '').startsWith('supportforge:ticket') &&
+          getField(channel.topic ?? '', 'department') === departmentId,
       );
 
       for (const channel of activeTickets) {
