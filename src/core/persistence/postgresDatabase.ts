@@ -16,7 +16,27 @@ function requireConnectionString(name: 'DATABASE_URL' | 'DATABASE_URL_UNPOOLED')
     );
   }
 
-  return value;
+  return normalizePostgresConnectionString(value);
+}
+
+/**
+ * pg 8.23+ warns that legacy SSL modes such as `require` currently behave
+ * like `verify-full`, and that this behavior will change in a future major.
+ * Neon connection strings commonly contain `sslmode=require`, so make the
+ * intended certificate/hostname verification explicit without weakening SSL.
+ *
+ * We only rewrite an explicitly supplied legacy mode. Local/test URLs without
+ * sslmode are left untouched so CI and local PostgreSQL continue to work.
+ */
+export function normalizePostgresConnectionString(value: string): string {
+  const url = new URL(value);
+  const sslmode = url.searchParams.get('sslmode');
+
+  if (sslmode === 'prefer' || sslmode === 'require' || sslmode === 'verify-ca') {
+    url.searchParams.set('sslmode', 'verify-full');
+  }
+
+  return url.toString();
 }
 
 function configurePool(): Pool {
@@ -31,6 +51,8 @@ function configurePool(): Pool {
 
   const instance = new Pool({
     connectionString,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
     max: Number.isInteger(max) && max > 0 ? Math.min(max, 50) : DEFAULT_POOL_MAX,
     idleTimeoutMillis:
       Number.isFinite(idleTimeoutMillis) && idleTimeoutMillis >= 0
@@ -94,7 +116,13 @@ export async function withUnpooledPostgres<T>(
   const { Client } = await import('pg');
   const client = new Client({
     connectionString,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
     application_name: 'supportforge-db-migrations',
+  });
+
+  client.on('error', (error) => {
+    console.error('❌ SupportForge PostgreSQL migration connection error:', error);
   });
 
   await client.connect();
