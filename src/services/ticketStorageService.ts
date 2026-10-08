@@ -105,6 +105,12 @@ async function ensureBucket(
     current[key] = category.id;
   });
 
+  await updateGuildConfig(guild.id, (current) => {
+    current.managedCategoryIds = Array.from(
+      new Set([...(current.managedCategoryIds ?? []), category.id]),
+    );
+  });
+
   const config = await getGuildConfig(guild.id);
   if (config.supportCategoryId) {
     void logSystemEvent(
@@ -206,6 +212,9 @@ export async function ensureOpenCategory(
 
   await updateGuildConfig(guild.id, (current) => {
     current.openCategoryId = category.id;
+    current.managedCategoryIds = Array.from(
+      new Set([...(current.managedCategoryIds ?? []), category.id]),
+    );
   });
 
   const supportCategoryId = (await getGuildConfig(guild.id)).supportCategoryId;
@@ -347,6 +356,12 @@ export async function ensureOptionalStatusCategory(
 
   await updateAdvancedSettings(guild.id, (current) => {
     current.statusCategories[config.setting] = category.id;
+  });
+
+  await updateGuildConfig(guild.id, (current) => {
+    current.managedCategoryIds = Array.from(
+      new Set([...(current.managedCategoryIds ?? []), category.id]),
+    );
   });
 
   return category;
