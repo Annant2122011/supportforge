@@ -4505,7 +4505,7 @@ export async function handleTicketInteraction(
         await handleReportSubcategorySelection(interaction);
         return;
       }
-      if (interaction.customId === 'ticket:create-tag:select') {
+      if (interaction.customId.startsWith('ticket:create-tag:select:')) {
         await handleTicketTagSelection(interaction);
         return;
       }
