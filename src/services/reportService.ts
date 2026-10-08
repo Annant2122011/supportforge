@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   PermissionFlagsBits,
@@ -58,10 +58,37 @@ function emptyGuildStore(): ReportGuildStore {
 
 async function persist(): Promise<void> {
   if (!state) return;
+
   writeQueue = writeQueue.catch(() => undefined).then(async () => {
     await mkdir(DATA_DIR, { recursive: true });
-    await writeFile(REPORT_PATH, JSON.stringify(state, null, 2), 'utf8');
+
+    const temporaryPath =
+      REPORT_PATH + '.tmp-' + process.pid + '-' + Date.now();
+
+    await writeFile(
+      temporaryPath,
+      JSON.stringify(state, null, 2),
+      'utf8',
+    );
+
+    try {
+      try {
+        await rename(temporaryPath, REPORT_PATH);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'EEXIST' && code !== 'EPERM') throw error;
+
+        await unlink(REPORT_PATH).catch((unlinkError) => {
+          const unlinkCode = (unlinkError as NodeJS.ErrnoException).code;
+          if (unlinkCode !== 'ENOENT') throw unlinkError;
+        });
+        await rename(temporaryPath, REPORT_PATH);
+      }
+    } finally {
+      await unlink(temporaryPath).catch(() => undefined);
+    }
   });
+
   await writeQueue;
 }
 
