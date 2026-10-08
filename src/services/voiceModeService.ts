@@ -88,7 +88,13 @@ export function clearVoiceTopicRetryState(channelId: string): void {
   }
 }
 
-async function updateVoiceTopic(channel: TextChannel, topic: string, reason: string): Promise<string> {
+async function updateVoiceTopic(
+  channel: TextChannel,
+  topic: string,
+  reason: string,
+  strict = false,
+): Promise<string> {
+  const previousTopic = channel.topic ?? '';
   channel.topic = topic;
   const previous = voiceTopicRetryTimers.get(channel.id);
   if (previous) clearTimeout(previous);
@@ -97,11 +103,18 @@ async function updateVoiceTopic(channel: TextChannel, topic: string, reason: str
   try {
     await setChannelTopic(channel.id, topic, reason);
   } catch (error) {
+    if (strict) {
+      channel.topic = previousTopic;
+      throw error;
+    }
+
     const delay = getRetryDelayMs(error);
     if (delay !== null) {
       const retry = setTimeout(() => {
         voiceTopicRetryTimers.delete(channel.id);
-        void setChannelTopic(channel.id, topic, reason).catch(() => undefined);
+        void setChannelTopic(channel.id, topic, reason).catch((retryError) => {
+          console.warn('⚠️ Voice ticket metadata retry failed:', retryError);
+        });
       }, delay);
       retry.unref?.();
       voiceTopicRetryTimers.set(channel.id, retry);
@@ -148,11 +161,29 @@ export async function startTicketVoiceMode(
   newTopic = setField(newTopic, 'voice_started_at', new Date().toISOString());
   newTopic = setField(newTopic, 'voice_started_by', moderatorIds[0]);
   newTopic = setField(newTopic, 'voice_channel_name', voiceChannel.name);
-  newTopic = await updateVoiceTopic(
-    ticketChannel,
-    newTopic,
-    'SupportForge voice mode metadata for ticket #' + number,
-  );
+
+  try {
+    newTopic = await updateVoiceTopic(
+      ticketChannel,
+      newTopic,
+      'SupportForge voice mode metadata for ticket #' + number,
+      true,
+    );
+  } catch (error) {
+    await voiceChannel.delete(
+      'SupportForge rollback after voice metadata persistence failure',
+    ).catch((rollbackError) => {
+      console.error(
+        '❌ Voice mode rollback could not delete the newly created voice channel:',
+        rollbackError,
+      );
+    });
+
+    throw new Error(
+      'Private voice mode could not be initialized safely because ticket metadata could not be persisted.',
+      { cause: error },
+    );
+  }
 
   void queueTicketChannelRename(
     ticketChannel,
