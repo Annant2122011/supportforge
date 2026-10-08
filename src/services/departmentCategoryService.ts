@@ -205,6 +205,9 @@ export async function ensureDepartmentCategory(
     if (configuredDepartment) {
       configuredDepartment.categoryId = category.id;
     }
+    current.managedCategoryIds = Array.from(
+      new Set([...(current.managedCategoryIds ?? []), category.id]),
+    );
   });
 
   const config = await getGuildConfig(guild.id);
