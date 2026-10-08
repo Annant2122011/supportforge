@@ -506,6 +506,7 @@ export async function isSupportForgeManagedChannel(
       settings.archiveCategoryId,
       settings.statusCategories.claimedCategoryId,
       settings.statusCategories.pendingCategoryId,
+      ...(config.managedCategoryIds ?? []),
       ...Object.values(config.departments).map(
         (department) => department.categoryId ?? null,
       ),
