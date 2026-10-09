@@ -12,6 +12,64 @@ import { logSystemEvent } from './auditLogService';
 
 const MAX_CHANNELS_PER_CATEGORY = 50;
 
+function overwriteHasExpectedState(
+  category: CategoryChannel,
+  overwriteId: string,
+  allow: readonly bigint[],
+  deny: readonly bigint[],
+): boolean {
+  const current = category.permissionOverwrites.cache.get(overwriteId);
+  if (!current) return false;
+  return (
+    allow.every((permission) => current.allow.has(permission) && !current.deny.has(permission)) &&
+    deny.every((permission) => current.deny.has(permission) && !current.allow.has(permission))
+  );
+}
+
+async function ensureStorageCategoryPermissions(
+  category: CategoryChannel,
+  botId: string,
+): Promise<void> {
+  const everyoneId = category.guild.roles.everyone.id;
+  const everyoneDeny = [
+    PermissionFlagsBits.ViewChannel,
+    PermissionFlagsBits.SendMessages,
+    PermissionFlagsBits.ReadMessageHistory,
+  ];
+  const botAllow = [
+    PermissionFlagsBits.ViewChannel,
+    PermissionFlagsBits.SendMessages,
+    PermissionFlagsBits.ReadMessageHistory,
+    PermissionFlagsBits.ManageChannels,
+    PermissionFlagsBits.ManageMessages,
+    PermissionFlagsBits.EmbedLinks,
+    PermissionFlagsBits.AttachFiles,
+  ];
+
+  // Ticket transitions revisit these categories frequently. Avoid editing
+  // their channel ACL when the stored permissions already match.
+  if (!overwriteHasExpectedState(category, everyoneId, [], everyoneDeny)) {
+    await category.permissionOverwrites.edit(everyoneId, {
+      ViewChannel: false,
+      SendMessages: false,
+      ReadMessageHistory: false,
+    }, { reason: 'Repair SupportForge private storage category permissions' });
+  }
+
+  if (!overwriteHasExpectedState(category, botId, botAllow, [])) {
+    await category.permissionOverwrites.edit(botId, {
+      ViewChannel: true,
+      SendMessages: true,
+      ReadMessageHistory: true,
+      ManageChannels: true,
+      ManageMessages: true,
+      EmbedLinks: true,
+      AttachFiles: true,
+    }, { reason: 'Allow SupportForge to manage its storage category' });
+  }
+}
+
+
 async function ensureBucket(
   guild: Guild,
   baseName: string,
@@ -35,20 +93,7 @@ async function ensureBucket(
       throw new Error('SupportForge bot member could not be resolved.');
     }
 
-    await savedChannel.permissionOverwrites.edit(guild.roles.everyone.id, {
-      ViewChannel: false,
-      SendMessages: false,
-      ReadMessageHistory: false,
-    });
-    await savedChannel.permissionOverwrites.edit(bot.id, {
-      ViewChannel: true,
-      SendMessages: true,
-      ReadMessageHistory: true,
-      ManageChannels: true,
-      ManageMessages: true,
-      EmbedLinks: true,
-      AttachFiles: true,
-    });
+    await ensureStorageCategoryPermissions(savedChannel, bot.id);
     return savedChannel;
   }
 
@@ -151,20 +196,7 @@ export async function ensureOpenCategory(
       throw new Error('SupportForge bot member could not be resolved.');
     }
 
-    await saved.permissionOverwrites.edit(guild.roles.everyone.id, {
-      ViewChannel: false,
-      SendMessages: false,
-      ReadMessageHistory: false,
-    });
-    await saved.permissionOverwrites.edit(bot.id, {
-      ViewChannel: true,
-      SendMessages: true,
-      ReadMessageHistory: true,
-      ManageChannels: true,
-      ManageMessages: true,
-      EmbedLinks: true,
-      AttachFiles: true,
-    });
+    await ensureStorageCategoryPermissions(saved, bot.id);
     return saved;
   }
 
@@ -287,20 +319,7 @@ export async function ensureOptionalStatusCategory(
     saved?.type === ChannelType.GuildCategory &&
     saved.children.cache.size < MAX_CHANNELS_PER_CATEGORY
   ) {
-    await saved.permissionOverwrites.edit(guild.roles.everyone.id, {
-      ViewChannel: false,
-      SendMessages: false,
-      ReadMessageHistory: false,
-    });
-    await saved.permissionOverwrites.edit(bot.id, {
-      ViewChannel: true,
-      SendMessages: true,
-      ReadMessageHistory: true,
-      ManageChannels: true,
-      ManageMessages: true,
-      EmbedLinks: true,
-      AttachFiles: true,
-    });
+    await ensureStorageCategoryPermissions(saved, bot.id);
     return saved;
   }
 
