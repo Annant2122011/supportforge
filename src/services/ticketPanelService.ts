@@ -353,7 +353,11 @@ async function performQueuedChannelRename(
      * do not operate on stale channel.name data.
      */
     channel.name = newName;
-    desiredChannelNames.delete(channel.id);
+    // A newer rename may have been requested while this REST call was in
+    // flight. An older completion must never clear that newer desired state.
+    if (desiredChannelNames.get(channel.id) === newName) {
+      desiredChannelNames.delete(channel.id);
+    }
 
     const existingTimer = channelRenameRetryTimers.get(channel.id);
     if (existingTimer) {
@@ -389,7 +393,9 @@ async function performQueuedChannelRename(
       return;
     }
 
-    desiredChannelNames.delete(channel.id);
+    if (desiredChannelNames.get(channel.id) === newName) {
+      desiredChannelNames.delete(channel.id);
+    }
     throw error;
   }
 }
