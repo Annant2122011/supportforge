@@ -76,9 +76,36 @@ function resolveDiscordRoute(method: DiscordMutationMethod, path: string): `/${s
 }
 
 function getRateLimitRetryAfterMs(error: unknown): number | null {
-  if (typeof error === 'object' && error !== null && 'retryAfter' in error) {
-    const retryAfter = Number((error as { retryAfter?: unknown }).retryAfter);
-    if (Number.isFinite(retryAfter) && retryAfter > 0) return Math.ceil(retryAfter);
+  if (typeof error === 'object' && error !== null) {
+    const record = error as Record<string, unknown>;
+
+    // discord.js RateLimitError exposes retryAfter in milliseconds.
+    const retryAfterMs = Number(record.retryAfter);
+    if (Number.isFinite(retryAfterMs) && retryAfterMs > 0) {
+      return Math.ceil(retryAfterMs);
+    }
+
+    // Discord's raw 429 response uses retry_after in seconds. Support both
+    // the direct response shape and common wrapped API-error shapes.
+    const candidates = [
+      record.retry_after,
+      (record.data as Record<string, unknown> | undefined)?.retry_after,
+      (record.rawError as Record<string, unknown> | undefined)?.retry_after,
+    ];
+    for (const candidate of candidates) {
+      const seconds = Number(candidate);
+      if (candidate !== undefined && Number.isFinite(seconds) && seconds > 0) {
+        return Math.ceil(seconds * 1000);
+      }
+    }
+
+    const headers = record.headers as { get?: (name: string) => string | null } | undefined;
+    if (headers && typeof headers.get === 'function') {
+      const headerSeconds = Number(headers.get('retry-after'));
+      if (Number.isFinite(headerSeconds) && headerSeconds > 0) {
+        return Math.ceil(headerSeconds * 1000);
+      }
+    }
   }
 
   const message = error instanceof Error ? error.message : String(error);
@@ -97,8 +124,12 @@ function getRateLimitRetryAfterMs(error: unknown): number | null {
 }
 
 function isGlobalRateLimit(error: unknown): boolean {
-  return typeof error === 'object' && error !== null &&
-    'global' in error && (error as { global?: unknown }).global === true;
+  if (typeof error !== 'object' || error === null) return false;
+  const record = error as Record<string, unknown>;
+  if (record.global === true) return true;
+  const data = record.data as Record<string, unknown> | undefined;
+  const rawError = record.rawError as Record<string, unknown> | undefined;
+  return data?.global === true || rawError?.global === true;
 }
 
 function createRateLimitError(operation: string, retryAfterMs: number, global: boolean): Error {
