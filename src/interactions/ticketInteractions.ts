@@ -27,6 +27,7 @@ import {
 } from '../services/configService';
 
 import { assertTicketStatusTransition } from '../core/domain/ticketLifecycle';
+import { buildTicketVisibilityPlan } from '../core/domain/ticketPermissionPlan';
 import { classifyTicketRoutingComponent } from '../core/domain/ticketInteractionRouting';
 
 import { generateTranscript } from '../services/transcriptService';
@@ -34,6 +35,7 @@ import { generateTranscript } from '../services/transcriptService';
 import {
   setChannelParent,
   setChannelPermissionOverwrite,
+  setChannelProperties,
   setChannelTopic,
 } from '../services/discordChannelService';
 
@@ -366,6 +368,9 @@ async function getEffectiveTicketTopic(
   }
   if (persisted.departmentId) {
     effective = setField(effective, 'department', persisted.departmentId);
+    const config = await getGuildConfig(channel.guild.id);
+    const department = config.departments[persisted.departmentId];
+    effective = setField(effective, 'staff', department?.staffRoleId ?? 'none');
   }
   if (persisted.tagId) {
     effective = setField(effective, 'tag', persisted.tagId);
@@ -853,74 +858,77 @@ async function applyTicketVisibilityMode(
   topic: string,
   mode: 'unclaimed' | 'claimed',
   formerClaimedBy?: string,
+  options?: {
+    topic?: string;
+    channelName?: string;
+    removeRoleIds?: string[];
+  },
 ): Promise<void> {
   const staffRoleId = getField(topic, 'staff');
   const ownerId = getField(topic, 'owner');
-  const claimedBy = getField(topic, 'claimed_by');
-  const claimedModerators = (claimedBy ?? '').split(',').map((id) => id.trim()).filter(Boolean);
-  const users = (getField(topic, 'users') ?? '').split(',').map((value) => value.trim()).filter(Boolean);
+  const claimedModerators = (getField(topic, 'claimed_by') ?? '').split(',').map((id) => id.trim()).filter(Boolean);
+  const users = (getField(topic, 'users') ?? '').split(',').map((id) => id.trim()).filter(Boolean);
 
   if (!channel.guild.members.me || !ownerId) {
     throw new Error('Ticket privacy could not resolve the bot or ticket owner.');
   }
 
-  const textPermissions = [
-    PermissionFlagsBits.ViewChannel,
-    PermissionFlagsBits.SendMessages,
-    PermissionFlagsBits.ReadMessageHistory,
-  ];
-  const memberAllow = [
-    ...textPermissions,
-    PermissionFlagsBits.AttachFiles,
-    PermissionFlagsBits.EmbedLinks,
-  ];
-
-  if (staffRoleId && staffRoleId !== 'none') {
-    await setChannelPermissionOverwrite(
-      channel.id,
-      staffRoleId,
-      mode === 'claimed' ? [] : textPermissions,
-      mode === 'claimed' ? textPermissions : [],
-      0,
-      mode === 'claimed'
-        ? 'Hide claimed ticket from unassigned department staff'
-        : 'Restore department staff access to ticket',
-    );
-  }
-
-  const formerClaimantIds = (formerClaimedBy ?? '')
-    .split(',')
-    .map((id) => id.trim())
-    .filter(Boolean);
-
-  for (const formerClaimantId of formerClaimantIds) {
-    if (
-      formerClaimantId === ownerId ||
-      claimedModerators.includes(formerClaimantId)
-    ) {
-      continue;
-    }
-
-    await setChannelPermissionOverwrite(
-      channel.id,
-      formerClaimantId,
-      [],
-      [],
-      1,
-      'Clear former claimant ticket override',
-    );
-  }
-
-  const participants = new Set<string>([
-    ownerId,
-    ...users,
-    ...(mode === 'claimed' ? claimedModerators : []),
+  const existing = [...channel.permissionOverwrites.cache.values()].map((overwrite) => ({
+    id: overwrite.id,
+    kind: overwrite.type === 0 ? 'role' as const : 'member' as const,
+    allow: overwrite.allow.bitfield.toString(),
+    deny: overwrite.deny.bitfield.toString(),
+  }));
+  const roleIds = new Set<string>([
+    ...channel.guild.roles.cache.keys(),
+    ...existing.filter((overwrite) => overwrite.kind === 'role').map((overwrite) => overwrite.id),
   ]);
 
-  for (const userId of participants) {
-    if (!userId || userId === channel.guild.members.me.id) continue;
-    await setChannelPermissionOverwrite(channel.id, userId, memberAllow, [], 1, 'Grant ticket participant access');
+  const plan = buildTicketVisibilityPlan({
+    existing,
+    roleIds,
+    staffRoleId,
+    ownerId,
+    userIds: users,
+    claimedModeratorIds: claimedModerators,
+    formerClaimantIds: (formerClaimedBy ?? '').split(',').map((id) => id.trim()).filter(Boolean),
+    removeRoleIds: options?.removeRoleIds,
+    mode,
+  });
+
+  const properties: {
+    topic?: string;
+    name?: string;
+    permissionOverwrites?: Array<{ id: string; allow?: Array<bigint | number | string>; deny?: Array<bigint | number | string> }>;
+  } = {};
+
+  if (options?.topic !== undefined && (channel.topic ?? '') !== options.topic) {
+    properties.topic = options.topic;
   }
+  if (options?.channelName !== undefined && channel.name !== options.channelName) {
+    properties.name = options.channelName;
+  }
+  if (plan.changed) {
+    properties.permissionOverwrites = plan.overwrites.map((overwrite) => ({
+      id: overwrite.id,
+      allow: [BigInt(overwrite.allow)],
+      deny: [BigInt(overwrite.deny)],
+    }));
+    for (const overwrite of plan.overwrites) {
+      if (overwrite.kind === 'role') roleIds.add(overwrite.id);
+    }
+  }
+
+  if (Object.keys(properties).length === 0) return;
+
+  await setChannelProperties(
+    channel.id,
+    properties,
+    roleIds,
+    'Synchronize SupportForge ticket metadata and privacy in one channel update',
+  );
+  if (properties.topic !== undefined) channel.topic = properties.topic;
+  if (properties.name !== undefined) channel.name = properties.name;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -3464,44 +3472,65 @@ async function applyTicketRouting(interaction: StringSelectMenuInteraction, depa
   );
 
   try {
-    await runChannelMutation(channel, 'Ticket routing update', async () => {
-      if (departmentChanged) {
-        if (!category) {
-          throw new Error('Destination department category could not be provisioned.');
-        }
-
-        await setChannelParent(
-          channel.id,
-          category.id,
-          'Move ticket to department category',
-        );
-        if (oldDepartment?.staffRoleId && oldDepartment.staffRoleId !== department.staffRoleId) await setChannelPermissionOverwrite(channel.id, oldDepartment.staffRoleId, [], [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory], 0, 'Remove previous department staff');
-        if (department.staffRoleId) await setChannelPermissionOverwrite(channel.id, department.staffRoleId, [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks], [], 0, 'Grant department staff');
-      }
-      await setChannelTopic(channel.id, newTopic, 'Update department and tag metadata');
-    });
-    channel.topic = newTopic;
-    updateRuntimeTicketState(channel, newTopic, status);
-
-    /*
-     * Rerouting can replace the department staff role while a ticket is already
-     * claimed. Reapply ticket visibility so the new department does not expose
-     * a private claimed ticket to unassigned staff.
-     */
-    await applyTicketVisibilityMode(
-      channel,
-      newTopic,
-      status === 'claimed' ? 'claimed' : 'unclaimed',
-    );
-
+    // The database owns routing metadata. A same-department tag change is
+    // intentionally message-only and must not rewrite channel topics or ACLs.
     await updatePersistedTicketMetadata(channel.id, {
       departmentId: department.id,
       tagId,
     }, interactionActor(interaction));
+
+    const syncFailures: string[] = [];
+    if (departmentChanged) {
+      if (!category) {
+        throw new Error('Destination department category could not be provisioned.');
+      }
+
+      try {
+        await setChannelParent(channel.id, category.id, 'Move ticket to department category');
+      } catch (error) {
+        syncFailures.push('Discord category');
+        console.warn('⚠️ Ticket routing was saved, but the category move is pending/failed:', error);
+      }
+
+      const oldRoleId = oldDepartment?.staffRoleId;
+      try {
+        await applyTicketVisibilityMode(
+          channel,
+          newTopic,
+          status === 'claimed' ? 'claimed' : 'unclaimed',
+          getField(topic, 'claimed_by'),
+          {
+            topic: newTopic,
+            removeRoleIds: oldRoleId && oldRoleId !== department.staffRoleId ? [oldRoleId] : [],
+          },
+        );
+      } catch (error) {
+        syncFailures.push('Discord topic/permissions');
+        console.warn('⚠️ Ticket routing was saved, but topic/permission synchronization is pending/failed:', error);
+      }
+    }
+
+    updateRuntimeTicketState(channel, channel.topic ?? topic, status);
     await updateMainMessage(channel, getField(newTopic, 'message'), status, newTopic);
-    await interaction.editReply({ content: '✅ Ticket routed to **' + department.name + ' → ' + (department.tags[tagId]?.name ?? 'tag') + '**.', components: [] });
-    if (config.supportCategoryId) await logTicketEvent(interaction.guild!, config.supportCategoryId, { ticketNumber: getField(newTopic, 'number') ?? 'unknown', event: 'ticket_routing_changed', actor: interaction.user.tag, actorId: interaction.user.id, actorName: interaction.user.tag, detail: 'Department=' + department.name + '; tag=' + (department.tags[tagId]?.name ?? tagId) + '.' });
-  } catch (error) { console.error('❌ Ticket routing update failed:', error); await interaction.editReply({ content: '❌ The ticket routing update failed.', components: [] }).catch(() => undefined); }
+    const destinationLabel = department.tags[tagId]?.name ?? 'tag';
+    await interaction.editReply({
+      content: syncFailures.length
+        ? '✅ Ticket routing saved as **' + department.name + ' → ' + destinationLabel + '**. Discord synchronization is pending or needs repair: ' + syncFailures.join(', ') + '.'
+        : '✅ Ticket routed to **' + department.name + ' → ' + destinationLabel + '**.',
+      components: [],
+    });
+    if (config.supportCategoryId) await logTicketEvent(interaction.guild!, config.supportCategoryId, {
+      ticketNumber: getField(newTopic, 'number') ?? 'unknown',
+      event: 'ticket_routing_changed',
+      actor: interaction.user.tag,
+      actorId: interaction.user.id,
+      actorName: interaction.user.tag,
+      detail: 'Department=' + department.name + '; tag=' + destinationLabel + '.',
+    });
+  } catch (error) {
+    console.error('❌ Ticket routing update failed:', error);
+    await interaction.editReply({ content: '❌ The ticket routing update failed.', components: [] }).catch(() => undefined);
+  }
 }
 
 async function changeTicketRoutingTag(interaction: StringSelectMenuInteraction): Promise<void> {
