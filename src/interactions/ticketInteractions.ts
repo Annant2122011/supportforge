@@ -861,6 +861,7 @@ async function applyTicketVisibilityMode(
   options?: {
     topic?: string;
     channelName?: string;
+    parentId?: string;
     removeRoleIds?: string[];
   },
 ): Promise<void> {
@@ -899,6 +900,7 @@ async function applyTicketVisibilityMode(
   const properties: {
     topic?: string;
     name?: string;
+    parentId?: string;
     permissionOverwrites?: Array<{ id: string; allow?: Array<bigint | number | string>; deny?: Array<bigint | number | string> }>;
   } = {};
 
@@ -907,6 +909,9 @@ async function applyTicketVisibilityMode(
   }
   if (options?.channelName !== undefined && channel.name !== options.channelName) {
     properties.name = options.channelName;
+  }
+  if (options?.parentId !== undefined && channel.parentId !== options.parentId) {
+    properties.parentId = options.parentId;
   }
   if (plan.changed) {
     properties.permissionOverwrites = plan.overwrites.map((overwrite) => ({
@@ -1469,17 +1474,12 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
       'claimed_by',
       remaining.join(','),
     );
-    await setChannelTopic(
-      channel.id,
-      newTopic,
-      'SupportForge moderator unclaimed from multi-moderator ticket',
-    ).catch(() => undefined);
-    channel.topic = newTopic;
     await applyTicketVisibilityMode(
       channel,
       newTopic,
       'claimed',
       interaction.user.id,
+      { topic: newTopic },
     );
     updateRuntimeTicketState(channel, newTopic, 'claimed');
     await updatePersistedTicketMetadata(channel.id, {
@@ -1509,8 +1509,6 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
     );
   }
 
-  await setChannelTopic(channel.id, newTopic, 'SupportForge last moderator unclaimed ticket').catch(() => undefined);
-  channel.topic = newTopic;
   await setPersistedTicketStatus(channel.id, 'open');
   await updatePersistedTicketMetadata(channel.id, {
     claimedByIds: [],
@@ -1519,7 +1517,7 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
       .map((id) => id.trim())
       .filter(Boolean),
   }, interactionActor(interaction));
-  await applyTicketVisibilityMode(channel, newTopic, 'unclaimed', interaction.user.id);
+  await applyTicketVisibilityMode(channel, newTopic, 'unclaimed', interaction.user.id, { topic: newTopic });
   updateRuntimeTicketState(channel, newTopic, 'open');
 
   const number = getField(newTopic, 'number') ?? 'unknown';
@@ -1926,26 +1924,19 @@ async function transition(
 
     if (newStatus === 'claimed') {
       try {
-        await setChannelTopic(
-          channel.id,
+        // Topic and ACL share PATCH /channels/{id}; apply them atomically so
+        // a claim does not consume two requests from the same route bucket.
+        await applyTicketVisibilityMode(
+          channel,
           newTopic,
-          'Persist SupportForge multi-moderator claim metadata',
+          'claimed',
+          undefined,
+          { topic: newTopic },
         );
-        channel.topic = newTopic;
       } catch (error) {
-        sideEffectFailures.push('ticket metadata topic');
+        sideEffectFailures.push('ticket metadata topic and permissions');
         console.warn(
-          '⚠️ Claimed ticket metadata topic update deferred; durable state will still be updated:',
-          error,
-        );
-      }
-
-      try {
-        await applyTicketVisibilityMode(channel, newTopic, 'claimed');
-      } catch (error) {
-        sideEffectFailures.push('ticket permissions');
-        console.warn(
-          '⚠️ Claimed ticket permission update deferred; durable state will still be updated:',
+          '⚠️ Claimed ticket topic/permission update deferred; durable state will still be updated:',
           error,
         );
       }
@@ -1965,31 +1956,20 @@ async function transition(
       newStatus === 'reopened'
     ) {
       try {
-        await setChannelTopic(
-          channel.id,
-          newTopic,
-          'Persist SupportForge ticket lifecycle metadata',
-        );
-        channel.topic = newTopic;
-      } catch (error) {
-        sideEffectFailures.push('ticket metadata topic');
-        console.warn(
-          '⚠️ Ticket lifecycle metadata topic update deferred; durable state will still be updated:',
-          error,
-        );
-      }
-
-      try {
+        // The lifecycle topic and permission plan must move together. Splitting
+        // them creates redundant channel edits and can hit Discord's channel
+        // mutation sublimit during repeated claim/reopen/pending actions.
         await applyTicketVisibilityMode(
           channel,
           newTopic,
           'unclaimed',
           getField(oldTopic, 'claimed_by'),
+          { topic: newTopic },
         );
       } catch (error) {
-        sideEffectFailures.push('ticket permissions');
+        sideEffectFailures.push('ticket metadata topic and permissions');
         console.warn(
-          '⚠️ Ticket permission update deferred; durable state will still be updated:',
+          '⚠️ Ticket lifecycle topic/permission update deferred; durable state will still be updated:',
           error,
         );
       }
@@ -3485,15 +3465,11 @@ async function applyTicketRouting(interaction: StringSelectMenuInteraction, depa
         throw new Error('Destination department category could not be provisioned.');
       }
 
-      try {
-        await setChannelParent(channel.id, category.id, 'Move ticket to department category');
-      } catch (error) {
-        syncFailures.push('Discord category');
-        console.warn('⚠️ Ticket routing was saved, but the category move is pending/failed:', error);
-      }
-
       const oldRoleId = oldDepartment?.staffRoleId;
       try {
+        // Moving the channel, updating routing metadata, and changing the
+        // staff ACL all target the same Modify Channel route. Submit them in
+        // one request to avoid a burst of consecutive PATCHes.
         await applyTicketVisibilityMode(
           channel,
           newTopic,
@@ -3501,12 +3477,13 @@ async function applyTicketRouting(interaction: StringSelectMenuInteraction, depa
           getField(topic, 'claimed_by'),
           {
             topic: newTopic,
+            parentId: category.id,
             removeRoleIds: oldRoleId && oldRoleId !== department.staffRoleId ? [oldRoleId] : [],
           },
         );
       } catch (error) {
-        syncFailures.push('Discord topic/permissions');
-        console.warn('⚠️ Ticket routing was saved, but topic/permission synchronization is pending/failed:', error);
+        syncFailures.push('Discord category/topic/permissions');
+        console.warn('⚠️ Ticket routing was saved, but channel category/topic/permission synchronization is pending/failed:', error);
       }
     }
 
