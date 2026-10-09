@@ -357,12 +357,12 @@ async function performQueuedChannelRename(
     // flight. An older completion must never clear that newer desired state.
     if (desiredChannelNames.get(channel.id) === newName) {
       desiredChannelNames.delete(channel.id);
-    }
 
-    const existingTimer = channelRenameRetryTimers.get(channel.id);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-      channelRenameRetryTimers.delete(channel.id);
+      const existingTimer = channelRenameRetryTimers.get(channel.id);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+        channelRenameRetryTimers.delete(channel.id);
+      }
     }
 
     console.log(
@@ -372,6 +372,10 @@ async function performQueuedChannelRename(
     const retryDelayMs = getRateLimitRetryDelayMs(error);
 
     if (retryDelayMs !== null) {
+      // This request may have been throttled after a newer name superseded it.
+      // Let the queued latest name run instead of scheduling a stale retry.
+      if (desiredChannelNames.get(channel.id) !== newName) return;
+
       console.warn(
         `⏳ Ticket rename delayed for ${Math.ceil(retryDelayMs / 1000)}s by Discord rate limit: ${channel.id}`,
       );
