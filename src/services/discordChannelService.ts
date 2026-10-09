@@ -53,7 +53,7 @@ function permissionListToBitfield(
   return result.toString();
 }
 
-function resolveDiscordRoute(method: DiscordMutationMethod, path: string): string {
+function resolveDiscordRoute(method: DiscordMutationMethod, path: string): `/${string}` {
   const permissionMatch = path.match(/^\/channels\/(\d+)\/permissions\/(\d+)$/);
   if (permissionMatch) {
     if (method === 'PATCH') {
