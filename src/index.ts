@@ -127,29 +127,106 @@ client.once('clientReady', (readyClient) => {
   startTicketRetentionScheduler(client);
   startAuditDailySummaryScheduler(client);
   startSupportForgeUpdateMonitor(client);
-  void Promise.all(
-    client.guilds.cache.map((guild) => removeLegacyCustomCommands(guild)),
-  ).catch((error) => console.warn('⚠️ Legacy settings command cleanup failed:', error));
-
-  // Repair previously provisioned Developer Audit infrastructure once at startup.
-  void Promise.all(client.guilds.cache.map(async (guild) => {
-    try {
-      const config = await getGuildConfig(guild.id);
-      const hasDeveloperSignal =
-        Boolean(config.auditDevChannelId || config.auditDeveloperRoleId) ||
-        guild.roles.cache.some((role) =>
-          !role.managed && role.name === 'developer-mode audit-log',
-        );
-      const parent = config.supportCategoryId
-        ? guild.channels.cache.get(config.supportCategoryId)
-        : undefined;
-      if (hasDeveloperSignal && parent?.type === ChannelType.GuildCategory) {
-        await ensureAuditDeveloperInfrastructure(guild, parent.id);
+  /*
+   * Run startup repairs sequentially across guilds. Parallel channel/role
+   * repairs create avoidable REST bursts on larger bot installations.
+   */
+  void (async () => {
+    for (const guild of client.guilds.cache.values()) {
+      try {
+        await removeLegacyCustomCommands(guild);
+      } catch (error) {
+        console.warn('⚠️ Legacy settings command cleanup failed for guild ' + guild.id + ':', error);
       }
-    } catch (error) {
-      console.warn('⚠️ Developer Audit startup repair failed for guild ' + guild.id + ':', error);
     }
-  }));
+  })();
+
+  /*
+   * Repair existing Developer Audit infrastructure, including stale config
+   * IDs and channels whose category was deleted or recreated. Do not silently
+   * skip a repair just because the configured category is missing from cache.
+   */
+  void (async () => {
+    for (const guild of client.guilds.cache.values()) {
+      try {
+        const config = await getGuildConfig(guild.id);
+        const hasDeveloperSignal =
+          Boolean(config.auditDevChannelId || config.auditDeveloperRoleId) ||
+          guild.roles.cache.some((role) =>
+            !role.managed && role.name === 'developer-mode audit-log',
+          );
+        if (!hasDeveloperSignal) continue;
+
+        let developerChannel: GuildBasedChannel | null | undefined =
+          config.auditDevChannelId
+            ? guild.channels.cache.get(config.auditDevChannelId)
+            : undefined;
+        if (!developerChannel && config.auditDevChannelId) {
+          developerChannel = await guild.channels.fetch(config.auditDevChannelId).catch(() => null);
+        }
+
+        if (developerChannel?.type !== ChannelType.GuildText) {
+          developerChannel = guild.channels.cache.find(
+            (candidate) =>
+              candidate.type === ChannelType.GuildText &&
+              candidate.topic?.startsWith('supportforge:audit-dev'),
+          );
+        }
+
+        let parent = config.supportCategoryId
+          ? guild.channels.cache.get(config.supportCategoryId)
+          : undefined;
+        if (!parent && config.supportCategoryId) {
+          parent = (await guild.channels.fetch(config.supportCategoryId).catch(() => null)) ?? undefined;
+        }
+
+        if (parent?.type !== ChannelType.GuildCategory) {
+          const existingParentId =
+            developerChannel?.type === ChannelType.GuildText
+              ? developerChannel.parentId
+              : null;
+          if (existingParentId) {
+            parent = guild.channels.cache.get(existingParentId) ??
+              (await guild.channels.fetch(existingParentId).catch(() => null)) ??
+              undefined;
+          }
+        }
+
+        if (parent?.type !== ChannelType.GuildCategory) {
+          let generalAudit: GuildBasedChannel | null | undefined =
+            config.auditChannelId
+              ? guild.channels.cache.get(config.auditChannelId)
+              : undefined;
+          if (!generalAudit && config.auditChannelId) {
+            generalAudit = await guild.channels.fetch(config.auditChannelId).catch(() => null);
+          }
+          if (generalAudit?.type !== ChannelType.GuildText) {
+            generalAudit = guild.channels.cache.find(
+              (candidate) =>
+                candidate.type === ChannelType.GuildText &&
+                candidate.topic?.startsWith('supportforge:audit guild='),
+            );
+          }
+          if (generalAudit?.type === ChannelType.GuildText && generalAudit.parentId) {
+            parent = guild.channels.cache.get(generalAudit.parentId) ??
+              (await guild.channels.fetch(generalAudit.parentId).catch(() => null)) ??
+              undefined;
+          }
+        }
+
+        if (parent?.type === ChannelType.GuildCategory) {
+          await ensureAuditDeveloperInfrastructure(guild, parent.id);
+        } else {
+          console.warn(
+            '⚠️ Developer Audit repair skipped for guild ' + guild.id +
+            ': no valid SupportForge parent category was found. Run /supportforge setup to recreate it.',
+          );
+        }
+      } catch (error) {
+        console.warn('⚠️ Developer Audit startup repair failed for guild ' + guild.id + ':', error);
+      }
+    }
+  })();
 });
 
 client.on('channelCreate', async (channel) => {
