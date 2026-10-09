@@ -2899,12 +2899,14 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       if (!isEnabled) {
         store.developerViewers.push(interaction.user.id);
       }
-      await member.roles.add(
-        infrastructure.role,
-        'SupportForge Developer Audit Mode enabled',
-      ).catch((error) => {
-        throw new Error('Could not grant the developer-mode audit-log role: ' + String(error));
-      });
+      if (!member.roles.cache.has(infrastructure.role.id)) {
+        await member.roles.add(
+          infrastructure.role,
+          'SupportForge Developer Audit Mode enabled',
+        ).catch((error) => {
+          throw new Error('Could not grant the developer-mode audit-log role: ' + String(error));
+        });
+      }
       await persist();
     } else if (interaction.customId === AUDIT_DEVELOPER_OFF_CUSTOM_ID) {
       await member.roles.remove(infrastructure.role, 'SupportForge Developer Audit Mode disabled').catch((error) => {
