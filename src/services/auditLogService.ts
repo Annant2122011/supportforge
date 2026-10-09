@@ -93,6 +93,8 @@ interface AuditGuildStore {
   panelEventCheckpoint: number;
   lastSetupDate: string | null;
   developerBackfillChannelId: string | null;
+  developerBackfillProgressChannelId: string | null;
+  developerBackfillLastEventId: string | null;
 }
 
 interface AuditStore {
@@ -187,6 +189,8 @@ function cloneGuildStore(): AuditGuildStore {
     panelEventCheckpoint: 0,
     lastSetupDate: null,
     developerBackfillChannelId: null,
+    developerBackfillProgressChannelId: null,
+    developerBackfillLastEventId: null,
   };
 }
 
@@ -392,6 +396,14 @@ async function load(): Promise<AuditStore> {
       developerBackfillChannelId:
         typeof store.developerBackfillChannelId === 'string'
           ? store.developerBackfillChannelId
+          : null,
+      developerBackfillProgressChannelId:
+        typeof store.developerBackfillProgressChannelId === 'string'
+          ? store.developerBackfillProgressChannelId
+          : null,
+      developerBackfillLastEventId:
+        typeof store.developerBackfillLastEventId === 'string'
+          ? store.developerBackfillLastEventId
           : null,
     };
   }
@@ -777,44 +789,52 @@ async function backfillDeveloperAuditChannel(guild: Guild, channel: TextChannel)
   const store = getGuildStore(current, guild.id);
 
   /*
-   * A recent-message check is not sufficient because developer audit channels
-   * can contain more than 100 messages. Track which concrete channel was
-   * backfilled so older history is never duplicated, while a newly recreated
-   * developer channel still receives the retained history.
+   * A channel is considered backfilled only after every retained event has
+   * been delivered. Finding one recent event is not proof that older entries
+   * were sent. Persist a per-event cursor so a restart or rate-limit failure
+   * resumes at the first unsent event rather than silently skipping history.
    */
   if (store.developerBackfillChannelId === channel.id) {
     return;
   }
 
-  const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+  let startIndex = 0;
   if (
-    recent?.some(
-      (message) =>
-        message.author.id === channel.client.user?.id &&
-        message.embeds.some((embed) =>
-          (embed.title ?? '').startsWith('SupportForge Audit • '),
-        ),
-    )
+    store.developerBackfillProgressChannelId === channel.id &&
+    store.developerBackfillLastEventId
   ) {
-    store.developerBackfillChannelId = channel.id;
-    await persist();
-    return;
-  }
-
-  let allSent = true;
-  for (const event of store.events) {
-    try {
-      await sendAuditEntry(channel, event);
-    } catch (error) {
-      allSent = false;
-      console.warn('⚠️ Could not backfill developer audit entry:', error);
+    const checkpointIndex = store.events.findIndex(
+      (event) => event.id === store.developerBackfillLastEventId,
+    );
+    if (checkpointIndex >= 0) {
+      startIndex = checkpointIndex + 1;
     }
   }
 
-  if (allSent) {
-    store.developerBackfillChannelId = channel.id;
+  for (let index = startIndex; index < store.events.length; index += 1) {
+    const event = store.events[index];
+    if (!event) continue;
+
+    try {
+      await sendAuditEntry(channel, event);
+    } catch (error) {
+      console.warn(
+        '⚠️ Developer audit backfill paused at event ' + event.id +
+        '; it will resume on the next repair attempt:',
+        error,
+      );
+      return;
+    }
+
+    store.developerBackfillProgressChannelId = channel.id;
+    store.developerBackfillLastEventId = event.id;
     await persist();
   }
+
+  store.developerBackfillChannelId = channel.id;
+  store.developerBackfillProgressChannelId = null;
+  store.developerBackfillLastEventId = null;
+  await persist();
 }
 
 async function createOrRepairAuditDeveloperInfrastructure(
@@ -847,12 +867,12 @@ async function createOrRepairAuditDeveloperInfrastructure(
     if (byTopic?.type === ChannelType.GuildText) channel = byTopic;
   }
 
+  let ambiguousDeveloperRole = false;
   if (!role && channel) {
     /*
-     * Recovery is allowed only when the existing SupportForge developer
-     * channel explicitly grants ViewChannel to exactly one role with the
-     * expected developer-role name. This is stronger evidence than a role
-     * name alone and preserves existing team membership after config loss.
+     * First recover the role from the existing channel ACL when there is
+     * exactly one matching candidate. This preserves current team membership
+     * when the saved role ID is stale or missing.
      */
     const aclEvidenceRoles = [...channel.permissionOverwrites.cache.values()]
       .filter((overwrite) =>
@@ -872,6 +892,7 @@ async function createOrRepairAuditDeveloperInfrastructure(
         '♻️ Recovered the SupportForge developer audit role from the existing channel permission overwrite.',
       );
     } else if (aclEvidenceRoles.length > 1) {
+      ambiguousDeveloperRole = true;
       console.warn(
         '⚠️ Multiple developer-role candidates were found in the audit channel ACL; refusing to guess which role owns developer access.',
       );
@@ -879,12 +900,12 @@ async function createOrRepairAuditDeveloperInfrastructure(
   }
 
   /*
-   * Role names by themselves are not ownership proof. Create a new role only
-   * when there is no configured role and no uniquely ACL-evidenced role to
-   * recover from the existing SupportForge developer channel.
+   * If a channel has been positively identified as SupportForge's developer
+   * channel, a unique role with the reserved name is a safe recovery target
+   * even if its previous overwrite was removed. Never create a replacement
+   * role when an existing team role can be recovered unambiguously.
    */
-  let ambiguousDeveloperRole = false;
-  if (!role && !channel) {
+  if (!role && !ambiguousDeveloperRole) {
     const namedCandidates = [...guild.roles.cache.values()].filter(
       (candidate) => !candidate.managed && candidate.name === AUDIT_DEVELOPER_ROLE_NAME,
     );
@@ -967,44 +988,63 @@ async function createOrRepairAuditDeveloperInfrastructure(
       await channel.setParent(parentCategoryId, { lockPermissions: false }).catch(() => undefined);
     }
 
-    if (!overwriteHasPermissionState(
-      channel,
-      guild.roles.everyone.id,
-      [],
-      [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
-    )) {
-      await channel.permissionOverwrites.edit(guild.roles.everyone.id, {
-        ViewChannel: false,
-        SendMessages: false,
-        ReadMessageHistory: false,
-      }, { reason: 'Keep SupportForge developer audit channel private' });
-    }
+    const expectedOverwrites = [
+      {
+        id: guild.roles.everyone.id,
+        type: 0 as const,
+        allow: [],
+        deny: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+        ],
+      },
+      {
+        id: bot.id,
+        type: 1 as const,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+          PermissionFlagsBits.EmbedLinks,
+        ],
+        deny: [],
+      },
+      {
+        id: role.id,
+        type: 0 as const,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.ReadMessageHistory,
+        ],
+        deny: [PermissionFlagsBits.SendMessages],
+      },
+    ];
 
-    if (!overwriteHasPermissionState(
-      channel,
-      bot.id,
-      [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks],
-      [],
-    )) {
-      await channel.permissionOverwrites.edit(bot.id, {
-        ViewChannel: true,
-        SendMessages: true,
-        ReadMessageHistory: true,
-        EmbedLinks: true,
-      }, { reason: 'Allow SupportForge to publish developer audit entries' });
-    }
+    const permissionBits = (permissions: readonly bigint[]): bigint =>
+      permissions.reduce((combined, permission) => combined | permission, 0n);
+    const aclIsExact =
+      channel.permissionOverwrites.cache.size === expectedOverwrites.length &&
+      expectedOverwrites.every((expected) => {
+        const actual = channel.permissionOverwrites.cache.get(expected.id);
+        return Boolean(
+          actual &&
+          actual.allow.bitfield === permissionBits(expected.allow) &&
+          actual.deny.bitfield === permissionBits(expected.deny),
+        );
+      });
 
-    if (role && !overwriteHasPermissionState(
-      channel,
-      role.id,
-      [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
-      [PermissionFlagsBits.SendMessages],
-    )) {
-      await channel.permissionOverwrites.edit(role.id, {
-        ViewChannel: true,
-        ReadMessageHistory: true,
-        SendMessages: false,
-      }, { reason: 'Grant developer audit team read-only access' });
+    /*
+     * Replace the dedicated channel ACL in one PATCH. Editing only the
+     * expected overwrites leaves explicit member-level denies and unrelated
+     * role grants behind, which can block a legitimate developer from seeing
+     * the channel even when their developer role is allowed to view it.
+     */
+    if (!aclIsExact) {
+      await channel.permissionOverwrites.set(
+        expectedOverwrites,
+        'Repair the private SupportForge developer audit channel ACL',
+      );
     }
 
     await updateGuildConfig(guild.id, (current) => {
