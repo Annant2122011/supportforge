@@ -823,7 +823,7 @@ async function createOrRepairAuditDeveloperInfrastructure(
       )
       .map((overwrite) => guild.roles.cache.get(overwrite.id))
       .filter((candidate): candidate is Role =>
-        Boolean(candidate) &&
+        candidate !== undefined &&
         !candidate.managed &&
         candidate.name === AUDIT_DEVELOPER_ROLE_NAME,
       );
