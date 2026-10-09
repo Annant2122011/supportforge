@@ -112,6 +112,7 @@ const AUDIT_BACKUP_PATH = join(DATA_DIR, 'audit-log.backup.json');
 let state: AuditStore | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 let dailyScheduler: NodeJS.Timeout | null = null;
+const auditPanelRepairLocks = new Map<string, Promise<void>>();
 
 function normalizeAuditActor(
   category: PersistedAuditEntry['category'],
@@ -396,6 +397,37 @@ async function load(): Promise<AuditStore> {
   };
 
   return state;
+}
+
+function overwriteHasPermissionState(
+  channel: TextChannel,
+  overwriteId: string,
+  allow: readonly bigint[],
+  deny: readonly bigint[],
+): boolean {
+  const current = channel.permissionOverwrites.cache.get(overwriteId);
+  if (!current) return false;
+  return allow.every((permission) => current.allow.has(permission) && !current.deny.has(permission)) &&
+    deny.every((permission) => current.deny.has(permission) && !current.allow.has(permission));
+}
+
+async function ensureAuditPanelOnce(guild: Guild, channel: TextChannel): Promise<void> {
+  const existing = auditPanelRepairLocks.get(channel.id);
+  if (existing) {
+    await existing;
+    return;
+  }
+
+  const repair = ensureAuditPanel(guild, channel);
+  auditPanelRepairLocks.set(channel.id, repair);
+  try {
+    await repair;
+  } catch (error) {
+    if (auditPanelRepairLocks.get(channel.id) === repair) {
+      auditPanelRepairLocks.delete(channel.id);
+    }
+    throw error;
+  }
 }
 
 function getGuildStore(current: AuditStore, guildId: string): AuditGuildStore {
@@ -845,7 +877,21 @@ async function createOrRepairAuditDeveloperInfrastructure(
    * when there is no configured role and no uniquely ACL-evidenced role to
    * recover from the existing SupportForge developer channel.
    */
-  if (!role && bot.permissions.has(PermissionFlagsBits.ManageRoles)) {
+  let ambiguousDeveloperRole = false;
+  if (!role && !channel) {
+    const namedCandidates = [...guild.roles.cache.values()].filter(
+      (candidate) => !candidate.managed && candidate.name === AUDIT_DEVELOPER_ROLE_NAME,
+    );
+    if (namedCandidates.length === 1) {
+      role = namedCandidates[0]!;
+      console.warn('♻️ Recovered the unique SupportForge developer audit role by its reserved role name.');
+    } else if (namedCandidates.length > 1) {
+      ambiguousDeveloperRole = true;
+      console.warn('⚠️ Multiple roles use the reserved developer audit role name; refusing to choose one arbitrarily.');
+    }
+  }
+
+  if (!role && !ambiguousDeveloperRole && bot.permissions.has(PermissionFlagsBits.ManageRoles)) {
     role = await guild.roles.create({
       name: AUDIT_DEVELOPER_ROLE_NAME,
       mentionable: false,
@@ -854,6 +900,14 @@ async function createOrRepairAuditDeveloperInfrastructure(
       console.warn('⚠️ Could not create the developer audit role:', error);
       return null;
     });
+  }
+
+  if (!role) {
+    throw new Error(
+      ambiguousDeveloperRole
+        ? 'Multiple developer audit roles exist and no configured role ID identifies the correct team.'
+        : 'The SupportForge developer audit role is unavailable. Grant Manage Roles or configure the existing developer role ID.',
+    );
   }
 
   if (role) {
@@ -907,25 +961,44 @@ async function createOrRepairAuditDeveloperInfrastructure(
       await channel.setParent(parentCategoryId, { lockPermissions: false }).catch(() => undefined);
     }
 
-    await channel.permissionOverwrites.edit(guild.roles.everyone.id, {
-      ViewChannel: false,
-      SendMessages: false,
-      ReadMessageHistory: false,
-    }).catch(() => undefined);
+    if (!overwriteHasPermissionState(
+      channel,
+      guild.roles.everyone.id,
+      [],
+      [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+    )) {
+      await channel.permissionOverwrites.edit(guild.roles.everyone.id, {
+        ViewChannel: false,
+        SendMessages: false,
+        ReadMessageHistory: false,
+      }, 'Keep SupportForge developer audit channel private');
+    }
 
-    await channel.permissionOverwrites.edit(bot.id, {
-      ViewChannel: true,
-      SendMessages: true,
-      ReadMessageHistory: true,
-      EmbedLinks: true,
-    }).catch(() => undefined);
+    if (!overwriteHasPermissionState(
+      channel,
+      bot.id,
+      [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks],
+      [],
+    )) {
+      await channel.permissionOverwrites.edit(bot.id, {
+        ViewChannel: true,
+        SendMessages: true,
+        ReadMessageHistory: true,
+        EmbedLinks: true,
+      }, 'Allow SupportForge to publish developer audit entries');
+    }
 
-    if (role) {
+    if (role && !overwriteHasPermissionState(
+      channel,
+      role.id,
+      [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+      [PermissionFlagsBits.SendMessages],
+    )) {
       await channel.permissionOverwrites.edit(role.id, {
         ViewChannel: true,
         ReadMessageHistory: true,
         SendMessages: false,
-      }).catch(() => undefined);
+      }, 'Grant developer audit team read-only access');
     }
 
     await updateGuildConfig(guild.id, (current) => {
@@ -985,15 +1058,20 @@ export async function getOrCreateAuditChannel(
     );
 
     for (const roleId of currentStaffRoleIds) {
+      if (overwriteHasPermissionState(
+        existing,
+        roleId,
+        [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+        [PermissionFlagsBits.SendMessages],
+      )) continue;
+
       await existing.permissionOverwrites.edit(roleId, {
         ViewChannel: true,
         ReadMessageHistory: true,
         SendMessages: false,
       }).catch((error) => {
-        console.warn(
-          `⚠️ Could not synchronize audit access for staff role ${roleId}:`,
-          error,
-        );
+        console.warn('⚠️ Could not synchronize audit access for staff role ' + roleId + ':', error);
+        throw error;
       });
     }
 
@@ -1026,7 +1104,7 @@ export async function getOrCreateAuditChannel(
       existing,
       'This private channel stores SupportForge’s durable operational audit history. It records important ticket lifecycle actions, configuration changes, retention decisions, repairs, and other administrative events with responsible users and timestamps.',
     );
-    await ensureAuditPanel(guild, existing);
+    await ensureAuditPanelOnce(guild, existing);
     return existing;
   }
 
@@ -1080,7 +1158,7 @@ export async function getOrCreateAuditChannel(
     'This private channel stores SupportForge’s durable operational audit history. It records important ticket lifecycle actions, configuration changes, retention decisions, repairs, and other administrative events with responsible users and timestamps.',
   );
 
-  await ensureAuditPanel(guild, channel);
+  await ensureAuditPanelOnce(guild, channel);
   return channel;
 }
 
@@ -2558,11 +2636,17 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
      * department staff role. When config was lost, verify membership against
      * the role overwrite on the identified SupportForge developer channel.
      */
+    const namedDeveloperRoles = [...interaction.guild.roles.cache.values()].filter(
+      (role) => !role.managed && role.name === AUDIT_DEVELOPER_ROLE_NAME,
+    );
+    const uniqueNamedDeveloperRole = namedDeveloperRoles.length === 1 ? namedDeveloperRoles[0] : null;
+
     const hasDeveloperRole =
       Boolean(
         member &&
         (
           (config.auditDeveloperRoleId && member.roles.cache.has(config.auditDeveloperRoleId)) ||
+          (uniqueNamedDeveloperRole && member.roles.cache.has(uniqueNamedDeveloperRole.id)) ||
           (
             developerChannelCandidate?.type === ChannelType.GuildText &&
             [...developerChannelCandidate.permissionOverwrites.cache.values()].some((overwrite) => {

@@ -96,7 +96,15 @@ const client = new Client({
   },
 });
 
-configureDiscordChannelRest(client.rest);
+configureDiscordChannelRest(client.rest, (data) => {
+  if (!data || typeof data !== 'object') return;
+  const payload = data as { guild_id?: unknown; id?: unknown };
+  if (typeof payload.guild_id !== 'string' || typeof payload.id !== 'string') return;
+  const guild = client.guilds.cache.get(payload.guild_id);
+  if (!guild) return;
+  const manager = guild.channels as unknown as { _add?: (data: unknown, guild?: unknown) => unknown };
+  manager._add?.(data, guild);
+});
 client.rest.on(RESTEvents.RateLimited, (rateLimit) => {
   console.warn(
     '⚠️ Discord REST rate limit: ' +

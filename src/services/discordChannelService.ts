@@ -32,6 +32,7 @@ interface DeferredDiscordMutation {
 }
 
 let sharedRest: REST | null = null;
+let syncChannelData: ((data: unknown) => void) | null = null;
 const deferredMutations = new Map<string, DeferredDiscordMutation>();
 
 /**
@@ -39,8 +40,9 @@ const deferredMutations = new Map<string, DeferredDiscordMutation>();
  * global, route-bucket, major-parameter and resource sublimit accounting stays
  * consistent with the rest of the bot.
  */
-export function configureDiscordChannelRest(rest: REST): void {
+export function configureDiscordChannelRest(rest: REST, syncChannel?: (data: unknown) => void): void {
   sharedRest = rest;
+  syncChannelData = syncChannel ?? null;
 }
 
 function permissionListToBitfield(
@@ -172,9 +174,16 @@ async function executeDiscordMutation<T>(
   };
 
   try {
-    if (method === 'PATCH') return await sharedRest.patch(route, requestOptions) as T;
-    if (method === 'PUT') return await sharedRest.put(route, requestOptions) as T;
-    return await sharedRest.delete(route, requestOptions) as T;
+    let response: T;
+    if (method === 'PATCH') response = await sharedRest.patch(route, requestOptions) as T;
+    else if (method === 'PUT') response = await sharedRest.put(route, requestOptions) as T;
+    else response = await sharedRest.delete(route, requestOptions) as T;
+    if (method === 'PATCH' && response !== undefined) {
+      try { syncChannelData?.(response); } catch (cacheError) {
+        console.warn('⚠️ Could not synchronize the Discord channel cache after a successful mutation:', cacheError);
+      }
+    }
+    return response;
   } catch (error) {
     const retryAfterMs = getRateLimitRetryAfterMs(error);
     if (retryAfterMs === null || retryAfterMs <= MAX_INLINE_RATE_LIMIT_WAIT_MS) {
@@ -295,6 +304,38 @@ export async function setChannelName(
  * Sending them separately doubles the number of requests and can cause
  * unnecessary 429s when several ticket state changes happen close together.
  */
+export interface ChannelPropertiesUpdate {
+  name?: string;
+  topic?: string;
+  parentId?: string;
+  userLimit?: number;
+  permissionOverwrites?: ChannelPermissionOverwrite[];
+}
+
+/** Combine channel attributes and ACL changes into one Modify Channel request. */
+export async function setChannelProperties(
+  channelId: string,
+  properties: ChannelPropertiesUpdate,
+  roleIds: ReadonlySet<string>,
+  operation: string,
+): Promise<void> {
+  const body: Record<string, unknown> = {};
+  if (properties.name !== undefined) body.name = properties.name;
+  if (properties.topic !== undefined) body.topic = properties.topic;
+  if (properties.parentId !== undefined) body.parent_id = properties.parentId;
+  if (properties.userLimit !== undefined) body.user_limit = properties.userLimit;
+  if (properties.permissionOverwrites !== undefined) {
+    body.permission_overwrites = properties.permissionOverwrites.map((overwrite) => ({
+      id: overwrite.id,
+      type: roleIds.has(overwrite.id) ? 0 : 1,
+      allow: permissionListToBitfield(overwrite.allow),
+      deny: permissionListToBitfield(overwrite.deny),
+    }));
+  }
+  if (Object.keys(body).length === 0) return;
+  await discordRequest(channelId, 'PATCH', '/channels/' + channelId, body, operation);
+}
+
 export async function setChannelNameAndTopic(
   channelId: string,
   name: string,
