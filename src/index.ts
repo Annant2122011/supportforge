@@ -31,7 +31,7 @@ import {
   clearPanelActivity,
   recordTicketMessageForPanel,
 } from './services/panelActivityService';
-import { ensureDefaultChannelPurpose } from './services/channelPurposeService';
+import { ensureDefaultChannelPurpose, invalidateChannelPurposeCache } from './services/channelPurposeService';
 
 
 import { startTicketRetentionScheduler } from './services/ticketRetentionService';
@@ -40,6 +40,8 @@ import { clearVoiceTopicRetryState } from './services/voiceModeService';
 import { removeLegacyCustomCommands } from './services/advancedSettingsService';
 import {
   handleAuditInteraction,
+  ensureAuditDeveloperInfrastructure,
+  invalidateAuditChannelPanel,
   isSupportForgeManagedChannel,
   isSupportForgeManagedRole,
   logDiscordMutation,
@@ -128,6 +130,26 @@ client.once('clientReady', (readyClient) => {
   void Promise.all(
     client.guilds.cache.map((guild) => removeLegacyCustomCommands(guild)),
   ).catch((error) => console.warn('⚠️ Legacy settings command cleanup failed:', error));
+
+  // Repair previously provisioned Developer Audit infrastructure once at startup.
+  void Promise.all(client.guilds.cache.map(async (guild) => {
+    try {
+      const config = await getGuildConfig(guild.id);
+      const hasDeveloperSignal =
+        Boolean(config.auditDevChannelId || config.auditDeveloperRoleId) ||
+        guild.roles.cache.some((role) =>
+          !role.managed && role.name === 'developer-mode audit-log',
+        );
+      const parent = config.supportCategoryId
+        ? guild.channels.cache.get(config.supportCategoryId)
+        : undefined;
+      if (hasDeveloperSignal && parent?.type === ChannelType.GuildCategory) {
+        await ensureAuditDeveloperInfrastructure(guild, parent.id);
+      }
+    } catch (error) {
+      console.warn('⚠️ Developer Audit startup repair failed for guild ' + guild.id + ':', error);
+    }
+  }));
 });
 
 client.on('channelCreate', async (channel) => {
@@ -488,6 +510,25 @@ function formatExactMessageContent(content: string): string {
   const fence = backtick.repeat(Math.max(3, longestRun + 1));
   return fence + '\n' + content + '\n' + fence;
 }
+
+client.on('messageDelete', (message) => {
+  if (message.channel.type !== ChannelType.GuildText || message.author?.id !== client.user?.id) return;
+
+  const purposeWasDeleted = message.embeds.some((embed) =>
+    embed.title === '📝 SupportForge Channel Purpose' &&
+    embed.footer?.text === 'SupportForge • Channel Purpose',
+  );
+  if (purposeWasDeleted) invalidateChannelPurposeCache(message.channel.id);
+
+  const auditPanelWasDeleted = message.components.some((row) =>
+    row.components.some((component) =>
+      'customId' in component &&
+      typeof component.customId === 'string' &&
+      component.customId.startsWith('sf:audit:'),
+    ),
+  );
+  if (auditPanelWasDeleted) invalidateAuditChannelPanel(message.channel.id);
+});
 
 client.on('messageCreate', async (message) => {
   if (

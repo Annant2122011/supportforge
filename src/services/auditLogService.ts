@@ -113,6 +113,11 @@ let state: AuditStore | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 let dailyScheduler: NodeJS.Timeout | null = null;
 const auditPanelRepairLocks = new Map<string, Promise<void>>();
+const auditPanelEnsuredChannelIds = new Set<string>();
+
+export function invalidateAuditChannelPanel(channelId: string): void {
+  auditPanelEnsuredChannelIds.delete(channelId);
+}
 
 function normalizeAuditActor(
   category: PersistedAuditEntry['category'],
@@ -412,6 +417,8 @@ function overwriteHasPermissionState(
 }
 
 async function ensureAuditPanelOnce(guild: Guild, channel: TextChannel): Promise<void> {
+  if (auditPanelEnsuredChannelIds.has(channel.id)) return;
+
   const existing = auditPanelRepairLocks.get(channel.id);
   if (existing) {
     await existing;
@@ -422,14 +429,13 @@ async function ensureAuditPanelOnce(guild: Guild, channel: TextChannel): Promise
   auditPanelRepairLocks.set(channel.id, repair);
   try {
     await repair;
-  } catch (error) {
+    auditPanelEnsuredChannelIds.add(channel.id);
+  } finally {
     if (auditPanelRepairLocks.get(channel.id) === repair) {
       auditPanelRepairLocks.delete(channel.id);
     }
-    throw error;
   }
 }
-
 function getGuildStore(current: AuditStore, guildId: string): AuditGuildStore {
   current.guilds[guildId] ??= cloneGuildStore();
   return current.guilds[guildId];
@@ -971,7 +977,7 @@ async function createOrRepairAuditDeveloperInfrastructure(
         ViewChannel: false,
         SendMessages: false,
         ReadMessageHistory: false,
-      }, 'Keep SupportForge developer audit channel private');
+      }, { reason: 'Keep SupportForge developer audit channel private' });
     }
 
     if (!overwriteHasPermissionState(
@@ -985,7 +991,7 @@ async function createOrRepairAuditDeveloperInfrastructure(
         SendMessages: true,
         ReadMessageHistory: true,
         EmbedLinks: true,
-      }, 'Allow SupportForge to publish developer audit entries');
+      }, { reason: 'Allow SupportForge to publish developer audit entries' });
     }
 
     if (role && !overwriteHasPermissionState(
@@ -998,7 +1004,7 @@ async function createOrRepairAuditDeveloperInfrastructure(
         ViewChannel: true,
         ReadMessageHistory: true,
         SendMessages: false,
-      }, 'Grant developer audit team read-only access');
+      }, { reason: 'Grant developer audit team read-only access' });
     }
 
     await updateGuildConfig(guild.id, (current) => {
@@ -2115,7 +2121,10 @@ async function recordAndPublish(
    */
   try {
     const config = await getGuildConfig(guild.id);
-    if (config.auditDevChannelId || config.auditDeveloperRoleId) {
+    const reservedDeveloperRoleExists = guild.roles.cache.some(
+      (role) => !role.managed && role.name === AUDIT_DEVELOPER_ROLE_NAME,
+    );
+    if (config.auditDevChannelId || config.auditDeveloperRoleId || reservedDeveloperRoleExists) {
       const developerInfrastructure = await ensureAuditDeveloperInfrastructure(
         guild,
         parentCategoryId,

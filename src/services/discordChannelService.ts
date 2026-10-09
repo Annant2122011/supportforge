@@ -28,12 +28,15 @@ interface DeferredDiscordMutation {
   body?: Record<string, unknown>;
   operation: string;
   operations: Set<string>;
+  sequence: number;
+  retryAt: number;
   timer?: NodeJS.Timeout;
 }
 
 let sharedRest: REST | null = null;
 let syncChannelData: ((data: unknown) => void) | null = null;
 const deferredMutations = new Map<string, DeferredDiscordMutation>();
+let deferredMutationSequence = 0;
 
 /**
  * All SupportForge channel mutations share discord.js's REST manager so its
@@ -116,29 +119,45 @@ function deferredMutationKey(method: DiscordMutationMethod, path: string): strin
 }
 
 function scheduleDeferredMutation(
-  request: Omit<DeferredDiscordMutation, 'key' | 'timer' | 'operations'>,
+  request: Omit<DeferredDiscordMutation, 'key' | 'timer' | 'operations' | 'sequence' | 'retryAt'> & {
+    sequence?: number;
+  },
   retryAfterMs: number,
 ): void {
   const key = deferredMutationKey(request.method, request.path);
   const existing = deferredMutations.get(key);
   if (existing?.timer) clearTimeout(existing.timer);
 
+  const incomingSequence = request.sequence ?? ++deferredMutationSequence;
+  const incomingIsNewer = !existing || incomingSequence >= existing.sequence;
   const operations = new Set<string>(existing?.operations ?? []);
   operations.add(request.operation ?? 'channel mutation');
 
+  // For repeated channel PATCH requests, preserve newest desired state if an older
+  // in-flight request is rejected after a newer request has already queued.
+  const body = request.method === 'PATCH'
+    ? incomingIsNewer
+      ? { ...(existing?.body ?? {}), ...(request.body ?? {}) }
+      : { ...(request.body ?? {}), ...(existing?.body ?? {}) }
+    : request.body;
+
+  const retryAt = Math.max(
+    existing?.retryAt ?? 0,
+    Date.now() + Math.max(1_000, retryAfterMs) + RATE_LIMIT_SAFETY_MARGIN_MS,
+  );
   const merged: DeferredDiscordMutation = {
     key,
     channelId: request.channelId,
     method: request.method,
     path: request.path,
-    body: request.method === 'PATCH'
-      ? { ...(existing?.body ?? {}), ...(request.body ?? {}) }
-      : request.body,
-    operation: request.operation,
+    ...(body ? { body } : {}),
+    operation: incomingIsNewer ? request.operation : existing?.operation ?? request.operation,
     operations,
+    sequence: Math.max(existing?.sequence ?? 0, incomingSequence),
+    retryAt,
   };
 
-  const delay = Math.max(1_000, retryAfterMs) + RATE_LIMIT_SAFETY_MARGIN_MS;
+  const delay = Math.max(1_000, retryAt - Date.now());
   merged.timer = setTimeout(() => {
     void drainDeferredMutation(key);
   }, delay);
@@ -152,7 +171,6 @@ function scheduleDeferredMutation(
     '; retry_in=' + Math.ceil(delay / 1000) + 's; coalesced=' + operations.size,
   );
 }
-
 async function executeDiscordMutation<T>(
   channelId: string,
   method: DiscordMutationMethod,
@@ -246,6 +264,7 @@ async function drainDeferredMutation(key: string): Promise<void> {
         path: request.path,
         ...(request.body ? { body: request.body } : {}),
         operation: [...request.operations].slice(-4).join(' / '),
+        sequence: request.sequence,
       }, retryAfterMs);
       return;
     }

@@ -15,6 +15,11 @@ export type SupportForgeChannelPurpose =
   | 'managed';
 
 const purposeQueues = new Map<string, Promise<void>>();
+const purposeVerifiedChannels = new Set<string>();
+
+export function invalidateChannelPurposeCache(channelId: string): void {
+  purposeVerifiedChannels.delete(channelId);
+}
 
 const DEFAULT_PURPOSES: Record<
   SupportForgeChannelPurpose,
@@ -72,7 +77,7 @@ export async function ensureChannelPurposeMessage(
 ): Promise<void> {
   const purpose = description?.trim();
 
-  if (!purpose) {
+  if (!purpose || purposeVerifiedChannels.has(channel.id)) {
     return;
   }
 
@@ -99,9 +104,14 @@ export async function ensureChannelPurposeMessage(
 
     const recent = await channel.messages
       .fetch({ limit: 50 })
-      .catch(() => null);
+      .catch((error) => {
+        console.warn('⚠️ Could not verify the SupportForge purpose marker in channel ' + channel.id + ':', error);
+        return null;
+      });
 
-    const existing = recent?.find(
+    if (!recent) return;
+
+    const existing = recent.find(
       (message) =>
         message.author.id === botId &&
         message.embeds.some(
@@ -116,6 +126,7 @@ export async function ensureChannelPurposeMessage(
      * Once present, leave the original message in place.
      */
     if (existing) {
+      purposeVerifiedChannels.add(channel.id);
       return;
     }
 
@@ -128,6 +139,7 @@ export async function ensureChannelPurposeMessage(
     await channel.send({
       embeds: [embed],
     });
+    purposeVerifiedChannels.add(channel.id);
   } finally {
     release();
 
