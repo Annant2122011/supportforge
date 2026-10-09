@@ -26,6 +26,7 @@ interface DeferredDiscordMutation {
   method: DiscordMutationMethod;
   path: string;
   body?: Record<string, unknown>;
+  operation: string;
   operations: Set<string>;
   timer?: NodeJS.Timeout;
 }
@@ -131,6 +132,7 @@ function scheduleDeferredMutation(
     body: request.method === 'PATCH'
       ? { ...(existing?.body ?? {}), ...(request.body ?? {}) }
       : request.body,
+    operation: request.operation,
     operations,
   };
 
