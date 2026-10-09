@@ -2698,13 +2698,17 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
         .filter((id): id is string => Boolean(id)),
     );
 
-    const developerChannelCandidate = config.auditDevChannelId
+    const configuredDeveloperChannel = config.auditDevChannelId
       ? interaction.guild.channels.cache.get(config.auditDevChannelId)
-      : interaction.guild.channels.cache.find(
-          (candidate) =>
-            candidate.type === ChannelType.GuildText &&
-            candidate.topic?.startsWith(AUDIT_DEV_TOPIC),
-        );
+      : undefined;
+    const developerChannelCandidate =
+      configuredDeveloperChannel?.type === ChannelType.GuildText
+        ? configuredDeveloperChannel
+        : interaction.guild.channels.cache.find(
+            (candidate) =>
+              candidate.type === ChannelType.GuildText &&
+              candidate.topic?.startsWith(AUDIT_DEV_TOPIC),
+          );
 
     /*
      * A member of the actual developer-team role must be allowed to reach the
@@ -2803,9 +2807,41 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       return true;
     }
 
+    let parentCategory =
+      config.supportCategoryId
+        ? interaction.guild.channels.cache.get(config.supportCategoryId)
+        : undefined;
+
+    if (parentCategory?.type !== ChannelType.GuildCategory && config.supportCategoryId) {
+      parentCategory = (await interaction.guild.channels.fetch(config.supportCategoryId).catch(() => null)) ?? undefined;
+    }
+
+    if (parentCategory?.type !== ChannelType.GuildCategory) {
+      parentCategory = interaction.channel.parentId
+        ? interaction.guild.channels.cache.get(interaction.channel.parentId)
+        : undefined;
+    }
+
+    if (parentCategory?.type !== ChannelType.GuildCategory) {
+      const existingAuditChannel = await findAuditChannel(interaction.guild);
+      if (existingAuditChannel?.parentId) {
+        parentCategory = interaction.guild.channels.cache.get(existingAuditChannel.parentId) ??
+          (await interaction.guild.channels.fetch(existingAuditChannel.parentId).catch(() => null)) ??
+          undefined;
+      }
+    }
+
+    if (parentCategory?.type !== ChannelType.GuildCategory) {
+      await interaction.editReply({
+        content:
+          '❌ SupportForge could not locate its managed category, so it cannot safely create or repair audit-log-dev. Run /supportforge setup to restore the SupportForge category, then enable Developer View again.',
+      });
+      return true;
+    }
+
     const infrastructure = await ensureAuditDeveloperInfrastructure(
       interaction.guild,
-      config.supportCategoryId ?? interaction.channel.parentId ?? interaction.guild.id,
+      parentCategory.id,
     ).catch((error) => {
       console.warn('⚠️ Could not prepare developer audit infrastructure:', error);
       return null;
