@@ -7,6 +7,7 @@ import {
   EmbedBuilder,
   GatewayIntentBits,
   MessageFlags,
+  RESTEvents,
 } from 'discord.js';
 
 import { execute } from './commands/supportforge';
@@ -51,6 +52,7 @@ import { isFactoryResetInProgress } from './services/factoryResetService';
 import { startSupportForgeUpdateMonitor } from './services/updateService';
 import type { GuildBasedChannel, TextChannel } from 'discord.js';
 import { initializePersistence } from './core/persistence/provider';
+import { configureDiscordChannelRest } from './services/discordChannelService';
 
 const token = process.env.DISCORD_TOKEN;
 
@@ -88,7 +90,24 @@ const client = new Client({
   rest: {
     timeout: 15_000,
     retries: 3,
+    // Keep safely below Discord's documented default global ceiling.
+    globalRequestsPerSecond: 40,
+    invalidRequestWarningInterval: 100,
   },
+});
+
+configureDiscordChannelRest(client.rest);
+client.rest.on(RESTEvents.RateLimited, (rateLimit) => {
+  console.warn(
+    '⚠️ Discord REST rate limit: ' +
+    'method=' + rateLimit.method +
+    ' route=' + rateLimit.route +
+    ' scope=' + rateLimit.scope +
+    ' retry_after=' + rateLimit.retryAfter + 'ms' +
+    ' global=' + rateLimit.global +
+    ' major=' + rateLimit.majorParameter +
+    (rateLimit.sublimitTimeout ? ' sublimit=' + rateLimit.sublimitTimeout + 'ms' : ''),
+  );
 });
 
 client.once('clientReady', (readyClient) => {

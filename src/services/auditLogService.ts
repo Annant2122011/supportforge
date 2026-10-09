@@ -794,12 +794,57 @@ async function createOrRepairAuditDeveloperInfrastructure(
     if (configuredRole && !configuredRole.managed) role = configuredRole;
   }
 
-  /*
-   * Role names are not ownership proof. A server member can legitimately
-   * create a role with the same name, so only the persisted role ID may be
-   * reused. A missing configured role is recreated instead.
-   */
+  let channel = config.auditDevChannelId
+    ? guild.channels.cache.get(config.auditDevChannelId)
+    : undefined;
 
+  if (channel?.type !== ChannelType.GuildText) channel = undefined;
+
+  if (!channel) {
+    const byTopic = guild.channels.cache.find(
+      (candidate) =>
+        candidate.type === ChannelType.GuildText &&
+        candidate.topic?.startsWith(AUDIT_DEV_TOPIC),
+    );
+    if (byTopic?.type === ChannelType.GuildText) channel = byTopic;
+  }
+
+  if (!role && channel) {
+    /*
+     * Recovery is allowed only when the existing SupportForge developer
+     * channel explicitly grants ViewChannel to exactly one role with the
+     * expected developer-role name. This is stronger evidence than a role
+     * name alone and preserves existing team membership after config loss.
+     */
+    const aclEvidenceRoles = [...channel.permissionOverwrites.cache.values()]
+      .filter((overwrite) =>
+        overwrite.type === 0 &&
+        overwrite.allow.has(PermissionFlagsBits.ViewChannel),
+      )
+      .map((overwrite) => guild.roles.cache.get(overwrite.id))
+      .filter((candidate): candidate is Role =>
+        Boolean(candidate) &&
+        !candidate.managed &&
+        candidate.name === AUDIT_DEVELOPER_ROLE_NAME,
+      );
+
+    if (aclEvidenceRoles.length === 1) {
+      role = aclEvidenceRoles[0]!;
+      console.warn(
+        '♻️ Recovered the SupportForge developer audit role from the existing channel permission overwrite.',
+      );
+    } else if (aclEvidenceRoles.length > 1) {
+      console.warn(
+        '⚠️ Multiple developer-role candidates were found in the audit channel ACL; refusing to guess which role owns developer access.',
+      );
+    }
+  }
+
+  /*
+   * Role names by themselves are not ownership proof. Create a new role only
+   * when there is no configured role and no uniquely ACL-evidenced role to
+   * recover from the existing SupportForge developer channel.
+   */
   if (!role && bot.permissions.has(PermissionFlagsBits.ManageRoles)) {
     role = await guild.roles.create({
       name: AUDIT_DEVELOPER_ROLE_NAME,
@@ -815,21 +860,6 @@ async function createOrRepairAuditDeveloperInfrastructure(
     await updateGuildConfig(guild.id, (current) => {
       current.auditDeveloperRoleId = role!.id;
     });
-  }
-
-  let channel = config.auditDevChannelId
-    ? guild.channels.cache.get(config.auditDevChannelId)
-    : undefined;
-
-  if (channel?.type !== ChannelType.GuildText) channel = undefined;
-
-  if (!channel) {
-    const byTopic = guild.channels.cache.find(
-      (candidate) =>
-        candidate.type === ChannelType.GuildText &&
-        candidate.topic?.startsWith(AUDIT_DEV_TOPIC),
-    );
-    if (byTopic?.type === ChannelType.GuildText) channel = byTopic;
   }
 
   if (!channel) {
@@ -2514,11 +2544,45 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
         .filter((id): id is string => Boolean(id)),
     );
 
+    const developerChannelCandidate = config.auditDevChannelId
+      ? interaction.guild.channels.cache.get(config.auditDevChannelId)
+      : interaction.guild.channels.cache.find(
+          (candidate) =>
+            candidate.type === ChannelType.GuildText &&
+            candidate.topic?.startsWith(AUDIT_DEV_TOPIC),
+        );
+
+    /*
+     * A member of the actual developer-team role must be allowed to reach the
+     * Developer View controls even if that role was not configured as a
+     * department staff role. When config was lost, verify membership against
+     * the role overwrite on the identified SupportForge developer channel.
+     */
+    const hasDeveloperRole =
+      Boolean(
+        member &&
+        (
+          (config.auditDeveloperRoleId && member.roles.cache.has(config.auditDeveloperRoleId)) ||
+          (
+            developerChannelCandidate?.type === ChannelType.GuildText &&
+            [...developerChannelCandidate.permissionOverwrites.cache.values()].some((overwrite) => {
+              const evidencedRole = interaction.guild!.roles.cache.get(overwrite.id);
+              return overwrite.type === 0 &&
+                overwrite.allow.has(PermissionFlagsBits.ViewChannel) &&
+                Boolean(evidencedRole) &&
+                evidencedRole!.name === AUDIT_DEVELOPER_ROLE_NAME &&
+                member.roles.cache.has(overwrite.id);
+            })
+          )
+        ),
+      );
+
     const isModerator =
       Boolean(
         interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
         interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ||
-        member?.roles.cache.some((role) => staffRoleIds.has(role.id)),
+        member?.roles.cache.some((role) => staffRoleIds.has(role.id)) ||
+        hasDeveloperRole,
       );
 
     if (!isModerator) {

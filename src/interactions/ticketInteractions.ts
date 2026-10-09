@@ -27,6 +27,7 @@ import {
 } from '../services/configService';
 
 import { assertTicketStatusTransition } from '../core/domain/ticketLifecycle';
+import { classifyTicketRoutingComponent } from '../core/domain/ticketInteractionRouting';
 
 import { generateTranscript } from '../services/transcriptService';
 
@@ -4689,6 +4690,7 @@ export async function handleTicketInteraction(
     | ModalSubmitInteraction,
 ): Promise<void> {
   try {
+    const routingComponentRoute = classifyTicketRoutingComponent(interaction.customId);
     /*
      * Move/Restore is allowed to perform several Discord API operations,
      * but the button acknowledgement must happen immediately. Defer before
@@ -4710,6 +4712,10 @@ export async function handleTicketInteraction(
     }
 
     if (interaction.isStringSelectMenu()) {
+      if (routingComponentRoute === 'department-select') {
+        await changeTicketDepartment(interaction);
+        return;
+      }
       if (interaction.customId === 'ticket:report:target') {
         await handleReportTargetSelection(interaction);
         return;
@@ -4726,10 +4732,19 @@ export async function handleTicketInteraction(
         await handleTicketTagSelection(interaction);
         return;
       }
-      if (interaction.customId.startsWith('ticket:routing-tag:select:')) {
+      if (routingComponentRoute === 'routing-tag-select') {
         await changeTicketRoutingTag(interaction);
         return;
       }
+    }
+
+    if (
+      interaction.isButton() &&
+      (routingComponentRoute === 'department-navigation' ||
+       routingComponentRoute === 'routing-tag-navigation')
+    ) {
+      await handlePanelButton(interaction);
+      return;
     }
 
     if (
