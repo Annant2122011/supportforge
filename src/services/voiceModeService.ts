@@ -238,6 +238,10 @@ export async function endTicketVoiceMode(
   topic: string,
   status: TicketStatus,
   reason: string,
+  options?: {
+    deferTicketTopicUpdate?: boolean;
+    queueRename?: boolean;
+  },
 ): Promise<string> {
   const voiceId = getField(topic, 'voice_channel_id');
   const number = getField(topic, 'number') ?? 'unknown';
@@ -278,18 +282,28 @@ export async function endTicketVoiceMode(
   newTopic = removeField(newTopic, 'voice_started_at');
   newTopic = removeField(newTopic, 'voice_started_by');
   newTopic = removeField(newTopic, 'voice_channel_name');
-  newTopic = await updateVoiceTopic(
-    ticketChannel,
-    newTopic,
-    'Clear voice mode metadata for ticket #' + number,
-  );
 
-  const priority = getField(newTopic, 'priority') ?? 'normal';
-  void queueTicketChannelRename(
-    ticketChannel,
-    getTicketChannelName(number, status, priority as TicketPriority),
-    reason,
-  ).catch(() => undefined);
+  /*
+   * Lifecycle handlers can fold the cleared voice metadata into their single
+   * ticket-channel PATCH. This avoids a second topic update and duplicate
+   * rename when the same status transition already updates those fields.
+   */
+  if (!options?.deferTicketTopicUpdate) {
+    newTopic = await updateVoiceTopic(
+      ticketChannel,
+      newTopic,
+      'Clear voice mode metadata for ticket #' + number,
+    );
+  }
+
+  if (options?.queueRename !== false) {
+    const priority = getField(newTopic, 'priority') ?? 'normal';
+    void queueTicketChannelRename(
+      ticketChannel,
+      getTicketChannelName(number, status, priority as TicketPriority),
+      reason,
+    ).catch(() => undefined);
+  }
 
   return newTopic;
 }
