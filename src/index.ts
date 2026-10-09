@@ -520,13 +520,17 @@ client.on('messageDelete', (message) => {
   );
   if (purposeWasDeleted) invalidateChannelPurposeCache(message.channel.id);
 
-  const auditPanelWasDeleted = message.components.some((row) =>
-    row.components.some((component) =>
+  const auditPanelWasDeleted = message.components.some((row) => {
+    // Discord.js top-level components can include components without children
+    // (for example files/media). Only inspect action-row-like containers.
+    if (!('components' in row) || !Array.isArray(row.components)) return false;
+
+    return row.components.some((component) =>
       'customId' in component &&
       typeof component.customId === 'string' &&
       component.customId.startsWith('sf:audit:'),
-    ),
-  );
+    );
+  });
   if (auditPanelWasDeleted) invalidateAuditChannelPanel(message.channel.id);
 });
 
