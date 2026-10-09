@@ -33,7 +33,6 @@ import { classifyTicketRoutingComponent } from '../core/domain/ticketInteraction
 import { generateTranscript } from '../services/transcriptService';
 
 import {
-  setChannelParent,
   setChannelPermissionOverwrite,
   setChannelProperties,
   setChannelTopic,
@@ -44,7 +43,6 @@ import {
   ensureClosedCategory,
   ensureOpenCategory,
   getOptionalStatusCategory,
-  moveTicketToCategory,
 } from '../services/ticketStorageService';
 
 import { resetPanelActivity } from '../services/panelActivityService';
@@ -2486,6 +2484,7 @@ async function closeTicket(
           topic,
           'closed',
           'SupportForge voice mode ended because ticket was closed',
+          { deferTicketTopicUpdate: true, queueRename: false },
         )
       : topic;
 
@@ -2511,33 +2510,37 @@ async function closeTicket(
     );
 
     /*
-     * Persist transcript/closure metadata in the channel topic as well as the
-     * local lifecycle store. Reopen and retention use this metadata to find the
-     * previous transcript and calculate eligibility after a restart.
+     * Persist the topic, storage-category move, and channel name together.
+     * These properties share PATCH /channels/{id}; separate edits for every
+     * close make the channel route bucket a rate-limit hotspot.
      */
-    await setChannelTopic(
-      channel.id,
-      closedTopic,
-      'SupportForge persist closed ticket metadata',
-    ).catch((error) => {
+    const closedCategory = await ensureClosedCategory(interaction.guild!);
+    const closedChannelName = getTicketChannelName(
+      ticketNumber,
+      'closed',
+      await getEffectiveTicketPriority(channel.id, closedTopic),
+    );
+    let channelSyncFailed = false;
+    try {
+      await setChannelProperties(
+        channel.id,
+        {
+          topic: closedTopic,
+          name: closedChannelName,
+          parentId: closedCategory.id,
+        },
+        new Set<string>(),
+        'SupportForge persist closed ticket metadata and storage location',
+      );
+      channel.topic = closedTopic;
+      channel.name = closedChannelName;
+    } catch (error) {
+      channelSyncFailed = true;
       console.warn(
-        `⚠️ Could not persist closed ticket metadata in channel topic; local status remains authoritative for ticket #${ticketNumber}:`,
+        `⚠️ Ticket #${ticketNumber} is closed in durable storage, but its Discord topic/category/name update is pending or failed:`,
         error,
       );
-    });
-
-    channel.topic = closedTopic;
-
-    /*
-     * The dedicated close flow does not use transition('closed'), so it must
-     * explicitly move the ticket into the configured Closed storage bucket.
-     * Without this, closed tickets remain in an active department category and
-     * retention/storage rules cannot manage the lifecycle consistently.
-     */
-    await moveTicketToCategory(
-      channel,
-      await ensureClosedCategory(interaction.guild!),
-    );
+    }
 
     updateRuntimeTicketState(
       channel,
@@ -2546,29 +2549,12 @@ async function closeTicket(
     );
 
     await interaction.editReply(
-      `✅ Ticket **#${ticketNumber}** has been closed and its transcript has been saved.`,
+      channelSyncFailed
+        ? `⚠️ Ticket **#${ticketNumber}** is closed and its transcript has been saved, but the Discord topic/category/name update is pending or failed. Check the bot log for details.`
+        : `✅ Ticket **#${ticketNumber}** has been closed and its transcript has been saved.`,
     );
 
-    /*
-     * Background rename is intentionally started FIRST. Channel rename and
-     * message edits can share Discord's per-channel resource buckets, so
-     * giving the rename queue the first chance reduces visible delay without
-     * making the close interaction wait for Discord channel PATCH latency.
-     */
-    void queueTicketChannelRename(
-      channel,
-      getTicketChannelName(
-        ticketNumber,
-        'closed',
-        await getEffectiveTicketPriority(channel.id, topic),
-      ),
-      `Ticket #${ticketNumber} closed`,
-    ).catch((error) => {
-      console.error(
-        '⚠️ Failed to rename closed ticket:',
-        error,
-      );
-    });
+
 
     /*
      * Panel update happens after the state is committed and remains
