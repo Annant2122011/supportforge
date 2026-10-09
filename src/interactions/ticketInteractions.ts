@@ -1912,6 +1912,23 @@ async function transition(
       );
 
     /*
+     * Clear voice metadata before assembling the final channel update. The
+     * voice helper normally patches the ticket topic and queues a rename; the
+     * transition below now performs those changes together with permissions
+     * and category placement in one Modify Channel request.
+     */
+    if (newStatus !== 'claimed' && getField(oldTopic, 'voice_channel_id')) {
+      newTopic = await endTicketVoiceMode(
+        interaction.guild!,
+        channel,
+        newTopic,
+        newStatus,
+        'SupportForge voice mode ended because ticket status changed',
+        { deferTicketTopicUpdate: true, queueRename: false },
+      );
+    }
+
+    /*
      * Discord channel mutations are secondary side effects. A long Discord
      * rate limit must never prevent the durable lifecycle transition from
      * being recorded in PostgreSQL.
@@ -1921,22 +1938,69 @@ async function transition(
      * interaction.
      */
     const sideEffectFailures: string[] = [];
+    let destinationCategoryId: string | undefined;
+
+    try {
+      if (newStatus === 'closed') {
+        destinationCategoryId = (await ensureClosedCategory(interaction.guild!)).id;
+      } else if (newStatus === 'archived') {
+        destinationCategoryId = (await ensureArchiveCategory(interaction.guild!)).id;
+      } else if (newStatus === 'claimed' || newStatus === 'pending') {
+        const optionalCategory = await getOptionalStatusCategory(
+          interaction.guild!,
+          newStatus,
+        );
+        if (optionalCategory) destinationCategoryId = optionalCategory.id;
+      } else if (newStatus === 'reopened' || newStatus === 'open') {
+        const currentConfig = await getGuildConfig(interaction.guild!.id);
+        const departmentId = getField(oldTopic, 'department');
+        const departmentConfig = departmentId
+          ? currentConfig.departments[departmentId]
+          : undefined;
+        const departmentCategory = departmentConfig?.categoryId
+          ? interaction.guild!.channels.cache.get(departmentConfig.categoryId)
+          : undefined;
+
+        if (departmentCategory?.type === ChannelType.GuildCategory) {
+          destinationCategoryId = departmentCategory.id;
+        } else {
+          destinationCategoryId = (await ensureOpenCategory(interaction.guild!)).id;
+        }
+      }
+    } catch (storageError) {
+      sideEffectFailures.push('ticket storage category');
+      console.warn(
+        '⚠️ Ticket state was saved, but its storage category could not be prepared:',
+        storageError,
+      );
+    }
+
+    const ticketNumberForName = getField(newTopic, 'number') ?? 'unknown';
+    const desiredChannelName = getTicketChannelName(
+      ticketNumberForName,
+      newStatus,
+      await getEffectiveTicketPriority(channel.id, newTopic),
+    );
 
     if (newStatus === 'claimed') {
       try {
-        // Topic and ACL share PATCH /channels/{id}; apply them atomically so
-        // a claim does not consume two requests from the same route bucket.
+        // Ticket topic, channel name, optional status category, and ACL are
+        // sent together because they share the Modify Channel route bucket.
         await applyTicketVisibilityMode(
           channel,
           newTopic,
           'claimed',
           undefined,
-          { topic: newTopic },
+          {
+            topic: newTopic,
+            channelName: desiredChannelName,
+            ...(destinationCategoryId ? { parentId: destinationCategoryId } : {}),
+          },
         );
       } catch (error) {
-        sideEffectFailures.push('ticket metadata topic and permissions');
+        sideEffectFailures.push('ticket channel metadata/category/permissions');
         console.warn(
-          '⚠️ Claimed ticket topic/permission update deferred; durable state will still be updated:',
+          '⚠️ Claimed ticket channel synchronization is pending/failed; durable state will still be updated:',
           error,
         );
       }
@@ -1956,34 +2020,47 @@ async function transition(
       newStatus === 'reopened'
     ) {
       try {
-        // The lifecycle topic and permission plan must move together. Splitting
-        // them creates redundant channel edits and can hit Discord's channel
-        // mutation sublimit during repeated claim/reopen/pending actions.
         await applyTicketVisibilityMode(
           channel,
           newTopic,
           'unclaimed',
           getField(oldTopic, 'claimed_by'),
-          { topic: newTopic },
+          {
+            topic: newTopic,
+            channelName: desiredChannelName,
+            ...(destinationCategoryId ? { parentId: destinationCategoryId } : {}),
+          },
         );
       } catch (error) {
-        sideEffectFailures.push('ticket metadata topic and permissions');
+        sideEffectFailures.push('ticket channel metadata/category/permissions');
         console.warn(
-          '⚠️ Ticket lifecycle topic/permission update deferred; durable state will still be updated:',
+          '⚠️ Ticket lifecycle channel synchronization is pending/failed; durable state will still be updated:',
           error,
         );
       }
-    }
-
-    if (newStatus !== 'claimed' && getField(oldTopic, 'voice_channel_id')) {
-      newTopic = await endTicketVoiceMode(
-        interaction.guild!,
-        channel,
-        newTopic,
-        newStatus,
-        'SupportForge voice mode ended because ticket status changed',
-      );
-      updateRuntimeTicketState(channel, newTopic, newStatus);
+    } else {
+      try {
+        // Closed/archived transitions do not change ticket ACLs, but their
+        // topic, name, and storage category still fit in a single PATCH.
+        await setChannelProperties(
+          channel.id,
+          {
+            topic: newTopic,
+            name: desiredChannelName,
+            ...(destinationCategoryId ? { parentId: destinationCategoryId } : {}),
+          },
+          new Set<string>(),
+          'Synchronize SupportForge closed/archived ticket channel metadata',
+        );
+        channel.topic = newTopic;
+        channel.name = desiredChannelName;
+      } catch (error) {
+        sideEffectFailures.push('ticket channel metadata/category/name');
+        console.warn(
+          '⚠️ Closed/archived ticket channel synchronization is pending/failed; durable state will still be updated:',
+          error,
+        );
+      }
     }
 
     await setPersistedTicketStatus(
@@ -2017,81 +2094,7 @@ async function transition(
       newStatus,
     );
 
-    /*
-     * Storage sections are separate from the active support category.
-     * Closed and archived tickets are physically moved so moderators can
-     * distinguish active work from historical records.
-     */
-    try {
-      if (newStatus === 'closed') {
-        await moveTicketToCategory(
-          channel,
-          await ensureClosedCategory(interaction.guild!),
-        );
-      } else if (newStatus === 'archived') {
-        await moveTicketToCategory(
-          channel,
-          await ensureArchiveCategory(interaction.guild!),
-        );
-      } else if (newStatus === 'claimed' || newStatus === 'pending') {
-        const optionalCategory = await getOptionalStatusCategory(
-          interaction.guild!,
-          newStatus,
-        );
 
-        if (optionalCategory) {
-          await moveTicketToCategory(channel, optionalCategory);
-        }
-      } else if (newStatus === 'reopened' || newStatus === 'open') {
-        const currentConfig = await getGuildConfig(interaction.guild!.id);
-        const departmentId = getField(oldTopic, 'department');
-        const departmentConfig = departmentId
-          ? currentConfig.departments[departmentId]
-          : undefined;
-
-        const departmentCategory = departmentConfig?.categoryId
-          ? interaction.guild!.channels.cache.get(departmentConfig.categoryId)
-          : undefined;
-
-        const openCategory = await ensureOpenCategory(interaction.guild!);
-
-        const destination =
-          departmentCategory?.type === ChannelType.GuildCategory
-            ? departmentCategory
-            : openCategory;
-
-        if (destination.type === ChannelType.GuildCategory) {
-          await moveTicketToCategory(channel, destination);
-        }
-      }
-    } catch (storageError) {
-      console.warn(
-        '⚠️ Ticket storage category transition failed:',
-        storageError,
-      );
-    }
-
-    /*
-     * Keep the channel name synchronized with the lifecycle state.
-     * "reopened" intentionally uses the normal "open" name.
-     */
-    const ticketNumberForName =
-      getField(newTopic, 'number') ?? 'unknown';
-
-    void queueTicketChannelRename(
-      channel,
-      getTicketChannelName(
-        ticketNumberForName,
-        newStatus,
-        await getEffectiveTicketPriority(channel.id, newTopic),
-      ),
-      `Ticket #${ticketNumberForName} status changed to ${newStatus}`,
-    ).catch((error) => {
-      console.error(
-        `⚠️ Failed to rename ticket for status ${newStatus}:`,
-        error,
-      );
-    });
     /*
      * Refresh the panel immediately, then schedule a relocation to the
      * bottom of the conversation. This is especially important when a
