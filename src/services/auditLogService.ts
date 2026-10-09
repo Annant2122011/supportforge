@@ -990,11 +990,12 @@ async function createOrRepairAuditDeveloperInfrastructure(
       current.auditDevChannelId = channel!.id;
     });
   } else {
-    if (channel.name !== AUDIT_DEV_NAME) {
-      await channel.setName(AUDIT_DEV_NAME, 'SupportForge developer audit channel normalization').catch(() => undefined);
+    const existingChannel = channel!;
+    if (existingChannel.name !== AUDIT_DEV_NAME) {
+      await existingChannel.setName(AUDIT_DEV_NAME, 'SupportForge developer audit channel normalization').catch(() => undefined);
     }
-    if (channel.parentId !== parentCategoryId) {
-      await channel.setParent(parentCategoryId, { lockPermissions: false }).catch(() => undefined);
+    if (existingChannel.parentId !== parentCategoryId) {
+      await existingChannel.setParent(parentCategoryId, { lockPermissions: false }).catch(() => undefined);
     }
 
     const expectedOverwrites = [
@@ -1033,9 +1034,9 @@ async function createOrRepairAuditDeveloperInfrastructure(
     const permissionBits = (permissions: readonly bigint[]): bigint =>
       permissions.reduce((combined, permission) => combined | permission, 0n);
     const aclIsExact =
-      channel.permissionOverwrites.cache.size === expectedOverwrites.length &&
+      existingChannel.permissionOverwrites.cache.size === expectedOverwrites.length &&
       expectedOverwrites.every((expected) => {
-        const actual = channel.permissionOverwrites.cache.get(expected.id);
+        const actual = existingChannel.permissionOverwrites.cache.get(expected.id);
         return Boolean(
           actual &&
           actual.allow.bitfield === permissionBits(expected.allow) &&
@@ -1050,7 +1051,7 @@ async function createOrRepairAuditDeveloperInfrastructure(
      * the channel even when their developer role is allowed to view it.
      */
     if (!aclIsExact) {
-      await channel.permissionOverwrites.set(
+      await existingChannel.permissionOverwrites.set(
         expectedOverwrites,
         'Repair the private SupportForge developer audit channel ACL',
       );
