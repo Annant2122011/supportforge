@@ -854,14 +854,18 @@ async function createOrRepairAuditDeveloperInfrastructure(
     if (configuredRole && !configuredRole.managed) role = configuredRole;
   }
 
-  let channel: GuildBasedChannel | null | undefined = config.auditDevChannelId
-    ? guild.channels.cache.get(config.auditDevChannelId)
-    : undefined;
-  if (!channel && config.auditDevChannelId) {
-    channel = await guild.channels.fetch(config.auditDevChannelId).catch(() => null);
+  let channel: TextChannel | undefined;
+  if (config.auditDevChannelId) {
+    const cachedChannel = guild.channels.cache.get(config.auditDevChannelId);
+    if (cachedChannel?.type === ChannelType.GuildText) {
+      channel = cachedChannel;
+    } else {
+      const fetchedChannel = await guild.channels.fetch(config.auditDevChannelId).catch(() => null);
+      if (fetchedChannel?.type === ChannelType.GuildText) {
+        channel = fetchedChannel;
+      }
+    }
   }
-
-  if (channel?.type !== ChannelType.GuildText) channel = undefined;
 
   if (!channel) {
     const byTopic = guild.channels.cache.find(
