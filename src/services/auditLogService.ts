@@ -991,13 +991,6 @@ async function createOrRepairAuditDeveloperInfrastructure(
     });
   } else {
     const existingChannel = channel!;
-    if (existingChannel.name !== AUDIT_DEV_NAME) {
-      await existingChannel.setName(AUDIT_DEV_NAME, 'SupportForge developer audit channel normalization').catch(() => undefined);
-    }
-    if (existingChannel.parentId !== parentCategoryId) {
-      await existingChannel.setParent(parentCategoryId, { lockPermissions: false }).catch(() => undefined);
-    }
-
     const expectedOverwrites = [
       {
         id: guild.roles.everyone.id,
@@ -1050,11 +1043,31 @@ async function createOrRepairAuditDeveloperInfrastructure(
      * role grants behind, which can block a legitimate developer from seeing
      * the channel even when their developer role is allowed to view it.
      */
+    const channelUpdate: {
+      name?: string;
+      parent?: string;
+      lockPermissions?: false;
+      permissionOverwrites?: typeof expectedOverwrites;
+      reason: string;
+    } = {
+      reason: 'Repair SupportForge developer audit channel configuration',
+    };
+
+    if (existingChannel.name !== AUDIT_DEV_NAME) {
+      channelUpdate.name = AUDIT_DEV_NAME;
+    }
+    if (existingChannel.parentId !== parentCategoryId) {
+      channelUpdate.parent = parentCategoryId;
+      channelUpdate.lockPermissions = false;
+    }
     if (!aclIsExact) {
-      await existingChannel.permissionOverwrites.set(
-        expectedOverwrites,
-        'Repair the private SupportForge developer audit channel ACL',
-      );
+      channelUpdate.permissionOverwrites = expectedOverwrites;
+    }
+
+    if (Object.keys(channelUpdate).some((key) => key !== 'reason')) {
+      // Name, category placement, and access control all share the same
+      // Modify Channel route; repair them with one request instead of three.
+      await existingChannel.edit(channelUpdate);
     }
 
     await updateGuildConfig(guild.id, (current) => {
