@@ -877,11 +877,12 @@ async function createOrRepairAuditDeveloperInfrastructure(
   }
 
   let ambiguousDeveloperRole = false;
-  if (!role && channel) {
+  if (channel) {
     /*
-     * First recover the role from the existing channel ACL when there is
-     * exactly one matching candidate. This preserves current team membership
-     * when the saved role ID is stale or missing.
+     * A stale but still-valid saved role ID can point at a different role. If
+     * the identified SupportForge dev channel already grants access to the
+     * unique reserved developer role, that channel ACL is stronger evidence
+     * for the team members who should see it than the stale setting alone.
      */
     const aclEvidenceRoles = [...channel.permissionOverwrites.cache.values()]
       .filter((overwrite) =>
@@ -900,7 +901,10 @@ async function createOrRepairAuditDeveloperInfrastructure(
       console.warn(
         '♻️ Recovered the SupportForge developer audit role from the existing channel permission overwrite.',
       );
-    } else if (aclEvidenceRoles.length > 1) {
+    } else if (
+      aclEvidenceRoles.length > 1 &&
+      (!role || !aclEvidenceRoles.some((candidate) => candidate.id === role!.id))
+    ) {
       ambiguousDeveloperRole = true;
       console.warn(
         '⚠️ Multiple developer-role candidates were found in the audit channel ACL; refusing to guess which role owns developer access.',
