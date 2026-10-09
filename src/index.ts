@@ -154,6 +154,10 @@ client.once('clientReady', (readyClient) => {
           Boolean(config.auditDevChannelId || config.auditDeveloperRoleId) ||
           guild.roles.cache.some((role) =>
             !role.managed && role.name === 'developer-mode audit-log',
+          ) ||
+          guild.channels.cache.some((candidate) =>
+            candidate.type === ChannelType.GuildText &&
+            candidate.topic?.startsWith('supportforge:audit-dev'),
           );
         if (!hasDeveloperSignal) continue;
 
