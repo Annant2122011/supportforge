@@ -41,6 +41,8 @@ import {
 } from '../services/voiceModeService';
 
 import {
+  getPersistedTicket,
+  getPersistedTicketPriority,
   getPersistedTicketStatus,
   setPersistedTicketStatus,
   updatePersistedTicketMetadata,
@@ -75,7 +77,28 @@ async function getTicketContext(
     );
   }
 
-  const topic = channel.topic ?? '';
+  const rawTopic = channel.topic ?? '';
+  const persisted = await getPersistedTicket(channel.id).catch(() => undefined);
+
+  /*
+   * Persisted ticket fields are authoritative when available. Discord topic
+   * metadata remains the compatibility fallback for legacy tickets.
+   */
+  let topic = rawTopic;
+  if (persisted) {
+    topic = setField(topic, 'status', persisted.status);
+    if (persisted.priority) topic = setField(topic, 'priority', persisted.priority);
+    if (persisted.departmentId) topic = setField(topic, 'department', persisted.departmentId);
+    if (persisted.tagId) {
+      topic = setField(topic, 'tag', persisted.tagId);
+      topic = setField(topic, 'tags', persisted.tagId);
+    }
+    if (persisted.ownerId) topic = setField(topic, 'owner', persisted.ownerId);
+    if (persisted.participantIds.length) topic = setField(topic, 'users', persisted.participantIds.join(','));
+    else topic = removeField(topic, 'users');
+    if (persisted.claimedByIds.length) topic = setField(topic, 'claimed_by', persisted.claimedByIds.join(','));
+    else topic = removeField(topic, 'claimed_by');
+  }
 
   if (
     !topic.startsWith('supportforge:ticket')
@@ -183,6 +206,7 @@ async function audit(
     {
       ticketNumber:
         context.ticketNumber,
+      ticketChannelId: context.channel.id,
       event,
       actor:
         interaction.user.tag,
@@ -307,6 +331,18 @@ async function saveTopic(
       getTicketStatus(topic),
       'SupportForge voice mode ended by ticket command transition',
     );
+  }
+
+  /*
+   * PostgreSQL is the durable source of truth for ticket metadata. Priority
+   * changes intentionally avoid an immediate Discord channel PATCH because
+   * channel renames/topics are rate-limited. Before any later command writes
+   * the topic, merge the persisted priority back in so a status/assignment
+   * change can never resurrect an older priority from the Discord cache.
+   */
+  const persistedPriority = await getPersistedTicketPriority(context.channel.id);
+  if (persistedPriority) {
+    topic = setField(topic, 'priority', persistedPriority);
   }
 
   await setChannelTopic(
@@ -452,6 +488,11 @@ export async function executeTicketCommand(
       await setPersistedTicketStatus(
         context.channel.id,
         'archived',
+        {
+          id: interaction.user.id,
+          attribution: 'actorKnown',
+          confidence: 'high',
+        },
       );
 
       try {
@@ -1118,6 +1159,10 @@ export async function executeTicketCommand(
 
       await updatePersistedTicketMetadata(context.channel.id, {
         participantIds: [...users],
+      }, {
+        id: interaction.user.id,
+        attribution: 'actorKnown',
+        confidence: 'high',
       });
 
       await audit(
@@ -1173,6 +1218,11 @@ export async function executeTicketCommand(
       await updatePersistedTicketMetadata(
         context.channel.id,
         { priority },
+        {
+          id: interaction.user.id,
+          attribution: 'actorKnown',
+          confidence: 'high',
+        },
       );
 
       context.channel.topic = topic;
@@ -1264,6 +1314,7 @@ export async function executeTicketCommand(
       const events = await getTicketAuditHistory(
         context.guild.id,
         context.ticketNumber,
+        context.channel.id,
       );
 
       const recent = events.slice(-20).reverse();
@@ -1277,11 +1328,15 @@ No audit events have been recorded for this ticket yet.`,
         return;
       }
 
-      const lines = recent.map((event) => {
-        const timestamp = Math.floor(new Date(event.timestamp).getTime() / 1000);
+      const lines: string[] = [];
+      for (const event of recent) {
+        const timestampValue = new Date(event.timestamp).getTime();
+        const timestamp = Number.isFinite(timestampValue)
+          ? Math.floor(timestampValue / 1000)
+          : Math.floor(Date.now() / 1000);
         const detail = event.detail?.trim();
 
-        return (
+        const line =
           '• <t:' +
           timestamp +
           ':f> • **' +
@@ -1291,15 +1346,26 @@ No audit events have been recorded for this ticket yet.`,
             .join(' ') +
           '** • ' +
           (event.actorName || 'Unknown') +
-          (detail ? ' • ' + detail.slice(0, 220) : '')
-        );
-      });
+          (detail ? ' • ' + detail.slice(0, 180) : '');
 
+        const projected = lines.length
+          ? lines.join('\n') + '\n' + line
+          : line;
+
+        if (projected.length > 1_850) {
+          break;
+        }
+
+        lines.push(line);
+      }
+
+      const omitted = recent.length - lines.length;
       await interaction.editReply(
         `📜 **Recent history for ticket #${context.ticketNumber}**
 
 ` +
-          lines.join('\n'),
+          lines.join('\n') +
+          (omitted > 0 ? '\n\n…and ' + omitted + ' older event(s) were omitted to fit Discord’s message limit.' : ''),
       );
 
       return;

@@ -34,6 +34,7 @@ import {
 
 export interface AuditEvent {
   ticketNumber?: string;
+  ticketChannelId?: string;
   event: string;
   actor?: string;
   actorId?: string;
@@ -69,6 +70,7 @@ interface PersistedAuditEntry {
   discordAuditLogId?: string;
   timestamp: string;
   ticketNumber?: string;
+  ticketChannelId?: string;
   detail?: string;
 }
 
@@ -91,6 +93,8 @@ interface AuditGuildStore {
   panelEventCheckpoint: number;
   lastSetupDate: string | null;
   developerBackfillChannelId: string | null;
+  developerBackfillProgressChannelId: string | null;
+  developerBackfillLastEventId: string | null;
 }
 
 interface AuditStore {
@@ -110,6 +114,12 @@ const AUDIT_BACKUP_PATH = join(DATA_DIR, 'audit-log.backup.json');
 let state: AuditStore | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 let dailyScheduler: NodeJS.Timeout | null = null;
+const auditPanelRepairLocks = new Map<string, Promise<void>>();
+const auditPanelEnsuredChannelIds = new Set<string>();
+
+export function invalidateAuditChannelPanel(channelId: string): void {
+  auditPanelEnsuredChannelIds.delete(channelId);
+}
 
 function normalizeAuditActor(
   category: PersistedAuditEntry['category'],
@@ -179,6 +189,8 @@ function cloneGuildStore(): AuditGuildStore {
     panelEventCheckpoint: 0,
     lastSetupDate: null,
     developerBackfillChannelId: null,
+    developerBackfillProgressChannelId: null,
+    developerBackfillLastEventId: null,
   };
 }
 
@@ -227,119 +239,215 @@ async function load(): Promise<AuditStore> {
 
   await mkdir(DATA_DIR, { recursive: true });
 
+  let parsed: Partial<AuditStore> | undefined;
+  let primaryError: unknown;
+
   try {
-    let raw: string;
+    const raw = await readFile(AUDIT_PATH, 'utf8');
+    parsed = JSON.parse(raw) as Partial<AuditStore>;
+  } catch (error) {
+    primaryError = error;
+  }
 
+  if (!parsed) {
     try {
-      raw = await readFile(AUDIT_PATH, 'utf8');
-    } catch {
-      raw = await readFile(AUDIT_BACKUP_PATH, 'utf8');
-    }
-
-    let parsed: Partial<AuditStore>;
-    try {
-      parsed = JSON.parse(raw) as Partial<AuditStore>;
-    } catch {
       const backup = await readFile(AUDIT_BACKUP_PATH, 'utf8');
       parsed = JSON.parse(backup) as Partial<AuditStore>;
+      console.warn('⚠️ SupportForge primary audit data could not be loaded; using the backup audit store.');
+    } catch (backupError) {
+      const primaryCode = (primaryError as NodeJS.ErrnoException | undefined)?.code;
+      const backupCode = (backupError as NodeJS.ErrnoException | undefined)?.code;
+
+      if (primaryCode === 'ENOENT' && backupCode === 'ENOENT') {
+        state = {
+          version: 2,
+          guilds: {},
+        };
+        await persist();
+        return state;
+      }
+
+      throw new Error(
+        'SupportForge audit data could not be loaded safely. The primary and backup audit stores are unavailable or invalid. No audit history was discarded.',
+        { cause: backupError },
+      );
+    }
+  }
+
+  const rawGuilds = parsed?.guilds;
+  if (
+    !rawGuilds ||
+    typeof rawGuilds !== 'object' ||
+    Array.isArray(rawGuilds)
+  ) {
+    throw new Error(
+      'SupportForge audit data is malformed: the guild collection is invalid.',
+    );
+  }
+
+  const guilds: Record<string, AuditGuildStore> = {};
+
+  for (const [guildId, rawStore] of Object.entries(rawGuilds)) {
+    if (!rawStore || typeof rawStore !== 'object' || Array.isArray(rawStore)) {
+      throw new Error(
+        'SupportForge audit data is malformed for guild ' + guildId + '.',
+      );
     }
 
-    const rawGuilds = parsed.guilds ?? {};
-    const guilds: Record<string, AuditGuildStore> = {};
-
-    for (const [guildId, rawStore] of Object.entries(rawGuilds)) {
-      const store = rawStore as Partial<AuditGuildStore>;
-      guilds[guildId] = {
-        events: Array.isArray(store.events)
-          ? store.events.map((rawEvent) => {
-              const event = rawEvent as Partial<PersistedAuditEntry>;
-              return {
-                id: typeof event.id === 'string' ? event.id : randomUUID(),
-                guildId,
-                category:
-                  event.category === 'ticket' ||
+    const store = rawStore as Partial<AuditGuildStore>;
+    guilds[guildId] = {
+      events: Array.isArray(store.events)
+        ? store.events.map((rawEvent) => {
+            const event = rawEvent as Partial<PersistedAuditEntry>;
+            return {
+              id: typeof event.id === 'string' ? event.id : randomUUID(),
+              guildId,
+              category:
+                event.category === 'ticket' ||
+                event.category === 'settings' ||
+                event.category === 'system'
+                  ? event.category
+                  : 'system',
+              action:
+                typeof event.action === 'string' ? event.action : 'UNKNOWN',
+              ...normalizeAuditActor(
+                event.category === 'ticket' ||
                   event.category === 'settings' ||
                   event.category === 'system'
-                    ? event.category
-                    : 'system',
-                action:
-                  typeof event.action === 'string' ? event.action : 'UNKNOWN',
-                ...normalizeAuditActor(
-                  event.category === 'ticket' ||
-                    event.category === 'settings' ||
-                    event.category === 'system'
-                    ? event.category
-                    : 'system',
-                  event.actorId,
-                  event.actorName,
-                  event.actorAttribution,
-                  event.actorConfidence,
-                  event.discordAuditLogId,
-                ),
-                timestamp:
-                  typeof event.timestamp === 'string'
-                    ? event.timestamp
-                    : new Date().toISOString(),
-                ...(typeof event.ticketNumber === 'string'
-                  ? { ticketNumber: event.ticketNumber }
-                  : {}),
-                ...(typeof event.detail === 'string'
-                  ? { detail: event.detail }
-                  : {}),
-              };
-            })
-          : [],
-        summaries: store.summaries ?? {},
-        overallSummary: store.overallSummary ?? null,
-        accumulationEnabled: store.accumulationEnabled ?? true,
-        developerViewers: Array.isArray(store.developerViewers)
-          ? store.developerViewers.filter((id): id is string => typeof id === 'string')
-          : [],
-        developerViewModes:
-          store.developerViewModes &&
-          typeof store.developerViewModes === 'object'
-            ? Object.fromEntries(
-                Object.entries(store.developerViewModes).filter(
-                  ([id, mode]) =>
-                    typeof id === 'string' &&
-                    (mode === 'now' || mode === 'past_and_now'),
-                ),
-              )
-            : {},
-        developerViewStartedAt:
-          store.developerViewStartedAt &&
-          typeof store.developerViewStartedAt === 'object'
-            ? Object.fromEntries(
-                Object.entries(store.developerViewStartedAt).filter(
-                  ([id, timestamp]) =>
-                    typeof id === 'string' &&
-                    typeof timestamp === 'string',
-                ),
-              )
-            : {},
-        panelMessageId: store.panelMessageId ?? null,
-        restoreMessageId: store.restoreMessageId ?? null,
-        panelEventCheckpoint: store.panelEventCheckpoint ?? 0,
-        lastSetupDate: store.lastSetupDate ?? null,
-        developerBackfillChannelId: store.developerBackfillChannelId ?? null,
-      };
-    }
-
-    state = {
-      version: 2,
-      guilds,
+                  ? event.category
+                  : 'system',
+                event.actorId,
+                event.actorName,
+                event.actorAttribution,
+                event.actorConfidence,
+                event.discordAuditLogId,
+              ),
+              timestamp:
+                typeof event.timestamp === 'string'
+                  ? event.timestamp
+                  : new Date().toISOString(),
+              ...(typeof event.ticketNumber === 'string'
+                ? { ticketNumber: event.ticketNumber }
+                : {}),
+              ...(typeof event.detail === 'string'
+                ? { detail: event.detail }
+                : {}),
+            };
+          })
+        : [],
+      summaries:
+        store.summaries &&
+        typeof store.summaries === 'object' &&
+        !Array.isArray(store.summaries)
+          ? store.summaries
+          : {},
+      overallSummary:
+        typeof store.overallSummary === 'string'
+          ? store.overallSummary
+          : null,
+      accumulationEnabled:
+        typeof store.accumulationEnabled === 'boolean'
+          ? store.accumulationEnabled
+          : true,
+      developerViewers: Array.isArray(store.developerViewers)
+        ? store.developerViewers.filter((id): id is string => typeof id === 'string')
+        : [],
+      developerViewModes:
+        store.developerViewModes &&
+        typeof store.developerViewModes === 'object' &&
+        !Array.isArray(store.developerViewModes)
+          ? Object.fromEntries(
+              Object.entries(store.developerViewModes).filter(
+                ([id, mode]) =>
+                  typeof id === 'string' &&
+                  (mode === 'now' || mode === 'past_and_now'),
+              ),
+            )
+          : {},
+      developerViewStartedAt:
+        store.developerViewStartedAt &&
+        typeof store.developerViewStartedAt === 'object' &&
+        !Array.isArray(store.developerViewStartedAt)
+          ? Object.fromEntries(
+              Object.entries(store.developerViewStartedAt).filter(
+                ([id, timestamp]) =>
+                  typeof id === 'string' &&
+                  typeof timestamp === 'string',
+              ),
+            )
+          : {},
+      panelMessageId:
+        typeof store.panelMessageId === 'string'
+          ? store.panelMessageId
+          : null,
+      restoreMessageId:
+        typeof store.restoreMessageId === 'string'
+          ? store.restoreMessageId
+          : null,
+      panelEventCheckpoint:
+        Number.isInteger(store.panelEventCheckpoint) &&
+        Number(store.panelEventCheckpoint) >= 0
+          ? Number(store.panelEventCheckpoint)
+          : 0,
+      lastSetupDate:
+        typeof store.lastSetupDate === 'string'
+          ? store.lastSetupDate
+          : null,
+      developerBackfillChannelId:
+        typeof store.developerBackfillChannelId === 'string'
+          ? store.developerBackfillChannelId
+          : null,
+      developerBackfillProgressChannelId:
+        typeof store.developerBackfillProgressChannelId === 'string'
+          ? store.developerBackfillProgressChannelId
+          : null,
+      developerBackfillLastEventId:
+        typeof store.developerBackfillLastEventId === 'string'
+          ? store.developerBackfillLastEventId
+          : null,
     };
-  } catch {
-    state = {
-      version: 2,
-      guilds: {},
-    };
-    await persist();
   }
+
+  state = {
+    version: 2,
+    guilds,
+  };
 
   return state;
 }
 
+function overwriteHasPermissionState(
+  channel: TextChannel,
+  overwriteId: string,
+  allow: readonly bigint[],
+  deny: readonly bigint[],
+): boolean {
+  const current = channel.permissionOverwrites.cache.get(overwriteId);
+  if (!current) return false;
+  return allow.every((permission) => current.allow.has(permission) && !current.deny.has(permission)) &&
+    deny.every((permission) => current.deny.has(permission) && !current.allow.has(permission));
+}
+
+async function ensureAuditPanelOnce(guild: Guild, channel: TextChannel): Promise<void> {
+  if (auditPanelEnsuredChannelIds.has(channel.id)) return;
+
+  const existing = auditPanelRepairLocks.get(channel.id);
+  if (existing) {
+    await existing;
+    return;
+  }
+
+  const repair = ensureAuditPanel(guild, channel);
+  auditPanelRepairLocks.set(channel.id, repair);
+  try {
+    await repair;
+    auditPanelEnsuredChannelIds.add(channel.id);
+  } finally {
+    if (auditPanelRepairLocks.get(channel.id) === repair) {
+      auditPanelRepairLocks.delete(channel.id);
+    }
+  }
+}
 function getGuildStore(current: AuditStore, guildId: string): AuditGuildStore {
   current.guilds[guildId] ??= cloneGuildStore();
   return current.guilds[guildId];
@@ -448,6 +556,7 @@ export async function isSupportForgeManagedChannel(
       settings.archiveCategoryId,
       settings.statusCategories.claimedCategoryId,
       settings.statusCategories.pendingCategoryId,
+      ...(config.managedCategoryIds ?? []),
       ...Object.values(config.departments).map(
         (department) => department.categoryId ?? null,
       ),
@@ -680,44 +789,52 @@ async function backfillDeveloperAuditChannel(guild: Guild, channel: TextChannel)
   const store = getGuildStore(current, guild.id);
 
   /*
-   * A recent-message check is not sufficient because developer audit channels
-   * can contain more than 100 messages. Track which concrete channel was
-   * backfilled so older history is never duplicated, while a newly recreated
-   * developer channel still receives the retained history.
+   * A channel is considered backfilled only after every retained event has
+   * been delivered. Finding one recent event is not proof that older entries
+   * were sent. Persist a per-event cursor so a restart or rate-limit failure
+   * resumes at the first unsent event rather than silently skipping history.
    */
   if (store.developerBackfillChannelId === channel.id) {
     return;
   }
 
-  const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+  let startIndex = 0;
   if (
-    recent?.some(
-      (message) =>
-        message.author.id === channel.client.user?.id &&
-        message.embeds.some((embed) =>
-          (embed.title ?? '').startsWith('SupportForge Audit • '),
-        ),
-    )
+    store.developerBackfillProgressChannelId === channel.id &&
+    store.developerBackfillLastEventId
   ) {
-    store.developerBackfillChannelId = channel.id;
-    await persist();
-    return;
-  }
-
-  let allSent = true;
-  for (const event of store.events) {
-    try {
-      await sendAuditEntry(channel, event);
-    } catch (error) {
-      allSent = false;
-      console.warn('⚠️ Could not backfill developer audit entry:', error);
+    const checkpointIndex = store.events.findIndex(
+      (event) => event.id === store.developerBackfillLastEventId,
+    );
+    if (checkpointIndex >= 0) {
+      startIndex = checkpointIndex + 1;
     }
   }
 
-  if (allSent) {
-    store.developerBackfillChannelId = channel.id;
+  for (let index = startIndex; index < store.events.length; index += 1) {
+    const event = store.events[index];
+    if (!event) continue;
+
+    try {
+      await sendAuditEntry(channel, event);
+    } catch (error) {
+      console.warn(
+        '⚠️ Developer audit backfill paused at event ' + event.id +
+        '; it will resume on the next repair attempt:',
+        error,
+      );
+      return;
+    }
+
+    store.developerBackfillProgressChannelId = channel.id;
+    store.developerBackfillLastEventId = event.id;
     await persist();
   }
+
+  store.developerBackfillChannelId = channel.id;
+  store.developerBackfillProgressChannelId = null;
+  store.developerBackfillLastEventId = null;
+  await persist();
 }
 
 async function createOrRepairAuditDeveloperInfrastructure(
@@ -731,17 +848,90 @@ async function createOrRepairAuditDeveloperInfrastructure(
   let role: Role | null = null;
 
   if (config.auditDeveloperRoleId) {
-    const configuredRole = guild.roles.cache.get(config.auditDeveloperRoleId);
+    const configuredRole =
+      guild.roles.cache.get(config.auditDeveloperRoleId) ??
+      await guild.roles.fetch(config.auditDeveloperRoleId).catch(() => null);
     if (configuredRole && !configuredRole.managed) role = configuredRole;
   }
 
-  /*
-   * Role names are not ownership proof. A server member can legitimately
-   * create a role with the same name, so only the persisted role ID may be
-   * reused. A missing configured role is recreated instead.
-   */
+  let channel: TextChannel | undefined;
+  if (config.auditDevChannelId) {
+    const cachedChannel = guild.channels.cache.get(config.auditDevChannelId);
+    if (cachedChannel?.type === ChannelType.GuildText) {
+      channel = cachedChannel;
+    } else {
+      const fetchedChannel = await guild.channels.fetch(config.auditDevChannelId).catch(() => null);
+      if (fetchedChannel?.type === ChannelType.GuildText) {
+        channel = fetchedChannel;
+      }
+    }
+  }
 
-  if (!role && bot.permissions.has(PermissionFlagsBits.ManageRoles)) {
+  if (!channel) {
+    const byTopic = guild.channels.cache.find(
+      (candidate) =>
+        candidate.type === ChannelType.GuildText &&
+        candidate.topic?.startsWith(AUDIT_DEV_TOPIC),
+    );
+    if (byTopic?.type === ChannelType.GuildText) channel = byTopic;
+  }
+
+  let ambiguousDeveloperRole = false;
+  if (channel) {
+    /*
+     * A stale but still-valid saved role ID can point at a different role. If
+     * the identified SupportForge dev channel already grants access to the
+     * unique reserved developer role, that channel ACL is stronger evidence
+     * for the team members who should see it than the stale setting alone.
+     */
+    const aclEvidenceRoles = [...channel.permissionOverwrites.cache.values()]
+      .filter((overwrite) =>
+        overwrite.type === 0 &&
+        overwrite.allow.has(PermissionFlagsBits.ViewChannel),
+      )
+      .map((overwrite) => guild.roles.cache.get(overwrite.id))
+      .filter((candidate): candidate is Role =>
+        candidate !== undefined &&
+        !candidate.managed &&
+        candidate.name === AUDIT_DEVELOPER_ROLE_NAME,
+      );
+
+    if (aclEvidenceRoles.length === 1) {
+      role = aclEvidenceRoles[0]!;
+      console.warn(
+        '♻️ Recovered the SupportForge developer audit role from the existing channel permission overwrite.',
+      );
+    } else if (
+      aclEvidenceRoles.length > 1 &&
+      (!role || !aclEvidenceRoles.some((candidate) => candidate.id === role!.id))
+    ) {
+      ambiguousDeveloperRole = true;
+      console.warn(
+        '⚠️ Multiple developer-role candidates were found in the audit channel ACL; refusing to guess which role owns developer access.',
+      );
+    }
+  }
+
+  /*
+   * If a channel has been positively identified as SupportForge's developer
+   * channel, a unique role with the reserved name is a safe recovery target
+   * even if its previous overwrite was removed. Never create a replacement
+   * role when an existing team role can be recovered unambiguously.
+   */
+  if (!role && !ambiguousDeveloperRole) {
+    const namedCandidates = [...guild.roles.cache.values()].filter(
+      (candidate) => !candidate.managed && candidate.name === AUDIT_DEVELOPER_ROLE_NAME,
+    );
+    if (namedCandidates.length === 1) {
+      role = namedCandidates[0]!;
+      console.warn('♻️ Recovered the unique SupportForge developer audit role by its reserved role name.');
+    } else if (namedCandidates.length > 1) {
+      ambiguousDeveloperRole = true;
+      console.warn('⚠️ Multiple roles use the reserved developer audit role name; refusing to choose one arbitrarily.');
+    }
+  }
+
+  if (!role && !ambiguousDeveloperRole && bot.permissions.has(PermissionFlagsBits.ManageRoles)) {
     role = await guild.roles.create({
       name: AUDIT_DEVELOPER_ROLE_NAME,
       mentionable: false,
@@ -752,25 +942,18 @@ async function createOrRepairAuditDeveloperInfrastructure(
     });
   }
 
+  if (!role) {
+    throw new Error(
+      ambiguousDeveloperRole
+        ? 'Multiple developer audit roles exist and no configured role ID identifies the correct team.'
+        : 'The SupportForge developer audit role is unavailable. Grant Manage Roles or configure the existing developer role ID.',
+    );
+  }
+
   if (role) {
     await updateGuildConfig(guild.id, (current) => {
       current.auditDeveloperRoleId = role!.id;
     });
-  }
-
-  let channel = config.auditDevChannelId
-    ? guild.channels.cache.get(config.auditDevChannelId)
-    : undefined;
-
-  if (channel?.type !== ChannelType.GuildText) channel = undefined;
-
-  if (!channel) {
-    const byTopic = guild.channels.cache.find(
-      (candidate) =>
-        candidate.type === ChannelType.GuildText &&
-        candidate.topic?.startsWith(AUDIT_DEV_TOPIC),
-    );
-    if (byTopic?.type === ChannelType.GuildText) channel = byTopic;
   }
 
   if (!channel) {
@@ -811,32 +994,84 @@ async function createOrRepairAuditDeveloperInfrastructure(
       current.auditDevChannelId = channel!.id;
     });
   } else {
-    if (channel.name !== AUDIT_DEV_NAME) {
-      await channel.setName(AUDIT_DEV_NAME, 'SupportForge developer audit channel normalization').catch(() => undefined);
+    const existingChannel = channel!;
+    const expectedOverwrites = [
+      {
+        id: guild.roles.everyone.id,
+        type: 0 as const,
+        allow: [],
+        deny: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+        ],
+      },
+      {
+        id: bot.id,
+        type: 1 as const,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+          PermissionFlagsBits.EmbedLinks,
+        ],
+        deny: [],
+      },
+      {
+        id: role.id,
+        type: 0 as const,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.ReadMessageHistory,
+        ],
+        deny: [PermissionFlagsBits.SendMessages],
+      },
+    ];
+
+    const permissionBits = (permissions: readonly bigint[]): bigint =>
+      permissions.reduce((combined, permission) => combined | permission, 0n);
+    const aclIsExact =
+      existingChannel.permissionOverwrites.cache.size === expectedOverwrites.length &&
+      expectedOverwrites.every((expected) => {
+        const actual = existingChannel.permissionOverwrites.cache.get(expected.id);
+        return Boolean(
+          actual &&
+          actual.allow.bitfield === permissionBits(expected.allow) &&
+          actual.deny.bitfield === permissionBits(expected.deny),
+        );
+      });
+
+    /*
+     * Replace the dedicated channel ACL in one PATCH. Editing only the
+     * expected overwrites leaves explicit member-level denies and unrelated
+     * role grants behind, which can block a legitimate developer from seeing
+     * the channel even when their developer role is allowed to view it.
+     */
+    const channelUpdate: {
+      name?: string;
+      parent?: string;
+      lockPermissions?: false;
+      permissionOverwrites?: typeof expectedOverwrites;
+      reason: string;
+    } = {
+      reason: 'Repair SupportForge developer audit channel configuration',
+    };
+
+    if (existingChannel.name !== AUDIT_DEV_NAME) {
+      channelUpdate.name = AUDIT_DEV_NAME;
     }
-    if (channel.parentId !== parentCategoryId) {
-      await channel.setParent(parentCategoryId, { lockPermissions: false }).catch(() => undefined);
+    if (existingChannel.parentId !== parentCategoryId) {
+      channelUpdate.parent = parentCategoryId;
+      channelUpdate.lockPermissions = false;
+    }
+    if (!aclIsExact) {
+      channelUpdate.permissionOverwrites = expectedOverwrites;
     }
 
-    await channel.permissionOverwrites.edit(guild.roles.everyone.id, {
-      ViewChannel: false,
-      SendMessages: false,
-      ReadMessageHistory: false,
-    }).catch(() => undefined);
-
-    await channel.permissionOverwrites.edit(bot.id, {
-      ViewChannel: true,
-      SendMessages: true,
-      ReadMessageHistory: true,
-      EmbedLinks: true,
-    }).catch(() => undefined);
-
-    if (role) {
-      await channel.permissionOverwrites.edit(role.id, {
-        ViewChannel: true,
-        ReadMessageHistory: true,
-        SendMessages: false,
-      }).catch(() => undefined);
+    if (Object.keys(channelUpdate).some((key) => key !== 'reason')) {
+      // Name, category placement, and access control all share the same
+      // Modify Channel route; repair them with one request instead of three.
+      await existingChannel.edit(channelUpdate);
     }
 
     await updateGuildConfig(guild.id, (current) => {
@@ -896,34 +1131,53 @@ export async function getOrCreateAuditChannel(
     );
 
     for (const roleId of currentStaffRoleIds) {
+      if (overwriteHasPermissionState(
+        existing,
+        roleId,
+        [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+        [PermissionFlagsBits.SendMessages],
+      )) continue;
+
       await existing.permissionOverwrites.edit(roleId, {
         ViewChannel: true,
         ReadMessageHistory: true,
         SendMessages: false,
       }).catch((error) => {
-        console.warn(
-          `⚠️ Could not synchronize audit access for staff role ${roleId}:`,
-          error,
-        );
+        console.warn('⚠️ Could not synchronize audit access for staff role ' + roleId + ':', error);
+        throw error;
       });
     }
 
     if (existing.name !== AUDIT_NAME) {
       await existing.setName(AUDIT_NAME, 'SupportForge general audit channel normalization').catch(() => undefined);
     }
-    if (existing.parentId !== parentCategoryId) {
+    const parentCategory = guild.channels.cache.get(parentCategoryId);
+    if (
+      parentCategory?.type === ChannelType.GuildCategory &&
+      existing.parentId !== parentCategory.id
+    ) {
       await existing
-        .setParent(parentCategoryId, { lockPermissions: false })
+        .setParent(parentCategory.id, { lockPermissions: false })
         .catch((error) => {
           console.warn('⚠️ Could not move the SupportForge audit channel into its container:', error);
         });
+    } else if (existing.parentId !== parentCategoryId) {
+      /*
+       * A persisted category ID can become stale after a reset or manual
+       * deletion. Never send a known-deleted category ID to Discord.
+       * The audit channel remains where it is until setup recreates a valid
+       * SupportForge category.
+       */
+      console.warn(
+        `⚠️ SupportForge audit channel parent ${parentCategoryId} is not a valid category; leaving the audit channel in its current location.`,
+      );
     }
 
     await ensureChannelPurposeMessage(
       existing,
       'This private channel stores SupportForge’s durable operational audit history. It records important ticket lifecycle actions, configuration changes, retention decisions, repairs, and other administrative events with responsible users and timestamps.',
     );
-    await ensureAuditPanel(guild, existing);
+    await ensureAuditPanelOnce(guild, existing);
     return existing;
   }
 
@@ -977,7 +1231,7 @@ export async function getOrCreateAuditChannel(
     'This private channel stores SupportForge’s durable operational audit history. It records important ticket lifecycle actions, configuration changes, retention decisions, repairs, and other administrative events with responsible users and timestamps.',
   );
 
-  await ensureAuditPanel(guild, channel);
+  await ensureAuditPanelOnce(guild, channel);
   return channel;
 }
 
@@ -1897,14 +2151,29 @@ async function recordAndPublish(
     event.discordAuditLogId,
   );
 
+  const inferredTicketChannelId =
+    event.ticketChannelId ??
+    (event.ticketNumber
+      ? (() => {
+          const matches = [...guild.channels.cache.values()].filter(
+            (channel) =>
+              channel.type === ChannelType.GuildText &&
+              channel.topic?.startsWith('supportforge:ticket') &&
+              getField(channel.topic, 'number') === event.ticketNumber,
+          );
+          return matches.length === 1 ? matches[0]!.id : undefined;
+        })()
+      : undefined);
+
   const record: PersistedAuditEntry = {
-    id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    id: randomUUID(),
     guildId: guild.id,
     category,
     action: event.event.toUpperCase(),
     ...actor,
     timestamp,
-    ticketNumber: event.ticketNumber,
+    ...(event.ticketNumber ? { ticketNumber: event.ticketNumber } : {}),
+    ...(inferredTicketChannelId ? { ticketChannelId: inferredTicketChannelId } : {}),
     detail: event.detail,
   };
 
@@ -1919,7 +2188,10 @@ async function recordAndPublish(
    */
   try {
     const config = await getGuildConfig(guild.id);
-    if (config.auditDevChannelId || config.auditDeveloperRoleId) {
+    const reservedDeveloperRoleExists = guild.roles.cache.some(
+      (role) => !role.managed && role.name === AUDIT_DEVELOPER_ROLE_NAME,
+    );
+    if (config.auditDevChannelId || config.auditDeveloperRoleId || reservedDeveloperRoleExists) {
       const developerInfrastructure = await ensureAuditDeveloperInfrastructure(
         guild,
         parentCategoryId,
@@ -1980,13 +2252,37 @@ async function recordAndPublish(
 export async function getTicketAuditHistory(
   guildId: string,
   ticketNumber: string,
+  ticketChannelId?: string,
 ): Promise<PersistedAuditEntry[]> {
   const current = await load();
   const store = getGuildStore(current, guildId);
 
-  return store.events.filter(
+  const matching = store.events.filter(
+    (event) => event.ticketNumber === ticketNumber,
+  );
+
+  if (!ticketChannelId) return matching;
+
+  const otherChannelExists = matching.some(
     (event) =>
-      event.ticketNumber === ticketNumber,
+      Boolean(event.ticketChannelId) &&
+      event.ticketChannelId !== ticketChannelId,
+  );
+
+  if (!otherChannelExists) {
+    return matching;
+  }
+
+  /*
+   * Once a reused ticket number is detected across multiple concrete channel
+   * identities, keep the exact ticket's events plus legacy events that predate
+   * the channel-identity field. Exclude only events explicitly tied to a
+   * different channel.
+   */
+  return matching.filter(
+    (event) =>
+      !event.ticketChannelId ||
+      event.ticketChannelId === ticketChannelId,
   );
 }
 
@@ -1999,6 +2295,7 @@ export async function logTicketEvent(
     await recordAndPublish(guild, parentCategoryId, {
       ...event,
       category: event.category ?? 'ticket',
+      ...(event.ticketChannelId ? { ticketChannelId: event.ticketChannelId } : {}),
     });
   } catch (error) {
     console.error('❌ Failed to write audit log:', error);
@@ -2401,11 +2698,55 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
         .filter((id): id is string => Boolean(id)),
     );
 
+    const configuredDeveloperChannel = config.auditDevChannelId
+      ? interaction.guild.channels.cache.get(config.auditDevChannelId)
+      : undefined;
+    const developerChannelCandidate =
+      configuredDeveloperChannel?.type === ChannelType.GuildText
+        ? configuredDeveloperChannel
+        : interaction.guild.channels.cache.find(
+            (candidate) =>
+              candidate.type === ChannelType.GuildText &&
+              candidate.topic?.startsWith(AUDIT_DEV_TOPIC),
+          );
+
+    /*
+     * A member of the actual developer-team role must be allowed to reach the
+     * Developer View controls even if that role was not configured as a
+     * department staff role. When config was lost, verify membership against
+     * the role overwrite on the identified SupportForge developer channel.
+     */
+    const namedDeveloperRoles = [...interaction.guild.roles.cache.values()].filter(
+      (role) => !role.managed && role.name === AUDIT_DEVELOPER_ROLE_NAME,
+    );
+    const uniqueNamedDeveloperRole = namedDeveloperRoles.length === 1 ? namedDeveloperRoles[0] : null;
+
+    const hasDeveloperRole =
+      Boolean(
+        member &&
+        (
+          (config.auditDeveloperRoleId && member.roles.cache.has(config.auditDeveloperRoleId)) ||
+          (uniqueNamedDeveloperRole && member.roles.cache.has(uniqueNamedDeveloperRole.id)) ||
+          (
+            developerChannelCandidate?.type === ChannelType.GuildText &&
+            [...developerChannelCandidate.permissionOverwrites.cache.values()].some((overwrite) => {
+              const evidencedRole = interaction.guild!.roles.cache.get(overwrite.id);
+              return overwrite.type === 0 &&
+                overwrite.allow.has(PermissionFlagsBits.ViewChannel) &&
+                Boolean(evidencedRole) &&
+                evidencedRole!.name === AUDIT_DEVELOPER_ROLE_NAME &&
+                member.roles.cache.has(overwrite.id);
+            })
+          )
+        ),
+      );
+
     const isModerator =
       Boolean(
         interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
         interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ||
-        member?.roles.cache.some((role) => staffRoleIds.has(role.id)),
+        member?.roles.cache.some((role) => staffRoleIds.has(role.id)) ||
+        hasDeveloperRole,
       );
 
     if (!isModerator) {
@@ -2466,9 +2807,41 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       return true;
     }
 
+    let parentCategory =
+      config.supportCategoryId
+        ? interaction.guild.channels.cache.get(config.supportCategoryId)
+        : undefined;
+
+    if (parentCategory?.type !== ChannelType.GuildCategory && config.supportCategoryId) {
+      parentCategory = (await interaction.guild.channels.fetch(config.supportCategoryId).catch(() => null)) ?? undefined;
+    }
+
+    if (parentCategory?.type !== ChannelType.GuildCategory) {
+      parentCategory = interaction.channel.parentId
+        ? interaction.guild.channels.cache.get(interaction.channel.parentId)
+        : undefined;
+    }
+
+    if (parentCategory?.type !== ChannelType.GuildCategory) {
+      const existingAuditChannel = await findAuditChannel(interaction.guild);
+      if (existingAuditChannel?.parentId) {
+        parentCategory = interaction.guild.channels.cache.get(existingAuditChannel.parentId) ??
+          (await interaction.guild.channels.fetch(existingAuditChannel.parentId).catch(() => null)) ??
+          undefined;
+      }
+    }
+
+    if (parentCategory?.type !== ChannelType.GuildCategory) {
+      await interaction.editReply({
+        content:
+          '❌ SupportForge could not locate its managed category, so it cannot safely create or repair audit-log-dev. Run /supportforge setup to restore the SupportForge category, then enable Developer View again.',
+      });
+      return true;
+    }
+
     const infrastructure = await ensureAuditDeveloperInfrastructure(
       interaction.guild,
-      config.supportCategoryId ?? interaction.channel.parentId ?? interaction.guild.id,
+      parentCategory.id,
     ).catch((error) => {
       console.warn('⚠️ Could not prepare developer audit infrastructure:', error);
       return null;
@@ -2526,12 +2899,14 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       if (!isEnabled) {
         store.developerViewers.push(interaction.user.id);
       }
-      await member.roles.add(
-        infrastructure.role,
-        'SupportForge Developer Audit Mode enabled',
-      ).catch((error) => {
-        throw new Error('Could not grant the developer-mode audit-log role: ' + String(error));
-      });
+      if (!member.roles.cache.has(infrastructure.role.id)) {
+        await member.roles.add(
+          infrastructure.role,
+          'SupportForge Developer Audit Mode enabled',
+        ).catch((error) => {
+          throw new Error('Could not grant the developer-mode audit-log role: ' + String(error));
+        });
+      }
       await persist();
     } else if (interaction.customId === AUDIT_DEVELOPER_OFF_CUSTOM_ID) {
       await member.roles.remove(infrastructure.role, 'SupportForge Developer Audit Mode disabled').catch((error) => {

@@ -80,7 +80,21 @@ function participantOverwrites(
   return overwrites;
 }
 
-async function updateVoiceTopic(channel: TextChannel, topic: string, reason: string): Promise<string> {
+export function clearVoiceTopicRetryState(channelId: string): void {
+  const timer = voiceTopicRetryTimers.get(channelId);
+  if (timer) {
+    clearTimeout(timer);
+    voiceTopicRetryTimers.delete(channelId);
+  }
+}
+
+async function updateVoiceTopic(
+  channel: TextChannel,
+  topic: string,
+  reason: string,
+  strict = false,
+): Promise<string> {
+  const previousTopic = channel.topic ?? '';
   channel.topic = topic;
   const previous = voiceTopicRetryTimers.get(channel.id);
   if (previous) clearTimeout(previous);
@@ -89,11 +103,18 @@ async function updateVoiceTopic(channel: TextChannel, topic: string, reason: str
   try {
     await setChannelTopic(channel.id, topic, reason);
   } catch (error) {
+    if (strict) {
+      channel.topic = previousTopic;
+      throw error;
+    }
+
     const delay = getRetryDelayMs(error);
     if (delay !== null) {
       const retry = setTimeout(() => {
         voiceTopicRetryTimers.delete(channel.id);
-        void setChannelTopic(channel.id, topic, reason).catch(() => undefined);
+        void setChannelTopic(channel.id, topic, reason).catch((retryError) => {
+          console.warn('⚠️ Voice ticket metadata retry failed:', retryError);
+        });
       }, delay);
       retry.unref?.();
       voiceTopicRetryTimers.set(channel.id, retry);
@@ -140,11 +161,29 @@ export async function startTicketVoiceMode(
   newTopic = setField(newTopic, 'voice_started_at', new Date().toISOString());
   newTopic = setField(newTopic, 'voice_started_by', moderatorIds[0]);
   newTopic = setField(newTopic, 'voice_channel_name', voiceChannel.name);
-  newTopic = await updateVoiceTopic(
-    ticketChannel,
-    newTopic,
-    'SupportForge voice mode metadata for ticket #' + number,
-  );
+
+  try {
+    newTopic = await updateVoiceTopic(
+      ticketChannel,
+      newTopic,
+      'SupportForge voice mode metadata for ticket #' + number,
+      true,
+    );
+  } catch (error) {
+    await voiceChannel.delete(
+      'SupportForge rollback after voice metadata persistence failure',
+    ).catch((rollbackError) => {
+      console.error(
+        '❌ Voice mode rollback could not delete the newly created voice channel:',
+        rollbackError,
+      );
+    });
+
+    throw new Error(
+      'Private voice mode could not be initialized safely because ticket metadata could not be persisted.',
+      { cause: error },
+    );
+  }
 
   void queueTicketChannelRename(
     ticketChannel,
@@ -199,33 +238,72 @@ export async function endTicketVoiceMode(
   topic: string,
   status: TicketStatus,
   reason: string,
+  options?: {
+    deferTicketTopicUpdate?: boolean;
+    queueRename?: boolean;
+  },
 ): Promise<string> {
   const voiceId = getField(topic, 'voice_channel_id');
   const number = getField(topic, 'number') ?? 'unknown';
   const voiceChannel = voiceId ? guild.channels.cache.get(voiceId) : undefined;
 
-  if (voiceChannel?.type === ChannelType.GuildVoice) {
-    await voiceChannel.delete(reason).catch((error) => {
-      console.warn('⚠️ Could not delete SupportForge voice channel ' + voiceId + ':', error);
-    });
+  if (voiceId) {
+    if (voiceChannel?.type === ChannelType.GuildVoice) {
+      try {
+        await voiceChannel.delete(reason);
+      } catch (error) {
+        /*
+         * Never clear the recovery pointer when Discord refused the delete.
+         * Keeping voice_channel_id in the ticket metadata allows a later
+         * repair/retry to find the orphaned room instead of making it
+         * permanently invisible to SupportForge.
+         */
+        console.warn(
+          '⚠️ Could not delete SupportForge voice channel ' + voiceId + ':',
+          error,
+        );
+        throw new Error(
+          'The private voice channel could not be deleted safely. Voice-mode metadata was retained so the channel can be repaired.',
+          { cause: error },
+        );
+      }
+    } else {
+      /*
+       * The referenced voice channel is already gone. Treat that as a
+       * successful cleanup and clear the stale pointer.
+       */
+      console.warn(
+        '⚠️ SupportForge voice channel ' + voiceId + ' was already missing; clearing stale voice metadata.',
+      );
+    }
   }
 
   let newTopic = removeField(topic, 'voice_channel_id');
   newTopic = removeField(newTopic, 'voice_started_at');
   newTopic = removeField(newTopic, 'voice_started_by');
   newTopic = removeField(newTopic, 'voice_channel_name');
-  newTopic = await updateVoiceTopic(
-    ticketChannel,
-    newTopic,
-    'Clear voice mode metadata for ticket #' + number,
-  );
 
-  const priority = getField(newTopic, 'priority') ?? 'normal';
-  void queueTicketChannelRename(
-    ticketChannel,
-    getTicketChannelName(number, status, priority as TicketPriority),
-    reason,
-  ).catch(() => undefined);
+  /*
+   * Lifecycle handlers can fold the cleared voice metadata into their single
+   * ticket-channel PATCH. This avoids a second topic update and duplicate
+   * rename when the same status transition already updates those fields.
+   */
+  if (!options?.deferTicketTopicUpdate) {
+    newTopic = await updateVoiceTopic(
+      ticketChannel,
+      newTopic,
+      'Clear voice mode metadata for ticket #' + number,
+    );
+  }
+
+  if (options?.queueRename !== false) {
+    const priority = getField(newTopic, 'priority') ?? 'normal';
+    void queueTicketChannelRename(
+      ticketChannel,
+      getTicketChannelName(number, status, priority as TicketPriority),
+      reason,
+    ).catch(() => undefined);
+  }
 
   return newTopic;
 }

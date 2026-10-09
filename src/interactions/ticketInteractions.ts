@@ -27,12 +27,14 @@ import {
 } from '../services/configService';
 
 import { assertTicketStatusTransition } from '../core/domain/ticketLifecycle';
+import { buildTicketVisibilityPlan } from '../core/domain/ticketPermissionPlan';
+import { classifyTicketRoutingComponent } from '../core/domain/ticketInteractionRouting';
 
 import { generateTranscript } from '../services/transcriptService';
 
 import {
-  setChannelParent,
   setChannelPermissionOverwrite,
+  setChannelProperties,
   setChannelTopic,
 } from '../services/discordChannelService';
 
@@ -41,7 +43,6 @@ import {
   ensureClosedCategory,
   ensureOpenCategory,
   getOptionalStatusCategory,
-  moveTicketToCategory,
 } from '../services/ticketStorageService';
 
 import { resetPanelActivity } from '../services/panelActivityService';
@@ -52,6 +53,7 @@ import { getUserFlagCount, isTicketCreationRestricted, recordReport } from '../s
 
 import {
   findActivePersistedTickets,
+  getPersistedTicket,
   getPersistedTicketPriority,
   getPersistedTicketStatus,
   markPersistedTicketDeleted,
@@ -334,6 +336,61 @@ function isAdmin(
         PermissionFlagsBits.ManageGuild,
       ),
   );
+}
+
+function interactionActor(
+  interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
+): {
+  id: string;
+  attribution: 'actorKnown';
+  confidence: 'high';
+} {
+  return {
+    id: interaction.user.id,
+    attribution: 'actorKnown',
+    confidence: 'high',
+  };
+}
+
+async function getEffectiveTicketTopic(
+  channel: TextChannel,
+  topic: string,
+): Promise<string> {
+  const persisted = await getPersistedTicket(channel.id).catch(() => undefined);
+  if (!persisted) return topic;
+
+  let effective = setField(topic, 'status', persisted.status);
+
+  if (persisted.priority) {
+    effective = setField(effective, 'priority', persisted.priority);
+  }
+  if (persisted.departmentId) {
+    effective = setField(effective, 'department', persisted.departmentId);
+    const config = await getGuildConfig(channel.guild.id);
+    const department = config.departments[persisted.departmentId];
+    effective = setField(effective, 'staff', department?.staffRoleId ?? 'none');
+  }
+  if (persisted.tagId) {
+    effective = setField(effective, 'tag', persisted.tagId);
+    effective = setField(effective, 'tags', persisted.tagId);
+  }
+  if (persisted.ownerId) {
+    effective = setField(effective, 'owner', persisted.ownerId);
+  }
+
+  if (persisted.participantIds.length) {
+    effective = setField(effective, 'users', persisted.participantIds.join(','));
+  } else {
+    effective = removeField(effective, 'users');
+  }
+
+  if (persisted.claimedByIds.length) {
+    effective = setField(effective, 'claimed_by', persisted.claimedByIds.join(','));
+  } else {
+    effective = removeField(effective, 'claimed_by');
+  }
+
+  return effective;
 }
 
 function getStaffContext(
@@ -799,74 +856,82 @@ async function applyTicketVisibilityMode(
   topic: string,
   mode: 'unclaimed' | 'claimed',
   formerClaimedBy?: string,
+  options?: {
+    topic?: string;
+    channelName?: string;
+    parentId?: string;
+    removeRoleIds?: string[];
+  },
 ): Promise<void> {
   const staffRoleId = getField(topic, 'staff');
   const ownerId = getField(topic, 'owner');
-  const claimedBy = getField(topic, 'claimed_by');
-  const claimedModerators = (claimedBy ?? '').split(',').map((id) => id.trim()).filter(Boolean);
-  const users = (getField(topic, 'users') ?? '').split(',').map((value) => value.trim()).filter(Boolean);
+  const claimedModerators = (getField(topic, 'claimed_by') ?? '').split(',').map((id) => id.trim()).filter(Boolean);
+  const users = (getField(topic, 'users') ?? '').split(',').map((id) => id.trim()).filter(Boolean);
 
   if (!channel.guild.members.me || !ownerId) {
     throw new Error('Ticket privacy could not resolve the bot or ticket owner.');
   }
 
-  const textPermissions = [
-    PermissionFlagsBits.ViewChannel,
-    PermissionFlagsBits.SendMessages,
-    PermissionFlagsBits.ReadMessageHistory,
-  ];
-  const memberAllow = [
-    ...textPermissions,
-    PermissionFlagsBits.AttachFiles,
-    PermissionFlagsBits.EmbedLinks,
-  ];
-
-  if (staffRoleId && staffRoleId !== 'none') {
-    await setChannelPermissionOverwrite(
-      channel.id,
-      staffRoleId,
-      mode === 'claimed' ? [] : textPermissions,
-      mode === 'claimed' ? textPermissions : [],
-      0,
-      mode === 'claimed'
-        ? 'Hide claimed ticket from unassigned department staff'
-        : 'Restore department staff access to ticket',
-    );
-  }
-
-  const formerClaimantIds = (formerClaimedBy ?? '')
-    .split(',')
-    .map((id) => id.trim())
-    .filter(Boolean);
-
-  for (const formerClaimantId of formerClaimantIds) {
-    if (
-      formerClaimantId === ownerId ||
-      claimedModerators.includes(formerClaimantId)
-    ) {
-      continue;
-    }
-
-    await setChannelPermissionOverwrite(
-      channel.id,
-      formerClaimantId,
-      [],
-      [],
-      1,
-      'Clear former claimant ticket override',
-    );
-  }
-
-  const participants = new Set<string>([
-    ownerId,
-    ...users,
-    ...(mode === 'claimed' ? claimedModerators : []),
+  const existing = [...channel.permissionOverwrites.cache.values()].map((overwrite) => ({
+    id: overwrite.id,
+    kind: overwrite.type === 0 ? 'role' as const : 'member' as const,
+    allow: overwrite.allow.bitfield.toString(),
+    deny: overwrite.deny.bitfield.toString(),
+  }));
+  const roleIds = new Set<string>([
+    ...channel.guild.roles.cache.keys(),
+    ...existing.filter((overwrite) => overwrite.kind === 'role').map((overwrite) => overwrite.id),
   ]);
 
-  for (const userId of participants) {
-    if (!userId || userId === channel.guild.members.me.id) continue;
-    await setChannelPermissionOverwrite(channel.id, userId, memberAllow, [], 1, 'Grant ticket participant access');
+  const plan = buildTicketVisibilityPlan({
+    existing,
+    roleIds,
+    staffRoleId,
+    ownerId,
+    userIds: users,
+    claimedModeratorIds: claimedModerators,
+    formerClaimantIds: (formerClaimedBy ?? '').split(',').map((id) => id.trim()).filter(Boolean),
+    removeRoleIds: options?.removeRoleIds,
+    mode,
+  });
+
+  const properties: {
+    topic?: string;
+    name?: string;
+    parentId?: string;
+    permissionOverwrites?: Array<{ id: string; allow?: Array<bigint | number | string>; deny?: Array<bigint | number | string> }>;
+  } = {};
+
+  if (options?.topic !== undefined && (channel.topic ?? '') !== options.topic) {
+    properties.topic = options.topic;
   }
+  if (options?.channelName !== undefined && channel.name !== options.channelName) {
+    properties.name = options.channelName;
+  }
+  if (options?.parentId !== undefined && channel.parentId !== options.parentId) {
+    properties.parentId = options.parentId;
+  }
+  if (plan.changed) {
+    properties.permissionOverwrites = plan.overwrites.map((overwrite) => ({
+      id: overwrite.id,
+      allow: [BigInt(overwrite.allow)],
+      deny: [BigInt(overwrite.deny)],
+    }));
+    for (const overwrite of plan.overwrites) {
+      if (overwrite.kind === 'role') roleIds.add(overwrite.id);
+    }
+  }
+
+  if (Object.keys(properties).length === 0) return;
+
+  await setChannelProperties(
+    channel.id,
+    properties,
+    roleIds,
+    'Synchronize SupportForge ticket metadata and privacy in one channel update',
+  );
+  if (properties.topic !== undefined) channel.topic = properties.topic;
+  if (properties.name !== undefined) channel.name = properties.name;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -898,7 +963,7 @@ async function createTicket(
     interaction.guild;
 
   const lockKey =
-    `${guild.id}:${interaction.user.id}:${departmentId}:${tagId}`;
+    `${guild.id}:${interaction.user.id}:${departmentId}`;
 
   if (
     ticketCreationLocks.has(
@@ -1244,6 +1309,11 @@ async function createTicket(
           createdAt: now,
           participantIds: [interaction.user.id],
         },
+        {
+          id: interaction.user.id,
+          attribution: 'actorKnown',
+          confidence: 'high',
+        },
       );
 
       await ticketChannel.send({
@@ -1380,8 +1450,8 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
   }
 
   const channel = interaction.channel as TextChannel;
-  const topic = channel.topic ?? '';
-  const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
+  const topic = await getEffectiveTicketTopic(channel, channel.topic ?? '');
+  const status = getTicketStatus(topic);
   if (status !== 'claimed') {
     await replyError(interaction, '❌ This ticket is not currently claimed.');
     return;
@@ -1402,17 +1472,12 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
       'claimed_by',
       remaining.join(','),
     );
-    await setChannelTopic(
-      channel.id,
-      newTopic,
-      'SupportForge moderator unclaimed from multi-moderator ticket',
-    ).catch(() => undefined);
-    channel.topic = newTopic;
     await applyTicketVisibilityMode(
       channel,
       newTopic,
       'claimed',
       interaction.user.id,
+      { topic: newTopic },
     );
     updateRuntimeTicketState(channel, newTopic, 'claimed');
     await updatePersistedTicketMetadata(channel.id, {
@@ -1421,7 +1486,7 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
         .split(',')
         .map((id) => id.trim())
         .filter(Boolean),
-    });
+    }, interactionActor(interaction));
     await syncTicketVoiceParticipants(interaction.guild, newTopic);
     await updateMainMessage(channel, getField(newTopic, 'message'), 'claimed', newTopic);
     await interaction.editReply('✅ You left the ticket. Other assigned moderators remain on it.');
@@ -1442,8 +1507,6 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
     );
   }
 
-  await setChannelTopic(channel.id, newTopic, 'SupportForge last moderator unclaimed ticket').catch(() => undefined);
-  channel.topic = newTopic;
   await setPersistedTicketStatus(channel.id, 'open');
   await updatePersistedTicketMetadata(channel.id, {
     claimedByIds: [],
@@ -1451,8 +1514,8 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
       .split(',')
       .map((id) => id.trim())
       .filter(Boolean),
-  });
-  await applyTicketVisibilityMode(channel, newTopic, 'unclaimed', interaction.user.id);
+  }, interactionActor(interaction));
+  await applyTicketVisibilityMode(channel, newTopic, 'unclaimed', interaction.user.id, { topic: newTopic });
   updateRuntimeTicketState(channel, newTopic, 'open');
 
   const number = getField(newTopic, 'number') ?? 'unknown';
@@ -1847,40 +1910,11 @@ async function transition(
       );
 
     /*
-     * Lifecycle status is persisted outside the Discord channel topic.
-     * Discord's /channels PATCH bucket can remain rate-limited for many
-     * minutes, so status changes must not depend on a topic PATCH succeeding.
-     * The topic remains descriptive metadata and is still used by older
-     * tickets and other ticket metadata operations.
+     * Clear voice metadata before assembling the final channel update. The
+     * voice helper normally patches the ticket topic and queues a rename; the
+     * transition below now performs those changes together with permissions
+     * and category placement in one Modify Channel request.
      */
-    if (newStatus === 'claimed') {
-      await setChannelTopic(
-        channel.id,
-        newTopic,
-        'Persist SupportForge multi-moderator claim metadata',
-      ).catch((error) => {
-        console.warn('⚠️ Claimed ticket metadata topic update was deferred:', error);
-      });
-      channel.topic = newTopic;
-      await applyTicketVisibilityMode(channel, newTopic, 'claimed');
-      await syncTicketVoiceParticipants(interaction.guild!, newTopic);
-    } else if (newStatus === 'open' || newStatus === 'pending' || newStatus === 'reopened') {
-      await setChannelTopic(
-        channel.id,
-        newTopic,
-        'Persist SupportForge ticket lifecycle metadata',
-      ).catch((error) => {
-        console.warn('⚠️ Ticket lifecycle metadata topic update was deferred:', error);
-      });
-      channel.topic = newTopic;
-      await applyTicketVisibilityMode(
-        channel,
-        newTopic,
-        'unclaimed',
-        getField(oldTopic, 'claimed_by'),
-      );
-    }
-
     if (newStatus !== 'claimed' && getField(oldTopic, 'voice_channel_id')) {
       newTopic = await endTicketVoiceMode(
         interaction.guild!,
@@ -1888,25 +1922,165 @@ async function transition(
         newTopic,
         newStatus,
         'SupportForge voice mode ended because ticket status changed',
+        { deferTicketTopicUpdate: true, queueRename: false },
       );
-      updateRuntimeTicketState(channel, newTopic, newStatus);
+    }
+
+    /*
+     * Discord channel mutations are secondary side effects. A long Discord
+     * rate limit must never prevent the durable lifecycle transition from
+     * being recorded in PostgreSQL.
+     *
+     * Do not update discord.js' cached topic when the REST write failed.
+     * Pretending the write succeeded creates stale-state bugs on the next
+     * interaction.
+     */
+    const sideEffectFailures: string[] = [];
+    let destinationCategoryId: string | undefined;
+
+    try {
+      if (newStatus === 'closed') {
+        destinationCategoryId = (await ensureClosedCategory(interaction.guild!)).id;
+      } else if (newStatus === 'archived') {
+        destinationCategoryId = (await ensureArchiveCategory(interaction.guild!)).id;
+      } else if (newStatus === 'claimed' || newStatus === 'pending') {
+        const optionalCategory = await getOptionalStatusCategory(
+          interaction.guild!,
+          newStatus,
+        );
+        if (optionalCategory) destinationCategoryId = optionalCategory.id;
+      } else if (newStatus === 'reopened' || newStatus === 'open') {
+        const currentConfig = await getGuildConfig(interaction.guild!.id);
+        const departmentId = getField(oldTopic, 'department');
+        const departmentConfig = departmentId
+          ? currentConfig.departments[departmentId]
+          : undefined;
+        const departmentCategory = departmentConfig?.categoryId
+          ? interaction.guild!.channels.cache.get(departmentConfig.categoryId)
+          : undefined;
+
+        if (departmentCategory?.type === ChannelType.GuildCategory) {
+          destinationCategoryId = departmentCategory.id;
+        } else {
+          destinationCategoryId = (await ensureOpenCategory(interaction.guild!)).id;
+        }
+      }
+    } catch (storageError) {
+      sideEffectFailures.push('ticket storage category');
+      console.warn(
+        '⚠️ Ticket state was saved, but its storage category could not be prepared:',
+        storageError,
+      );
+    }
+
+    const ticketNumberForName = getField(newTopic, 'number') ?? 'unknown';
+    const desiredChannelName = getTicketChannelName(
+      ticketNumberForName,
+      newStatus,
+      await getEffectiveTicketPriority(channel.id, newTopic),
+    );
+
+    if (newStatus === 'claimed') {
+      try {
+        // Ticket topic, channel name, optional status category, and ACL are
+        // sent together because they share the Modify Channel route bucket.
+        await applyTicketVisibilityMode(
+          channel,
+          newTopic,
+          'claimed',
+          undefined,
+          {
+            topic: newTopic,
+            channelName: desiredChannelName,
+            ...(destinationCategoryId ? { parentId: destinationCategoryId } : {}),
+          },
+        );
+      } catch (error) {
+        sideEffectFailures.push('ticket channel metadata/category/permissions');
+        console.warn(
+          '⚠️ Claimed ticket channel synchronization is pending/failed; durable state will still be updated:',
+          error,
+        );
+      }
+
+      try {
+        await syncTicketVoiceParticipants(interaction.guild!, newTopic);
+      } catch (error) {
+        sideEffectFailures.push('voice participants');
+        console.warn(
+          '⚠️ Voice participant synchronization deferred:',
+          error,
+        );
+      }
+    } else if (
+      newStatus === 'open' ||
+      newStatus === 'pending' ||
+      newStatus === 'reopened'
+    ) {
+      try {
+        await applyTicketVisibilityMode(
+          channel,
+          newTopic,
+          'unclaimed',
+          getField(oldTopic, 'claimed_by'),
+          {
+            topic: newTopic,
+            channelName: desiredChannelName,
+            ...(destinationCategoryId ? { parentId: destinationCategoryId } : {}),
+          },
+        );
+      } catch (error) {
+        sideEffectFailures.push('ticket channel metadata/category/permissions');
+        console.warn(
+          '⚠️ Ticket lifecycle channel synchronization is pending/failed; durable state will still be updated:',
+          error,
+        );
+      }
+    } else {
+      try {
+        // Closed/archived transitions do not change ticket ACLs, but their
+        // topic, name, and storage category still fit in a single PATCH.
+        await setChannelProperties(
+          channel.id,
+          {
+            topic: newTopic,
+            name: desiredChannelName,
+            ...(destinationCategoryId ? { parentId: destinationCategoryId } : {}),
+          },
+          new Set<string>(),
+          'Synchronize SupportForge closed/archived ticket channel metadata',
+        );
+        channel.topic = newTopic;
+        channel.name = desiredChannelName;
+      } catch (error) {
+        sideEffectFailures.push('ticket channel metadata/category/name');
+        console.warn(
+          '⚠️ Closed/archived ticket channel synchronization is pending/failed; durable state will still be updated:',
+          error,
+        );
+      }
     }
 
     await setPersistedTicketStatus(
       channel.id,
       newStatus,
+      interactionActor(interaction),
     );
 
-    await updatePersistedTicketMetadata(channel.id, {
-      claimedByIds: (getField(newTopic, 'claimed_by') ?? '')
-        .split(',')
-        .map((id) => id.trim())
-        .filter(Boolean),
-      participantIds: (getField(newTopic, 'users') ?? '')
-        .split(',')
-        .map((id) => id.trim())
-        .filter(Boolean),
-    });
+    await updatePersistedTicketMetadata(
+      channel.id,
+      {
+        claimedByIds: (getField(newTopic, 'claimed_by') ?? '')
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+        participantIds: (getField(newTopic, 'users') ?? '')
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+      },
+      interactionActor(interaction),
+    );
 
     /*
      * Keep the local runtime state immediately consistent with the persisted
@@ -1918,99 +2092,36 @@ async function transition(
       newStatus,
     );
 
-    /*
-     * Storage sections are separate from the active support category.
-     * Closed and archived tickets are physically moved so moderators can
-     * distinguish active work from historical records.
-     */
-    try {
-      if (newStatus === 'closed') {
-        await moveTicketToCategory(
-          channel,
-          await ensureClosedCategory(interaction.guild!),
-        );
-      } else if (newStatus === 'archived') {
-        await moveTicketToCategory(
-          channel,
-          await ensureArchiveCategory(interaction.guild!),
-        );
-      } else if (newStatus === 'claimed' || newStatus === 'pending') {
-        const optionalCategory = await getOptionalStatusCategory(
-          interaction.guild!,
-          newStatus,
-        );
 
-        if (optionalCategory) {
-          await moveTicketToCategory(channel, optionalCategory);
-        }
-      } else if (newStatus === 'reopened' || newStatus === 'open') {
-        const currentConfig = await getGuildConfig(interaction.guild!.id);
-        const departmentId = getField(oldTopic, 'department');
-        const departmentConfig = departmentId
-          ? currentConfig.departments[departmentId]
-          : undefined;
-
-        const departmentCategory = departmentConfig?.categoryId
-          ? interaction.guild!.channels.cache.get(departmentConfig.categoryId)
-          : undefined;
-
-        const openCategory = await ensureOpenCategory(interaction.guild!);
-
-        const destination =
-          departmentCategory?.type === ChannelType.GuildCategory
-            ? departmentCategory
-            : openCategory;
-
-        if (destination.type === ChannelType.GuildCategory) {
-          await moveTicketToCategory(channel, destination);
-        }
-      }
-    } catch (storageError) {
-      console.warn(
-        '⚠️ Ticket storage category transition failed:',
-        storageError,
-      );
-    }
-
-    /*
-     * Keep the channel name synchronized with the lifecycle state.
-     * "reopened" intentionally uses the normal "open" name.
-     */
-    const ticketNumberForName =
-      getField(newTopic, 'number') ?? 'unknown';
-
-    void queueTicketChannelRename(
-      channel,
-      getTicketChannelName(
-        ticketNumberForName,
-        newStatus,
-        await getEffectiveTicketPriority(channel.id, newTopic),
-      ),
-      `Ticket #${ticketNumberForName} status changed to ${newStatus}`,
-    ).catch((error) => {
-      console.error(
-        `⚠️ Failed to rename ticket for status ${newStatus}:`,
-        error,
-      );
-    });
     /*
      * Refresh the panel immediately, then schedule a relocation to the
      * bottom of the conversation. This is especially important when a
      * closed ticket is reopened after a long conversation: the old panel
      * may be hundreds of messages above the current activity.
      */
-    await updateMainMessage(
-      channel,
-      messageId,
-      newStatus,
-      newTopic,
-    );
-
+    try {
+      await updateMainMessage(
+        channel,
+        messageId,
+        newStatus,
+        newTopic,
+      );
+    } catch (error) {
+      sideEffectFailures.push('ticket panel refresh');
+      console.warn(
+        '⚠️ Ticket panel refresh was deferred; durable state is already updated:',
+        error,
+      );
+    }
 
     await interaction.editReply(
-      `✅ Ticket status changed to **${capitalize(
-        newStatus,
-      )}**.`,
+      sideEffectFailures.length
+        ? `⚠️ Ticket status changed to **${capitalize(
+            newStatus,
+          )}** in durable storage. Discord could not immediately apply: ${sideEffectFailures.join(', ')}. The durable ticket state was preserved.`
+        : `✅ Ticket status changed to **${capitalize(
+            newStatus,
+          )}**.`,
     );
 
     /*
@@ -2150,8 +2261,10 @@ async function closeTicket(
       );
 
     const topic =
-      latestTopic ||
-      state.topic;
+      await getEffectiveTicketTopic(
+        channel,
+        latestTopic || state.topic,
+      );
 
     const topicStatus =
       getTicketStatus(
@@ -2371,6 +2484,7 @@ async function closeTicket(
           topic,
           'closed',
           'SupportForge voice mode ended because ticket was closed',
+          { deferTicketTopicUpdate: true, queueRename: false },
         )
       : topic;
 
@@ -2392,34 +2506,41 @@ async function closeTicket(
     await setPersistedTicketStatus(
       channel.id,
       'closed',
+      interactionActor(interaction),
     );
 
     /*
-     * Persist transcript/closure metadata in the channel topic as well as the
-     * local lifecycle store. Reopen and retention use this metadata to find the
-     * previous transcript and calculate eligibility after a restart.
+     * Persist the topic, storage-category move, and channel name together.
+     * These properties share PATCH /channels/{id}; separate edits for every
+     * close make the channel route bucket a rate-limit hotspot.
      */
-    await setChannelTopic(
-      channel.id,
-      closedTopic,
-      'SupportForge persist closed ticket metadata',
-    ).catch((error) => {
+    const closedCategory = await ensureClosedCategory(interaction.guild!);
+    const closedChannelName = getTicketChannelName(
+      ticketNumber,
+      'closed',
+      await getEffectiveTicketPriority(channel.id, closedTopic),
+    );
+    let channelSyncFailed = false;
+    try {
+      await setChannelProperties(
+        channel.id,
+        {
+          topic: closedTopic,
+          name: closedChannelName,
+          parentId: closedCategory.id,
+        },
+        new Set<string>(),
+        'SupportForge persist closed ticket metadata and storage location',
+      );
+      channel.topic = closedTopic;
+      channel.name = closedChannelName;
+    } catch (error) {
+      channelSyncFailed = true;
       console.warn(
-        `⚠️ Could not persist closed ticket metadata in channel topic; local status remains authoritative for ticket #${ticketNumber}:`,
+        `⚠️ Ticket #${ticketNumber} is closed in durable storage, but its Discord topic/category/name update is pending or failed:`,
         error,
       );
-    });
-
-    /*
-     * The dedicated close flow does not use transition('closed'), so it must
-     * explicitly move the ticket into the configured Closed storage bucket.
-     * Without this, closed tickets remain in an active department category and
-     * retention/storage rules cannot manage the lifecycle consistently.
-     */
-    await moveTicketToCategory(
-      channel,
-      await ensureClosedCategory(interaction.guild!),
-    );
+    }
 
     updateRuntimeTicketState(
       channel,
@@ -2428,29 +2549,12 @@ async function closeTicket(
     );
 
     await interaction.editReply(
-      `✅ Ticket **#${ticketNumber}** has been closed and its transcript has been saved.`,
+      channelSyncFailed
+        ? `⚠️ Ticket **#${ticketNumber}** is closed and its transcript has been saved, but the Discord topic/category/name update is pending or failed. Check the bot log for details.`
+        : `✅ Ticket **#${ticketNumber}** has been closed and its transcript has been saved.`,
     );
 
-    /*
-     * Background rename is intentionally started FIRST. Channel rename and
-     * message edits can share Discord's per-channel resource buckets, so
-     * giving the rename queue the first chance reduces visible delay without
-     * making the close interaction wait for Discord channel PATCH latency.
-     */
-    void queueTicketChannelRename(
-      channel,
-      getTicketChannelName(
-        ticketNumber,
-        'closed',
-        await getEffectiveTicketPriority(channel.id, topic),
-      ),
-      `Ticket #${ticketNumber} closed`,
-    ).catch((error) => {
-      console.error(
-        '⚠️ Failed to rename closed ticket:',
-        error,
-      );
-    });
+
 
     /*
      * Panel update happens after the state is committed and remains
@@ -2752,6 +2856,20 @@ async function showTicketCreationModal(
   }
 }
 
+function isTicketParticipant(topic: string, userId: string, reporterId?: string): boolean {
+  if (!userId || (reporterId && userId === reporterId)) return false;
+
+  const ownerId = getField(topic, 'owner');
+  if (ownerId === userId) return true;
+
+  const participants = [
+    ...(getField(topic, 'users') ?? '').split(','),
+    ...(getField(topic, 'claimed_by') ?? '').split(','),
+  ].map((id) => id.trim()).filter(Boolean);
+
+  return participants.includes(userId);
+}
+
 async function showReportTargetSelector(interaction: ButtonInteraction, page = 0): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
@@ -2759,8 +2877,16 @@ async function showReportTargetSelector(interaction: ButtonInteraction, page = 0
     return;
   }
 
-  const topic = interaction.channel.topic ?? '';
+  const topic = await getEffectiveTicketTopic(
+    interaction.channel as TextChannel,
+    interaction.channel.topic ?? '',
+  );
   const reportSettings = await getAdvancedSettings(interaction.guild.id);
+
+  if (!isTicketTopic(topic) || !isActiveTicketStatus(getTicketStatus(topic))) {
+    await replyError(interaction, '❌ Reporting is only available on an active SupportForge ticket.');
+    return;
+  }
 
   if (!reportSettings.reports.enabled) {
     await interaction.editReply(
@@ -2836,7 +2962,18 @@ async function showReportTargetSelector(interaction: ButtonInteraction, page = 0
 async function handleReportTargetSelection(interaction: StringSelectMenuInteraction): Promise<void> {
   await interaction.deferUpdate();
   const targetId = interaction.values[0];
-  const topic = interaction.channel?.type === ChannelType.GuildText ? interaction.channel.topic ?? '' : '';
+  const topic = interaction.channel?.type === ChannelType.GuildText
+    ? await getEffectiveTicketTopic(
+        interaction.channel as TextChannel,
+        interaction.channel.topic ?? '',
+      )
+    : '';
+
+  if (!isTicketParticipant(topic, targetId, interaction.user.id)) {
+    await replyError(interaction, '❌ That user is no longer a reportable participant on this ticket.');
+    return;
+  }
+
   const settings = await getAdvancedSettings(interaction.guild!.id);
 
   const rows = Object.values(settings.reports.categories).slice(0, 25);
@@ -2935,6 +3072,24 @@ async function handleReportCategorySelection(interaction: StringSelectMenuIntera
   await interaction.deferUpdate();
   const parts = interaction.customId.split(':');
   const targetId = parts[3] ?? '';
+  const topic = interaction.channel?.type === ChannelType.GuildText
+    ? await getEffectiveTicketTopic(
+        interaction.channel as TextChannel,
+        interaction.channel.topic ?? '',
+      )
+    : '';
+
+  if (!isTicketParticipant(topic, targetId, interaction.user.id)) {
+    await replyError(interaction, '❌ That user is no longer a reportable participant on this ticket.');
+    return;
+  }
+
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  if (!settings.reports.categories[interaction.values[0]]) {
+    await replyError(interaction, '❌ That report category is no longer configured.');
+    return;
+  }
+
   const categoryId = interaction.values[0];
   await renderReportSubcategorySelector(interaction, targetId, categoryId, 0);
 }
@@ -2944,6 +3099,21 @@ async function handleReportSubcategorySelection(interaction: StringSelectMenuInt
   const targetId = parts[3] ?? '';
   const categoryId = parts[4] ?? '';
   const subcategoryId = interaction.values[0];
+  const topic = interaction.channel?.type === ChannelType.GuildText
+    ? await getEffectiveTicketTopic(
+        interaction.channel as TextChannel,
+        interaction.channel.topic ?? '',
+      )
+    : '';
+
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  if (
+    !isTicketParticipant(topic, targetId, interaction.user.id) ||
+    !settings.reports.categories[categoryId]?.subcategories[subcategoryId]
+  ) {
+    await replyError(interaction, '❌ This report selection is no longer valid for the current ticket.');
+    return;
+  }
 
   await interaction.showModal(
     new ModalBuilder()
@@ -2978,6 +3148,24 @@ async function handleReportModal(interaction: ModalSubmitInteraction): Promise<v
   const staff = getStaffContext(interaction, topic);
   if (!staff.authorized) {
     await replyError(interaction, '❌ Only configured moderators or administrators can submit reports.');
+    return;
+  }
+
+  if (!isTicketTopic(topic) || !isActiveTicketStatus(getTicketStatus(topic))) {
+    await replyError(interaction, '❌ Reporting is only available on an active SupportForge ticket.');
+    return;
+  }
+
+  if (!isTicketParticipant(topic, targetUserId, interaction.user.id)) {
+    await replyError(interaction, '❌ The reported user is no longer a participant on this ticket.');
+    return;
+  }
+
+  const settings = await getAdvancedSettings(interaction.guild.id);
+  if (
+    !settings.reports.categories[categoryId]?.subcategories[subcategoryId]
+  ) {
+    await replyError(interaction, '❌ The selected report reason is no longer configured.');
     return;
   }
 
@@ -3018,7 +3206,10 @@ async function handleReportDecision(interaction: ButtonInteraction): Promise<voi
   if (
     !pending ||
     pending.expiresAt <= Date.now() ||
-    pending.reporterUserId !== interaction.user.id
+    pending.reporterUserId !== interaction.user.id ||
+    pending.guildId !== interaction.guild?.id ||
+    pending.channelId !== interaction.channel?.id ||
+    (decision !== 'flag' && decision !== 'record')
   ) {
     await replyError(interaction, '❌ This report review has expired or is not assigned to you.');
     return;
@@ -3090,6 +3281,7 @@ async function showTicketHistory(
     const events = await getTicketAuditHistory(
       interaction.guild.id,
       ticketNumber,
+      channel.id,
     );
 
     const recent = events.slice(-20).reverse();
@@ -3184,8 +3376,9 @@ async function changeTicketDepartment(interaction: StringSelectMenuInteraction):
   }
 
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) { await replyError(interaction, '❌ This action can only be used inside a ticket.'); return; }
-  const channel = interaction.channel as TextChannel; const topic = channel.topic ?? '';
-  const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
+  const channel = interaction.channel as TextChannel;
+  const topic = await getEffectiveTicketTopic(channel, channel.topic ?? '');
+  const status = getTicketStatus(topic);
   if (!isTicketTopic(topic) || !isActiveTicketStatus(status)) { await replyError(interaction, '❌ Only active tickets can be rerouted.'); return; }
   const staff = getStaffContext(interaction, topic);
   if (!staff.authorized) { await replyError(interaction, '❌ Only configured staff or administrators can change the department.'); return; }
@@ -3207,7 +3400,8 @@ async function renderRoutingTagSelector(interaction: ButtonInteraction | StringS
     await interaction.deferUpdate();
   }
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) { await replyError(interaction, '❌ This action can only be used inside a ticket.'); return; }
-  const channel = interaction.channel as TextChannel; const topic = channel.topic ?? '';
+  const channel = interaction.channel as TextChannel;
+  const topic = await getEffectiveTicketTopic(channel, channel.topic ?? '');
   const departmentId = departmentIdOverride ?? getField(topic, 'department'); const config = await getGuildConfig(interaction.guild.id); const department = departmentId ? config.departments[departmentId] : undefined;
   if (!department) { await replyError(interaction, '❌ This ticket department no longer exists.'); return; }
   const tags = Object.values(department.tags ?? {}).sort((x, y) => x.name.localeCompare(y.name));
@@ -3247,44 +3441,62 @@ async function applyTicketRouting(interaction: StringSelectMenuInteraction, depa
   );
 
   try {
-    await runChannelMutation(channel, 'Ticket routing update', async () => {
-      if (departmentChanged) {
-        if (!category) {
-          throw new Error('Destination department category could not be provisioned.');
-        }
-
-        await setChannelParent(
-          channel.id,
-          category.id,
-          'Move ticket to department category',
-        );
-        if (oldDepartment?.staffRoleId && oldDepartment.staffRoleId !== department.staffRoleId) await setChannelPermissionOverwrite(channel.id, oldDepartment.staffRoleId, [], [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory], 0, 'Remove previous department staff');
-        if (department.staffRoleId) await setChannelPermissionOverwrite(channel.id, department.staffRoleId, [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks], [], 0, 'Grant department staff');
-      }
-      await setChannelTopic(channel.id, newTopic, 'Update department and tag metadata');
-    });
-    channel.topic = newTopic;
-    updateRuntimeTicketState(channel, newTopic, status);
-
-    /*
-     * Rerouting can replace the department staff role while a ticket is already
-     * claimed. Reapply ticket visibility so the new department does not expose
-     * a private claimed ticket to unassigned staff.
-     */
-    await applyTicketVisibilityMode(
-      channel,
-      newTopic,
-      status === 'claimed' ? 'claimed' : 'unclaimed',
-    );
-
+    // The database owns routing metadata. A same-department tag change is
+    // intentionally message-only and must not rewrite channel topics or ACLs.
     await updatePersistedTicketMetadata(channel.id, {
       departmentId: department.id,
       tagId,
-    });
+    }, interactionActor(interaction));
+
+    const syncFailures: string[] = [];
+    if (departmentChanged) {
+      if (!category) {
+        throw new Error('Destination department category could not be provisioned.');
+      }
+
+      const oldRoleId = oldDepartment?.staffRoleId;
+      try {
+        // Moving the channel, updating routing metadata, and changing the
+        // staff ACL all target the same Modify Channel route. Submit them in
+        // one request to avoid a burst of consecutive PATCHes.
+        await applyTicketVisibilityMode(
+          channel,
+          newTopic,
+          status === 'claimed' ? 'claimed' : 'unclaimed',
+          getField(topic, 'claimed_by'),
+          {
+            topic: newTopic,
+            parentId: category.id,
+            removeRoleIds: oldRoleId && oldRoleId !== department.staffRoleId ? [oldRoleId] : [],
+          },
+        );
+      } catch (error) {
+        syncFailures.push('Discord category/topic/permissions');
+        console.warn('⚠️ Ticket routing was saved, but channel category/topic/permission synchronization is pending/failed:', error);
+      }
+    }
+
+    updateRuntimeTicketState(channel, channel.topic ?? topic, status);
     await updateMainMessage(channel, getField(newTopic, 'message'), status, newTopic);
-    await interaction.editReply({ content: '✅ Ticket routed to **' + department.name + ' → ' + (department.tags[tagId]?.name ?? 'tag') + '**.', components: [] });
-    if (config.supportCategoryId) await logTicketEvent(interaction.guild!, config.supportCategoryId, { ticketNumber: getField(newTopic, 'number') ?? 'unknown', event: 'ticket_routing_changed', actor: interaction.user.tag, actorId: interaction.user.id, actorName: interaction.user.tag, detail: 'Department=' + department.name + '; tag=' + (department.tags[tagId]?.name ?? tagId) + '.' });
-  } catch (error) { console.error('❌ Ticket routing update failed:', error); await interaction.editReply({ content: '❌ The ticket routing update failed.', components: [] }).catch(() => undefined); }
+    const destinationLabel = department.tags[tagId]?.name ?? 'tag';
+    await interaction.editReply({
+      content: syncFailures.length
+        ? '✅ Ticket routing saved as **' + department.name + ' → ' + destinationLabel + '**. Discord synchronization is pending or needs repair: ' + syncFailures.join(', ') + '.'
+        : '✅ Ticket routed to **' + department.name + ' → ' + destinationLabel + '**.',
+      components: [],
+    });
+    if (config.supportCategoryId) await logTicketEvent(interaction.guild!, config.supportCategoryId, {
+      ticketNumber: getField(newTopic, 'number') ?? 'unknown',
+      event: 'ticket_routing_changed',
+      actor: interaction.user.tag,
+      actorId: interaction.user.id,
+      actorName: interaction.user.tag,
+      detail: 'Department=' + department.name + '; tag=' + destinationLabel + '.',
+    });
+  } catch (error) {
+    console.error('❌ Ticket routing update failed:', error);
+    await interaction.editReply({ content: '❌ The ticket routing update failed.', components: [] }).catch(() => undefined);
+  }
 }
 
 async function changeTicketRoutingTag(interaction: StringSelectMenuInteraction): Promise<void> {
@@ -3295,7 +3507,9 @@ async function changeTicketRoutingTag(interaction: StringSelectMenuInteraction):
   const parts = interaction.customId.split(':'); const departmentId = parts[3] ?? ''; const tagId = interaction.values[0] ?? '';
   const config = await getGuildConfig(interaction.guild!.id); const department = config.departments[departmentId];
   if (!department?.tags?.[tagId]) { await replyError(interaction, '❌ That tag is not valid for this department.'); return; }
-  const channel = interaction.channel as TextChannel; const topic = channel.topic ?? ''; const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
+  const channel = interaction.channel as TextChannel;
+  const topic = await getEffectiveTicketTopic(channel, channel.topic ?? '');
+  const status = getTicketStatus(topic);
   const staff = getStaffContext(interaction, topic);
   if (!isTicketTopic(topic) || !isActiveTicketStatus(status) || !staff.authorized) { await replyError(interaction, '❌ Only configured staff or administrators can change ticket tags.'); return; }
   await applyTicketRouting(interaction, department, tagId, status, topic);
@@ -3379,7 +3593,10 @@ async function applyTicketPriority(
 
   const channel = interaction.channel as TextChannel;
   const state = getRuntimeTicketState(channel);
-  const topic = channel.topic ?? state.topic;
+  const topic = await getEffectiveTicketTopic(
+    channel,
+    channel.topic ?? state.topic,
+  );
   const status =
     (await getPersistedTicketStatus(channel.id)) ??
     getTicketStatus(topic);
@@ -3410,6 +3627,7 @@ async function applyTicketPriority(
   await updatePersistedTicketMetadata(
     channel.id,
     { priority },
+    interactionActor(interaction),
   );
 
   channel.topic = newTopic;
@@ -4467,6 +4685,7 @@ export async function handleTicketInteraction(
     | ModalSubmitInteraction,
 ): Promise<void> {
   try {
+    const routingComponentRoute = classifyTicketRoutingComponent(interaction.customId);
     /*
      * Move/Restore is allowed to perform several Discord API operations,
      * but the button acknowledgement must happen immediately. Defer before
@@ -4488,6 +4707,10 @@ export async function handleTicketInteraction(
     }
 
     if (interaction.isStringSelectMenu()) {
+      if (routingComponentRoute === 'department-select') {
+        await changeTicketDepartment(interaction);
+        return;
+      }
       if (interaction.customId === 'ticket:report:target') {
         await handleReportTargetSelection(interaction);
         return;
@@ -4500,14 +4723,23 @@ export async function handleTicketInteraction(
         await handleReportSubcategorySelection(interaction);
         return;
       }
-      if (interaction.customId === 'ticket:create-tag:select') {
+      if (interaction.customId.startsWith('ticket:create-tag:select:')) {
         await handleTicketTagSelection(interaction);
         return;
       }
-      if (interaction.customId.startsWith('ticket:routing-tag:select:')) {
+      if (routingComponentRoute === 'routing-tag-select') {
         await changeTicketRoutingTag(interaction);
         return;
       }
+    }
+
+    if (
+      interaction.isButton() &&
+      (routingComponentRoute === 'department-navigation' ||
+       routingComponentRoute === 'routing-tag-navigation')
+    ) {
+      await handlePanelButton(interaction);
+      return;
     }
 
     if (
