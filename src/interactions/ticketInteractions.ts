@@ -2537,51 +2537,105 @@ async function closeTicket(
      * Discord channel PATCH. The lifecycle state is persisted locally so the
      * closed-ticket message guard continues to work after a restart.
      */
-    const voiceClearedTopic = getField(topic, 'voice_channel_id')
-      ? await endTicketVoiceMode(
+    const closeTimestamp = closedAt.toISOString();
+    let closedTopic = setField(
+      setField(
+        setField(topic, 'status', 'closed'),
+        'closed_at',
+        closeTimestamp,
+      ),
+      'transcript_id',
+      transcriptMessage.id,
+    );
+    closedTopic = setField(closedTopic, 'updated_at', closeTimestamp);
+
+    const ownerIdForParticipants = getField(topic, 'owner');
+    const participants = [
+      ...new Set([
+        ...(ownerIdForParticipants ? [ownerIdForParticipants] : []),
+        ...(getField(topic, 'users') ?? '').split(',').map((id) => id.trim()).filter(Boolean),
+      ]),
+    ];
+    const voiceChannelId = getField(topic, 'voice_channel_id');
+    const closeMetadata: Record<string, unknown> = {
+      closedAt: closeTimestamp,
+      closedById: interaction.user.id,
+      closedByTag: interaction.user.tag,
+      transcriptId: transcriptMessage.id,
+      transcriptDestinationId: transcriptChannelId,
+      lastActivityAt: closeTimestamp,
+      lastStaffActivityAt: closeTimestamp,
+    };
+    if (voiceChannelId) {
+      closeMetadata.voiceChannelId = voiceChannelId;
+      closeMetadata.voiceChannelName = getField(topic, 'voice_channel_name') ?? null;
+      closeMetadata.voiceStartedAt = getField(topic, 'voice_started_at') ?? null;
+      closeMetadata.voiceStartedBy = getField(topic, 'voice_started_by') ?? null;
+    }
+
+    /*
+     * Transcript delivery succeeded. Commit the complete closed state and
+     * transcript reference before touching Discord channel state. The event
+     * and outbox entries are in this same database transaction.
+     */
+    await transitionPersistedTicket(
+      channel.id,
+      'closed',
+      {
+        participantIds: participants,
+        metadata: closeMetadata,
+      },
+      interactionActor(interaction),
+      closeTimestamp,
+    );
+
+    let channelSyncFailed = false;
+    if (voiceChannelId) {
+      try {
+        closedTopic = await endTicketVoiceMode(
           interaction.guild!,
           channel,
-          topic,
+          closedTopic,
           'closed',
           'SupportForge voice mode ended because ticket was closed',
           { deferTicketTopicUpdate: true, queueRename: false },
-        )
-      : topic;
-
-    const closedTopic =
-      setField(
-        setField(
-          setField(
-            voiceClearedTopic,
-            'status',
-            'closed',
-          ),
-          'closed_at',
-          closedAt.toISOString(),
-        ),
-        'transcript_id',
-        transcriptMessage.id,
-      );
-
-    await setPersistedTicketStatus(
-      channel.id,
-      'closed',
-      interactionActor(interaction),
-    );
+        );
+        closedTopic = setField(closedTopic, 'updated_at', closeTimestamp);
+        await transitionPersistedTicket(
+          channel.id,
+          'closed',
+          {
+            metadata: {
+              voiceChannelId: null,
+              voiceChannelName: null,
+              voiceStartedAt: null,
+              voiceStartedBy: null,
+            },
+          },
+          interactionActor(interaction),
+          closeTimestamp,
+        );
+      } catch (error) {
+        channelSyncFailed = true;
+        console.warn(
+          `⚠️ Ticket #${ticketNumber} was closed durably, but private voice cleanup remains pending:`,
+          error,
+        );
+      }
+    }
 
     /*
      * Persist the topic, storage-category move, and channel name together.
-     * These properties share PATCH /channels/{id}; separate edits for every
-     * close make the channel route bucket a rate-limit hotspot.
+     * The outbox retries this reconciliation if Discord is rate-limited or
+     * temporarily unavailable.
      */
-    const closedCategory = await ensureClosedCategory(interaction.guild!);
     const closedChannelName = getTicketChannelName(
       ticketNumber,
       'closed',
       await getEffectiveTicketPriority(channel.id, closedTopic),
     );
-    let channelSyncFailed = false;
     try {
+      const closedCategory = await ensureClosedCategory(interaction.guild!);
       await setChannelProperties(
         channel.id,
         {
@@ -2597,7 +2651,7 @@ async function closeTicket(
     } catch (error) {
       channelSyncFailed = true;
       console.warn(
-        `⚠️ Ticket #${ticketNumber} is closed in durable storage, but its Discord topic/category/name update is pending or failed:`,
+        `⚠️ Ticket #${ticketNumber} is closed in durable storage, but the Discord topic/category/name update is pending or failed:`,
         error,
       );
     }
