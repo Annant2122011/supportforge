@@ -6,7 +6,7 @@ import { getSupportForgeDatabase, type SqliteDatabase } from '../core/persistenc
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
 import type { PersistenceProvider } from '../core/persistence/provider';
 
-export type JsonDocumentKey = 'guild-config' | 'advanced-settings' | 'reports' | 'legacy-tickets-import-status';
+export type JsonDocumentKey = 'guild-config' | 'advanced-settings' | 'reports' | 'audit-log' | 'legacy-tickets-import-status';
 
 export interface JsonDocumentRepository {
   get(key: JsonDocumentKey): Promise<unknown | undefined>;
@@ -102,10 +102,18 @@ export class PostgresJsonDocumentRepository implements JsonDocumentRepository {
 const LEGACY_DOCUMENTS: ReadonlyArray<{
   key: JsonDocumentKey;
   path: string;
+  fallbackPath?: string;
 }> = [
-  { key: 'guild-config', path: join(process.cwd(), 'data', 'config.json') },
-  { key: 'advanced-settings', path: join(process.cwd(), 'data', 'advanced-settings.json') },
-  { key: 'reports', path: join(process.cwd(), 'data', 'reports.json') },
+  { key: 'guild-config', path: 'data/config.json' },
+  { key: 'advanced-settings', path: 'data/advanced-settings.json' },
+  { key: 'reports', path: 'data/reports.json' },
+  {
+    key: 'audit-log',
+    path: 'data/audit-log.json',
+    // The prior filesystem-backed audit store maintained a backup. Keep that
+    // recovery path available if the primary file is absent or malformed.
+    fallbackPath: 'data/audit-log.backup.json',
+  },
 ];
 
 function readLegacyDocument(path: string): unknown {
@@ -137,32 +145,75 @@ function readLegacyDocument(path: string): unknown {
  */
 export async function importLegacyJsonDocuments(
   provider: PersistenceProvider,
+  rootDirectory = process.cwd(),
+  repositoryOverride?: JsonDocumentRepository,
 ): Promise<{ imported: JsonDocumentKey[]; skipped: JsonDocumentKey[] }> {
   const repository: JsonDocumentRepository =
-    provider === 'postgres'
-      ? new PostgresJsonDocumentRepository()
-      : new SqliteJsonDocumentRepository();
+    repositoryOverride ?? (
+      provider === 'postgres'
+        ? new PostgresJsonDocumentRepository()
+        : new SqliteJsonDocumentRepository()
+    );
 
   const imported: JsonDocumentKey[] = [];
   const skipped: JsonDocumentKey[] = [];
 
   for (const document of LEGACY_DOCUMENTS) {
-    if (!existsSync(document.path)) {
-      skipped.push(document.key);
-      continue;
-    }
-
+    // Never let a legacy local file overwrite an existing durable document.
     if (await repository.get(document.key) !== undefined) {
       skipped.push(document.key);
       continue;
     }
 
-    // Backup before parsing so even a malformed legacy file has an exact
-    // recovery copy. Never modify or delete the original JSON source.
-    const backupPath =
-      document.path + '.pre-database-' + Date.now() + '-' + randomUUID() + '.backup';
-    copyFileSync(document.path, backupPath);
-    const value = readLegacyDocument(document.path);
+    const candidates = [
+      join(rootDirectory, document.path),
+      ...(document.fallbackPath ? [join(rootDirectory, document.fallbackPath)] : []),
+    ].filter(existsSync);
+
+    if (!candidates.length) {
+      skipped.push(document.key);
+      continue;
+    }
+
+    let value: unknown;
+    let selectedPath: string | undefined;
+    let lastError: unknown;
+
+    for (const candidatePath of candidates) {
+      // Backup every attempted source before parsing it. The original file is
+      // never modified or deleted, even when its contents are malformed.
+      const backupPath =
+        candidatePath + '.pre-database-' + Date.now() + '-' + randomUUID() + '.backup';
+      copyFileSync(candidatePath, backupPath);
+
+      try {
+        value = readLegacyDocument(candidatePath);
+        selectedPath = candidatePath;
+        break;
+      } catch (error) {
+        lastError = error;
+        if (candidatePath !== candidates[candidates.length - 1]) {
+          console.warn(
+            '⚠️ Legacy SupportForge file could not be imported; trying its configured backup: ' +
+            candidatePath,
+          );
+        }
+      }
+    }
+
+    if (!selectedPath) {
+      throw new Error(
+        'SupportForge could not import legacy document "' + document.key +
+        '". All available source files were invalid; no source was modified.',
+        { cause: lastError },
+      );
+    }
+
+    if (document.key === 'audit-log' && selectedPath !== candidates[0]) {
+      console.warn(
+        '⚠️ Imported audit history from the retained backup because the primary audit file was unavailable or invalid.',
+      );
+    }
 
     if (await repository.putIfAbsent(document.key, value)) {
       imported.push(document.key);
