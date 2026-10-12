@@ -477,7 +477,7 @@ export class SqliteTicketRepository implements TicketRepository {
       if (updates.priority !== undefined) add('priority', updates.priority);
       if (updates.claimedByIds !== undefined) add('claimed_by_json', JSON.stringify(updates.claimedByIds));
       if (updates.participantIds !== undefined) add('participant_ids_json', JSON.stringify(updates.participantIds));
-      if (updates.metadata !== undefined) add('metadata_json', JSON.stringify(updates.metadata));
+      if (updates.metadata !== undefined) add('metadata_json', JSON.stringify({ ...current.metadata, ...updates.metadata }));
 
       add('updated_at', updatedAt);
       parameters.push(channelId, current.status);
