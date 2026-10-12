@@ -28,6 +28,21 @@ test('honors Retry-After headers', () => {
   );
 });
 
+test('parses nested raw payloads and wrapped causes consistently', () => {
+  assert.equal(
+    calculateOutboxRetryDelayMs(1, {
+      cause: { data: { retry_after: 12.5 } },
+    }),
+    13_500,
+  );
+  assert.equal(
+    calculateOutboxRetryDelayMs(1, {
+      cause: new Error('Discord rate limit: retry after=2.5s'),
+    }),
+    3_500,
+  );
+});
+
 test('honors textual retry-after messages from wrapped API errors', () => {
   assert.equal(
     calculateOutboxRetryDelayMs(1, new Error('Discord rate limit: retry after 195s')),
