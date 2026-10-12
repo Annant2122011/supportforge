@@ -3530,23 +3530,38 @@ async function applyTicketRouting(interaction: StringSelectMenuInteraction, depa
   const category = departmentChanged
     ? await ensureDepartmentCategory(interaction.guild!, department)
     : null;
+  const transitionAt = new Date().toISOString();
   const newTopic = setField(
     setField(
-      setField(topic, 'department', department.id),
-      'staff',
-      department.staffRoleId ?? 'none',
+      setField(
+        setField(topic, 'department', department.id),
+        'staff',
+        department.staffRoleId ?? 'none',
+      ),
+      'tags',
+      tagId,
     ),
-    'tags',
-    tagId,
+    'updated_at',
+    transitionAt,
   );
 
   try {
     // The database owns routing metadata. A same-department tag change is
     // intentionally message-only and must not rewrite channel topics or ACLs.
-    await updatePersistedTicketMetadata(channel.id, {
-      departmentId: department.id,
-      tagId,
-    }, interactionActor(interaction));
+    await transitionPersistedTicket(
+      channel.id,
+      status,
+      {
+        departmentId: department.id,
+        tagId,
+        metadata: {
+          lastActivityAt: transitionAt,
+          lastStaffActivityAt: transitionAt,
+        },
+      },
+      interactionActor(interaction),
+      transitionAt,
+    );
 
     const syncFailures: string[] = [];
     if (departmentChanged) {
