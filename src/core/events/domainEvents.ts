@@ -1,3 +1,5 @@
+export const MAX_OUTBOX_ATTEMPTS = 10;
+
 export type DomainEventType =
   | 'ticket.created'
   | 'ticket.status_changed'
