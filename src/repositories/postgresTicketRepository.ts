@@ -105,7 +105,7 @@ export interface AsyncTicketRepository {
     departmentId: string,
   ): Promise<TicketRepositoryRecord[]>;
   listAll(): Promise<TicketRepositoryRecord[]>;
-  upsert(record: TicketRepositoryRecord): Promise<void>;
+  upsert(record: TicketRepositoryRecord, actor?: EventActor): Promise<void>;
   create(record: TicketRepositoryRecord, actor?: EventActor): Promise<void>;
   listEvents(channelId: string, limit?: number): Promise<import('../core/events/domainEvents').DomainEvent[]>;
   setStatus(channelId: string, status: TicketStatus, updatedAt: string): Promise<void>;
@@ -280,14 +280,36 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
     }
   }
 
-  public async upsert(record: TicketRepositoryRecord): Promise<void> {
-    await this.executor.query(
-      'INSERT INTO tickets (' +
-        'id, guild_id, channel_id, ticket_number, status, department_id, tag_id, owner_id, priority, claimed_by_ids, participant_ids, metadata, created_at, updated_at, deleted_at, deletion_reason' +
-        ') VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text[], $11::text[], $12::jsonb, $13::timestamptz, $14::timestamptz, $15::timestamptz, $16) ' +
-        'ON CONFLICT(channel_id) DO UPDATE SET ' +
-        'ticket_number = EXCLUDED.ticket_number, status = EXCLUDED.status, department_id = EXCLUDED.department_id, tag_id = EXCLUDED.tag_id, owner_id = EXCLUDED.owner_id, priority = EXCLUDED.priority, claimed_by_ids = EXCLUDED.claimed_by_ids, participant_ids = EXCLUDED.participant_ids, metadata = EXCLUDED.metadata, updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at, deletion_reason = EXCLUDED.deletion_reason',
-      insertParameters(record),
+  public async upsert(
+    record: TicketRepositoryRecord,
+    actor?: EventActor,
+  ): Promise<void> {
+    const current = await this.getByChannelId(record.channelId);
+    if (!current) {
+      await this.create(record, actor);
+      return;
+    }
+
+    if (current.id !== record.id || current.guildId !== record.guildId) {
+      throw new Error(
+        `Refusing to overwrite immutable SupportForge ticket identity for channel ${record.channelId}.`,
+      );
+    }
+
+    await this.transitionStatusAndMetadata(
+      record.channelId,
+      record.status,
+      {
+        departmentId: record.departmentId,
+        tagId: record.tagId,
+        ownerId: record.ownerId,
+        priority: record.priority,
+        claimedByIds: record.claimedByIds,
+        participantIds: record.participantIds,
+        metadata: record.metadata,
+      },
+      record.updatedAt,
+      actor,
     );
   }
 
