@@ -135,7 +135,8 @@ test('legacy ticket migration preserves the source backup and rejects malformed 
   try {
     assert.throws(
       () => createSupportForgeDatabase(databasePath, legacyTicketsPath),
-      /unsupported or missing status/,
+      (error) =>
+        /unsupported or missing status/.test(String((error as Error & { cause?: unknown }).cause)),
     );
 
     assert.deepEqual(JSON.parse(await readFile(legacyTicketsPath, 'utf8')), source);
@@ -161,7 +162,8 @@ test('legacy ticket migration rejects invalid JSON while keeping a recovery copy
   try {
     assert.throws(
       () => createSupportForgeDatabase(databasePath, legacyTicketsPath),
-      /legacy file is invalid JSON/,
+      (error) =>
+        /file is invalid JSON/.test(String((error as Error & { cause?: unknown }).cause)),
     );
 
     assert.equal(await readFile(legacyTicketsPath, 'utf8'), source);
@@ -290,7 +292,7 @@ test('legacy tickets migrate with claimant, participant, and metadata fields int
         );
         assert.deepEqual(
           markerStatement.all().map((row) => Number(row.id)),
-          [1, 2, 3],
+          [1, 2, 3, 4],
         )
       } finally {
         if (reopened.isOpen) reopened.close();
@@ -325,7 +327,7 @@ test('malformed legacy JSON fails safely and can be retried after repair', async
     /*
      * Migration 2 must not be marked as applied after the failed import.
      * Repairing the source and reopening the same database must therefore
-     * execute the import exactly once and finish at migration 2.
+     * execute the import exactly once and finish at migration 4.
      */
     await writeFile(
       legacyTicketsPath,
@@ -362,7 +364,7 @@ test('malformed legacy JSON fails safely and can be retried after repair', async
       );
       assert.deepEqual(
         markerStatement.all().map((row) => Number(row.id)),
-        [1, 2, 3],
+        [1, 2, 3, 4],
       );
     } finally {
       if (repaired.isOpen) repaired.close();
