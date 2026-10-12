@@ -61,8 +61,8 @@ class SqliteTicketRepositoryAdapter implements AsyncTicketRepository {
     return this.repository.listAll();
   }
 
-  async upsert(record: Parameters<SqliteTicketRepository['upsert']>[0]) {
-    this.repository.upsert(record);
+  async upsert(record: Parameters<SqliteTicketRepository['upsert']>[0], actor?: EventActor) {
+    this.repository.upsert(record, actor);
   }
 
   async create(
