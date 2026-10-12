@@ -125,6 +125,63 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+  {
+    id: 4,
+    name: 'create_application_document_store_and_outbox_lease',
+    up: async (db) => {
+      await db.query(`
+        ALTER TABLE outbox_events
+          ADD COLUMN IF NOT EXISTS processing_started_at TIMESTAMPTZ;
+
+        CREATE TABLE IF NOT EXISTS app_documents (
+          document_key TEXT PRIMARY KEY,
+          payload JSONB NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_app_documents_updated_at
+          ON app_documents (updated_at);
+      `);
+    },
+  },
+  {
+    id: 5,
+    name: 'expand_domain_event_types',
+    up: async (db) => {
+      const eventTypes = [
+        'ticket.created',
+        'ticket.status_changed',
+        'ticket.metadata_changed',
+        'ticket.deleted',
+        'ticket.claimed',
+        'ticket.unclaimed',
+        'ticket.pending',
+        'ticket.resumed',
+        'ticket.closed',
+        'ticket.reopened',
+        'ticket.archived',
+        'ticket.priority.changed',
+        'ticket.department.changed',
+        'ticket.tag.changed',
+        'ticket.participant.added',
+        'ticket.participant.removed',
+      ];
+      const accepted = eventTypes.map((type) => "'" + type + "'").join(', ');
+
+      await db.query(
+        'ALTER TABLE ticket_events DROP CONSTRAINT IF EXISTS ticket_events_event_type_check',
+      );
+      await db.query(
+        'ALTER TABLE outbox_events DROP CONSTRAINT IF EXISTS outbox_events_event_type_check',
+      );
+      await db.query(
+        'ALTER TABLE ticket_events ADD CONSTRAINT ticket_events_event_type_check CHECK (event_type IN (' + accepted + '))',
+      );
+      await db.query(
+        'ALTER TABLE outbox_events ADD CONSTRAINT outbox_events_event_type_check CHECK (event_type IN (' + accepted + '))',
+      );
+    },
+  },
 ];
 
 export async function runPostgresMigrations(
