@@ -1,10 +1,9 @@
 import type { QueryResult, QueryResultRow } from 'pg';
 
 /**
- * Database boundary shared by persistence repositories.
- *
- * The application currently supports SQLite during the migration window and
- * PostgreSQL/Neon as the target production provider.
+ * Query boundary for the live PostgreSQL/Neon persistence repositories.
+ * SQLite implementation code is retained for legacy migration tooling and
+ * isolated repository tests, but is not a supported live bot provider.
  */
 export interface DatabaseExecutor {
   query<T extends QueryResultRow = QueryResultRow>(
