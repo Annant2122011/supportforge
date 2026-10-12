@@ -94,7 +94,11 @@ test('SQLite schema is migrated and repository preserves structured ticket data'
     assert.equal(updated.priority, 'high');
     assert.deepEqual(updated.claimedByIds, ['moderator-2']);
     assert.deepEqual(updated.participantIds, ['user-1', 'moderator-2']);
-    assert.deepEqual(updated.metadata, { updated: true });
+    assert.deepEqual(updated.metadata, {
+      subject: 'Refund',
+      custom: { priorityReason: 'duplicate charge' },
+      updated: true,
+    });
     assert.equal(updated.updatedAt, '2026-10-06T11:00:00.000Z');
 
     repository.markDeleted(
