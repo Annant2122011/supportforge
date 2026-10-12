@@ -87,7 +87,7 @@ function retryAfterMs(error: unknown): number | null {
   return milliseconds ? Number(milliseconds[1]) : null;
 }
 
-function retryDelayMs(attempts: number, error?: unknown): number {
+export function calculateOutboxRetryDelayMs(attempts: number, error?: unknown): number {
   const exponent = Math.min(Math.max(attempts - 1, 0), 10);
   const exponential = Math.min(1_000 * 2 ** exponent, MAX_RETRY_DELAY_MS);
   const serverCooldown = error === undefined ? null : retryAfterMs(error);
@@ -128,7 +128,7 @@ async function processSqliteOutboxBatch(
     } catch (error) {
       failed += 1;
       const permanent = isPermanentFailure(error);
-      const delay = permanent ? 0 : retryDelayMs(event.attempts + 1, error);
+      const delay = permanent ? 0 : calculateOutboxRetryDelayMs(event.attempts + 1, error);
       repository.markOutboxFailed(
         event.id,
         errorMessage(error),
@@ -169,7 +169,7 @@ async function processPostgresOutboxBatch(
     } catch (error) {
       failed += 1;
       const permanent = isPermanentFailure(error);
-      const delay = permanent ? 0 : retryDelayMs(event.attempts, error);
+      const delay = permanent ? 0 : calculateOutboxRetryDelayMs(event.attempts, error);
       await repository.markOutboxFailed(
         event.id,
         errorMessage(error),
