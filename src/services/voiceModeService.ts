@@ -11,6 +11,7 @@ import { getField, removeField, setField } from './ticketStateService';
 import { getTicketChannelName, queueTicketChannelRename } from './ticketPanelService';
 import type { TicketPriority } from './advancedSettingsService';
 import { getAdvancedSettings } from './advancedSettingsService';
+import { updatePersistedTicketMetadata } from './ticketPersistenceService';
 import type { TicketStatus } from './ticketStateService';
 
 const VOICE_TOPIC_RETRY_MAX_DELAY_MS = 15 * 60 * 1000;
@@ -157,12 +158,33 @@ export async function startTicketVoiceMode(
     reason: 'SupportForge private voice mode for ticket #' + number,
   }) as VoiceChannel;
 
+  const voiceStartedAt = new Date().toISOString();
   let newTopic = setField(topic, 'voice_channel_id', voiceChannel.id);
-  newTopic = setField(newTopic, 'voice_started_at', new Date().toISOString());
+  newTopic = setField(newTopic, 'voice_started_at', voiceStartedAt);
   newTopic = setField(newTopic, 'voice_started_by', moderatorIds[0]);
   newTopic = setField(newTopic, 'voice_channel_name', voiceChannel.name);
 
   try {
+    // Persist the recovery pointer before touching the ticket-channel topic.
+    // If the process crashes after the voice channel is created, the durable
+    // outbox record still identifies the room that must be reconciled.
+    await updatePersistedTicketMetadata(
+      ticketChannel.id,
+      {
+        metadata: {
+          voiceChannelId: voiceChannel.id,
+          voiceChannelName: voiceChannel.name,
+          voiceStartedAt,
+          voiceStartedBy: moderatorIds[0],
+        },
+      },
+      {
+        id: moderatorIds[0]!,
+        attribution: 'actorKnown',
+        confidence: 'high',
+      },
+    );
+
     newTopic = await updateVoiceTopic(
       ticketChannel,
       newTopic,
@@ -176,6 +198,28 @@ export async function startTicketVoiceMode(
       console.error(
         '❌ Voice mode rollback could not delete the newly created voice channel:',
         rollbackError,
+      );
+    });
+
+    await updatePersistedTicketMetadata(
+      ticketChannel.id,
+      {
+        metadata: {
+          voiceChannelId: null,
+          voiceChannelName: null,
+          voiceStartedAt: null,
+          voiceStartedBy: null,
+        },
+      },
+      {
+        id: moderatorIds[0]!,
+        attribution: 'actorKnown',
+        confidence: 'high',
+      },
+    ).catch((clearError) => {
+      console.error(
+        '❌ Voice-mode metadata rollback failed; the durable pointer will require reconciliation:',
+        clearError,
       );
     });
 
