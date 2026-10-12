@@ -1,3 +1,7 @@
+import type { EventActor } from '../core/events/domainEvents';
+import type { TicketMetadataUpdates } from '../repositories/ticketRepository';
+import { buildTicketVisibilityPlan } from '../core/domain/ticketPermissionPlan';
+
 import {
   ActionRowBuilder,
   ButtonBuilder,
