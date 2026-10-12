@@ -157,6 +157,9 @@ function metadataEventType(
     'departmentId' | 'tagId' | 'ownerId' | 'priority' |
     'claimedByIds' | 'participantIds' | 'metadata'>>,
 ): DomainEventType {
+  if (updates.metadata && typeof updates.metadata.lastMessageId === 'string') {
+    return 'ticket.message.received';
+  }
   if (changedFields.length === 1) {
     const field = changedFields[0];
     if (field === 'priority') return 'ticket.priority.changed';
@@ -172,6 +175,20 @@ function metadataEventType(
     }
   }
   return 'ticket.metadata_changed';
+}
+
+function metadataEventPayload(
+  changedFields: string[],
+  updates: Partial<Pick<TicketRepositoryRecord, 'metadata'>>,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = { changedFields };
+  const metadata = updates.metadata;
+  if (metadata && typeof metadata.lastMessageId === 'string') {
+    payload.messageId = metadata.lastMessageId;
+    payload.messageAuthorType = metadata.lastMessageAuthorType ?? 'unknown';
+    payload.messageTimestamp = metadata.lastActivityAt ?? null;
+  }
+  return payload;
 }
 
 function fromRow(row: TicketRow): TicketRepositoryRecord {
@@ -527,7 +544,7 @@ export class SqliteTicketRepository implements TicketRepository {
           actorId: actor.id,
           actorAttribution: actor.attribution ?? 'actorUnknown',
           actorConfidence: actor.confidence ?? 'none',
-          payload: { changedFields },
+          payload: metadataEventPayload(changedFields, updates),
           occurredAt: updatedAt,
         });
       }
@@ -629,9 +646,7 @@ export class SqliteTicketRepository implements TicketRepository {
         actorId: actor.id,
         actorAttribution: actor.attribution ?? 'actorUnknown',
         actorConfidence: actor.confidence ?? 'none',
-        payload: {
-          changedFields: Object.keys(updates),
-        },
+        payload: metadataEventPayload(Object.keys(updates), updates),
         occurredAt: updatedAt,
       });
 
