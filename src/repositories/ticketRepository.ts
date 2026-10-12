@@ -191,6 +191,70 @@ function metadataEventPayload(
   return payload;
 }
 
+function mergeTicketMetadata(
+  current: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged = { ...current, ...patch };
+  const firstTimestampFields = [
+    'firstCustomerMessageAt',
+    'firstStaffResponseAt',
+  ];
+  for (const field of firstTimestampFields) {
+    if (typeof current[field] === 'string' && current[field]) {
+      merged[field] = current[field];
+    }
+  }
+
+  const monotonicTimestampFields = [
+    'lastActivityAt',
+    'lastCustomerMessageAt',
+    'lastStaffActivityAt',
+    'lastStaffResponseAt',
+  ];
+  for (const field of monotonicTimestampFields) {
+    const oldValue = current[field];
+    const newValue = patch[field];
+    if (
+      typeof oldValue === 'string' &&
+      oldValue &&
+      (typeof newValue !== 'string' || newValue < oldValue)
+    ) {
+      merged[field] = oldValue;
+    }
+  }
+
+  const oldActivityAt = typeof current.lastActivityAt === 'string'
+    ? current.lastActivityAt
+    : '';
+  const newActivityAt = typeof patch.lastActivityAt === 'string'
+    ? patch.lastActivityAt
+    : '';
+  const oldMessageId = typeof current.lastMessageId === 'string'
+    ? current.lastMessageId
+    : '';
+  const newMessageId = typeof patch.lastMessageId === 'string'
+    ? patch.lastMessageId
+    : '';
+  const sameTimestampOlderSnowflake =
+    oldActivityAt === newActivityAt &&
+    /^\d+$/.test(oldMessageId) &&
+    /^\d+$/.test(newMessageId) &&
+    BigInt(newMessageId) < BigInt(oldMessageId);
+  const olderActivity =
+    Boolean(oldActivityAt && newActivityAt) &&
+    (newActivityAt < oldActivityAt || sameTimestampOlderSnowflake);
+
+  if (olderActivity && newMessageId) {
+    for (const field of ['lastMessageId', 'lastMessageAuthorId', 'lastMessageAuthorType']) {
+      if (current[field] === undefined) delete merged[field];
+      else merged[field] = current[field];
+    }
+  }
+
+  return merged;
+}
+
 function fromRow(row: TicketRow): TicketRepositoryRecord {
   return {
     id: row.id,
@@ -501,7 +565,7 @@ export class SqliteTicketRepository implements TicketRepository {
       if (updates.priority !== undefined) add('priority', updates.priority);
       if (updates.claimedByIds !== undefined) add('claimed_by_json', JSON.stringify(updates.claimedByIds));
       if (updates.participantIds !== undefined) add('participant_ids_json', JSON.stringify(updates.participantIds));
-      if (updates.metadata !== undefined) add('metadata_json', JSON.stringify({ ...current.metadata, ...updates.metadata }));
+      if (updates.metadata !== undefined) add('metadata_json', JSON.stringify(mergeTicketMetadata(current.metadata, updates.metadata)));
 
       add('updated_at', updatedAt);
       parameters.push(channelId, current.status);
