@@ -1,7 +1,7 @@
 import { copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { getSupportForgeDatabase } from '../core/persistence/sqliteDatabase';
+import { getSupportForgeDatabase, type SqliteDatabase } from '../core/persistence/sqliteDatabase';
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
 import type { PersistenceProvider } from '../core/persistence/provider';
 
@@ -45,22 +45,26 @@ function serialized(value: unknown): string {
 }
 
 export class SqliteJsonDocumentRepository implements JsonDocumentRepository {
+  public constructor(
+    private readonly database: SqliteDatabase = getSupportForgeDatabase(),
+  ) {}
+
   public async get(key: JsonDocumentKey): Promise<unknown | undefined> {
-    const row = getSupportForgeDatabase()
+    const row = this.database
       .prepare('SELECT document_key, payload_json, updated_at FROM app_documents WHERE document_key = ?')
       .get(key) as SqliteDocumentRow | undefined;
     return row ? parseJson(row.payload_json, key) : undefined;
   }
 
   public async put(key: JsonDocumentKey, value: unknown): Promise<void> {
-    getSupportForgeDatabase().prepare(
+    this.database.prepare(
       'INSERT INTO app_documents (document_key, payload_json, updated_at) VALUES (?, ?, ?) ' +
       'ON CONFLICT(document_key) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at',
     ).run(key, serialized(value), new Date().toISOString());
   }
 
   public async putIfAbsent(key: JsonDocumentKey, value: unknown): Promise<boolean> {
-    const result = getSupportForgeDatabase().prepare(
+    const result = this.database.prepare(
       'INSERT OR IGNORE INTO app_documents (document_key, payload_json, updated_at) VALUES (?, ?, ?)',
     ).run(key, serialized(value), new Date().toISOString());
     return Number(result.changes) === 1;
