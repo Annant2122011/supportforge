@@ -164,6 +164,9 @@ export class TicketOutboxPublisher implements OutboxPublisher {
   public constructor(private readonly client: Client) {}
 
   public async publish(event: OutboxEvent): Promise<void> {
+    // Message-received events are durable activity records, not Discord mutations.
+    // They must not cause a channel PATCH for every customer/staff message.
+    if (event.type === 'ticket.message.received') return;
     const payloadChannelId = stringValue(event.payload.channelId);
     let ticket = payloadChannelId
       ? await getPersistedTicket(payloadChannelId)
