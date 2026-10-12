@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
+import { MAX_OUTBOX_ATTEMPTS } from '../core/events/domainEvents';
+
 import type {
   DomainEvent,
   EventActorAttribution,
   EventActorConfidence,
   DomainEventType,
-  MAX_OUTBOX_ATTEMPTS,
   OutboxEvent,
 } from '../core/events/domainEvents';
 import type { SqliteDatabase } from '../core/persistence/sqliteDatabase';
