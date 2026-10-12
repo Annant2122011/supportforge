@@ -322,6 +322,7 @@ export class TicketOutboxPublisher implements OutboxPublisher {
         properties,
         visibility.roleIds,
         'Reconcile ticket from durable outbox event ' + event.id,
+        { deferLongRateLimit: false },
       );
       if (properties.name !== undefined) channel.name = properties.name;
       if (properties.topic !== undefined) channel.topic = properties.topic;
