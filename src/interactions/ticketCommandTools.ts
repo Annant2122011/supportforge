@@ -496,83 +496,18 @@ export async function executeTicketCommand(
         return;
       }
 
-      let topic = setField(
-        context.topic,
-        'status',
-        'archived',
-      );
-
-      topic = setField(
-        topic,
+      const transitionAt = new Date().toISOString();
+      const topic = setField(
+        setField(context.topic, 'status', 'archived'),
         'archived_at',
-        new Date().toISOString(),
+        transitionAt,
       );
 
-      await setPersistedTicketStatus(
-        context.channel.id,
-        'archived',
-        {
-          id: interaction.user.id,
-          attribution: 'actorKnown',
-          confidence: 'high',
-        },
-      );
-
-      try {
-        await moveTicketToCategory(
-          context.channel,
-          await ensureArchiveCategory(context.guild),
-        );
-      } catch (error) {
-        console.warn(
-          '⚠️ Archive storage transition failed:',
-          error,
-        );
-      }
-
-      try {
-        await setChannelTopic(
-          context.channel.id,
-          topic,
-          'SupportForge archive metadata update',
-        );
-      } catch (error) {
-        console.warn(
-          '⚠️ Archive topic update failed; persisted lifecycle state remains authoritative:',
-          error,
-        );
-      }
-
-      /*
-       * Native REST does not reliably mutate the discord.js channel cache.
-       * Keep the local topic aligned with the archived state so the next
-       * command or panel lookup does not read the old closed metadata.
-       */
-      context.channel.topic = topic;
-
-      await refreshTicketPanel(
-        context.channel,
-        topic,
-      );
-
-      const expectedName = getTicketChannelName(
-        context.ticketNumber,
-        'archived',
-        (getField(topic, 'priority') ?? 'normal') as 'low' | 'normal' | 'high' | 'urgent' | 'critical',
-      );
-
-      if (context.channel.name !== expectedName) {
-        void queueTicketChannelRename(
-          context.channel,
-          expectedName,
-          `Ticket #${context.ticketNumber} archived`,
-        ).catch((error) => {
-          console.error(
-            '⚠️ Failed to rename archived ticket:',
-            error,
-          );
-        });
-      }
+      await saveTopic(context, topic, {
+        id: interaction.user.id,
+        attribution: 'actorKnown',
+        confidence: 'high',
+      });
 
       await interaction.editReply(
         `🗄️ Ticket #${context.ticketNumber} has been archived and moved to the Archive section.`,
