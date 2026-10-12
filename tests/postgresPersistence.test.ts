@@ -103,8 +103,8 @@ test(
     assert.equal(ticketEvents.length, 3);
     assert.deepEqual(ticketEvents.map((event) => event.type), [
       'ticket.created',
-      'ticket.status_changed',
-      'ticket.metadata_changed',
+      'ticket.claimed',
+      'ticket.priority.changed',
     ]);
 
     pending = await events.listPendingOutbox();
@@ -118,9 +118,13 @@ test(
 
     await tickets.remove(record.channelId);
 
-    assert.equal(await tickets.getByChannelId(record.channelId), undefined);
-    assert.equal((await events.listTicketEvents(record.id)).length, 0);
-    assert.equal((await events.listOutbox()).length, 0);
+    const deleted = await tickets.getByChannelId(record.channelId);
+    assert.ok(deleted?.deletedAt);
+    assert.deepEqual(
+      (await events.listTicketEvents(record.id)).map((event) => event.type),
+      ['ticket.created', 'ticket.claimed', 'ticket.priority.changed', 'ticket.deleted'],
+    );
+    assert.equal((await events.listOutbox()).length, 4);
   },
 );
 
