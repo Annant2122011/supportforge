@@ -689,25 +689,45 @@ export class SqliteTicketRepository implements TicketRepository {
   }
 
   public remove(channelId: string): void {
-    const current = this.getByChannelId(channelId);
-    if (!current) return;
+    this.markDeleted(
+      channelId,
+      new Date().toISOString(),
+      'Ticket removed from active SupportForge storage; history retained.',
+    );
+  }
 
+  public clearAll(): void {
+    const activeTickets = this.listAll().filter((ticket) => ticket.deletedAt === null);
+    if (!activeTickets.length) return;
+
+    const deletedAt = new Date().toISOString();
     this.database.exec('BEGIN IMMEDIATE');
 
     try {
-      this.database
-        .prepare(
-          "DELETE FROM outbox_events WHERE aggregate_type = 'ticket' AND aggregate_id = ?",
-        )
-        .run(current.id);
+      const update = this.database.prepare(
+        'UPDATE tickets SET deleted_at = ?, deletion_reason = ?, updated_at = ? ' +
+        'WHERE channel_id = ? AND deleted_at IS NULL',
+      );
 
-      this.database
-        .prepare('DELETE FROM ticket_events WHERE ticket_id = ?')
-        .run(current.id);
+      for (const ticket of activeTickets) {
+        const reason = 'SupportForge ticket store reset; history retained.';
+        const result = update.run(deletedAt, reason, deletedAt, ticket.channelId);
+        if (Number(result.changes) !== 1) continue;
 
-      this.database
-        .prepare('DELETE FROM tickets WHERE channel_id = ?')
-        .run(channelId);
+        this.events.append({
+          id: randomUUID(),
+          type: 'ticket.deleted',
+          aggregateType: 'ticket',
+          aggregateId: ticket.id,
+          guildId: ticket.guildId,
+          channelId: ticket.channelId,
+          actorId: 'supportforge-system',
+          actorAttribution: 'actorKnown',
+          actorConfidence: 'high',
+          payload: { reason },
+          occurredAt: deletedAt,
+        });
+      }
 
       this.database.exec('COMMIT');
     } catch (error) {
@@ -718,9 +738,5 @@ export class SqliteTicketRepository implements TicketRepository {
       }
       throw error;
     }
-  }
-
-  public clearAll(): void {
-    this.database.prepare('DELETE FROM tickets').run();
   }
 }
