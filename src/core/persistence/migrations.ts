@@ -1,6 +1,5 @@
-import { randomUUID } from 'node:crypto';
-import { copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { readLegacyTicketJson } from './legacyTicketData';
 
 import type { SqliteDatabase } from './sqliteDatabase';
 
@@ -8,28 +7,6 @@ interface Migration {
   id: number;
   name: string;
   up: (db: SqliteDatabase, legacyTicketsPath: string) => void;
-}
-
-interface LegacyTicket {
-  guildId?: unknown;
-  status?: unknown;
-  updatedAt?: unknown;
-  createdAt?: unknown;
-  ticketNumber?: unknown;
-  departmentId?: unknown;
-  tagId?: unknown;
-  ownerId?: unknown;
-  priority?: unknown;
-  claimedByIds?: unknown;
-  participantIds?: unknown;
-  metadata?: unknown;
-  deletedAt?: unknown;
-  deletionReason?: unknown;
-}
-
-interface LegacyTicketState {
-  version?: unknown;
-  tickets?: Record<string, LegacyTicket | null>;
 }
 
 const DATA_DIR = join(process.cwd(), 'data');
@@ -71,111 +48,8 @@ const migrations: readonly Migration[] = [
     id: 2,
     name: 'import_legacy_ticket_json',
     up: (db, legacyTicketsPath) => {
-      if (!existsSync(legacyTicketsPath)) return;
-
-      // Preserve the source before parsing or normalizing anything, including
-      // malformed input. Failed migrations leave this backup and original file.
-      const backupPath =
-        legacyTicketsPath + '.pre-sqlite-' + Date.now() + '-' + randomUUID() + '.backup';
-      copyFileSync(legacyTicketsPath, backupPath);
-
-      let source: unknown;
-      try {
-        source = JSON.parse(readFileSync(legacyTicketsPath, 'utf8')) as unknown;
-      } catch (error) {
-        throw new Error(
-          'SupportForge could not migrate data/tickets.json because the legacy file is invalid JSON. The original file and its backup were preserved.',
-          { cause: error },
-        );
-      }
-
-      if (!source || typeof source !== 'object' || Array.isArray(source)) {
-        throw new Error(
-          'SupportForge could not migrate data/tickets.json because the root must be a JSON object.',
-        );
-      }
-
-      const parsed = source as LegacyTicketState;
-      if (parsed.version !== undefined && parsed.version !== 1) {
-        throw new Error(
-          'SupportForge cannot migrate data/tickets.json version ' +
-            String(parsed.version) +
-            '. Only legacy version 1 is supported by this migration.',
-        );
-      }
-
-      if (
-        !parsed.tickets ||
-        typeof parsed.tickets !== 'object' ||
-        Array.isArray(parsed.tickets)
-      ) {
-        throw new Error(
-          'SupportForge could not migrate data/tickets.json because its tickets collection is malformed. The original file and its backup were preserved.',
-        );
-      }
-
-      const optionalString = (
-        value: unknown,
-        field: string,
-        channelId: string,
-      ): string | null => {
-        if (value === undefined || value === null || value === '') return null;
-        if (typeof value !== 'string') {
-          throw new Error(
-            'Legacy ticket ' + channelId + ' has a non-string ' + field + '. No data was imported.',
-          );
-        }
-        return value;
-      };
-
-      const requiredTimestamp = (
-        value: unknown,
-        field: string,
-        channelId: string,
-      ): string => {
-        if (typeof value !== 'string' || !value.trim() || Number.isNaN(new Date(value).getTime())) {
-          throw new Error(
-            'Legacy ticket ' + channelId + ' has a missing or invalid ' + field + '. No data was imported.',
-          );
-        }
-        return value;
-      };
-
-      const stringArray = (
-        value: unknown,
-        field: string,
-        channelId: string,
-      ): string[] => {
-        if (value === undefined || value === null) return [];
-        if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
-          throw new Error(
-            'Legacy ticket ' + channelId + ' has a malformed ' + field + '. No data was imported.',
-          );
-        }
-        return value as string[];
-      };
-
-      const metadataObject = (
-        value: unknown,
-        channelId: string,
-      ): Record<string, unknown> => {
-        if (value === undefined || value === null) return {};
-        if (typeof value !== 'object' || Array.isArray(value)) {
-          throw new Error(
-            'Legacy ticket ' + channelId + ' has malformed metadata. No data was imported.',
-          );
-        }
-        return value as Record<string, unknown>;
-      };
-
-      const supportedStatuses = new Set([
-        'open',
-        'claimed',
-        'pending',
-        'reopened',
-        'closed',
-        'archived',
-      ]);
+      const records = readLegacyTicketJson(legacyTicketsPath);
+      if (!records) return;
 
       const insert = db.prepare(
         'INSERT OR IGNORE INTO tickets (' +
@@ -184,78 +58,38 @@ const migrations: readonly Migration[] = [
         ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       );
 
-      for (const [channelId, rawTicket] of Object.entries(parsed.tickets)) {
-        if (!channelId.trim()) {
-          throw new Error('Legacy ticket collection contains an empty channel ID.');
-        }
-        if (!rawTicket || typeof rawTicket !== 'object' || Array.isArray(rawTicket)) {
-          throw new Error(
-            'Legacy ticket ' + channelId + ' is not a JSON object. No data was imported.',
-          );
-        }
-
-        const ticket = rawTicket as LegacyTicket;
-        const guildId = optionalString(ticket.guildId, 'guildId', channelId);
-        if (!guildId) {
-          throw new Error(
-            'Legacy ticket ' + channelId + ' is missing guildId. No data was imported.',
-          );
-        }
-
-        if (typeof ticket.status !== 'string' || !supportedStatuses.has(ticket.status)) {
-          throw new Error(
-            'Legacy ticket ' + channelId + ' has unsupported or missing status: ' +
-              String(ticket.status) + '. No data was imported.',
-          );
-        }
-
-        const ticketNumber = optionalString(ticket.ticketNumber, 'ticketNumber', channelId);
-        const departmentId = optionalString(ticket.departmentId, 'departmentId', channelId);
-        const tagId = optionalString(ticket.tagId, 'tagId', channelId);
-        const ownerId = optionalString(ticket.ownerId, 'ownerId', channelId);
-        const priority = optionalString(ticket.priority, 'priority', channelId);
-        const claimedByIds = stringArray(ticket.claimedByIds, 'claimedByIds', channelId);
-        const participantIds = stringArray(ticket.participantIds, 'participantIds', channelId);
-        const metadata = metadataObject(ticket.metadata, channelId);
-        const createdAt = requiredTimestamp(ticket.createdAt, 'createdAt', channelId);
-        const updatedAt = requiredTimestamp(ticket.updatedAt, 'updatedAt', channelId);
-        const deletedAt = optionalString(ticket.deletedAt, 'deletedAt', channelId);
-        const deletionReason = optionalString(ticket.deletionReason, 'deletionReason', channelId);
-
-        if (deletedAt !== null && Number.isNaN(new Date(deletedAt).getTime())) {
-          throw new Error('Legacy ticket ' + channelId + ' has an invalid deletedAt. No data was imported.');
-        }
-
+      for (const ticket of records) {
         const result = insert.run(
-          'legacy:' + channelId,
-          guildId,
-          channelId,
-          ticketNumber,
+          ticket.id,
+          ticket.guildId,
+          ticket.channelId,
+          ticket.ticketNumber,
           ticket.status,
-          departmentId,
-          tagId,
-          ownerId,
-          priority,
-          JSON.stringify(claimedByIds),
-          JSON.stringify(participantIds),
-          JSON.stringify(metadata),
-          createdAt,
-          updatedAt,
-          deletedAt,
-          deletionReason,
+          ticket.departmentId,
+          ticket.tagId,
+          ticket.ownerId,
+          ticket.priority,
+          JSON.stringify(ticket.claimedByIds),
+          JSON.stringify(ticket.participantIds),
+          JSON.stringify(ticket.metadata),
+          ticket.createdAt,
+          ticket.updatedAt,
+          ticket.deletedAt,
+          ticket.deletionReason,
         );
 
         if (Number(result.changes) === 0) {
           const existing = db.prepare(
             'SELECT id, guild_id, channel_id FROM tickets WHERE channel_id = ?',
-          ).get(channelId);
+          ).get(ticket.channelId);
+
           if (
             !existing ||
-            existing.id !== 'legacy:' + channelId ||
-            existing.guild_id !== guildId
+            existing.id !== ticket.id ||
+            existing.guild_id !== ticket.guildId
           ) {
             throw new Error(
-              'Legacy ticket ' + channelId +
+              'Legacy ticket ' + ticket.channelId +
                 ' conflicts with an existing database record. The migration refused to overwrite it.',
             );
           }
