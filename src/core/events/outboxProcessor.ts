@@ -3,6 +3,7 @@ import { getPersistenceProvider } from '../persistence/provider';
 import { SqliteEventRepository } from '../../repositories/eventRepository';
 import { PostgresEventRepository } from '../../repositories/postgresEventRepository';
 import { MAX_OUTBOX_ATTEMPTS, type OutboxEvent } from './domainEvents';
+import { getDiscordRetryAfterMs } from '../../utils/discordRateLimit';
 
 const MAX_BATCH_SIZE = 100;
 const MAX_RETRY_DELAY_MS = 15 * 60_000;
@@ -41,52 +42,20 @@ function retryAfterMs(error: unknown): number | null {
   let current: unknown = error;
   const visited = new Set<unknown>();
 
+  // Reuse the shared parser so REST mutations and durable outbox retries
+  // interpret discord.js milliseconds, raw Discord seconds, headers, and
+  // wrapped errors consistently. Walk causes because libraries often wrap
+  // the original rate-limit response in a higher-level error.
   for (let depth = 0; depth < 5 && current && !visited.has(current); depth += 1) {
     visited.add(current);
-    if (typeof current === 'object') {
-      const record = current as Record<string, unknown>;
+    const retryAfter = getDiscordRetryAfterMs(current);
+    if (retryAfter !== null) return retryAfter;
 
-      // discord.js RateLimitError exposes retryAfter in milliseconds.
-      const milliseconds = Number(record.retryAfter);
-      if (Number.isFinite(milliseconds) && milliseconds > 0) {
-        return Math.ceil(milliseconds);
-      }
-
-      const raw = record.rawError && typeof record.rawError === 'object'
-        ? record.rawError as Record<string, unknown>
-        : undefined;
-      for (const value of [record.retry_after, raw?.retry_after]) {
-        const seconds = Number(value);
-        if (value !== undefined && Number.isFinite(seconds) && seconds > 0) {
-          return Math.ceil(seconds * 1_000);
-        }
-      }
-
-      const headers = record.headers as { get?: (name: string) => string | null } | undefined;
-      if (headers && typeof headers.get === 'function') {
-        const seconds = Number(headers.get('retry-after'));
-        if (Number.isFinite(seconds) && seconds > 0) {
-          return Math.ceil(seconds * 1_000);
-        }
-      }
-
-      current = record.cause;
-      continue;
-    }
-
-    const message = String(current);
-    const seconds = message.match(/another\s+(\d+)s\b/i);
-    if (seconds) return Number(seconds[1]) * 1_000;
-    break;
+    if (typeof current !== 'object') break;
+    current = (current as Record<string, unknown>).cause;
   }
 
-  const message = error instanceof Error ? error.message : String(error);
-  const seconds = message.match(/another\s+(\d+)s\b/i);
-  if (seconds) return Number(seconds[1]) * 1_000;
-  const explicitSeconds = message.match(/retry(?:\s+after|After)[=: ]+\s*(\d+(?:\.\d+)?)\s*s\b/i);
-  if (explicitSeconds) return Math.ceil(Number(explicitSeconds[1]) * 1_000);
-  const milliseconds = message.match(/retry(?:\s+after|After)[=: ]+\s*(\d+)\s*ms/i);
-  return milliseconds ? Number(milliseconds[1]) : null;
+  return null;
 }
 
 export function calculateOutboxRetryDelayMs(attempts: number, error?: unknown): number {
