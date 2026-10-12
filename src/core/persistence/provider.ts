@@ -14,16 +14,21 @@ export type PersistenceProvider = 'sqlite' | 'postgres';
 export function getPersistenceProvider(): PersistenceProvider {
   const value = process.env.SUPPORTFORGE_DATABASE_PROVIDER?.trim().toLowerCase();
 
-  if (!value || value === 'sqlite') {
-    return 'sqlite';
-  }
-
-  if (value === 'postgres' || value === 'postgresql' || value === 'neon') {
+  // Neon/PostgreSQL is the live source of truth. SQLite remains available only
+  // to the explicit legacy-migration tooling and isolated repository tests; it
+  // must never be selected silently by a production/default environment.
+  if (!value || value === 'postgres' || value === 'postgresql' || value === 'neon') {
     return 'postgres';
   }
 
+  if (value === 'sqlite') {
+    throw new Error(
+      'SQLite is disabled for live SupportForge persistence. Set SUPPORTFORGE_DATABASE_PROVIDER=postgres and configure the Neon DATABASE_URL and DATABASE_URL_UNPOOLED values.',
+    );
+  }
+
   throw new Error(
-    `Unsupported SUPPORTFORGE_DATABASE_PROVIDER "${value}". Expected "sqlite" or "postgres".`,
+    `Unsupported SUPPORTFORGE_DATABASE_PROVIDER "${value}". Expected "postgres" or "neon".`,
   );
 }
 
