@@ -80,9 +80,12 @@ export function projectDurableTicketTopic(
 
   for (const [metadataKey, topicKey] of fields) {
     const value = metadata[metadataKey];
-    topic = value === undefined || value === null
-      ? setOrRemove(topic, topicKey, getField(topic, topicKey))
-      : setOrRemove(topic, topicKey, value);
+    if (value === undefined) continue;
+    if (value === null) {
+      topic = removeField(topic, topicKey);
+      continue;
+    }
+    topic = setOrRemove(topic, topicKey, value);
   }
 
   return topic;
