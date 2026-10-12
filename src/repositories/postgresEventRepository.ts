@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 
+import { MAX_OUTBOX_ATTEMPTS } from '../core/events/domainEvents';
+
 import type {
   DomainEvent,
   DomainEventType,
   EventActorAttribution,
   EventActorConfidence,
   OutboxEvent,
-  MAX_OUTBOX_ATTEMPTS,
 } from '../core/events/domainEvents';
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
 import type { DatabaseExecutor, TransactionExecutor } from '../core/persistence/database';
@@ -167,7 +168,7 @@ export class PostgresEventRepository {
       const result = await client.query<OutboxRow>(
         "WITH candidates AS (" +
           "SELECT id FROM outbox_events " +
-          "WHERE status IN ('pending', 'failed') AND available_at <= NOW() " +
+          "WHERE status IN ('pending', 'failed') AND attempts < $1 AND available_at <= NOW() " +
           "ORDER BY created_at ASC " +
           "LIMIT $2 " +
           "FOR UPDATE SKIP LOCKED" +
