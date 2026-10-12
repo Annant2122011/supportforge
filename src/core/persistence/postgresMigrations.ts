@@ -165,6 +165,7 @@ const MIGRATIONS: readonly PostgresMigration[] = [
         'ticket.tag.changed',
         'ticket.participant.added',
         'ticket.participant.removed',
+        'ticket.message.received',
       ];
       const accepted = eventTypes.map((type) => "'" + type + "'").join(', ');
 
