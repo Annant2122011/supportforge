@@ -170,13 +170,14 @@ export async function transitionPersistedTicket(
   status: TicketStatus,
   updates: TicketMetadataUpdates,
   actor?: EventActor,
+  updatedAt = new Date().toISOString(),
 ): Promise<void> {
   const repository = await getRepository();
   await repository.transitionStatusAndMetadata(
     channelId,
     status,
     updates,
-    new Date().toISOString(),
+    updatedAt,
     actor,
   );
 }
