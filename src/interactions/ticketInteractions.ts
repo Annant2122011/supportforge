@@ -1458,26 +1458,52 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
   let newTopic = topic;
 
   if (remaining.length) {
+    const transitionAt = new Date().toISOString();
     newTopic = setField(
-      newTopic,
-      'claimed_by',
-      remaining.join(','),
+      setField(
+        newTopic,
+        'claimed_by',
+        remaining.join(','),
+      ),
+      'updated_at',
+      transitionAt,
     );
-    await applyTicketVisibilityMode(
-      channel,
-      newTopic,
+    const ownerId = getField(newTopic, 'owner');
+    const additionalParticipants = (getField(newTopic, 'users') ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+
+    await transitionPersistedTicket(
+      channel.id,
       'claimed',
-      interaction.user.id,
-      { topic: newTopic },
+      {
+        claimedByIds: remaining,
+        participantIds: [...new Set([...(ownerId ? [ownerId] : []), ...additionalParticipants])],
+        metadata: {
+          lastActivityAt: transitionAt,
+          lastStaffActivityAt: transitionAt,
+        },
+      },
+      interactionActor(interaction),
+      transitionAt,
     );
+
+    try {
+      await applyTicketVisibilityMode(
+        channel,
+        newTopic,
+        'claimed',
+        interaction.user.id,
+        { topic: newTopic },
+      );
+    } catch (error) {
+      console.warn(
+        'Ticket claimant state is durable; Discord permissions/topic will be reconciled by the outbox:',
+        error,
+      );
+    }
     updateRuntimeTicketState(channel, newTopic, 'claimed');
-    await updatePersistedTicketMetadata(channel.id, {
-      claimedByIds: remaining,
-      participantIds: (getField(newTopic, 'users') ?? '')
-        .split(',')
-        .map((id) => id.trim())
-        .filter(Boolean),
-    }, interactionActor(interaction));
     await syncTicketVoiceParticipants(interaction.guild, newTopic);
     await updateMainMessage(channel, getField(newTopic, 'message'), 'claimed', newTopic);
     await interaction.editReply('✅ You left the ticket. Other assigned moderators remain on it.');
@@ -1487,34 +1513,51 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
   newTopic = removeField(newTopic, 'claimed_by');
   newTopic = removeField(newTopic, 'claimed_at');
   newTopic = setField(newTopic, 'status', 'open');
+  const transitionAt = new Date().toISOString();
+  newTopic = setField(newTopic, 'updated_at', transitionAt);
+  const ownerId = getField(newTopic, 'owner');
+  const additionalParticipants = (getField(newTopic, 'users') ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
 
-  if (getField(newTopic, 'voice_channel_id')) {
-    newTopic = await endTicketVoiceMode(
-      interaction.guild,
+  /*
+   * The state/event/outbox transaction happens before channel edits. The
+   * publisher also owns temporary voice cleanup, so a restart at this point
+   * cannot orphan a private room or create two competing cleanup attempts.
+   */
+  await transitionPersistedTicket(
+    channel.id,
+    'open',
+    {
+      claimedByIds: [],
+      participantIds: [...new Set([...(ownerId ? [ownerId] : []), ...additionalParticipants])],
+      metadata: {
+        claimedAt: null,
+        assignedAt: null,
+        lastActivityAt: transitionAt,
+        lastStaffActivityAt: transitionAt,
+      },
+    },
+    interactionActor(interaction),
+    transitionAt,
+  );
+
+  try {
+    await applyTicketVisibilityMode(
       channel,
       newTopic,
-      'open',
-      'SupportForge voice mode ended because the final moderator unclaimed the ticket',
+      'unclaimed',
+      interaction.user.id,
+      { topic: newTopic },
+    );
+  } catch (error) {
+    console.warn(
+      'Ticket is durably unclaimed; Discord topic/name/permissions will be reconciled by the outbox:',
+      error,
     );
   }
-
-  await setPersistedTicketStatus(channel.id, 'open');
-  await updatePersistedTicketMetadata(channel.id, {
-    claimedByIds: [],
-    participantIds: (getField(newTopic, 'users') ?? '')
-      .split(',')
-      .map((id) => id.trim())
-      .filter(Boolean),
-  }, interactionActor(interaction));
-  await applyTicketVisibilityMode(channel, newTopic, 'unclaimed', interaction.user.id, { topic: newTopic });
-  updateRuntimeTicketState(channel, newTopic, 'open');
-
-  const number = getField(newTopic, 'number') ?? 'unknown';
-  void queueTicketChannelRename(
-    channel,
-    getTicketChannelName(number, 'open', await getEffectiveTicketPriority(channel.id, newTopic)),
-    'Ticket returned to open after final moderator unclaimed',
-  ).catch(() => undefined);
+  updateRuntimeTicketState(channel, channel.topic ?? newTopic, 'open');
 
   await updateMainMessage(channel, getField(newTopic, 'message'), 'open', newTopic);
   await interaction.editReply('✅ You left the ticket. It is now open for another moderator to claim.');
