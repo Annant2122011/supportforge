@@ -196,6 +196,25 @@ const migrations: readonly Migration[] = [
       );
     },
   },
+  {
+    id: 4,
+    name: 'add_document_storage_and_outbox_processing_lease',
+    up: (db) => {
+      const columns = db.prepare('PRAGMA table_info(outbox_events)').all();
+      if (!columns.some((column) => column.name === 'processing_started_at')) {
+        db.exec('ALTER TABLE outbox_events ADD COLUMN processing_started_at TEXT');
+      }
+
+      db.exec(
+        'CREATE TABLE IF NOT EXISTS app_documents (' +
+        'document_key TEXT PRIMARY KEY, ' +
+        'payload_json TEXT NOT NULL, ' +
+        'updated_at TEXT NOT NULL' +
+        ') STRICT; ' +
+        'CREATE INDEX IF NOT EXISTS idx_app_documents_updated_at ON app_documents(updated_at);'
+      );
+    },
+  },
 ];
 
 export function runMigrations(
