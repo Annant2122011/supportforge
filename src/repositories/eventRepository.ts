@@ -41,15 +41,19 @@ interface OutboxRow extends Record<string, unknown> {
 }
 
 function parseObject(value: string): Record<string, unknown> {
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(value);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {};
-  } catch {
-    return {};
+    parsed = JSON.parse(value) as unknown;
+  } catch (error) {
+    throw new Error('Corrupt JSON payload in SupportForge ticket event/outbox record.', { cause: error });
   }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('SupportForge ticket event/outbox payload must be a JSON object.');
+  }
+  return parsed as Record<string, unknown>;
 }
+
 
 function fromEventRow(row: EventRow): DomainEvent {
   return {
