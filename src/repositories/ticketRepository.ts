@@ -48,6 +48,13 @@ export interface TicketRepository {
     updatedAt: string,
     actor?: EventActor,
   ): void;
+  transitionStatusAndMetadata(
+    channelId: string,
+    status: TicketStatus,
+    updates: TicketMetadataUpdates,
+    updatedAt: string,
+    actor?: EventActor,
+  ): void;
   updateMetadata(
     channelId: string,
     updates: Partial<
@@ -69,6 +76,19 @@ export interface TicketRepository {
   remove(channelId: string): void;
   clearAll(): void;
 }
+
+export type TicketMetadataUpdates = Partial<
+  Pick<
+    TicketRepositoryRecord,
+    | 'departmentId'
+    | 'tagId'
+    | 'ownerId'
+    | 'priority'
+    | 'claimedByIds'
+    | 'participantIds'
+    | 'metadata'
+  >
+>;
 
 interface TicketRow extends Record<string, unknown> {
   id: string;
