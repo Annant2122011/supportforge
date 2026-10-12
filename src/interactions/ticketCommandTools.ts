@@ -1187,48 +1187,39 @@ export async function executeTicketCommand(
         return;
       }
 
-      const priority = level as 'low' | 'normal' | 'high' | 'urgent' | 'critical';
+      const priority = level as TicketPriority;
+      const transitionAt = new Date().toISOString();
       const topic = setField(
-        context.topic,
-        'priority',
-        priority,
+        setField(context.topic, 'priority', priority),
+        'updated_at',
+        transitionAt,
       );
 
       /*
-       * Priority changes do not need a /channels PATCH. Persist the value in
-       * the ticket record and refresh the panel immediately, avoiding Discord's
-       * heavily rate-limited channel mutation bucket.
+       * Priority, audit event and outbox intent commit together. The outbox
+       * batches the channel name/topic reconciliation and observes Discord's
+       * Retry-After instead of launching a second rename retry queue.
        */
-      await updatePersistedTicketMetadata(
+      await transitionPersistedTicket(
         context.channel.id,
-        { priority },
+        context.status,
+        {
+          priority,
+          metadata: {
+            lastActivityAt: transitionAt,
+            lastStaffActivityAt: transitionAt,
+          },
+        },
         {
           id: interaction.user.id,
           attribution: 'actorKnown',
           confidence: 'high',
         },
+        transitionAt,
       );
 
       context.channel.topic = topic;
-      await refreshTicketPanel(
-        context.channel,
-        topic,
-      );
-
-      await queueTicketChannelRename(
-        context.channel,
-        getTicketChannelName(
-          context.ticketNumber,
-          context.status,
-          priority,
-        ),
-        `SupportForge priority changed to ${level}`,
-      ).catch((error) => {
-        console.warn(
-          `⚠️ Ticket #${context.ticketNumber} priority was saved, but its channel rename was deferred:`,
-          error,
-        );
-      });
+      await refreshTicketPanel(context.channel, topic);
 
       await audit(
         interaction,
