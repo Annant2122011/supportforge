@@ -106,10 +106,12 @@ async function getEffectiveTicketPriority(
   channelId: string,
   topic: string,
 ): Promise<TicketPriority> {
-  return (
-    (await getPersistedTicketPriority(channelId).catch(() => undefined)) ??
-    getTopicPriority(topic)
-  );
+  // Use topic data only for legacy channels without a durable ticket row.
+  // A database outage must not silently authorize stale channel metadata.
+  const persisted = await getPersistedTicket(channelId);
+  return persisted
+    ? persisted.priority ?? 'normal'
+    : getTopicPriority(topic);
 }
 
 /* -------------------------------------------------------------------------- */
