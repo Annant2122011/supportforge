@@ -75,15 +75,15 @@ function retryAfterMs(error: unknown): number | null {
     }
 
     const message = String(current);
-    const seconds = message.match(/another\\s+(\\d+)s\\b/i);
+    const seconds = message.match(/another\s+(\d+)s\b/i);
     if (seconds) return Number(seconds[1]) * 1_000;
     break;
   }
 
   const message = error instanceof Error ? error.message : String(error);
-  const seconds = message.match(/another\\s+(\\d+)s\\b/i);
+  const seconds = message.match(/another\s+(\d+)s\b/i);
   if (seconds) return Number(seconds[1]) * 1_000;
-  const milliseconds = message.match(/retry(?:\\s+after|After)[=: ]+\\s*(\\d+)\\s*ms/i);
+  const milliseconds = message.match(/retry(?:\s+after|After)[=: ]+\s*(\d+)\s*ms/i);
   return milliseconds ? Number(milliseconds[1]) : null;
 }
 
