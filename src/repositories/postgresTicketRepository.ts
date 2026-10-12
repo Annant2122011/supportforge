@@ -114,6 +114,13 @@ export interface AsyncTicketRepository {
     updatedAt: string,
     actor?: EventActor,
   ): Promise<void>;
+  transitionStatusAndMetadata(
+    channelId: string,
+    status: TicketStatus,
+    updates: import('./ticketRepository').TicketMetadataUpdates,
+    updatedAt: string,
+    actor?: EventActor,
+  ): Promise<void>;
   updateMetadata(
     channelId: string,
     updates: Partial<
