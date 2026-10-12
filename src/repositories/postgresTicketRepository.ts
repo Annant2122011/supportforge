@@ -54,6 +54,9 @@ function metadataEventType(
     'departmentId' | 'tagId' | 'ownerId' | 'priority' |
     'claimedByIds' | 'participantIds' | 'metadata'>>,
 ): DomainEventType {
+  if (updates.metadata && typeof updates.metadata.lastMessageId === 'string') {
+    return 'ticket.message.received';
+  }
   if (changedFields.length === 1) {
     const field = changedFields[0];
     if (field === 'priority') return 'ticket.priority.changed';
@@ -69,6 +72,20 @@ function metadataEventType(
     }
   }
   return 'ticket.metadata_changed';
+}
+
+function metadataEventPayload(
+  changedFields: string[],
+  updates: Partial<Pick<TicketRepositoryRecord, 'metadata'>>,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = { changedFields };
+  const metadata = updates.metadata;
+  if (metadata && typeof metadata.lastMessageId === 'string') {
+    payload.messageId = metadata.lastMessageId;
+    payload.messageAuthorType = metadata.lastMessageAuthorType ?? 'unknown';
+    payload.messageTimestamp = metadata.lastActivityAt ?? null;
+  }
+  return payload;
 }
 
 function requireStringArray(value: unknown, field: string): string[] {
@@ -495,7 +512,7 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
           actorId: resolved.id,
           actorAttribution: resolved.attribution,
           actorConfidence: resolved.confidence,
-          payload: { changedFields },
+          payload: metadataEventPayload(changedFields, updates),
           occurredAt: updatedAt,
         }, undefined, client);
       }
