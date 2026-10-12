@@ -16,7 +16,8 @@ export type DomainEventType =
   | 'ticket.department.changed'
   | 'ticket.tag.changed'
   | 'ticket.participant.added'
-  | 'ticket.participant.removed';
+  | 'ticket.participant.removed'
+  | 'ticket.message.received';
 
 export type EventActorAttribution =
   | 'actorKnown'
