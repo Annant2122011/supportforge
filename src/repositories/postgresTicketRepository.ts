@@ -395,7 +395,7 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
         status,
         claimedByIds: updates.claimedByIds ?? current.claimedByIds,
         participantIds: updates.participantIds ?? current.participantIds,
-        metadata: updates.metadata ?? current.metadata,
+        metadata: updates.metadata !== undefined ? { ...current.metadata, ...updates.metadata } : current.metadata,
         updatedAt,
       };
 
@@ -516,7 +516,7 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
         ...updates,
         claimedByIds: updates.claimedByIds ?? currentRecord.claimedByIds,
         participantIds: updates.participantIds ?? currentRecord.participantIds,
-        metadata: updates.metadata ?? currentRecord.metadata,
+        metadata: updates.metadata !== undefined ? { ...currentRecord.metadata, ...updates.metadata } : currentRecord.metadata,
         updatedAt,
       };
 
