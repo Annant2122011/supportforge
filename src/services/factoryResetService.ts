@@ -12,6 +12,7 @@ import { prepareFactoryResetAuditRetention } from './auditLogService';
 import { getAdvancedSettings, resetAdvancedSettingsState } from './advancedSettingsService';
 import { resetTicketPersistenceState } from './ticketPersistenceService';
 import { resetReportState } from './reportService';
+import { getDiscordRetryAfterMs } from '../utils/discordRateLimit';
 
 const DATA_DIR = join(process.cwd(), 'data');
 
@@ -94,25 +95,30 @@ function getDiscordErrorCode(error: unknown): number | string | undefined {
   return candidate.code ?? candidate.status;
 }
 
-function getRetryDelay(error: unknown): number | null {
-  if (!error || typeof error !== 'object') return null;
-
-  const candidate = error as {
-    retryAfter?: number;
-    data?: { retry_after?: number };
-  };
-
-  const retryAfter =
-    candidate.retryAfter ??
-    candidate.data?.retry_after;
-
-  return typeof retryAfter === 'number' && retryAfter > 0
-    ? Math.min(Math.ceil(retryAfter * 1000) + 250, 10_000)
-    : null;
+/**
+ * Factory-reset retries must honor Discord's actual cooldown. discord.js
+ * reports retryAfter in milliseconds, while raw retry_after payload fields
+ * report seconds; the shared parser handles that distinction.
+ */
+export function getFactoryResetRetryDelayMs(error: unknown): number | null {
+  const retryAfterMs = getDiscordRetryAfterMs(error);
+  return retryAfterMs === null ? null : retryAfterMs + 250;
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+const MAX_TIMEOUT_CHUNK_MS = 2_147_000_000;
+
+async function delay(ms: number): Promise<void> {
+  // Node clamps timers above 2^31-1 milliseconds to near-immediate timeouts.
+  // Split unusually long cooldowns so they are still respected.
+  const deadline = Date.now() + Math.max(0, ms);
+  while (true) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return;
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, Math.min(remaining, MAX_TIMEOUT_CHUNK_MS));
+    });
+  }
 }
 
 async function deleteChannelSafely(
@@ -133,7 +139,7 @@ async function deleteChannelSafely(
         return { deleted: true };
       }
 
-      const retryDelay = getRetryDelay(error);
+      const retryDelay = getFactoryResetRetryDelayMs(error);
       if (retryDelay !== null && attempt < 2) {
         await delay(retryDelay);
         continue;
@@ -160,7 +166,7 @@ async function deleteRoleSafely(
         return { deleted: true };
       }
 
-      const retryDelay = getRetryDelay(error);
+      const retryDelay = getFactoryResetRetryDelayMs(error);
       if (retryDelay !== null && attempt < 2) {
         await delay(retryDelay);
         continue;
