@@ -51,6 +51,12 @@ interface TicketSnapshot {
   deletion_reason: string | null;
 }
 
+interface DocumentSnapshot {
+  document_key: string;
+  payload_json: string;
+  updated_at: string;
+}
+
 const { DatabaseSync } = require('node:sqlite') as {
   DatabaseSync: DatabaseSyncConstructor;
 };
@@ -131,9 +137,22 @@ function validateSource(
   tickets: SqliteRow[],
   ticketEvents: SqliteRow[],
   outboxEvents: SqliteRow[],
+  documents: SqliteRow[],
 ): void {
   if (!tables.has('tickets')) {
     throw new Error('SQLite source has no tickets table.');
+  }
+
+  const documentKeys = new Set<string>();
+  for (const row of documents) {
+    const key = requireNonEmpty(stringOrNull(row.document_key), 'app_documents.document_key');
+    if (documentKeys.has(key)) {
+      throw new Error(`Duplicate application document key detected: ${key}`);
+    }
+    documentKeys.add(key);
+    const payload = requireNonEmpty(stringOrNull(row.payload_json), 'app_documents.payload_json');
+    jsonObject(payload);
+    requireNonEmpty(stringOrNull(row.updated_at), 'app_documents.updated_at');
   }
 
   const ticketIds = new Set<string>();
@@ -226,6 +245,22 @@ async function targetCount(
   return Number(result.rows[0]?.count ?? 0);
 }
 
+function rowDocumentSnapshot(row: SqliteRow): DocumentSnapshot {
+  const documentKey = requireNonEmpty(
+    stringOrNull(row.document_key),
+    'app_documents.document_key',
+  );
+  const payload = jsonObject(row.payload_json ?? '{}');
+  return {
+    document_key: documentKey,
+    payload_json: JSON.stringify(stableObject(payload)),
+    updated_at: requireNonEmpty(
+      stringOrNull(row.updated_at),
+      'app_documents.updated_at',
+    ),
+  };
+}
+
 function rowTicketSnapshot(row: SqliteRow): TicketSnapshot {
   const id = requireNonEmpty(stringOrNull(row.id), 'tickets.id');
 
@@ -308,6 +343,7 @@ async function main(): Promise<void> {
     let tickets: SqliteRow[];
     let ticketEvents: SqliteRow[];
     let outboxEvents: SqliteRow[];
+    let documents: SqliteRow[];
 
     try {
       const tables = new Set(
@@ -337,7 +373,13 @@ async function main(): Promise<void> {
             .all()
         : [];
 
-      validateSource(tables, tickets, ticketEvents, outboxEvents);
+      documents = tables.has('app_documents')
+        ? sqlite
+            .prepare('SELECT * FROM app_documents ORDER BY document_key ASC')
+            .all()
+        : [];
+
+      validateSource(tables, tickets, ticketEvents, outboxEvents, documents);
       sqlite.exec('COMMIT');
     } catch (error) {
       try {
@@ -349,6 +391,7 @@ async function main(): Promise<void> {
     }
 
     const ticketSnapshots = tickets.map(rowTicketSnapshot);
+    const documentSnapshots = documents.map(rowDocumentSnapshot);
 
     console.log('────────────────────────────────────────────');
     console.log('SupportForge SQLite → Neon PostgreSQL migration');
@@ -357,6 +400,8 @@ async function main(): Promise<void> {
     console.log(`Tickets: ${tickets.length}`);
     console.log(`Ticket events: ${ticketEvents.length}`);
     console.log(`Outbox events: ${outboxEvents.length}`);
+    console.log(`Application documents: ${documents.length}`);
+    console.log(`Source document fingerprint: ${digest(documentSnapshots)}`);
     console.log(`Source ticket fingerprint: ${digest(ticketSnapshots)}`);
     console.log(`Mode: ${apply ? 'APPLY' : 'DRY RUN'}`);
     console.log('');
@@ -386,7 +431,7 @@ async function main(): Promise<void> {
       try {
         const tables = await client.query<{ table_name: string }>(
           "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ANY($1::text[]) ORDER BY table_name",
-          [['schema_migrations', 'tickets', 'ticket_events', 'outbox_events']],
+          [['schema_migrations', 'tickets', 'ticket_events', 'outbox_events', 'app_documents']],
         );
         const existingTables = new Set(tables.rows.map((row) => row.table_name));
 
@@ -397,7 +442,7 @@ async function main(): Promise<void> {
           return;
         }
 
-        const requiredTables = ['schema_migrations', 'tickets', 'ticket_events', 'outbox_events'];
+        const requiredTables = ['schema_migrations', 'tickets', 'ticket_events', 'outbox_events', 'app_documents'];
         const missingTables = requiredTables.filter((table) => !existingTables.has(table));
         if (missingTables.length > 0) {
           throw new Error(
@@ -408,12 +453,13 @@ async function main(): Promise<void> {
         const existingTickets = await targetCount(client, 'tickets');
         const existingEvents = await targetCount(client, 'ticket_events');
         const existingOutbox = await targetCount(client, 'outbox_events');
+        const existingDocuments = await targetCount(client, 'app_documents');
 
         console.log(
-          `Target currently contains tickets=${existingTickets}, events=${existingEvents}, outbox=${existingOutbox}.`,
+          `Target currently contains tickets=${existingTickets}, events=${existingEvents}, outbox=${existingOutbox}, documents=${existingDocuments}.`,
         );
 
-        if (existingTickets !== 0 || existingEvents !== 0 || existingOutbox !== 0) {
+        if (existingTickets !== 0 || existingEvents !== 0 || existingOutbox !== 0 || existingDocuments !== 0) {
           throw new Error(
             'Target PostgreSQL tables are not empty. Migration refuses to merge or overwrite existing data.',
           );
@@ -462,15 +508,17 @@ async function main(): Promise<void> {
         const existingTickets = await targetCount(client, 'tickets');
         const existingEvents = await targetCount(client, 'ticket_events');
         const existingOutbox = await targetCount(client, 'outbox_events');
+        const existingDocuments = await targetCount(client, 'app_documents');
 
         console.log(
-          `Target currently contains tickets=${existingTickets}, events=${existingEvents}, outbox=${existingOutbox}.`,
+          `Target currently contains tickets=${existingTickets}, events=${existingEvents}, outbox=${existingOutbox}, documents=${existingDocuments}.`,
         );
 
         if (
           existingTickets !== 0 ||
           existingEvents !== 0 ||
-          existingOutbox !== 0
+          existingOutbox !== 0 ||
+          existingDocuments !== 0
         ) {
           throw new Error(
             'Target PostgreSQL tables are not empty. Migration refuses to merge or overwrite existing data.',
@@ -556,17 +604,30 @@ async function main(): Promise<void> {
             );
           }
 
+          for (const document of documents) {
+            await client.query(
+              'INSERT INTO app_documents (document_key, payload, updated_at) VALUES ($1, $2::jsonb, $3::timestamptz)',
+              [
+                requireNonEmpty(stringOrNull(document.document_key), 'app_documents.document_key'),
+                JSON.stringify(jsonObject(document.payload_json ?? '{}')),
+                requireNonEmpty(stringOrNull(document.updated_at), 'app_documents.updated_at'),
+              ],
+            );
+          }
+
           const migratedTickets = await targetCount(client, 'tickets');
           const migratedEvents = await targetCount(client, 'ticket_events');
           const migratedOutbox = await targetCount(client, 'outbox_events');
+          const migratedDocuments = await targetCount(client, 'app_documents');
 
           if (
             migratedTickets !== tickets.length ||
             migratedEvents !== ticketEvents.length ||
-            migratedOutbox !== outboxEvents.length
+            migratedOutbox !== outboxEvents.length ||
+            migratedDocuments !== documents.length
           ) {
             throw new Error(
-              `Migration verification failed inside transaction. Target tickets=${migratedTickets}, events=${migratedEvents}, outbox=${migratedOutbox}; source tickets=${tickets.length}, events=${ticketEvents.length}, outbox=${outboxEvents.length}.`,
+              `Migration verification failed inside transaction. Target tickets=${migratedTickets}, events=${migratedEvents}, outbox=${migratedOutbox}, documents=${migratedDocuments}; source tickets=${tickets.length}, events=${ticketEvents.length}, outbox=${outboxEvents.length}, documents=${documents.length}.`,
             );
           }
 
@@ -580,9 +641,21 @@ async function main(): Promise<void> {
             'SELECT id FROM outbox_events ORDER BY created_at ASC, id ASC',
           );
 
+          const targetDocumentRows = await client.query<QueryResultRow>(
+            'SELECT document_key, payload, updated_at FROM app_documents ORDER BY document_key ASC',
+          );
           const targetTicketSnapshots = targetTicketRows.rows.map(
             rowPostgresTicketSnapshot,
           );
+          const targetDocumentSnapshots: DocumentSnapshot[] = targetDocumentRows.rows.map((row) => ({
+            document_key: String(row.document_key),
+            payload_json: JSON.stringify(stableObject(
+              row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
+                ? row.payload
+                : {},
+            )),
+            updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : new Date(String(row.updated_at)).toISOString(),
+          }));
           const sourceEventIds = ticketEvents.map((row) =>
             requireNonEmpty(stringOrNull(row.id), 'ticket_events.id'),
           );
@@ -599,6 +672,9 @@ async function main(): Promise<void> {
             throw new Error(
               'Ticket content verification failed. The migrated ticket records do not exactly match the source snapshot.',
             );
+          }
+          if (digest(documentSnapshots) !== digest(targetDocumentSnapshots)) {
+            throw new Error('Application document content verification failed. Migrated settings/report records do not match the source snapshot.');
           }
           if (digest(sourceEventIds) !== digest(targetIds.events)) {
             throw new Error('Ticket event ID verification failed.');
@@ -630,8 +706,10 @@ async function main(): Promise<void> {
           console.log(`Tickets migrated: ${tickets.length}`);
           console.log(`Ticket events migrated: ${ticketEvents.length}`);
           console.log(`Outbox events migrated: ${outboxEvents.length}`);
+          console.log(`Application documents migrated: ${documents.length}`);
           console.log(`Verified ticket fingerprint: ${digest(targetTicketSnapshots)}`);
           console.log('✅ Ticket/event/outbox IDs verified.');
+          console.log('✅ Application document fingerprints verified.');
           console.log('✅ Referential-integrity checks passed.');
           console.log('✅ SQLite source database was not modified.');
         } catch (error) {
