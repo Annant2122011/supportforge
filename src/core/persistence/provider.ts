@@ -6,6 +6,7 @@ import {
 import { migratePostgres } from './migrationRunner';
 import { PostgresTicketRepository, type AsyncTicketRepository } from '../../repositories/postgresTicketRepository';
 import { SqliteTicketRepository } from '../../repositories/ticketRepository';
+import { importLegacyJsonDocuments } from '../../repositories/jsonDocumentRepository';
 
 export type PersistenceProvider = 'sqlite' | 'postgres';
 
@@ -127,6 +128,11 @@ export async function initializePersistence(): Promise<void> {
       } else {
         getSupportForgeDatabase();
       }
+
+      // Import the legacy settings/report documents after the destination
+      // schema exists but before any command can observe application state.
+      // Imports are insert-if-absent, so restarts cannot overwrite DB changes.
+      await importLegacyJsonDocuments(provider);
 
       initialized = true;
     })().finally(() => {
