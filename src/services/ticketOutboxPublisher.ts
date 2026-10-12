@@ -34,6 +34,32 @@ import { PermanentOutboxPublishError, type OutboxPublisher } from '../core/event
 import { getField } from './ticketStateService';
 import { projectDurableTicketTopic } from './ticketTopicProjectionService';
 
+function isUnknownChannel(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const record = error as Record<string, unknown>;
+  const raw = record.rawError && typeof record.rawError === 'object'
+    ? record.rawError as Record<string, unknown>
+    : undefined;
+  return (
+    Number(record.code) === 10003 ||
+    Number(raw?.code) === 10003 ||
+    Number(record.status) === 404
+  );
+}
+
+function isUnknownGuild(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const record = error as Record<string, unknown>;
+  const raw = record.rawError && typeof record.rawError === 'object'
+    ? record.rawError as Record<string, unknown>
+    : undefined;
+  return (
+    Number(record.code) === 10004 ||
+    Number(raw?.code) === 10004 ||
+    Number(record.status) === 404
+  );
+}
+
 function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
 }
