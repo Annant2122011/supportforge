@@ -15,6 +15,7 @@ import {
 } from './advancedSettingsService';
 import { ensureChannelPurposeMessage } from './channelPurposeService';
 import { logSystemEvent } from './auditLogService';
+import { setChannelTopic } from './discordChannelService';
 
 const SETTINGS_TOPIC_PREFIX = 'supportforge:settings';
 const SETTINGS_TITLE = '⚙️ SupportForge Settings';
@@ -70,6 +71,13 @@ export async function ensureSettingsChannel(
     throw new Error('SupportForge bot member could not be resolved.');
   }
 
+  const parent = guild.channels.cache.get(parentId);
+  if (parent?.type !== ChannelType.GuildCategory) {
+    throw new Error(
+      'SupportForge Settings destination category does not exist or is not a category.',
+    );
+  }
+
   let channel: TextChannel | undefined;
 
   if (settings.settingsChannelId) {
@@ -79,7 +87,7 @@ export async function ensureSettingsChannel(
     }
   }
 
-  const created = !channel;
+  let created = !channel;
 
   if (!channel) {
     const existing = guild.channels.cache.find(
@@ -88,10 +96,11 @@ export async function ensureSettingsChannel(
         candidate.topic?.startsWith(SETTINGS_TOPIC_PREFIX),
     );
 
-    channel =
-      existing?.type === ChannelType.GuildText
-        ? existing
-        : await guild.channels.create({
+    if (existing?.type === ChannelType.GuildText) {
+      channel = existing;
+      created = false;
+    } else {
+      channel = await guild.channels.create({
             name: 'supportforge-settings',
             type: ChannelType.GuildText,
             parent: parentId,
@@ -115,12 +124,25 @@ export async function ensureSettingsChannel(
               },
             ],
           });
+    }
   }
 
+  await setChannelTopic(
+    channel.id,
+    SETTINGS_TOPIC_PREFIX + ' guild=' + guild.id,
+    'SupportForge settings channel metadata normalization',
+  ).catch((error) => {
+    throw new Error(
+      'SupportForge Settings channel metadata could not be repaired.',
+      { cause: error },
+    );
+  });
+
   if (channel.parentId !== parentId) {
-    await channel
-      .setParent(parentId, { lockPermissions: false })
-      .catch(() => undefined);
+    await channel.setParent(
+      parentId,
+      { lockPermissions: false },
+    );
   }
 
   for (const department of Object.values(
@@ -128,31 +150,43 @@ export async function ensureSettingsChannel(
   )) {
     if (!department.staffRoleId) continue;
 
-    await channel.permissionOverwrites
-      .edit(department.staffRoleId, {
-        ViewChannel: true,
-        ReadMessageHistory: true,
-        SendMessages: false,
-      })
-      .catch(() => undefined);
+    try {
+      await channel.permissionOverwrites.edit(
+        department.staffRoleId,
+        {
+          ViewChannel: true,
+          ReadMessageHistory: true,
+          SendMessages: false,
+        },
+      );
+    } catch (error) {
+      console.warn(
+        '⚠️ Could not grant Settings access to department role ' +
+          department.staffRoleId +
+          ':',
+        error,
+      );
+    }
   }
 
-  await channel.permissionOverwrites
-    .edit(guild.roles.everyone.id, {
+  await channel.permissionOverwrites.edit(
+    guild.roles.everyone.id,
+    {
       ViewChannel: false,
       SendMessages: false,
       ReadMessageHistory: false,
-    })
-    .catch(() => undefined);
+    },
+  );
 
-  await channel.permissionOverwrites
-    .edit(bot.id, {
+  await channel.permissionOverwrites.edit(
+    bot.id,
+    {
       ViewChannel: true,
       SendMessages: true,
       ReadMessageHistory: true,
       EmbedLinks: true,
-    })
-    .catch(() => undefined);
+    },
+  );
 
   const currentSettings = await getAdvancedSettings(guild.id);
 
@@ -304,11 +338,17 @@ function isSettingsDashboardMessage(message: {
   );
 }
 
-function isSettingsPurposeMessage(message: {
-  author: { id: string };
-  embeds: readonly { title?: string | null; footer?: { text?: string | null } | null }[];
-}): boolean {
-  return message.author.id === message.author.id &&
+function isSettingsPurposeMessage(
+  message: {
+    author: { id: string };
+    embeds: readonly {
+      title?: string | null;
+      footer?: { text?: string | null } | null;
+    }[];
+  },
+  botId: string,
+): boolean {
+  return message.author.id === botId &&
     message.embeds.some(
       (embed) =>
         embed.title === '📝 SupportForge Channel Purpose' &&
@@ -473,7 +513,7 @@ export async function restoreSettingsChannelToBottom(guild: Guild): Promise<void
       message.author.id === botId &&
       message.id !== dashboard?.id &&
       !isSettingsDashboardMessage(message, botId) &&
-      !isSettingsPurposeMessage(message),
+      !isSettingsPurposeMessage(message, botId),
   );
 
   /*

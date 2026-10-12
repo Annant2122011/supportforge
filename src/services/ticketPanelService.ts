@@ -230,13 +230,70 @@ export async function refreshTicketPanel(
   if (persistedPriority) {
     effectiveTopic = setField(effectiveTopic, 'priority', persistedPriority);
   }
-  const messageId = getField(effectiveTopic, 'message');
-  if (!messageId) return;
-
+  const configuredMessageId = getField(effectiveTopic, 'message');
   const config = await getGuildConfig(channel.guild.id);
-  const message =
-    channel.messages.cache.get(messageId) ??
-    (await channel.messages.fetch(messageId));
+  const ticketNumber = getField(effectiveTopic, 'number') ?? 'unknown';
+
+  let message: Message | undefined;
+
+  if (configuredMessageId) {
+    message =
+      channel.messages.cache.get(configuredMessageId) ??
+      await channel.messages.fetch(configuredMessageId).catch(() => undefined);
+  }
+
+  /*
+   * A panel message is recoverable state, not an irreplaceable record. If a
+   * moderator deleted it manually, find the existing SupportForge panel first
+   * so refresh never creates duplicates.
+   */
+  if (!message) {
+    const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+    message = recent?.find(
+      (candidate) =>
+        candidate.author.id === channel.client.user?.id &&
+        candidate.embeds.some(
+          (embed) => embed.title === '🎫 SupportForge Ticket #' + ticketNumber,
+        ),
+    );
+  }
+
+  if (!message) {
+    message = await channel.send({
+      embeds: [
+        buildTicketPanelEmbed(
+          channel.guild,
+          channel.name,
+          effectiveTopic,
+          config,
+        ),
+      ],
+      components: buildTicketPanelComponents(
+        getTicketStatus(effectiveTopic),
+        effectiveTopic,
+      ),
+    });
+
+    const repairedTopic = setField(
+      effectiveTopic,
+      'message',
+      message.id,
+    );
+    channel.topic = repairedTopic;
+
+    await setChannelTopic(
+      channel.id,
+      repairedTopic,
+      'SupportForge ticket panel message reference repair',
+    ).catch((error) => {
+      console.warn(
+        '⚠️ Ticket panel was recreated, but its message reference could not be persisted:',
+        error,
+      );
+    });
+
+    return;
+  }
 
   await message.edit({
     embeds: [
@@ -296,12 +353,16 @@ async function performQueuedChannelRename(
      * do not operate on stale channel.name data.
      */
     channel.name = newName;
-    desiredChannelNames.delete(channel.id);
+    // A newer rename may have been requested while this REST call was in
+    // flight. An older completion must never clear that newer desired state.
+    if (desiredChannelNames.get(channel.id) === newName) {
+      desiredChannelNames.delete(channel.id);
 
-    const existingTimer = channelRenameRetryTimers.get(channel.id);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-      channelRenameRetryTimers.delete(channel.id);
+      const existingTimer = channelRenameRetryTimers.get(channel.id);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+        channelRenameRetryTimers.delete(channel.id);
+      }
     }
 
     console.log(
@@ -311,6 +372,10 @@ async function performQueuedChannelRename(
     const retryDelayMs = getRateLimitRetryDelayMs(error);
 
     if (retryDelayMs !== null) {
+      // This request may have been throttled after a newer name superseded it.
+      // Let the queued latest name run instead of scheduling a stale retry.
+      if (desiredChannelNames.get(channel.id) !== newName) return;
+
       console.warn(
         `⏳ Ticket rename delayed for ${Math.ceil(retryDelayMs / 1000)}s by Discord rate limit: ${channel.id}`,
       );
@@ -332,7 +397,20 @@ async function performQueuedChannelRename(
       return;
     }
 
+    if (desiredChannelNames.get(channel.id) === newName) {
+      desiredChannelNames.delete(channel.id);
+    }
     throw error;
+  }
+}
+
+export function clearTicketRenameState(channelId: string): void {
+  desiredChannelNames.delete(channelId);
+
+  const retryTimer = channelRenameRetryTimers.get(channelId);
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+    channelRenameRetryTimers.delete(channelId);
   }
 }
 

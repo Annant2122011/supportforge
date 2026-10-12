@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Guild } from 'discord.js';
 
@@ -217,11 +217,32 @@ async function persist(): Promise<void> {
 
   writeQueue = writeQueue.catch(() => undefined).then(async () => {
     await mkdir(DATA_DIR, { recursive: true });
+
+    const temporaryPath =
+      SETTINGS_PATH + '.tmp-' + process.pid + '-' + Date.now();
+
     await writeFile(
-      SETTINGS_PATH,
+      temporaryPath,
       JSON.stringify(state, null, 2),
       'utf8',
     );
+
+    try {
+      try {
+        await rename(temporaryPath, SETTINGS_PATH);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'EEXIST' && code !== 'EPERM') throw error;
+
+        await unlink(SETTINGS_PATH).catch((unlinkError) => {
+          const unlinkCode = (unlinkError as NodeJS.ErrnoException).code;
+          if (unlinkCode !== 'ENOENT') throw unlinkError;
+        });
+        await rename(temporaryPath, SETTINGS_PATH);
+      }
+    } finally {
+      await unlink(temporaryPath).catch(() => undefined);
+    }
   });
 
   await writeQueue;
@@ -236,9 +257,21 @@ async function load(): Promise<SettingsFile> {
     const raw = await readFile(SETTINGS_PATH, 'utf8');
     const parsed = JSON.parse(raw) as Partial<SettingsFile>;
 
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      !parsed.guilds ||
+      typeof parsed.guilds !== 'object' ||
+      Array.isArray(parsed.guilds)
+    ) {
+      throw new Error(
+        'SupportForge advanced settings are malformed: the guild settings collection is invalid.',
+      );
+    }
+
     state = {
       version: 5,
-      guilds: parsed.guilds ?? {},
+      guilds: parsed.guilds as Record<string, AdvancedGuildSettings>,
     };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;

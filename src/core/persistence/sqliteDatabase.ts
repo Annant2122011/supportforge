@@ -67,7 +67,20 @@ export function createSupportForgeDatabase(
     'PRAGMA synchronous = NORMAL;',
   );
 
-  runMigrations(instance, legacyTicketsPath);
+  try {
+    runMigrations(instance, legacyTicketsPath);
+  } catch (error) {
+    /*
+     * A failed migration must not leak the SQLite handle. In WAL mode,
+     * node:sqlite keeps the -shm/-wal files locked until the database is
+     * closed, which can otherwise make cleanup and retry operations fail on
+     * Windows with EBUSY.
+     */
+    if (instance.isOpen) {
+      instance.close();
+    }
+    throw error;
+  }
 
   return instance;
 }

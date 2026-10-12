@@ -8,6 +8,7 @@ import {
   MessageFlags,
   PermissionFlagsBits,
   SlashCommandBuilder,
+  type CategoryChannel,
   type ChatInputCommandInteraction,
   type Guild,
   type TextChannel,
@@ -15,6 +16,7 @@ import {
 
 import {
   getGuildConfig,
+  registerManagedCategory,
   getTier,
   newDepartmentId,
   newTagId,
@@ -35,6 +37,7 @@ import {
 import {
   ensureArchiveCategory,
   ensureClosedCategory,
+  ensureOpenCategory,
 } from '../services/ticketStorageService';
 
 import {
@@ -62,6 +65,146 @@ const PANEL_TOPIC = 'supportforge:panel';
 const TRANSCRIPT_NAME = '📄 support-transcripts';
 const TRANSCRIPT_TOPIC = 'supportforge:transcript';
 const TICKET_PREFIX = 'supportforge:ticket';
+
+type ManagedChannelOverwrite = {
+  id: string;
+  type: 0 | 1;
+  allow: bigint[];
+  deny: bigint[];
+};
+
+function permissionsToBitfield(values: readonly bigint[]): bigint {
+  return values.reduce((combined, value) => combined | value, 0n);
+}
+
+function overwriteSetMatches(
+  channel: CategoryChannel | TextChannel,
+  expected: ManagedChannelOverwrite[],
+): boolean {
+  if (channel.permissionOverwrites.cache.size !== expected.length) return false;
+  return expected.every((entry) => {
+    const current = channel.permissionOverwrites.cache.get(entry.id);
+    return Boolean(
+      current &&
+      current.type === entry.type &&
+      current.allow.bitfield === permissionsToBitfield(entry.allow) &&
+      current.deny.bitfield === permissionsToBitfield(entry.deny),
+    );
+  });
+}
+
+async function reconcileManagedTextChannel(
+  channel: TextChannel,
+  parentId: string,
+  topic: string,
+  expectedOverwrites: ManagedChannelOverwrite[],
+  reason: string,
+): Promise<void> {
+  const changes: {
+    parent?: string;
+    lockPermissions?: false;
+    topic?: string;
+    permissionOverwrites?: ManagedChannelOverwrite[];
+    reason: string;
+  } = { reason };
+
+  if (channel.parentId !== parentId) {
+    changes.parent = parentId;
+    changes.lockPermissions = false;
+  }
+  if (channel.topic !== topic) changes.topic = topic;
+  if (!overwriteSetMatches(channel, expectedOverwrites)) {
+    changes.permissionOverwrites = expectedOverwrites;
+  }
+
+  // Parent, topic and ACL all use PATCH /channels/{id}. Send one combined
+  // request only when there is an actual difference to repair.
+  if (Object.keys(changes).some((key) => key !== 'reason')) {
+    await channel.edit(changes);
+  }
+}
+
+function transcriptChannelOverwrites(
+  guild: Guild,
+  botId: string,
+  staffRoleIds: string[],
+): ManagedChannelOverwrite[] {
+  return [
+    {
+      id: guild.roles.everyone.id,
+      type: 0,
+      allow: [],
+      deny: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+      ],
+    },
+    {
+      id: botId,
+      type: 1,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.AttachFiles,
+        PermissionFlagsBits.EmbedLinks,
+      ],
+      deny: [],
+    },
+    ...staffRoleIds.map((id) => ({
+      id,
+      type: 0 as const,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.ReadMessageHistory,
+      ],
+      deny: [PermissionFlagsBits.SendMessages],
+    })),
+  ];
+}
+
+function panelChannelOverwrites(
+  guild: Guild,
+  botId: string,
+): ManagedChannelOverwrite[] {
+  return [
+    {
+      id: guild.roles.everyone.id,
+      type: 0,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.ReadMessageHistory,
+      ],
+      deny: [PermissionFlagsBits.SendMessages],
+    },
+    {
+      id: botId,
+      type: 1,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.EmbedLinks,
+      ],
+      deny: [],
+    },
+  ];
+}
+
+function containerOverwriteMatches(
+  channel: CategoryChannel,
+  overwriteId: string,
+  allow: readonly bigint[],
+  deny: readonly bigint[],
+): boolean {
+  const current = channel.permissionOverwrites.cache.get(overwriteId);
+  return Boolean(
+    current &&
+    allow.every((permission) => current.allow.has(permission) && !current.deny.has(permission)) &&
+    deny.every((permission) => current.deny.has(permission) && !current.allow.has(permission)),
+  );
+}
 
 function isActiveTicketStatus(
   status: ReturnType<typeof getTicketStatus>,
@@ -151,20 +294,38 @@ async function ensureContainer(guild: Guild) {
       channel?.type ===
       ChannelType.GuildCategory
     ) {
-      await channel.permissionOverwrites.edit(guild.roles.everyone.id, {
-        ViewChannel: true,
-        ReadMessageHistory: true,
-        SendMessages: false,
-      });
-      await channel.permissionOverwrites.edit(bot.id, {
-        ViewChannel: true,
-        SendMessages: true,
-        ReadMessageHistory: true,
-        ManageChannels: true,
-        ManageMessages: true,
-        EmbedLinks: true,
-        AttachFiles: true,
-      });
+      const everyoneAllow = [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.ReadMessageHistory,
+      ];
+      const everyoneDeny = [PermissionFlagsBits.SendMessages];
+      const botAllow = [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.ManageChannels,
+        PermissionFlagsBits.ManageMessages,
+        PermissionFlagsBits.EmbedLinks,
+        PermissionFlagsBits.AttachFiles,
+      ];
+      if (!containerOverwriteMatches(channel, guild.roles.everyone.id, everyoneAllow, everyoneDeny)) {
+        await channel.permissionOverwrites.edit(guild.roles.everyone.id, {
+          ViewChannel: true,
+          ReadMessageHistory: true,
+          SendMessages: false,
+        }, { reason: 'Repair SupportForge container permissions' });
+      }
+      if (!containerOverwriteMatches(channel, bot.id, botAllow, [])) {
+        await channel.permissionOverwrites.edit(bot.id, {
+          ViewChannel: true,
+          SendMessages: true,
+          ReadMessageHistory: true,
+          ManageChannels: true,
+          ManageMessages: true,
+          EmbedLinks: true,
+          AttachFiles: true,
+        }, { reason: 'Allow SupportForge to manage its container' });
+      }
       return channel;
     }
   }
@@ -198,24 +359,13 @@ async function ensureContainer(guild: Guild) {
           ],
         });
 
-  await category.permissionOverwrites.edit(
-    bot.id,
-    {
-      ViewChannel: true,
-      SendMessages: true,
-      ReadMessageHistory: true,
-      ManageChannels: true,
-      ManageMessages: true,
-      EmbedLinks: true,
-      AttachFiles: true,
-    },
-  );
-
   await updateGuildConfig(
     guild.id,
     (config) => {
-      config.supportCategoryId =
-        category.id;
+      config.supportCategoryId = category.id;
+      config.managedCategoryIds = Array.from(
+        new Set([...(config.managedCategoryIds ?? []), category.id]),
+      );
     },
   );
 
@@ -253,40 +403,13 @@ async function ensureTranscriptChannel(
     if (
       saved?.type === ChannelType.GuildText
     ) {
-      if (saved.parentId !== parentId) {
-        await saved.setParent(parentId, { lockPermissions: false }).catch((error) => {
-          throw new Error(
-            'SupportForge transcript channel could not be placed in its managed category.',
-            { cause: error },
-          );
-        });
-      }
-
-      await saved.permissionOverwrites.edit(guild.roles.everyone.id, {
-        ViewChannel: false,
-        SendMessages: false,
-        ReadMessageHistory: false,
-      });
-      await saved.permissionOverwrites.edit(bot.id, {
-        ViewChannel: true,
-        SendMessages: true,
-        ReadMessageHistory: true,
-        AttachFiles: true,
-        EmbedLinks: true,
-      });
-
-      for (const roleId of staffRoleIds) {
-        await saved.permissionOverwrites.edit(roleId, {
-          ViewChannel: true,
-          ReadMessageHistory: true,
-          SendMessages: false,
-        }).catch((error) => {
-          console.warn(
-            '⚠️ Could not synchronize transcript staff access for ' + roleId + ':',
-            error,
-          );
-        });
-      }
+      await reconcileManagedTextChannel(
+        saved,
+        parentId,
+        `${TRANSCRIPT_TOPIC} guild=${guild.id}`,
+        transcriptChannelOverwrites(guild, bot.id, staffRoleIds),
+        'Repair SupportForge transcript channel parent, topic and access',
+      );
 
       await ensureChannelPurposeMessage(
         saved,
@@ -307,39 +430,13 @@ async function ensureTranscriptChannel(
   if (
     existing?.type === ChannelType.GuildText
   ) {
-    if (existing.parentId !== parentId) {
-      await existing.setParent(parentId, {
-        lockPermissions: false,
-      });
-    }
-
-    await existing.permissionOverwrites.edit(
-      guild.roles.everyone.id,
-      {
-        ViewChannel: false,
-        SendMessages: false,
-        ReadMessageHistory: false,
-      },
+    await reconcileManagedTextChannel(
+      existing,
+      parentId,
+      `${TRANSCRIPT_TOPIC} guild=${guild.id}`,
+      transcriptChannelOverwrites(guild, bot.id, staffRoleIds),
+      'Repair recovered SupportForge transcript channel parent, topic and access',
     );
-
-    await existing.permissionOverwrites.edit(
-      bot.id,
-      {
-        ViewChannel: true,
-        SendMessages: true,
-        ReadMessageHistory: true,
-        AttachFiles: true,
-        EmbedLinks: true,
-      },
-    );
-
-    for (const roleId of staffRoleIds) {
-      await existing.permissionOverwrites.edit(roleId, {
-        ViewChannel: true,
-        ReadMessageHistory: true,
-        SendMessages: false,
-      }).catch(() => undefined);
-    }
 
     await updateGuildConfig(
       guild.id,
@@ -434,32 +531,13 @@ export async function ensurePanelChannel(
     if (
       saved?.type === ChannelType.GuildText
     ) {
-      if (saved.parentId !== parentId) {
-        await saved.setParent(parentId, { lockPermissions: false }).catch((error) => {
-          throw new Error(
-            'SupportForge panel channel could not be placed in its managed category.',
-            { cause: error },
-          );
-        });
-      }
-
-      await saved.permissionOverwrites.edit(guild.roles.everyone.id, {
-        ViewChannel: true,
-        ReadMessageHistory: true,
-        SendMessages: false,
-      });
-      await saved.permissionOverwrites.edit(bot.id, {
-        ViewChannel: true,
-        SendMessages: true,
-        ReadMessageHistory: true,
-        EmbedLinks: true,
-      });
-      await saved.setTopic(`${PANEL_TOPIC} guild=${guild.id}`).catch((error) => {
-        throw new Error(
-          'SupportForge panel channel topic could not be repaired.',
-          { cause: error },
-        );
-      });
+      await reconcileManagedTextChannel(
+        saved,
+        parentId,
+        `${PANEL_TOPIC} guild=${guild.id}`,
+        panelChannelOverwrites(guild, bot.id),
+        'Repair SupportForge panel channel parent, topic and access',
+      );
       return saved;
     }
   }
@@ -477,33 +555,12 @@ export async function ensurePanelChannel(
   if (
     existing?.type === ChannelType.GuildText
   ) {
-    if (existing.parentId !== parentId) {
-      await existing.setParent(parentId, {
-        lockPermissions: false,
-      });
-    }
-
-    await existing.permissionOverwrites.edit(
-      guild.roles.everyone.id,
-      {
-        ViewChannel: true,
-        ReadMessageHistory: true,
-        SendMessages: false,
-      },
-    );
-
-    await existing.permissionOverwrites.edit(
-      bot.id,
-      {
-        ViewChannel: true,
-        SendMessages: true,
-        ReadMessageHistory: true,
-        EmbedLinks: true,
-      },
-    );
-
-    await existing.setTopic(
+    await reconcileManagedTextChannel(
+      existing,
+      parentId,
       `${PANEL_TOPIC} guild=${guild.id}`,
+      panelChannelOverwrites(guild, bot.id),
+      'Repair recovered SupportForge panel channel parent, topic and access',
     );
 
     await updateGuildConfig(
@@ -1044,6 +1101,7 @@ export async function execute(
         supportCategory.id,
       );
 
+      await ensureOpenCategory(guild);
       await ensureClosedCategory(guild);
       await ensureArchiveCategory(guild);
       await ensureSettingsChannel(guild, supportCategory.id);
@@ -1280,24 +1338,38 @@ export async function execute(
           ),
         );
 
-      const lines =
-        departments.length
-          ? departments
-              .map(
-                (department) =>
-                  `• **${
-                    department.name
-                  }** — staff: ${
-                    department.staffRoleId
-                      ? `<@&${department.staffRoleId}>`
-                      : 'Administrators only'
-                  }`,
-              )
-              .join('\n')
-          : 'No departments configured.';
+      const lines = departments.length
+        ? departments
+            .map(
+              (department) =>
+                `• **${department.name}** — staff: ${department.staffRoleId ? `<@&${department.staffRoleId}>` : 'Administrators only'}`,
+            )
+            .join('\n')
+        : 'No departments configured.';
+
+      let visible = lines;
+      if (lines.length > 1_700) {
+        const entries: string[] = [];
+        let length = 0;
+
+        for (const department of departments) {
+          const line =
+            `• **${department.name}** — staff: ${department.staffRoleId ? `<@&${department.staffRoleId}>` : 'Administrators only'}`;
+          const nextLength = length + line.length + (entries.length ? 1 : 0);
+          if (nextLength > 1_700) break;
+          entries.push(line);
+          length = nextLength;
+        }
+
+        visible =
+          entries.join('\n') +
+          '\n\n…and ' +
+          Math.max(0, departments.length - entries.length) +
+          ' more department(s).';
+      }
 
       await interaction.editReply(
-        `📂 **SupportForge departments**\n\n${lines}`,
+        `📂 **SupportForge departments**\n\n${visible}`,
       );
 
       return;
@@ -1376,6 +1448,15 @@ export async function execute(
       await updateGuildConfig(
         guild.id,
         (current) => {
+          const currentDepartment = current.departments[department.id];
+
+          if (currentDepartment?.categoryId) {
+            current.retiredCategoryIds = Array.from(new Set([
+              ...(current.retiredCategoryIds ?? []),
+              currentDepartment.categoryId,
+            ]));
+          }
+
           delete current.departments[
             department.id
           ];

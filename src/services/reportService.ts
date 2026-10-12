@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import {
   PermissionFlagsBits,
   type Guild,
@@ -58,10 +59,37 @@ function emptyGuildStore(): ReportGuildStore {
 
 async function persist(): Promise<void> {
   if (!state) return;
+
   writeQueue = writeQueue.catch(() => undefined).then(async () => {
     await mkdir(DATA_DIR, { recursive: true });
-    await writeFile(REPORT_PATH, JSON.stringify(state, null, 2), 'utf8');
+
+    const temporaryPath =
+      REPORT_PATH + '.tmp-' + process.pid + '-' + Date.now();
+
+    await writeFile(
+      temporaryPath,
+      JSON.stringify(state, null, 2),
+      'utf8',
+    );
+
+    try {
+      try {
+        await rename(temporaryPath, REPORT_PATH);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'EEXIST' && code !== 'EPERM') throw error;
+
+        await unlink(REPORT_PATH).catch((unlinkError) => {
+          const unlinkCode = (unlinkError as NodeJS.ErrnoException).code;
+          if (unlinkCode !== 'ENOENT') throw unlinkError;
+        });
+        await rename(temporaryPath, REPORT_PATH);
+      }
+    } finally {
+      await unlink(temporaryPath).catch(() => undefined);
+    }
   });
+
   await writeQueue;
 }
 
@@ -72,9 +100,22 @@ async function load(): Promise<ReportStore> {
   try {
     const raw = await readFile(REPORT_PATH, 'utf8');
     const parsed = JSON.parse(raw) as Partial<ReportStore>;
+
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      !parsed.guilds ||
+      typeof parsed.guilds !== 'object' ||
+      Array.isArray(parsed.guilds)
+    ) {
+      throw new Error(
+        'SupportForge report data is malformed: the guild collection is invalid.',
+      );
+    }
+
     const guilds: Record<string, ReportGuildStore> = {};
 
-    for (const [guildId, rawStore] of Object.entries(parsed.guilds ?? {})) {
+    for (const [guildId, rawStore] of Object.entries(parsed.guilds)) {
       const store = rawStore as Partial<ReportGuildStore>;
       guilds[guildId] = {
         reports: Array.isArray(store.reports) ? store.reports : [],
@@ -236,7 +277,7 @@ export async function recordReport(
   const store = getGuildStore(current, guild.id);
 
   const report: StoredReport = {
-    id: 'report-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
+    id: 'report-' + randomUUID(),
     guildId: guild.id,
     targetUserId: input.targetUserId,
     reporterUserId: input.reporterUserId,

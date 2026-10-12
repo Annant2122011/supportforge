@@ -63,6 +63,7 @@ export interface TicketRepository {
       >
     >,
     updatedAt: string,
+    actor?: EventActor,
   ): void;
   markDeleted(channelId: string, deletedAt: string, reason: string): void;
   remove(channelId: string): void;
@@ -386,7 +387,19 @@ export class SqliteTicketRepository implements TicketRepository {
       >
     >,
     updatedAt: string,
+    actor: EventActor = {
+      id: 'supportforge-system',
+      attribution: 'actorKnown',
+      confidence: 'high',
+    },
   ): void {
+    const current = this.getByChannelId(channelId);
+    if (!current) {
+      throw new Error(
+        `Cannot update SupportForge ticket ${channelId}: durable ticket record does not exist.`,
+      );
+    }
+
     const assignments: string[] = [];
     const parameters: unknown[] = [];
 
@@ -412,29 +425,103 @@ export class SqliteTicketRepository implements TicketRepository {
       JSON.stringify(updates.metadata),
     );
 
+    if (assignments.length === 0) return;
+
     assignments.push('updated_at = ?');
     parameters.push(updatedAt);
     parameters.push(channelId);
 
-    this.database
-      .prepare(
-        'UPDATE tickets SET ' +
-        assignments.join(', ') +
-        ' WHERE channel_id = ?',
-      )
-      .run(...parameters);
+    this.database.exec('BEGIN IMMEDIATE');
+
+    try {
+      const result = this.database
+        .prepare(
+          'UPDATE tickets SET ' +
+          assignments.join(', ') +
+          ' WHERE channel_id = ?',
+        )
+        .run(...parameters);
+
+      if (Number(result.changes) !== 1) {
+        throw new Error(
+          `SupportForge ticket ${channelId} disappeared during metadata update.`,
+        );
+      }
+
+      this.events.append({
+        id: randomUUID(),
+        type: 'ticket.metadata_changed',
+        aggregateType: 'ticket',
+        aggregateId: current.id,
+        guildId: current.guildId,
+        channelId: current.channelId,
+        actorId: actor.id,
+        actorAttribution: actor.attribution ?? 'actorUnknown',
+        actorConfidence: actor.confidence ?? 'none',
+        payload: {
+          changedFields: Object.keys(updates),
+        },
+        occurredAt: updatedAt,
+      });
+
+      this.database.exec('COMMIT');
+    } catch (error) {
+      try {
+        this.database.exec('ROLLBACK');
+      } catch {
+        // Preserve original persistence error.
+      }
+      throw error;
+    }
   }
 
   public markDeleted(
     channelId: string,
     deletedAt: string,
     reason: string,
+    actor: EventActor = {
+      id: 'supportforge-system',
+      attribution: 'actorKnown',
+      confidence: 'high',
+    },
   ): void {
-    this.database
-      .prepare(
-        'UPDATE tickets SET deleted_at = ?, deletion_reason = ?, updated_at = ? WHERE channel_id = ?',
-      )
-      .run(deletedAt, reason, deletedAt, channelId);
+    const current = this.getByChannelId(channelId);
+    if (!current) return;
+
+    this.database.exec('BEGIN IMMEDIATE');
+
+    try {
+      const result = this.database
+        .prepare(
+          'UPDATE tickets SET deleted_at = ?, deletion_reason = ?, updated_at = ? WHERE channel_id = ? AND deleted_at IS NULL',
+        )
+        .run(deletedAt, reason, deletedAt, channelId);
+
+      if (Number(result.changes) === 1) {
+        this.events.append({
+          id: randomUUID(),
+          type: 'ticket.deleted',
+          aggregateType: 'ticket',
+          aggregateId: current.id,
+          guildId: current.guildId,
+          channelId: current.channelId,
+          actorId: actor.id,
+          actorAttribution: actor.attribution ?? 'actorUnknown',
+          actorConfidence: actor.confidence ?? 'none',
+          payload: { reason },
+          occurredAt: deletedAt,
+        });
+      }
+
+      this.database.exec('COMMIT');
+    } catch (error) {
+      try {
+        this.database.exec('ROLLBACK');
+      } catch {
+        // Preserve original persistence error.
+      }
+      throw error;
+    }
   }
 
   public remove(channelId: string): void {

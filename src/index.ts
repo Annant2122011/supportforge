@@ -7,6 +7,7 @@ import {
   EmbedBuilder,
   GatewayIntentBits,
   MessageFlags,
+  RESTEvents,
 } from 'discord.js';
 
 import { execute } from './commands/supportforge';
@@ -26,14 +27,21 @@ import {
 
 import { getGuildConfig } from './services/configService';
 
-import { recordTicketMessageForPanel } from './services/panelActivityService';
-import { ensureDefaultChannelPurpose } from './services/channelPurposeService';
+import {
+  clearPanelActivity,
+  recordTicketMessageForPanel,
+} from './services/panelActivityService';
+import { ensureDefaultChannelPurpose, invalidateChannelPurposeCache } from './services/channelPurposeService';
 
 
 import { startTicketRetentionScheduler } from './services/ticketRetentionService';
+import { clearTicketRenameState } from './services/ticketPanelService';
+import { clearVoiceTopicRetryState } from './services/voiceModeService';
 import { removeLegacyCustomCommands } from './services/advancedSettingsService';
 import {
   handleAuditInteraction,
+  ensureAuditDeveloperInfrastructure,
+  invalidateAuditChannelPanel,
   isSupportForgeManagedChannel,
   isSupportForgeManagedRole,
   logDiscordMutation,
@@ -45,7 +53,8 @@ import { ensureSettingsChannel } from './services/settingsChannelService';
 import { isFactoryResetInProgress } from './services/factoryResetService';
 import { startSupportForgeUpdateMonitor } from './services/updateService';
 import type { GuildBasedChannel, TextChannel } from 'discord.js';
-import { getSupportForgeDatabase } from './core/persistence/sqliteDatabase';
+import { initializePersistence } from './core/persistence/provider';
+import { configureDiscordChannelRest } from './services/discordChannelService';
 
 const token = process.env.DISCORD_TOKEN;
 
@@ -60,13 +69,17 @@ if (!token) {
  * forces schema migrations and legacy-data validation to happen before the
  * bot can accept any ticket interactions.
  */
-try {
-  getSupportForgeDatabase();
-} catch (error) {
-  throw new Error(
-    'SupportForge durable database initialization failed. The bot will not start with unverified persistence.',
-    { cause: error },
-  );
+async function initializeAndLogin(): Promise<void> {
+  try {
+    await initializePersistence();
+  } catch (error) {
+    throw new Error(
+      'SupportForge durable database initialization failed. The bot will not start with unverified persistence.',
+      { cause: error },
+    );
+  }
+
+  await client.login(token);
 }
 
 const client = new Client({
@@ -79,7 +92,32 @@ const client = new Client({
   rest: {
     timeout: 15_000,
     retries: 3,
+    // Keep safely below Discord's documented default global ceiling.
+    globalRequestsPerSecond: 40,
+    invalidRequestWarningInterval: 100,
   },
+});
+
+configureDiscordChannelRest(client.rest, (data) => {
+  if (!data || typeof data !== 'object') return;
+  const payload = data as { guild_id?: unknown; id?: unknown };
+  if (typeof payload.guild_id !== 'string' || typeof payload.id !== 'string') return;
+  const guild = client.guilds.cache.get(payload.guild_id);
+  if (!guild) return;
+  const manager = guild.channels as unknown as { _add?: (data: unknown, guild?: unknown) => unknown };
+  manager._add?.(data, guild);
+});
+client.rest.on(RESTEvents.RateLimited, (rateLimit) => {
+  console.warn(
+    '⚠️ Discord REST rate limit: ' +
+    'method=' + rateLimit.method +
+    ' route=' + rateLimit.route +
+    ' scope=' + rateLimit.scope +
+    ' retry_after=' + rateLimit.retryAfter + 'ms' +
+    ' global=' + rateLimit.global +
+    ' major=' + rateLimit.majorParameter +
+    (rateLimit.sublimitTimeout ? ' sublimit=' + rateLimit.sublimitTimeout + 'ms' : ''),
+  );
 });
 
 client.once('clientReady', (readyClient) => {
@@ -89,9 +127,110 @@ client.once('clientReady', (readyClient) => {
   startTicketRetentionScheduler(client);
   startAuditDailySummaryScheduler(client);
   startSupportForgeUpdateMonitor(client);
-  void Promise.all(
-    client.guilds.cache.map((guild) => removeLegacyCustomCommands(guild)),
-  ).catch((error) => console.warn('⚠️ Legacy settings command cleanup failed:', error));
+  /*
+   * Run startup repairs sequentially across guilds. Parallel channel/role
+   * repairs create avoidable REST bursts on larger bot installations.
+   */
+  void (async () => {
+    for (const guild of client.guilds.cache.values()) {
+      try {
+        await removeLegacyCustomCommands(guild);
+      } catch (error) {
+        console.warn('⚠️ Legacy settings command cleanup failed for guild ' + guild.id + ':', error);
+      }
+    }
+  })();
+
+  /*
+   * Repair existing Developer Audit infrastructure, including stale config
+   * IDs and channels whose category was deleted or recreated. Do not silently
+   * skip a repair just because the configured category is missing from cache.
+   */
+  void (async () => {
+    for (const guild of client.guilds.cache.values()) {
+      try {
+        const config = await getGuildConfig(guild.id);
+        const hasDeveloperSignal =
+          Boolean(config.auditDevChannelId || config.auditDeveloperRoleId) ||
+          guild.roles.cache.some((role) =>
+            !role.managed && role.name === 'developer-mode audit-log',
+          ) ||
+          guild.channels.cache.some((candidate) =>
+            candidate.type === ChannelType.GuildText &&
+            candidate.topic?.startsWith('supportforge:audit-dev'),
+          );
+        if (!hasDeveloperSignal) continue;
+
+        let developerChannel: GuildBasedChannel | null | undefined =
+          config.auditDevChannelId
+            ? guild.channels.cache.get(config.auditDevChannelId)
+            : undefined;
+        if (!developerChannel && config.auditDevChannelId) {
+          developerChannel = await guild.channels.fetch(config.auditDevChannelId).catch(() => null);
+        }
+
+        if (developerChannel?.type !== ChannelType.GuildText) {
+          developerChannel = guild.channels.cache.find(
+            (candidate) =>
+              candidate.type === ChannelType.GuildText &&
+              candidate.topic?.startsWith('supportforge:audit-dev'),
+          );
+        }
+
+        let parent = config.supportCategoryId
+          ? guild.channels.cache.get(config.supportCategoryId)
+          : undefined;
+        if (!parent && config.supportCategoryId) {
+          parent = (await guild.channels.fetch(config.supportCategoryId).catch(() => null)) ?? undefined;
+        }
+
+        if (parent?.type !== ChannelType.GuildCategory) {
+          const existingParentId =
+            developerChannel?.type === ChannelType.GuildText
+              ? developerChannel.parentId
+              : null;
+          if (existingParentId) {
+            parent = guild.channels.cache.get(existingParentId) ??
+              (await guild.channels.fetch(existingParentId).catch(() => null)) ??
+              undefined;
+          }
+        }
+
+        if (parent?.type !== ChannelType.GuildCategory) {
+          let generalAudit: GuildBasedChannel | null | undefined =
+            config.auditChannelId
+              ? guild.channels.cache.get(config.auditChannelId)
+              : undefined;
+          if (!generalAudit && config.auditChannelId) {
+            generalAudit = await guild.channels.fetch(config.auditChannelId).catch(() => null);
+          }
+          if (generalAudit?.type !== ChannelType.GuildText) {
+            generalAudit = guild.channels.cache.find(
+              (candidate) =>
+                candidate.type === ChannelType.GuildText &&
+                candidate.topic?.startsWith('supportforge:audit guild='),
+            );
+          }
+          if (generalAudit?.type === ChannelType.GuildText && generalAudit.parentId) {
+            parent = guild.channels.cache.get(generalAudit.parentId) ??
+              (await guild.channels.fetch(generalAudit.parentId).catch(() => null)) ??
+              undefined;
+          }
+        }
+
+        if (parent?.type === ChannelType.GuildCategory) {
+          await ensureAuditDeveloperInfrastructure(guild, parent.id);
+        } else {
+          console.warn(
+            '⚠️ Developer Audit repair skipped for guild ' + guild.id +
+            ': no valid SupportForge parent category was found. Run /supportforge setup to recreate it.',
+          );
+        }
+      } catch (error) {
+        console.warn('⚠️ Developer Audit startup repair failed for guild ' + guild.id + ':', error);
+      }
+    }
+  })();
 });
 
 client.on('channelCreate', async (channel) => {
@@ -283,6 +422,10 @@ client.on('channelDelete', async (channel) => {
       : '';
 
   if (isTicketTopic(deletedTicketTopic)) {
+    clearPanelActivity(guildChannel.id);
+    clearTicketRenameState(guildChannel.id);
+    clearVoiceTopicRetryState(guildChannel.id);
+
     /*
      * Manual ticket deletion must update durable lifecycle storage and remove
      * any temporary voice room owned by the deleted ticket.
@@ -449,6 +592,29 @@ function formatExactMessageContent(content: string): string {
   return fence + '\n' + content + '\n' + fence;
 }
 
+client.on('messageDelete', (message) => {
+  if (message.channel.type !== ChannelType.GuildText || message.author?.id !== client.user?.id) return;
+
+  const purposeWasDeleted = message.embeds.some((embed) =>
+    embed.title === '📝 SupportForge Channel Purpose' &&
+    embed.footer?.text === 'SupportForge • Channel Purpose',
+  );
+  if (purposeWasDeleted) invalidateChannelPurposeCache(message.channel.id);
+
+  const auditPanelWasDeleted = message.components.some((row) => {
+    // Discord.js top-level components can include components without children
+    // (for example files/media). Only inspect action-row-like containers.
+    if (!('components' in row) || !Array.isArray(row.components)) return false;
+
+    return row.components.some((component) =>
+      'customId' in component &&
+      typeof component.customId === 'string' &&
+      component.customId.startsWith('sf:audit:'),
+    );
+  });
+  if (auditPanelWasDeleted) invalidateAuditChannelPanel(message.channel.id);
+});
+
 client.on('messageCreate', async (message) => {
   if (
     !message.guild ||
@@ -597,27 +763,28 @@ client.on(
       );
 
       /*
-       * If Discord has already invalidated the
-       * interaction token, there is nothing useful
-       * we can send back to that interaction.
+       * Every interaction path should leave the user with a visible
+       * failure state. A previously deferred component can still be edited,
+       * which is preferable to silently leaving an old/stale panel on screen.
        */
-      if (
-        !interaction.isRepliable() ||
-        interaction.replied ||
-        interaction.deferred
-      ) {
+      if (!interaction.isRepliable()) {
         return;
       }
 
       try {
-        await interaction.reply({
-          content:
-            '❌ SupportForge encountered an unexpected error.',
-          flags: MessageFlags.Ephemeral,
-        });
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply({
+            content: '❌ SupportForge encountered an unexpected error while processing this action.',
+          });
+        } else {
+          await interaction.reply({
+            content: '❌ SupportForge encountered an unexpected error while processing this action.',
+            flags: MessageFlags.Ephemeral,
+          });
+        }
       } catch (replyError) {
         console.error(
-          '❌ Failed to send error response:',
+          '❌ Failed to send interaction error response:',
           replyError,
         );
       }
@@ -625,4 +792,7 @@ client.on(
   },
 );
 
-void client.login(token);
+void initializeAndLogin().catch((error) => {
+  console.error('❌ SupportForge startup failed:', error);
+  process.exitCode = 1;
+});
