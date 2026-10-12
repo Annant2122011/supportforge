@@ -135,7 +135,7 @@ async function deleteChannelSafely(
        * Treat that as successful cleanup, which makes retries idempotent.
        */
       const code = getDiscordErrorCode(error);
-      if (code === 10003 || code === 10008) {
+      if (code === 10003) {
         return { deleted: true };
       }
 
@@ -162,7 +162,7 @@ async function deleteRoleSafely(
       return { deleted: true };
     } catch (error) {
       const code = getDiscordErrorCode(error);
-      if (code === 10011 || code === 10008) {
+      if (code === 10011) {
         return { deleted: true };
       }
 
