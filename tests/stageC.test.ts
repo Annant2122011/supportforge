@@ -119,6 +119,7 @@ test('status transitions are conditional, durable, and append a domain event plu
     const eventRepository = new SqliteEventRepository(db);
     const events = eventRepository.listTicketEvents('ticket-c-1');
     assert.equal(events.length, 2);
+    assert.equal(events[1].type, 'ticket.claimed');
     assert.deepEqual(events[1].payload, {
       from: 'open',
       to: 'claimed',
@@ -166,8 +167,8 @@ test('outbox claiming prevents duplicate workers and stale processing can recove
 
     const stale = new Date(Date.now() - 60 * 60_000).toISOString();
     db.prepare(
-      "UPDATE outbox_events SET available_at = ? WHERE id = ?",
-    ).run(stale, pending[0].id);
+      "UPDATE outbox_events SET available_at = ?, processing_started_at = ? WHERE id = ?",
+    ).run(stale, stale, pending[0].id);
 
     assert.equal(
       events.recoverStaleProcessing(
@@ -179,7 +180,7 @@ test('outbox claiming prevents duplicate workers and stale processing can recove
     assert.equal(events.listPendingOutbox().length, 1);
   });
 });
-test('deleting a ticket atomically purges its durable events and outbox records', async () => {
+test('removing a ticket preserves the ticket tombstone, full event history, and outbox audit trail', async () => {
   await withDatabase(async (db) => {
     const tickets = new SqliteTicketRepository(db);
     tickets.create(record());
@@ -190,8 +191,14 @@ test('deleting a ticket atomically purges its durable events and outbox records'
 
     tickets.remove('channel-c-1');
 
-    assert.equal(tickets.getByChannelId('channel-c-1'), undefined);
-    assert.equal(events.listTicketEvents('ticket-c-1').length, 0);
-    assert.equal(events.listOutbox('pending').length, 0);
+    const deleted = tickets.getByChannelId('channel-c-1');
+    assert.ok(deleted);
+    assert.ok(deleted.deletedAt);
+    assert.match(deleted.deletionReason ?? '', /history retained/i);
+    assert.deepEqual(
+      events.listTicketEvents('ticket-c-1').map((event) => event.type),
+      ['ticket.created', 'ticket.deleted'],
+    );
+    assert.equal(events.listOutbox('pending').length, 2);
   });
 });
