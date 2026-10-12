@@ -75,6 +75,14 @@ export async function getPersistedTicket(
   return record ? toPersistedTicket(record) : undefined;
 }
 
+export async function getPersistedTicketById(
+  ticketId: string,
+): Promise<PersistedTicket | undefined> {
+  const repository = await getRepository();
+  const record = await repository.getById(ticketId);
+  return record ? toPersistedTicket(record) : undefined;
+}
+
 export async function getPersistedTicketStatus(
   channelId: string,
 ): Promise<TicketStatus | undefined> {
