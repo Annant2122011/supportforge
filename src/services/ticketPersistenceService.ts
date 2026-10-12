@@ -141,7 +141,7 @@ export async function registerTicket(
   };
 
   if (current) {
-    await repository.upsert(record);
+    await repository.upsert(record, actor);
   } else {
     await repository.create(record, actor);
   }
