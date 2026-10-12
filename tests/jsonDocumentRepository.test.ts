@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -8,7 +8,10 @@ import {
   createSupportForgeDatabase,
   type SqliteDatabase,
 } from '../src/core/persistence/sqliteDatabase';
-import { SqliteJsonDocumentRepository } from '../src/repositories/jsonDocumentRepository';
+import {
+  importLegacyJsonDocuments,
+  SqliteJsonDocumentRepository,
+} from '../src/repositories/jsonDocumentRepository';
 
 async function withDatabase(
   callback: (database: SqliteDatabase) => Promise<void>,
@@ -91,4 +94,64 @@ test('undefined is rejected rather than silently dropping a persistence write', 
       /cannot store undefined/i,
     );
   });
+});
+
+
+test('legacy audit migration recovers from a malformed primary file using its backup', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'supportforge-audit-import-'));
+  const dataDirectory = join(directory, 'data');
+  await mkdir(dataDirectory, { recursive: true });
+
+  const primaryPath = join(dataDirectory, 'audit-log.json');
+  const backupPath = join(dataDirectory, 'audit-log.backup.json');
+  const malformedPrimary = '{not-valid-json';
+  const fallbackAudit = {
+    version: 2,
+    guilds: {
+      'guild-restore-test': {
+        events: [{
+          id: 'audit-entry-1',
+          guildId: 'guild-restore-test',
+          category: 'settings',
+          action: 'SETTINGS_UPDATED',
+          actorId: 'moderator-1',
+          actorName: 'Moderator',
+          actorAttribution: 'actorKnown',
+          actorConfidence: 'high',
+          timestamp: '2026-10-12T10:00:00.000Z',
+          ticketChannelId: 'ticket-channel-1',
+        }],
+        summaries: {},
+        overallSummary: null,
+        accumulationEnabled: true,
+        developerViewers: [],
+      },
+    },
+  };
+
+  await writeFile(primaryPath, malformedPrimary, 'utf8');
+  await writeFile(backupPath, JSON.stringify(fallbackAudit), 'utf8');
+
+  const database = createSupportForgeDatabase(
+    join(directory, 'supportforge.sqlite'),
+    join(directory, 'missing-tickets.json'),
+  );
+
+  try {
+    const documents = new SqliteJsonDocumentRepository(database);
+    const result = await importLegacyJsonDocuments('sqlite', directory, documents);
+
+    assert.deepEqual(result.imported, ['audit-log']);
+    assert.deepEqual(await documents.get('audit-log'), fallbackAudit);
+    assert.equal(await readFile(primaryPath, 'utf8'), malformedPrimary);
+    assert.equal(await readFile(backupPath, 'utf8'), JSON.stringify(fallbackAudit));
+
+    const backupFiles = (await readdir(dataDirectory)).filter((name) =>
+      name.includes('.pre-database-') && name.endsWith('.backup'),
+    );
+    assert.equal(backupFiles.length, 2, 'both attempted source files should have recovery copies');
+  } finally {
+    if (database.isOpen) database.close();
+    await rm(directory, { recursive: true, force: true });
+  }
 });
