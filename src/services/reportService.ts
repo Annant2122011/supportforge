@@ -1,6 +1,5 @@
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { getJsonDocument, setJsonDocument } from './jsonDocumentPersistenceService';
 import {
   PermissionFlagsBits,
   type Guild,
@@ -42,9 +41,6 @@ interface ReportStore {
   guilds: Record<string, ReportGuildStore>;
 }
 
-const DATA_DIR = join(process.cwd(), 'data');
-const REPORT_PATH = join(DATA_DIR, 'reports.json');
-
 let state: ReportStore | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 
@@ -60,62 +56,38 @@ function emptyGuildStore(): ReportGuildStore {
 async function persist(): Promise<void> {
   if (!state) return;
 
-  writeQueue = writeQueue.catch(() => undefined).then(async () => {
-    await mkdir(DATA_DIR, { recursive: true });
-
-    const temporaryPath =
-      REPORT_PATH + '.tmp-' + process.pid + '-' + Date.now();
-
-    await writeFile(
-      temporaryPath,
-      JSON.stringify(state, null, 2),
-      'utf8',
-    );
-
-    try {
-      try {
-        await rename(temporaryPath, REPORT_PATH);
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== 'EEXIST' && code !== 'EPERM') throw error;
-
-        await unlink(REPORT_PATH).catch((unlinkError) => {
-          const unlinkCode = (unlinkError as NodeJS.ErrnoException).code;
-          if (unlinkCode !== 'ENOENT') throw unlinkError;
-        });
-        await rename(temporaryPath, REPORT_PATH);
-      }
-    } finally {
-      await unlink(temporaryPath).catch(() => undefined);
-    }
-  });
-
+  const snapshot = JSON.parse(JSON.stringify(state)) as ReportStore;
+  writeQueue = writeQueue.catch(() => undefined).then(
+    () => setJsonDocument('reports', snapshot),
+  );
   await writeQueue;
 }
 
 async function load(): Promise<ReportStore> {
   if (state) return state;
-  await mkdir(DATA_DIR, { recursive: true });
 
-  try {
-    const raw = await readFile(REPORT_PATH, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<ReportStore>;
-
+  const persisted = await getJsonDocument<Partial<ReportStore>>('reports');
+  if (persisted !== undefined) {
     if (
-      !parsed ||
-      typeof parsed !== 'object' ||
-      !parsed.guilds ||
-      typeof parsed.guilds !== 'object' ||
-      Array.isArray(parsed.guilds)
+      !persisted ||
+      typeof persisted !== 'object' ||
+      !persisted.guilds ||
+      typeof persisted.guilds !== 'object' ||
+      Array.isArray(persisted.guilds)
     ) {
       throw new Error(
-        'SupportForge report data is malformed: the guild collection is invalid.',
+        'SupportForge report database document is malformed. Existing data was not overwritten.',
       );
     }
 
     const guilds: Record<string, ReportGuildStore> = {};
+    for (const [guildId, rawStore] of Object.entries(persisted.guilds)) {
+      if (!rawStore || typeof rawStore !== 'object' || Array.isArray(rawStore)) {
+        throw new Error(
+          'SupportForge report database document contains a malformed guild entry: ' + guildId,
+        );
+      }
 
-    for (const [guildId, rawStore] of Object.entries(parsed.guilds)) {
       const store = rawStore as Partial<ReportGuildStore>;
       guilds[guildId] = {
         reports: Array.isArray(store.reports) ? store.reports : [],
@@ -128,19 +100,11 @@ async function load(): Promise<ReportStore> {
     }
 
     state = { version: 1, guilds };
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') {
-      throw new Error(
-        'SupportForge report data could not be loaded safely. The existing file was not replaced.',
-        { cause: error },
-      );
-    }
-
-    state = { version: 1, guilds: {} };
-    await persist();
+    return state;
   }
 
+  state = { version: 1, guilds: {} };
+  await persist();
   return state;
 }
 
