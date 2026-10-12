@@ -5,7 +5,7 @@ import {
   assertTicketStatusTransition,
   type TicketStatus,
 } from '../core/domain/ticketLifecycle';
-import type { EventActor } from '../core/events/domainEvents';
+import type { DomainEventType, EventActor } from '../core/events/domainEvents';
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
 import type { DatabaseExecutor } from '../core/persistence/database';
 import {
@@ -36,6 +36,136 @@ function iso(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
+function lifecycleEventType(from: TicketStatus, to: TicketStatus): DomainEventType {
+  if (to === 'claimed') return 'ticket.claimed';
+  if (to === 'pending') return 'ticket.pending';
+  if (to === 'closed') return 'ticket.closed';
+  if (to === 'reopened') return 'ticket.reopened';
+  if (to === 'archived') return 'ticket.archived';
+  if (from === 'claimed' && to === 'open') return 'ticket.unclaimed';
+  if (from === 'pending' && to === 'open') return 'ticket.resumed';
+  return 'ticket.status_changed';
+}
+
+function metadataEventType(
+  changedFields: string[],
+  current: TicketRepositoryRecord,
+  updates: Partial<Pick<TicketRepositoryRecord,
+    'departmentId' | 'tagId' | 'ownerId' | 'priority' |
+    'claimedByIds' | 'participantIds' | 'metadata'>>,
+): DomainEventType {
+  if (updates.metadata && typeof updates.metadata.lastMessageId === 'string') {
+    return 'ticket.message.received';
+  }
+  if (changedFields.length === 1) {
+    const field = changedFields[0];
+    if (field === 'priority') return 'ticket.priority.changed';
+    if (field === 'departmentId') return 'ticket.department.changed';
+    if (field === 'tagId') return 'ticket.tag.changed';
+    if (field === 'participantIds' && updates.participantIds) {
+      const before = new Set(current.participantIds);
+      const after = new Set(updates.participantIds);
+      const added = [...after].filter((id) => !before.has(id));
+      const removed = [...before].filter((id) => !after.has(id));
+      if (added.length === 1 && removed.length === 0) return 'ticket.participant.added';
+      if (removed.length === 1 && added.length === 0) return 'ticket.participant.removed';
+    }
+  }
+  return 'ticket.metadata_changed';
+}
+
+function metadataEventPayload(
+  changedFields: string[],
+  updates: Partial<Pick<TicketRepositoryRecord, 'metadata'>>,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = { changedFields };
+  const metadata = updates.metadata;
+  if (metadata && typeof metadata.lastMessageId === 'string') {
+    payload.messageId = metadata.lastMessageId;
+    payload.messageAuthorType = metadata.lastMessageAuthorType ?? 'unknown';
+    payload.messageTimestamp = metadata.lastActivityAt ?? null;
+  }
+  return payload;
+}
+
+function requireStringArray(value: unknown, field: string): string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+    throw new Error('Corrupt PostgreSQL ticket field: ' + field + ' must be a string array.');
+  }
+  return value as string[];
+}
+
+function requireJsonObject(value: unknown, field: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Corrupt PostgreSQL ticket field: ' + field + ' must be a JSON object.');
+  }
+  return value as Record<string, unknown>;
+}
+
+function mergeTicketMetadata(
+  current: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged = { ...current, ...patch };
+  const firstTimestampFields = [
+    'firstCustomerMessageAt',
+    'firstStaffResponseAt',
+  ];
+  for (const field of firstTimestampFields) {
+    if (typeof current[field] === 'string' && current[field]) {
+      merged[field] = current[field];
+    }
+  }
+
+  const monotonicTimestampFields = [
+    'lastActivityAt',
+    'lastCustomerMessageAt',
+    'lastStaffActivityAt',
+    'lastStaffResponseAt',
+  ];
+  for (const field of monotonicTimestampFields) {
+    const oldValue = current[field];
+    const newValue = patch[field];
+    if (
+      typeof oldValue === 'string' &&
+      oldValue &&
+      (typeof newValue !== 'string' || newValue < oldValue)
+    ) {
+      merged[field] = oldValue;
+    }
+  }
+
+  const oldActivityAt = typeof current.lastActivityAt === 'string'
+    ? current.lastActivityAt
+    : '';
+  const newActivityAt = typeof patch.lastActivityAt === 'string'
+    ? patch.lastActivityAt
+    : '';
+  const oldMessageId = typeof current.lastMessageId === 'string'
+    ? current.lastMessageId
+    : '';
+  const newMessageId = typeof patch.lastMessageId === 'string'
+    ? patch.lastMessageId
+    : '';
+  const sameTimestampOlderSnowflake =
+    oldActivityAt === newActivityAt &&
+    /^\d+$/.test(oldMessageId) &&
+    /^\d+$/.test(newMessageId) &&
+    BigInt(newMessageId) < BigInt(oldMessageId);
+  const olderActivity =
+    Boolean(oldActivityAt && newActivityAt) &&
+    (newActivityAt < oldActivityAt || sameTimestampOlderSnowflake);
+
+  if (olderActivity && newMessageId) {
+    for (const field of ['lastMessageId', 'lastMessageAuthorId', 'lastMessageAuthorType']) {
+      if (current[field] === undefined) delete merged[field];
+      else merged[field] = current[field];
+    }
+  }
+
+  return merged;
+}
+
 function fromRow(row: TicketRow): TicketRepositoryRecord {
   return {
     id: row.id,
@@ -47,12 +177,9 @@ function fromRow(row: TicketRow): TicketRepositoryRecord {
     tagId: row.tag_id,
     ownerId: row.owner_id,
     priority: row.priority,
-    claimedByIds: Array.isArray(row.claimed_by_ids) ? row.claimed_by_ids : [],
-    participantIds: Array.isArray(row.participant_ids) ? row.participant_ids : [],
-    metadata:
-      row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
-        ? row.metadata
-        : {},
+    claimedByIds: requireStringArray(row.claimed_by_ids, 'claimed_by_ids'),
+    participantIds: requireStringArray(row.participant_ids, 'participant_ids'),
+    metadata: requireJsonObject(row.metadata, 'metadata'),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
     deletedAt: row.deleted_at ? iso(row.deleted_at) : null,
@@ -62,6 +189,7 @@ function fromRow(row: TicketRow): TicketRepositoryRecord {
 
 export interface AsyncTicketRepository {
   getByChannelId(channelId: string): Promise<TicketRepositoryRecord | undefined>;
+  getById(ticketId: string): Promise<TicketRepositoryRecord | undefined>;
   listByGuildId(guildId: string): Promise<TicketRepositoryRecord[]>;
   findActiveByOwnerAndDepartment(
     guildId: string,
@@ -69,13 +197,20 @@ export interface AsyncTicketRepository {
     departmentId: string,
   ): Promise<TicketRepositoryRecord[]>;
   listAll(): Promise<TicketRepositoryRecord[]>;
-  upsert(record: TicketRepositoryRecord): Promise<void>;
+  upsert(record: TicketRepositoryRecord, actor?: EventActor): Promise<void>;
   create(record: TicketRepositoryRecord, actor?: EventActor): Promise<void>;
   listEvents(channelId: string, limit?: number): Promise<import('../core/events/domainEvents').DomainEvent[]>;
   setStatus(channelId: string, status: TicketStatus, updatedAt: string): Promise<void>;
   transitionStatus(
     channelId: string,
     status: TicketStatus,
+    updatedAt: string,
+    actor?: EventActor,
+  ): Promise<void>;
+  transitionStatusAndMetadata(
+    channelId: string,
+    status: TicketStatus,
+    updates: import('./ticketRepository').TicketMetadataUpdates,
     updatedAt: string,
     actor?: EventActor,
   ): Promise<void>;
@@ -143,6 +278,15 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
   public constructor(executor: DatabaseExecutor = getPostgresPool()) {
     this.executor = executor;
     this.events = new PostgresEventRepository(executor);
+  }
+
+  public async getById(ticketId: string): Promise<TicketRepositoryRecord | undefined> {
+    const result = await this.executor.query<TicketRow>(
+      'SELECT * FROM tickets WHERE id = $1 LIMIT 1',
+      [ticketId],
+    );
+    const row = result.rows[0];
+    return row ? fromRow(row) : undefined;
   }
 
   public async getByChannelId(
@@ -228,14 +372,36 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
     }
   }
 
-  public async upsert(record: TicketRepositoryRecord): Promise<void> {
-    await this.executor.query(
-      'INSERT INTO tickets (' +
-        'id, guild_id, channel_id, ticket_number, status, department_id, tag_id, owner_id, priority, claimed_by_ids, participant_ids, metadata, created_at, updated_at, deleted_at, deletion_reason' +
-        ') VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text[], $11::text[], $12::jsonb, $13::timestamptz, $14::timestamptz, $15::timestamptz, $16) ' +
-        'ON CONFLICT(channel_id) DO UPDATE SET ' +
-        'ticket_number = EXCLUDED.ticket_number, status = EXCLUDED.status, department_id = EXCLUDED.department_id, tag_id = EXCLUDED.tag_id, owner_id = EXCLUDED.owner_id, priority = EXCLUDED.priority, claimed_by_ids = EXCLUDED.claimed_by_ids, participant_ids = EXCLUDED.participant_ids, metadata = EXCLUDED.metadata, updated_at = EXCLUDED.updated_at, deleted_at = EXCLUDED.deleted_at, deletion_reason = EXCLUDED.deletion_reason',
-      insertParameters(record),
+  public async upsert(
+    record: TicketRepositoryRecord,
+    actor?: EventActor,
+  ): Promise<void> {
+    const current = await this.getByChannelId(record.channelId);
+    if (!current) {
+      await this.create(record, actor);
+      return;
+    }
+
+    if (current.id !== record.id || current.guildId !== record.guildId) {
+      throw new Error(
+        `Refusing to overwrite immutable SupportForge ticket identity for channel ${record.channelId}.`,
+      );
+    }
+
+    await this.transitionStatusAndMetadata(
+      record.channelId,
+      record.status,
+      {
+        departmentId: record.departmentId,
+        tagId: record.tagId,
+        ownerId: record.ownerId,
+        priority: record.priority,
+        claimedByIds: record.claimedByIds,
+        participantIds: record.participantIds,
+        metadata: record.metadata,
+      },
+      record.updatedAt,
+      actor,
     );
   }
 
@@ -282,7 +448,7 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
       const resolved = resolveActor(actor);
       await this.events.append({
         id: randomUUID(),
-        type: 'ticket.status_changed',
+        type: lifecycleEventType(current.status, status),
         aggregateType: 'ticket',
         aggregateId: current.id,
         guildId: current.guildId,
@@ -293,6 +459,127 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
         payload: { from: current.status, to: status },
         occurredAt: updatedAt,
       }, undefined, client);
+
+      await client.query('COMMIT');
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // Preserve original transaction error.
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Atomically persists the ticket state and related metadata, including the
+   * event log and outbox intents. SELECT FOR UPDATE serializes concurrent
+   * writers to the same ticket across bot processes.
+   */
+  public async transitionStatusAndMetadata(
+    channelId: string,
+    status: TicketStatus,
+    updates: import('./ticketRepository').TicketMetadataUpdates,
+    updatedAt: string,
+    actor?: EventActor,
+  ): Promise<void> {
+    const client = await getPostgresPool().connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const currentResult = await client.query<TicketRow>(
+        'SELECT * FROM tickets WHERE channel_id = $1 FOR UPDATE',
+        [channelId],
+      );
+      const row = currentResult.rows[0];
+      if (!row) {
+        throw new Error(
+          `Cannot transition SupportForge ticket ${channelId}: ticket does not exist in durable storage.`,
+        );
+      }
+
+      const current = fromRow(row);
+      const statusChanged = current.status !== status;
+      if (statusChanged) assertTicketStatusTransition(current.status, status);
+
+      const changedFields = Object.keys(updates).filter(
+        (key) => updates[key as keyof import('./ticketRepository').TicketMetadataUpdates] !== undefined,
+      );
+      if (!statusChanged && changedFields.length === 0) {
+        await client.query('COMMIT');
+        return;
+      }
+
+      const next: TicketRepositoryRecord = {
+        ...current,
+        ...updates,
+        status,
+        claimedByIds: updates.claimedByIds ?? current.claimedByIds,
+        participantIds: updates.participantIds ?? current.participantIds,
+        metadata: updates.metadata !== undefined ? mergeTicketMetadata(current.metadata, updates.metadata) : current.metadata,
+        updatedAt,
+      };
+
+      const result = await client.query(
+        'UPDATE tickets SET status = $1, department_id = $2, tag_id = $3, owner_id = $4, priority = $5, ' +
+          'claimed_by_ids = $6::text[], participant_ids = $7::text[], metadata = $8::jsonb, ' +
+          'updated_at = $9::timestamptz WHERE channel_id = $10 AND status = $11',
+        [
+          next.status,
+          next.departmentId,
+          next.tagId,
+          next.ownerId,
+          next.priority,
+          next.claimedByIds,
+          next.participantIds,
+          JSON.stringify(next.metadata),
+          updatedAt,
+          channelId,
+          current.status,
+        ],
+      );
+
+      if ((result.rowCount ?? 0) !== 1) {
+        throw new Error(
+          `Ticket ${channelId} changed concurrently while applying a lifecycle and metadata transaction.`,
+        );
+      }
+
+      const resolved = resolveActor(actor);
+      if (statusChanged) {
+        await this.events.append({
+          id: randomUUID(),
+          type: lifecycleEventType(current.status, status),
+          aggregateType: 'ticket',
+          aggregateId: current.id,
+          guildId: current.guildId,
+          channelId: current.channelId,
+          actorId: resolved.id,
+          actorAttribution: resolved.attribution,
+          actorConfidence: resolved.confidence,
+          payload: { from: current.status, to: status, changedFields },
+          occurredAt: updatedAt,
+        }, undefined, client);
+      }
+
+      if (changedFields.length > 0) {
+        await this.events.append({
+          id: randomUUID(),
+          type: metadataEventType(changedFields, current, updates),
+          aggregateType: 'ticket',
+          aggregateId: current.id,
+          guildId: current.guildId,
+          channelId: current.channelId,
+          actorId: resolved.id,
+          actorAttribution: resolved.attribution,
+          actorConfidence: resolved.confidence,
+          payload: metadataEventPayload(changedFields, updates),
+          occurredAt: updatedAt,
+        }, undefined, client);
+      }
 
       await client.query('COMMIT');
     } catch (error) {
@@ -353,7 +640,7 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
         ...updates,
         claimedByIds: updates.claimedByIds ?? currentRecord.claimedByIds,
         participantIds: updates.participantIds ?? currentRecord.participantIds,
-        metadata: updates.metadata ?? currentRecord.metadata,
+        metadata: updates.metadata !== undefined ? mergeTicketMetadata(currentRecord.metadata, updates.metadata) : currentRecord.metadata,
         updatedAt,
       };
 
@@ -394,7 +681,7 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
         const resolved = resolveActor(actor);
         await this.events.append({
           id: randomUUID(),
-          type: 'ticket.metadata_changed',
+          type: metadataEventType(changedFields, currentRecord, updates),
           aggregateType: 'ticket',
           aggregateId: currentRecord.id,
           guildId: currentRecord.guildId,
@@ -480,13 +767,61 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
   }
 
   public async remove(channelId: string): Promise<void> {
-    await this.executor.query(
-      'DELETE FROM tickets WHERE channel_id = $1',
-      [channelId],
+    await this.markDeleted(
+      channelId,
+      new Date().toISOString(),
+      'Ticket removed from active SupportForge storage; history retained.',
     );
   }
 
   public async clearAll(): Promise<void> {
-    await this.executor.query('DELETE FROM tickets');
+    const client = await getPostgresPool().connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const result = await client.query<TicketRow>(
+        'SELECT * FROM tickets WHERE deleted_at IS NULL FOR UPDATE',
+      );
+      const deletedAt = new Date().toISOString();
+
+      for (const row of result.rows) {
+        const current = fromRow(row);
+        const reason = 'SupportForge ticket store reset; history retained.';
+        const update = await client.query(
+          'UPDATE tickets SET deleted_at = $1::timestamptz, deletion_reason = $2, updated_at = $1::timestamptz ' +
+          'WHERE channel_id = $3 AND deleted_at IS NULL',
+          [deletedAt, reason, current.channelId],
+        );
+
+        if ((update.rowCount ?? 0) !== 1) continue;
+
+        const resolved = resolveActor();
+        await this.events.append({
+          id: randomUUID(),
+          type: 'ticket.deleted',
+          aggregateType: 'ticket',
+          aggregateId: current.id,
+          guildId: current.guildId,
+          channelId: current.channelId,
+          actorId: resolved.id,
+          actorAttribution: resolved.attribution,
+          actorConfidence: resolved.confidence,
+          payload: { reason },
+          occurredAt: deletedAt,
+        }, undefined, client);
+      }
+
+      await client.query('COMMIT');
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // Preserve original reset error.
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 }

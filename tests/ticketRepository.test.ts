@@ -94,7 +94,11 @@ test('SQLite schema is migrated and repository preserves structured ticket data'
     assert.equal(updated.priority, 'high');
     assert.deepEqual(updated.claimedByIds, ['moderator-2']);
     assert.deepEqual(updated.participantIds, ['user-1', 'moderator-2']);
-    assert.deepEqual(updated.metadata, { updated: true });
+    assert.deepEqual(updated.metadata, {
+      subject: 'Refund',
+      custom: { priorityReason: 'duplicate charge' },
+      updated: true,
+    });
     assert.equal(updated.updatedAt, '2026-10-06T11:00:00.000Z');
 
     repository.markDeleted(
@@ -108,6 +112,67 @@ test('SQLite schema is migrated and repository preserves structured ticket data'
     assert.equal(deleted.deletedAt, '2026-10-06T12:00:00.000Z');
     assert.equal(deleted.deletionReason, 'manual deletion');
   });
+});
+
+test('legacy ticket migration preserves the source backup and rejects malformed records without coercion', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'supportforge-invalid-legacy-'));
+  const databasePath = join(directory, 'supportforge.sqlite');
+  const legacyTicketsPath = join(directory, 'tickets.json');
+  const source = {
+    version: 1,
+    tickets: {
+      'channel-invalid': {
+        guildId: 'guild-1',
+        status: 'not-a-ticket-status',
+        createdAt: '2026-10-06T10:00:00.000Z',
+        updatedAt: '2026-10-06T10:00:00.000Z',
+      },
+    },
+  };
+
+  await writeFile(legacyTicketsPath, JSON.stringify(source), 'utf8');
+
+  try {
+    assert.throws(
+      () => createSupportForgeDatabase(databasePath, legacyTicketsPath),
+      (error) =>
+        /unsupported or missing status/.test(String((error as Error & { cause?: unknown }).cause)),
+    );
+
+    assert.deepEqual(JSON.parse(await readFile(legacyTicketsPath, 'utf8')), source);
+    const backups = (await readdir(directory)).filter((name) => name.includes('.pre-database-'));
+    assert.equal(backups.length, 1);
+    assert.deepEqual(
+      JSON.parse(await readFile(join(directory, backups[0]!), 'utf8')),
+      source,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('legacy ticket migration rejects invalid JSON while keeping a recovery copy', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'supportforge-invalid-json-'));
+  const databasePath = join(directory, 'supportforge.sqlite');
+  const legacyTicketsPath = join(directory, 'tickets.json');
+  const source = '{"version":1,"tickets":';
+
+  await writeFile(legacyTicketsPath, source, 'utf8');
+
+  try {
+    assert.throws(
+      () => createSupportForgeDatabase(databasePath, legacyTicketsPath),
+      (error) =>
+        /file is invalid JSON/.test(String((error as Error & { cause?: unknown }).cause)),
+    );
+
+    assert.equal(await readFile(legacyTicketsPath, 'utf8'), source);
+    const backups = (await readdir(directory)).filter((name) => name.includes('.pre-database-'));
+    assert.equal(backups.length, 1);
+    assert.equal(await readFile(join(directory, backups[0]!), 'utf8'), source);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('active owner/department lookup excludes closed and deleted tickets', async () => {
@@ -201,7 +266,7 @@ test('legacy tickets migrate with claimant, participant, and metadata fields int
       const files = await readdir(directory);
       assert.equal(
         files.filter((name) =>
-          name.startsWith('tickets.json.pre-sqlite-') &&
+          name.startsWith('tickets.json.pre-database-') &&
           name.endsWith('.backup')
         ).length,
         1,
@@ -227,7 +292,7 @@ test('legacy tickets migrate with claimant, participant, and metadata fields int
         );
         assert.deepEqual(
           markerStatement.all().map((row) => Number(row.id)),
-          [1, 2, 3],
+          [1, 2, 3, 4],
         )
       } finally {
         if (reopened.isOpen) reopened.close();
@@ -262,7 +327,7 @@ test('malformed legacy JSON fails safely and can be retried after repair', async
     /*
      * Migration 2 must not be marked as applied after the failed import.
      * Repairing the source and reopening the same database must therefore
-     * execute the import exactly once and finish at migration 2.
+     * execute the import exactly once and finish at migration 4.
      */
     await writeFile(
       legacyTicketsPath,
@@ -299,7 +364,7 @@ test('malformed legacy JSON fails safely and can be retried after repair', async
       );
       assert.deepEqual(
         markerStatement.all().map((row) => Number(row.id)),
-        [1, 2, 3],
+        [1, 2, 3, 4],
       );
     } finally {
       if (repaired.isOpen) repaired.close();
@@ -307,7 +372,7 @@ test('malformed legacy JSON fails safely and can be retried after repair', async
 
     assert.equal(
       (await readdir(directory)).some((name) =>
-        name.startsWith('tickets.json.pre-sqlite-')
+        name.startsWith('tickets.json.pre-database-')
       ),
       true,
     );

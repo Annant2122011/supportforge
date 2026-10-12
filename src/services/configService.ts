@@ -1,6 +1,5 @@
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { getJsonDocument, setJsonDocument } from './jsonDocumentPersistenceService';
 
 export type SupportForgeTier = 'free' | 'premium-demo' | 'pro-demo';
 
@@ -40,9 +39,6 @@ interface ConfigFile {
   guilds: Record<string, GuildConfig>;
 }
 
-const DATA_DIR = join(process.cwd(), 'data');
-const CONFIG_PATH = join(DATA_DIR, 'config.json');
-
 const DEFAULT_CONFIG: GuildConfig = {
   supportCategoryId: null,
   openCategoryId: null,
@@ -74,80 +70,40 @@ function cloneDefaultConfig(): GuildConfig {
 async function loadState(): Promise<ConfigFile> {
   if (state) return state;
 
-  await mkdir(DATA_DIR, { recursive: true });
-
-  try {
-    const raw = await readFile(CONFIG_PATH, 'utf8');
-    const parsed = JSON.parse(raw) as ConfigFile;
-
+  const persisted = await getJsonDocument<ConfigFile>('guild-config');
+  if (persisted !== undefined) {
     if (
-      !parsed ||
-      typeof parsed !== 'object' ||
-      !parsed.guilds ||
-      typeof parsed.guilds !== 'object' ||
-      Array.isArray(parsed.guilds)
+      !persisted ||
+      typeof persisted !== 'object' ||
+      !persisted.guilds ||
+      typeof persisted.guilds !== 'object' ||
+      Array.isArray(persisted.guilds)
     ) {
       throw new Error(
-        'SupportForge config is malformed: the guild configuration collection is invalid.',
+        'SupportForge database configuration document is malformed. Existing data was not overwritten.',
       );
     }
-
     state = {
       version: 1,
-      guilds: parsed.guilds as Record<string, GuildConfig>,
+      guilds: persisted.guilds as Record<string, GuildConfig>,
     };
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') {
-      throw new Error(
-        'SupportForge config could not be loaded safely. The existing file was not replaced.',
-        { cause: error },
-      );
-    }
-
-    state = {
-      version: 1,
-      guilds: {},
-    };
-    await persistState();
+    return state;
   }
 
+  state = { version: 1, guilds: {} };
+  await persistState();
   return state;
 }
 
 async function persistState(): Promise<void> {
   if (!state) return;
 
-  writeQueue = writeQueue.catch(() => undefined).then(async () => {
-    await mkdir(DATA_DIR, { recursive: true });
-
-    const temporaryPath =
-      CONFIG_PATH + '.tmp-' + process.pid + '-' + Date.now();
-
-    await writeFile(
-      temporaryPath,
-      JSON.stringify(state, null, 2),
-      'utf8',
-    );
-
-    try {
-      try {
-        await rename(temporaryPath, CONFIG_PATH);
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== 'EEXIST' && code !== 'EPERM') throw error;
-
-        await unlink(CONFIG_PATH).catch((unlinkError) => {
-          const unlinkCode = (unlinkError as NodeJS.ErrnoException).code;
-          if (unlinkCode !== 'ENOENT') throw unlinkError;
-        });
-        await rename(temporaryPath, CONFIG_PATH);
-      }
-    } finally {
-      await unlink(temporaryPath).catch(() => undefined);
-    }
-  });
-
+  // Capture each queued write at enqueue time so rapid changes cannot make
+  // several queued writes accidentally persist different snapshots.
+  const snapshot = JSON.parse(JSON.stringify(state)) as ConfigFile;
+  writeQueue = writeQueue.catch(() => undefined).then(
+    () => setJsonDocument('guild-config', snapshot),
+  );
   await writeQueue;
 }
 

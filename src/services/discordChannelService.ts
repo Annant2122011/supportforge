@@ -135,10 +135,14 @@ function isGlobalRateLimit(error: unknown): boolean {
 function createRateLimitError(operation: string, retryAfterMs: number, global: boolean): Error {
   const seconds = Math.ceil(retryAfterMs / 1000);
   const scope = global ? 'global' : 'shared/resource or route';
-  return new Error(
+  const error = new Error(
     'Discord rate limit active for ' + scope + '. ' + operation +
     ' is queued for an automatic retry after another ' + seconds + 's.',
-  );
+  ) as Error & { retryAfter: number; global: boolean; retryable: boolean };
+  error.retryAfter = retryAfterMs;
+  error.global = global;
+  error.retryable = true;
+  return error;
 }
 
 function deferredMutationKey(method: DiscordMutationMethod, path: string): string {
@@ -208,6 +212,7 @@ async function executeDiscordMutation<T>(
   path: string,
   body: Record<string, unknown> | undefined,
   operation: string,
+  deferLongRateLimit = true,
 ): Promise<T> {
   if (!sharedRest) {
     throw new Error('SupportForge Discord REST manager has not been configured.');
@@ -247,13 +252,15 @@ async function executeDiscordMutation<T>(
       Object.prototype.hasOwnProperty.call(body ?? {}, 'name');
 
     if (!isNameOnlyPatch) {
-      scheduleDeferredMutation({
-        channelId,
-        method,
-        path,
-        ...(body ? { body } : {}),
-        operation,
-      }, retryAfterMs);
+      if (deferLongRateLimit) {
+        scheduleDeferredMutation({
+          channelId,
+          method,
+          path,
+          ...(body ? { body } : {}),
+          operation,
+        }, retryAfterMs);
+      }
       throw createRateLimitError(operation, retryAfterMs, isGlobalRateLimit(error));
     }
 
@@ -315,8 +322,9 @@ async function discordRequest<T = unknown>(
   path: string,
   body: Record<string, unknown> | undefined,
   operation: string,
+  deferLongRateLimit = true,
 ): Promise<T> {
-  return executeDiscordMutation<T>(channelId, method, path, body, operation);
+  return executeDiscordMutation<T>(channelId, method, path, body, operation, deferLongRateLimit);
 }
 
 export async function setChannelUserLimit(
@@ -368,6 +376,7 @@ export async function setChannelProperties(
   properties: ChannelPropertiesUpdate,
   roleIds: ReadonlySet<string>,
   operation: string,
+  options: { deferLongRateLimit?: boolean } = {},
 ): Promise<void> {
   const body: Record<string, unknown> = {};
   if (properties.name !== undefined) body.name = properties.name;
@@ -383,7 +392,14 @@ export async function setChannelProperties(
     }));
   }
   if (Object.keys(body).length === 0) return;
-  await discordRequest(channelId, 'PATCH', '/channels/' + channelId, body, operation);
+  await discordRequest(
+    channelId,
+    'PATCH',
+    '/channels/' + channelId,
+    body,
+    operation,
+    options.deferLongRateLimit ?? true,
+  );
 }
 
 export async function setChannelNameAndTopic(

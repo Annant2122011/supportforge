@@ -1,8 +1,23 @@
+export const MAX_OUTBOX_ATTEMPTS = 10;
+
 export type DomainEventType =
   | 'ticket.created'
   | 'ticket.status_changed'
   | 'ticket.metadata_changed'
-  | 'ticket.deleted';
+  | 'ticket.deleted'
+  | 'ticket.claimed'
+  | 'ticket.unclaimed'
+  | 'ticket.pending'
+  | 'ticket.resumed'
+  | 'ticket.closed'
+  | 'ticket.reopened'
+  | 'ticket.archived'
+  | 'ticket.priority.changed'
+  | 'ticket.department.changed'
+  | 'ticket.tag.changed'
+  | 'ticket.participant.added'
+  | 'ticket.participant.removed'
+  | 'ticket.message.received';
 
 export type EventActorAttribution =
   | 'actorKnown'
@@ -52,5 +67,6 @@ export interface OutboxEvent {
   availableAt: string;
   createdAt: string;
   processedAt: string | null;
+  processingStartedAt?: string | null;
   lastError: string | null;
 }

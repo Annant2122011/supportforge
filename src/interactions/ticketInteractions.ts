@@ -27,6 +27,7 @@ import {
 } from '../services/configService';
 
 import { assertTicketStatusTransition } from '../core/domain/ticketLifecycle';
+import { projectDurableTicketTopic } from '../services/ticketTopicProjectionService';
 import { buildTicketVisibilityPlan } from '../core/domain/ticketPermissionPlan';
 import { classifyTicketRoutingComponent } from '../core/domain/ticketInteractionRouting';
 
@@ -59,6 +60,7 @@ import {
   markPersistedTicketDeleted,
   registerTicket,
   setPersistedTicketStatus,
+  transitionPersistedTicket,
   updatePersistedTicketMetadata,
 } from '../services/ticketPersistenceService';
 
@@ -104,10 +106,12 @@ async function getEffectiveTicketPriority(
   channelId: string,
   topic: string,
 ): Promise<TicketPriority> {
-  return (
-    (await getPersistedTicketPriority(channelId).catch(() => undefined)) ??
-    getTopicPriority(topic)
-  );
+  // Use topic data only for legacy channels without a durable ticket row.
+  // A database outage must not silently authorize stale channel metadata.
+  const persisted = await getPersistedTicket(channelId);
+  return persisted
+    ? persisted.priority ?? 'normal'
+    : getTopicPriority(topic);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -356,41 +360,11 @@ async function getEffectiveTicketTopic(
   channel: TextChannel,
   topic: string,
 ): Promise<string> {
-  const persisted = await getPersistedTicket(channel.id).catch(() => undefined);
+  // Database failures must surface instead of falling back to stale Discord
+  // topic state that could authorize an action against an obsolete ticket.
+  const persisted = await getPersistedTicket(channel.id);
   if (!persisted) return topic;
-
-  let effective = setField(topic, 'status', persisted.status);
-
-  if (persisted.priority) {
-    effective = setField(effective, 'priority', persisted.priority);
-  }
-  if (persisted.departmentId) {
-    effective = setField(effective, 'department', persisted.departmentId);
-    const config = await getGuildConfig(channel.guild.id);
-    const department = config.departments[persisted.departmentId];
-    effective = setField(effective, 'staff', department?.staffRoleId ?? 'none');
-  }
-  if (persisted.tagId) {
-    effective = setField(effective, 'tag', persisted.tagId);
-    effective = setField(effective, 'tags', persisted.tagId);
-  }
-  if (persisted.ownerId) {
-    effective = setField(effective, 'owner', persisted.ownerId);
-  }
-
-  if (persisted.participantIds.length) {
-    effective = setField(effective, 'users', persisted.participantIds.join(','));
-  } else {
-    effective = removeField(effective, 'users');
-  }
-
-  if (persisted.claimedByIds.length) {
-    effective = setField(effective, 'claimed_by', persisted.claimedByIds.join(','));
-  } else {
-    effective = removeField(effective, 'claimed_by');
-  }
-
-  return effective;
+  return projectDurableTicketTopic(topic, persisted);
 }
 
 function getStaffContext(
@@ -929,6 +903,7 @@ async function applyTicketVisibilityMode(
     properties,
     roleIds,
     'Synchronize SupportForge ticket metadata and privacy in one channel update',
+    { deferLongRateLimit: false },
   );
   if (properties.topic !== undefined) channel.topic = properties.topic;
   if (properties.name !== undefined) channel.name = properties.name;
@@ -1189,6 +1164,7 @@ async function createTicket(
       )}`,
       `number=${number}`,
       `opened_at=${now}`,
+      `updated_at=${now}`,
     ].join(' ');
 
     const bot =
@@ -1271,22 +1247,8 @@ async function createTicket(
           error,
         );
 
-        void new Promise<void>((resolve) => {
-          setTimeout(resolve, 2_000);
-        })
-          .then(() =>
-            setChannelTopic(
-              ticketChannel!.id,
-              finalTopic,
-              'Ticket topic initialization retry',
-            ),
-          )
-          .catch((retryError) => {
-            console.warn(
-              '⚠️ Ticket topic initialization retry failed:',
-              retryError,
-            );
-          });
+        // Durable ticket registration emits an outbox event after this catch.
+        // The worker reconciles the topic with bounded, rate-limit-aware retry policy.
       }
 
       ticketChannel.topic = finalTopic;
@@ -1308,6 +1270,19 @@ async function createTicket(
           priority: advancedSettings.ticketDefaults.priority,
           createdAt: now,
           participantIds: [interaction.user.id],
+          metadata: {
+            panelMessageId: panel.id,
+            panelChannelId: panel.channelId,
+            sourcePanelMessageId: interaction.message?.id ?? null,
+            sourcePanelChannelId: interaction.channelId,
+            sourcePanelMessageUrl: interaction.message?.url ?? null,
+            subject: cleanSubject,
+            staffRoleId: department.staffRoleId,
+            openedAt: now,
+            lastActivityAt: now,
+            lastCustomerMessageAt: now,
+            ticketChannelType: 'text',
+          },
         },
         {
           id: interaction.user.id,
@@ -1316,7 +1291,7 @@ async function createTicket(
         },
       );
 
-      await ticketChannel.send({
+      const requestMessage = await ticketChannel.send({
           allowedMentions: {
             parse: [],
           },
@@ -1353,6 +1328,23 @@ async function createTicket(
               ),
           ],
         });
+
+      await updatePersistedTicketMetadata(
+        ticketChannel.id,
+        {
+          metadata: {
+            firstCustomerMessageId: requestMessage.id,
+            firstCustomerMessageAt: now,
+            lastActivityAt: now,
+            lastCustomerMessageAt: now,
+          },
+        },
+        {
+          id: interaction.user.id,
+          attribution: 'actorKnown',
+          confidence: 'high',
+        },
+      );
 
       await interaction.editReply({
         content:
@@ -1467,26 +1459,52 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
   let newTopic = topic;
 
   if (remaining.length) {
+    const transitionAt = new Date().toISOString();
     newTopic = setField(
-      newTopic,
-      'claimed_by',
-      remaining.join(','),
+      setField(
+        newTopic,
+        'claimed_by',
+        remaining.join(','),
+      ),
+      'updated_at',
+      transitionAt,
     );
-    await applyTicketVisibilityMode(
-      channel,
-      newTopic,
+    const ownerId = getField(newTopic, 'owner');
+    const additionalParticipants = (getField(newTopic, 'users') ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+
+    await transitionPersistedTicket(
+      channel.id,
       'claimed',
-      interaction.user.id,
-      { topic: newTopic },
+      {
+        claimedByIds: remaining,
+        participantIds: [...new Set([...(ownerId ? [ownerId] : []), ...additionalParticipants])],
+        metadata: {
+          lastActivityAt: transitionAt,
+          lastStaffActivityAt: transitionAt,
+        },
+      },
+      interactionActor(interaction),
+      transitionAt,
     );
+
+    try {
+      await applyTicketVisibilityMode(
+        channel,
+        newTopic,
+        'claimed',
+        interaction.user.id,
+        { topic: newTopic },
+      );
+    } catch (error) {
+      console.warn(
+        'Ticket claimant state is durable; Discord permissions/topic will be reconciled by the outbox:',
+        error,
+      );
+    }
     updateRuntimeTicketState(channel, newTopic, 'claimed');
-    await updatePersistedTicketMetadata(channel.id, {
-      claimedByIds: remaining,
-      participantIds: (getField(newTopic, 'users') ?? '')
-        .split(',')
-        .map((id) => id.trim())
-        .filter(Boolean),
-    }, interactionActor(interaction));
     await syncTicketVoiceParticipants(interaction.guild, newTopic);
     await updateMainMessage(channel, getField(newTopic, 'message'), 'claimed', newTopic);
     await interaction.editReply('✅ You left the ticket. Other assigned moderators remain on it.');
@@ -1496,34 +1514,51 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
   newTopic = removeField(newTopic, 'claimed_by');
   newTopic = removeField(newTopic, 'claimed_at');
   newTopic = setField(newTopic, 'status', 'open');
+  const transitionAt = new Date().toISOString();
+  newTopic = setField(newTopic, 'updated_at', transitionAt);
+  const ownerId = getField(newTopic, 'owner');
+  const additionalParticipants = (getField(newTopic, 'users') ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
 
-  if (getField(newTopic, 'voice_channel_id')) {
-    newTopic = await endTicketVoiceMode(
-      interaction.guild,
+  /*
+   * The state/event/outbox transaction happens before channel edits. The
+   * publisher also owns temporary voice cleanup, so a restart at this point
+   * cannot orphan a private room or create two competing cleanup attempts.
+   */
+  await transitionPersistedTicket(
+    channel.id,
+    'open',
+    {
+      claimedByIds: [],
+      participantIds: [...new Set([...(ownerId ? [ownerId] : []), ...additionalParticipants])],
+      metadata: {
+        claimedAt: null,
+        assignedAt: null,
+        lastActivityAt: transitionAt,
+        lastStaffActivityAt: transitionAt,
+      },
+    },
+    interactionActor(interaction),
+    transitionAt,
+  );
+
+  try {
+    await applyTicketVisibilityMode(
       channel,
       newTopic,
-      'open',
-      'SupportForge voice mode ended because the final moderator unclaimed the ticket',
+      'unclaimed',
+      interaction.user.id,
+      { topic: newTopic },
+    );
+  } catch (error) {
+    console.warn(
+      'Ticket is durably unclaimed; Discord topic/name/permissions will be reconciled by the outbox:',
+      error,
     );
   }
-
-  await setPersistedTicketStatus(channel.id, 'open');
-  await updatePersistedTicketMetadata(channel.id, {
-    claimedByIds: [],
-    participantIds: (getField(newTopic, 'users') ?? '')
-      .split(',')
-      .map((id) => id.trim())
-      .filter(Boolean),
-  }, interactionActor(interaction));
-  await applyTicketVisibilityMode(channel, newTopic, 'unclaimed', interaction.user.id, { topic: newTopic });
-  updateRuntimeTicketState(channel, newTopic, 'open');
-
-  const number = getField(newTopic, 'number') ?? 'unknown';
-  void queueTicketChannelRename(
-    channel,
-    getTicketChannelName(number, 'open', await getEffectiveTicketPriority(channel.id, newTopic)),
-    'Ticket returned to open after final moderator unclaimed',
-  ).catch(() => undefined);
+  updateRuntimeTicketState(channel, channel.topic ?? newTopic, 'open');
 
   await updateMainMessage(channel, getField(newTopic, 'message'), 'open', newTopic);
   await interaction.editReply('✅ You left the ticket. It is now open for another moderator to claim.');
@@ -1828,17 +1863,7 @@ async function transition(
       newStatus ===
       'reopened'
     ) {
-      try {
-        await removePreviousTicketTranscript(
-          interaction.guild!,
-          oldTopic,
-        );
-      } catch (error) {
-        console.warn(
-          '⚠️ Previous ticket transcript could not be removed during reopen:',
-          error,
-        );
-      }
+      // Transcript cleanup is deferred until the durable reopen transition commits.
 
       newTopic =
         setField(
@@ -1910,10 +1935,69 @@ async function transition(
       );
 
     /*
-     * Clear voice metadata before assembling the final channel update. The
-     * voice helper normally patches the ticket topic and queues a rename; the
-     * transition below now performs those changes together with permissions
-     * and category placement in one Modify Channel request.
+     * The database transition, ticket metadata, domain events, and outbox
+     * intent commit together before any Discord-side lifecycle mutations.
+     * The outbox worker repairs the Discord representation if the following
+     * calls fail or are interrupted by a process restart.
+     */
+    const transitionTime = new Date().toISOString();
+    newTopic = setField(newTopic, 'updated_at', transitionTime);
+    const metadataPatch: Record<string, unknown> = {};
+    if (newStatus === 'pending') {
+      metadataPatch.pendingSince = getField(newTopic, 'pending_since') ?? transitionTime;
+    } else if (oldStatus === 'pending') {
+      metadataPatch.pendingSince = null;
+    }
+    if (newStatus === 'reopened') {
+      metadataPatch.reopenedAt = getField(newTopic, 'reopened_at') ?? transitionTime;
+      metadataPatch.closedAt = null;
+      metadataPatch.archivedAt = null;
+      metadataPatch.transcriptId = null;
+      metadataPatch.transcriptDestinationId = null;
+      metadataPatch.pendingSince = null;
+    }
+    if (newStatus === 'archived') {
+      metadataPatch.archivedAt = getField(newTopic, 'archived_at') ?? transitionTime;
+    }
+    if (newStatus !== 'claimed' && getField(oldTopic, 'voice_channel_id')) {
+      metadataPatch.voiceChannelId = null;
+      metadataPatch.voiceChannelName = null;
+      metadataPatch.voiceStartedAt = null;
+      metadataPatch.voiceParticipantIds = [];
+    }
+
+    await transitionPersistedTicket(
+      channel.id,
+      newStatus,
+      {
+        claimedByIds: (getField(newTopic, 'claimed_by') ?? '')
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+        participantIds: (getField(newTopic, 'users') ?? '')
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+        ...(Object.keys(metadataPatch).length ? { metadata: metadataPatch } : {}),
+      },
+      interactionActor(interaction),
+    );
+
+    if (newStatus === 'reopened') {
+      try {
+        await removePreviousTicketTranscript(interaction.guild!, oldTopic);
+      } catch (error) {
+        console.warn(
+          '⚠️ Previous ticket transcript could not be removed after durable reopen:',
+          error,
+        );
+      }
+    }
+
+    /*
+     * Voice room cleanup is now secondary to the durable ticket state. Keep
+     * the old voice fields available to the cleanup service, while avoiding
+     * a separate ticket-topic REST request.
      */
     if (newStatus !== 'claimed' && getField(oldTopic, 'voice_channel_id')) {
       newTopic = await endTicketVoiceMode(
@@ -2060,27 +2144,6 @@ async function transition(
         );
       }
     }
-
-    await setPersistedTicketStatus(
-      channel.id,
-      newStatus,
-      interactionActor(interaction),
-    );
-
-    await updatePersistedTicketMetadata(
-      channel.id,
-      {
-        claimedByIds: (getField(newTopic, 'claimed_by') ?? '')
-          .split(',')
-          .map((id) => id.trim())
-          .filter(Boolean),
-        participantIds: (getField(newTopic, 'users') ?? '')
-          .split(',')
-          .map((id) => id.trim())
-          .filter(Boolean),
-      },
-      interactionActor(interaction),
-    );
 
     /*
      * Keep the local runtime state immediately consistent with the persisted
@@ -2477,51 +2540,105 @@ async function closeTicket(
      * Discord channel PATCH. The lifecycle state is persisted locally so the
      * closed-ticket message guard continues to work after a restart.
      */
-    const voiceClearedTopic = getField(topic, 'voice_channel_id')
-      ? await endTicketVoiceMode(
+    const closeTimestamp = closedAt.toISOString();
+    let closedTopic = setField(
+      setField(
+        setField(topic, 'status', 'closed'),
+        'closed_at',
+        closeTimestamp,
+      ),
+      'transcript_id',
+      transcriptMessage.id,
+    );
+    closedTopic = setField(closedTopic, 'updated_at', closeTimestamp);
+
+    const ownerIdForParticipants = getField(topic, 'owner');
+    const participants = [
+      ...new Set([
+        ...(ownerIdForParticipants ? [ownerIdForParticipants] : []),
+        ...(getField(topic, 'users') ?? '').split(',').map((id) => id.trim()).filter(Boolean),
+      ]),
+    ];
+    const voiceChannelId = getField(topic, 'voice_channel_id');
+    const closeMetadata: Record<string, unknown> = {
+      closedAt: closeTimestamp,
+      closedById: interaction.user.id,
+      closedByTag: interaction.user.tag,
+      transcriptId: transcriptMessage.id,
+      transcriptDestinationId: transcriptChannelId,
+      lastActivityAt: closeTimestamp,
+      lastStaffActivityAt: closeTimestamp,
+    };
+    if (voiceChannelId) {
+      closeMetadata.voiceChannelId = voiceChannelId;
+      closeMetadata.voiceChannelName = getField(topic, 'voice_channel_name') ?? null;
+      closeMetadata.voiceStartedAt = getField(topic, 'voice_started_at') ?? null;
+      closeMetadata.voiceStartedBy = getField(topic, 'voice_started_by') ?? null;
+    }
+
+    /*
+     * Transcript delivery succeeded. Commit the complete closed state and
+     * transcript reference before touching Discord channel state. The event
+     * and outbox entries are in this same database transaction.
+     */
+    await transitionPersistedTicket(
+      channel.id,
+      'closed',
+      {
+        participantIds: participants,
+        metadata: closeMetadata,
+      },
+      interactionActor(interaction),
+      closeTimestamp,
+    );
+
+    let channelSyncFailed = false;
+    if (voiceChannelId) {
+      try {
+        closedTopic = await endTicketVoiceMode(
           interaction.guild!,
           channel,
-          topic,
+          closedTopic,
           'closed',
           'SupportForge voice mode ended because ticket was closed',
           { deferTicketTopicUpdate: true, queueRename: false },
-        )
-      : topic;
-
-    const closedTopic =
-      setField(
-        setField(
-          setField(
-            voiceClearedTopic,
-            'status',
-            'closed',
-          ),
-          'closed_at',
-          closedAt.toISOString(),
-        ),
-        'transcript_id',
-        transcriptMessage.id,
-      );
-
-    await setPersistedTicketStatus(
-      channel.id,
-      'closed',
-      interactionActor(interaction),
-    );
+        );
+        closedTopic = setField(closedTopic, 'updated_at', closeTimestamp);
+        await transitionPersistedTicket(
+          channel.id,
+          'closed',
+          {
+            metadata: {
+              voiceChannelId: null,
+              voiceChannelName: null,
+              voiceStartedAt: null,
+              voiceStartedBy: null,
+            },
+          },
+          interactionActor(interaction),
+          closeTimestamp,
+        );
+      } catch (error) {
+        channelSyncFailed = true;
+        console.warn(
+          `⚠️ Ticket #${ticketNumber} was closed durably, but private voice cleanup remains pending:`,
+          error,
+        );
+      }
+    }
 
     /*
      * Persist the topic, storage-category move, and channel name together.
-     * These properties share PATCH /channels/{id}; separate edits for every
-     * close make the channel route bucket a rate-limit hotspot.
+     * The outbox retries this reconciliation if Discord is rate-limited or
+     * temporarily unavailable.
      */
-    const closedCategory = await ensureClosedCategory(interaction.guild!);
     const closedChannelName = getTicketChannelName(
       ticketNumber,
       'closed',
       await getEffectiveTicketPriority(channel.id, closedTopic),
     );
-    let channelSyncFailed = false;
     try {
+      const closedCategory = await ensureClosedCategory(interaction.guild!);
       await setChannelProperties(
         channel.id,
         {
@@ -2537,7 +2654,7 @@ async function closeTicket(
     } catch (error) {
       channelSyncFailed = true;
       console.warn(
-        `⚠️ Ticket #${ticketNumber} is closed in durable storage, but its Discord topic/category/name update is pending or failed:`,
+        `⚠️ Ticket #${ticketNumber} is closed in durable storage, but the Discord topic/category/name update is pending or failed:`,
         error,
       );
     }
@@ -3430,23 +3547,39 @@ async function applyTicketRouting(interaction: StringSelectMenuInteraction, depa
   const category = departmentChanged
     ? await ensureDepartmentCategory(interaction.guild!, department)
     : null;
+  const transitionAt = new Date().toISOString();
   const newTopic = setField(
     setField(
-      setField(topic, 'department', department.id),
-      'staff',
-      department.staffRoleId ?? 'none',
+      setField(
+        setField(topic, 'department', department.id),
+        'staff',
+        department.staffRoleId ?? 'none',
+      ),
+      'tags',
+      tagId,
     ),
-    'tags',
-    tagId,
+    'updated_at',
+    transitionAt,
   );
 
   try {
     // The database owns routing metadata. A same-department tag change is
     // intentionally message-only and must not rewrite channel topics or ACLs.
-    await updatePersistedTicketMetadata(channel.id, {
-      departmentId: department.id,
-      tagId,
-    }, interactionActor(interaction));
+    await transitionPersistedTicket(
+      channel.id,
+      status,
+      {
+        departmentId: department.id,
+        tagId,
+        metadata: {
+          staffRoleId: department.staffRoleId ?? 'none',
+          lastActivityAt: transitionAt,
+          lastStaffActivityAt: transitionAt,
+        },
+      },
+      interactionActor(interaction),
+      transitionAt,
+    );
 
     const syncFailures: string[] = [];
     if (departmentChanged) {
@@ -3618,16 +3751,25 @@ async function applyTicketPriority(
     return;
   }
 
+  const transitionAt = new Date().toISOString();
   const newTopic = setField(
-    topic,
-    'priority',
-    priority,
+    setField(topic, 'priority', priority),
+    'updated_at',
+    transitionAt,
   );
 
-  await updatePersistedTicketMetadata(
+  await transitionPersistedTicket(
     channel.id,
-    { priority },
+    status,
+    {
+      priority,
+      metadata: {
+        lastActivityAt: transitionAt,
+        lastStaffActivityAt: transitionAt,
+      },
+    },
     interactionActor(interaction),
+    transitionAt,
   );
 
   channel.topic = newTopic;
@@ -4496,45 +4638,45 @@ async function handlePanelModal(
         userId,
       );
 
-      newTopic =
-        setField(
+      const transitionAt = new Date().toISOString();
+      newTopic = setField(
+        setField(newTopic, 'users', users.join(',')),
+        'updated_at',
+        transitionAt,
+      );
+
+      const ownerId = getField(newTopic, 'owner');
+      await transitionPersistedTicket(
+        channel.id,
+        state.status,
+        {
+          participantIds: [...new Set([...(ownerId ? [ownerId] : []), ...users])],
+          metadata: {
+            lastActivityAt: transitionAt,
+            lastStaffActivityAt: transitionAt,
+          },
+        },
+        interactionActor(interaction),
+        transitionAt,
+      );
+
+      try {
+        await applyTicketVisibilityMode(
+          channel,
           newTopic,
-          'users',
-          users.join(','),
+          state.status === 'claimed' ? 'claimed' : 'unclaimed',
+          getField(state.topic, 'claimed_by'),
+          { topic: newTopic },
         );
-
-      await setChannelPermissionOverwrite(
-        channel.id,
-        userId,
-        [
-          PermissionFlagsBits.ViewChannel,
-          PermissionFlagsBits.SendMessages,
-          PermissionFlagsBits.ReadMessageHistory,
-          PermissionFlagsBits.AttachFiles,
-          PermissionFlagsBits.EmbedLinks,
-        ],
-        [],
-        1,
-        'Add ticket user permissions',
-      );
-
-      await setChannelTopic(
-        channel.id,
-        newTopic,
-        'Add ticket user topic update',
-      );
+      } catch (error) {
+        console.warn(
+          'Ticket participant was saved durably, but Discord topic/permission synchronization is pending:',
+          error,
+        );
+      }
 
       channel.topic = newTopic;
-
-      updateRuntimeTicketState(
-        channel,
-        newTopic,
-        state.status,
-      );
-
-      await updatePersistedTicketMetadata(channel.id, {
-        participantIds: users,
-      });
+      updateRuntimeTicketState(channel, newTopic, state.status);
 
       await interaction.editReply(
         `✅ <@${userId}> has been added to the ticket.`,

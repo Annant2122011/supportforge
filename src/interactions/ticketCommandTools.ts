@@ -1,3 +1,7 @@
+import type { EventActor } from '../core/events/domainEvents';
+import type { TicketMetadataUpdates } from '../repositories/ticketRepository';
+import { buildTicketVisibilityPlan } from '../core/domain/ticketPermissionPlan';
+
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -15,7 +19,8 @@ import {
   isPremiumOrHigher,
 } from '../services/configService';
 
-import { getAdvancedSettings } from '../services/advancedSettingsService';
+import { getAdvancedSettings, type TicketPriority } from '../services/advancedSettingsService';
+import { projectDurableTicketTopic } from '../services/ticketTopicProjectionService';
 
 import {
   getOrCreateAuditChannel,
@@ -44,11 +49,12 @@ import {
   getPersistedTicket,
   getPersistedTicketPriority,
   getPersistedTicketStatus,
+  transitionPersistedTicket,
   setPersistedTicketStatus,
   updatePersistedTicketMetadata,
 } from '../services/ticketPersistenceService';
 
-import { setChannelPermissionOverwrite, setChannelTopic } from '../services/discordChannelService';
+import { setChannelPermissionOverwrite, setChannelTopic, setChannelProperties, type ChannelPermissionOverwrite } from '../services/discordChannelService';
 
 import {
   ensureArchiveCategory,
@@ -78,27 +84,15 @@ async function getTicketContext(
   }
 
   const rawTopic = channel.topic ?? '';
-  const persisted = await getPersistedTicket(channel.id).catch(() => undefined);
+  const persisted = await getPersistedTicket(channel.id);
 
   /*
-   * Persisted ticket fields are authoritative when available. Discord topic
-   * metadata remains the compatibility fallback for legacy tickets.
+   * The durable record owns metadata. A missing row allows legacy recovery,
+   * but database failures are not swallowed and cannot silently use stale data.
    */
-  let topic = rawTopic;
-  if (persisted) {
-    topic = setField(topic, 'status', persisted.status);
-    if (persisted.priority) topic = setField(topic, 'priority', persisted.priority);
-    if (persisted.departmentId) topic = setField(topic, 'department', persisted.departmentId);
-    if (persisted.tagId) {
-      topic = setField(topic, 'tag', persisted.tagId);
-      topic = setField(topic, 'tags', persisted.tagId);
-    }
-    if (persisted.ownerId) topic = setField(topic, 'owner', persisted.ownerId);
-    if (persisted.participantIds.length) topic = setField(topic, 'users', persisted.participantIds.join(','));
-    else topic = removeField(topic, 'users');
-    if (persisted.claimedByIds.length) topic = setField(topic, 'claimed_by', persisted.claimedByIds.join(','));
-    else topic = removeField(topic, 'claimed_by');
-  }
+  const topic = persisted
+    ? projectDurableTicketTopic(rawTopic, persisted)
+    : rawTopic;
 
   if (
     !topic.startsWith('supportforge:ticket')
@@ -221,184 +215,215 @@ async function syncCommandTicketVisibility(
   newTopic: string,
 ): Promise<void> {
   const ownerId = getField(newTopic, 'owner');
-  if (!ownerId) return;
+  if (!ownerId) {
+    throw new Error('Cannot reconcile SupportForge ticket visibility without an owner ID.');
+  }
 
   const staffRoleId = getField(newTopic, 'staff');
   const oldClaimants = (getField(oldTopic, 'claimed_by') ?? '')
-    .split(',')
-    .map((id) => id.trim())
-    .filter(Boolean);
+    .split(',').map((id) => id.trim()).filter(Boolean);
   const newClaimants = (getField(newTopic, 'claimed_by') ?? '')
-    .split(',')
-    .map((id) => id.trim())
-    .filter(Boolean);
+    .split(',').map((id) => id.trim()).filter(Boolean);
   const users = (getField(newTopic, 'users') ?? '')
-    .split(',')
-    .map((id) => id.trim())
-    .filter(Boolean);
+    .split(',').map((id) => id.trim()).filter(Boolean);
   const status = getTicketStatus(newTopic);
-
-  if (staffRoleId && staffRoleId !== 'none') {
-    await setChannelPermissionOverwrite(
-      context.channel.id,
-      staffRoleId,
-      status === 'claimed'
-        ? []
-        : [
-            PermissionFlagsBits.ViewChannel,
-            PermissionFlagsBits.SendMessages,
-            PermissionFlagsBits.ReadMessageHistory,
-          ],
-      status === 'claimed'
-        ? [
-            PermissionFlagsBits.ViewChannel,
-            PermissionFlagsBits.SendMessages,
-            PermissionFlagsBits.ReadMessageHistory,
-          ]
-        : [],
-      0,
-      status === 'claimed'
-        ? 'Hide claimed ticket from unassigned department staff'
-        : 'Restore department staff access to ticket',
-    ).catch((error: unknown) => {
-      console.warn('⚠️ Could not synchronize ticket staff visibility:', error);
-    });
-  }
-
-  const participants = new Set([
-    ownerId,
-    ...users,
-    ...(status === 'claimed' ? newClaimants : []),
+  const existing = [...context.channel.permissionOverwrites.cache.values()].map((overwrite) => ({
+    id: overwrite.id,
+    kind: overwrite.type === 0 ? 'role' as const : 'member' as const,
+    allow: overwrite.allow.bitfield.toString(),
+    deny: overwrite.deny.bitfield.toString(),
+  }));
+  const roleIds = new Set<string>([
+    ...context.guild.roles.cache.keys(),
+    ...existing.filter((overwrite) => overwrite.kind === 'role').map((overwrite) => overwrite.id),
   ]);
+  const plan = buildTicketVisibilityPlan({
+    existing,
+    roleIds,
+    staffRoleId,
+    ownerId,
+    userIds: users,
+    claimedModeratorIds: status === 'claimed' ? newClaimants : [],
+    formerClaimantIds: oldClaimants,
+    mode: status === 'claimed' ? 'claimed' : 'unclaimed',
+  });
 
-  for (const userId of participants) {
-    if (!userId || userId === context.guild.members.me?.id) continue;
-
-    await setChannelPermissionOverwrite(
-      context.channel.id,
-      userId,
-      [
-        PermissionFlagsBits.ViewChannel,
-        PermissionFlagsBits.SendMessages,
-        PermissionFlagsBits.ReadMessageHistory,
-        PermissionFlagsBits.AttachFiles,
-        PermissionFlagsBits.EmbedLinks,
-      ],
-      [],
-      1,
-      'Synchronize SupportForge ticket participant access',
-    ).catch((error: unknown) => {
-      console.warn('⚠️ Could not grant ticket participant visibility:', error);
-    });
+  const properties: {
+    topic?: string;
+    name?: string;
+    parentId?: string;
+    permissionOverwrites?: ChannelPermissionOverwrite[];
+  } = {};
+  if ((context.channel.topic ?? '') !== newTopic) properties.topic = newTopic;
+  const desiredStatus = getTicketStatus(newTopic);
+  if (desiredStatus === 'archived') {
+    const archiveCategory = await ensureArchiveCategory(context.guild);
+    if (context.channel.parentId !== archiveCategory.id) {
+      properties.parentId = archiveCategory.id;
+    }
   }
 
-  for (const oldClaimantId of oldClaimants) {
-    if (participants.has(oldClaimantId)) continue;
-
-    await setChannelPermissionOverwrite(
-      context.channel.id,
-      oldClaimantId,
-      [],
-      [],
-      1,
-      'Clear former SupportForge ticket claimant access',
-    ).catch((error: unknown) => {
-      console.warn('⚠️ Could not clear former claimant visibility:', error);
-    });
+  const ticketNumber = getField(newTopic, 'number');
+  if (ticketNumber) {
+    const desiredName = getTicketChannelName(
+      ticketNumber,
+      status,
+      (getField(newTopic, 'priority') ?? 'normal') as 'low' | 'normal' | 'high' | 'urgent' | 'critical',
+    );
+    if (context.channel.name !== desiredName) properties.name = desiredName;
   }
+
+  if (plan.changed) {
+    properties.permissionOverwrites = plan.overwrites.map((overwrite) => ({
+      id: overwrite.id,
+      allow: [BigInt(overwrite.allow)],
+      deny: [BigInt(overwrite.deny)],
+    }));
+    for (const overwrite of plan.overwrites) {
+      if (overwrite.kind === 'role') roleIds.add(overwrite.id);
+    }
+  }
+
+  if (!Object.keys(properties).length) return;
+
+  await setChannelProperties(
+    context.channel.id,
+    properties,
+    roleIds,
+    'Synchronize SupportForge ticket topic, channel name, and visibility in one PATCH',
+    { deferLongRateLimit: false },
+  );
+  if (properties.topic !== undefined) context.channel.topic = properties.topic;
+  if (properties.name !== undefined) context.channel.name = properties.name;
 }
 
 async function saveTopic(
-  context: Awaited<
-    ReturnType<typeof getTicketContext>
-  >,
-  topic: string,
+  context: Awaited<ReturnType<typeof getTicketContext>>,
+  requestedTopic: string,
+  actor: EventActor = {
+    id: 'supportforge-system',
+    attribution: 'actorUnknown',
+    confidence: 'none',
+  },
 ): Promise<void> {
   const oldTopic = context.topic;
+  const persisted = await getPersistedTicket(context.channel.id);
+  if (!persisted || persisted.deletedAt) {
+    throw new Error('Cannot update a SupportForge ticket without an active durable ticket record.');
+  }
+
+  let topic = requestedTopic;
+  const persistedPriority = persisted.priority ?? await getPersistedTicketPriority(context.channel.id);
+  if (persistedPriority) topic = setField(topic, 'priority', persistedPriority);
+
+  const now = new Date().toISOString();
+  topic = setField(topic, 'updated_at', now);
+  const status = getTicketStatus(topic);
+  const ownerId = getField(topic, 'owner') ?? persisted.ownerId ?? undefined;
+  const users = (getField(topic, 'users') ?? '').split(',').map((id) => id.trim()).filter(Boolean);
+  const claimedByIds = (getField(topic, 'claimed_by') ?? '').split(',').map((id) => id.trim()).filter(Boolean);
+  const participantIds = [...new Set([...(ownerId ? [ownerId] : []), ...users])];
+
+  const updates: TicketMetadataUpdates = {};
+  const departmentId = getField(topic, 'department') ?? null;
+  const tagId = getField(topic, 'tag') ?? getField(topic, 'tags') ?? null;
+  const nextPriority = (getField(topic, 'priority') ?? 'normal') as TicketPriority;
+  if (persisted.departmentId !== departmentId) updates.departmentId = departmentId;
+  if (persisted.tagId !== tagId) updates.tagId = tagId;
+  if (persisted.ownerId !== (ownerId ?? null)) updates.ownerId = ownerId ?? null;
+  if (persisted.priority !== nextPriority) updates.priority = nextPriority;
+  if (JSON.stringify(persisted.claimedByIds) !== JSON.stringify(claimedByIds)) {
+    updates.claimedByIds = claimedByIds;
+  }
+  if (JSON.stringify(persisted.participantIds) !== JSON.stringify(participantIds)) {
+    updates.participantIds = participantIds;
+  }
+
+  const metadataPatch: Record<string, unknown> = {
+    lastActivityAt: now,
+    lastStaffActivityAt: now,
+  };
+  if (status === 'pending' && persisted.status !== 'pending') {
+    metadataPatch.pendingSince = getField(topic, 'pending_since') ?? now;
+  } else if (persisted.status === 'pending' && status !== 'pending') {
+    metadataPatch.pendingSince = null;
+  }
+  if (status === 'claimed') {
+    metadataPatch.claimedAt = getField(topic, 'claimed_at') ?? now;
+    metadataPatch.assignedAt = getField(topic, 'assigned_at') ?? now;
+  }
+  if (status === 'closed') metadataPatch.closedAt = getField(topic, 'closed_at') ?? now;
+  if (status === 'archived') metadataPatch.archivedAt = getField(topic, 'archived_at') ?? now;
+  if (status === 'reopened') {
+    metadataPatch.reopenedAt = getField(topic, 'reopened_at') ?? now;
+    metadataPatch.closedAt = null;
+    metadataPatch.archivedAt = null;
+    metadataPatch.transcriptId = null;
+    metadataPatch.transcriptDestinationId = null;
+    metadataPatch.pendingSince = null;
+  }
+  updates.metadata = metadataPatch;
 
   /*
-   * Voice mode is valid only while the ticket remains claimed. Slash-command
-   * transitions must clean up the temporary room just like the button path.
+   * Durable ticket status, metadata and corresponding events/outbox intents
+   * commit before Discord is changed. A failed channel mutation is recoverable
+   * by the outbox worker, which reads the latest state and reconciles it.
    */
-  if (
-    getField(oldTopic, 'voice_channel_id') &&
-    getTicketStatus(topic) !== 'claimed'
-  ) {
-    topic = await endTicketVoiceMode(
-      context.guild,
-      context.channel,
-      topic,
-      getTicketStatus(topic),
-      'SupportForge voice mode ended by ticket command transition',
+  await transitionPersistedTicket(
+    context.channel.id,
+    status,
+    updates,
+    actor,
+    now,
+  );
+
+  // Voice cleanup happens only after the durable lifecycle transition. If
+  // Discord refuses deletion, retain the voice pointer for later repair.
+  if (getField(topic, 'voice_channel_id') && status !== 'claimed') {
+    try {
+      topic = await endTicketVoiceMode(
+        context.guild,
+        context.channel,
+        topic,
+        status,
+        'SupportForge voice mode ended by ticket command transition',
+        { deferTicketTopicUpdate: true, queueRename: false },
+      );
+      await updatePersistedTicketMetadata(
+        context.channel.id,
+        {
+          metadata: {
+            voiceChannelId: null,
+            voiceChannelName: null,
+            voiceStartedAt: null,
+            voiceStartedBy: null,
+          },
+        },
+        actor,
+      );
+      topic = setField(topic, 'updated_at', now);
+    } catch (error) {
+      console.warn(
+        'SupportForge ticket state committed, but private voice cleanup is pending:',
+        error,
+      );
+    }
+  }
+
+  try {
+    await syncCommandTicketVisibility(context, oldTopic, topic);
+  } catch (error) {
+    console.warn(
+      'SupportForge ticket state is durable; Discord topic/name/permissions will be reconciled by the outbox:',
+      error,
     );
   }
 
-  /*
-   * PostgreSQL is the durable source of truth for ticket metadata. Priority
-   * changes intentionally avoid an immediate Discord channel PATCH because
-   * channel renames/topics are rate-limited. Before any later command writes
-   * the topic, merge the persisted priority back in so a status/assignment
-   * change can never resurrect an older priority from the Discord cache.
-   */
-  const persistedPriority = await getPersistedTicketPriority(context.channel.id);
-  if (persistedPriority) {
-    topic = setField(topic, 'priority', persistedPriority);
-  }
-
-  await setChannelTopic(
-    context.channel.id,
-    topic,
-    'SupportForge ticket metadata update',
-  );
-
-  /*
-   * The native REST helper updates Discord but does not mutate the discord.js
-   * channel cache. Keep the local topic synchronized so immediately following
-   * commands read the state that was just committed.
-   */
-  context.channel.topic = topic;
-
-  await setPersistedTicketStatus(
-    context.channel.id,
-    getTicketStatus(topic),
-  );
-
-  await syncCommandTicketVisibility(
-    context,
-    oldTopic,
-    topic,
-  );
-
-  if (getField(topic, 'voice_channel_id') && getTicketStatus(topic) === 'claimed') {
+  if (getField(topic, 'voice_channel_id') && status === 'claimed') {
     await syncTicketVoiceParticipants(context.guild, topic);
   }
 
-  await refreshTicketPanel(
-    context.channel,
-    topic,
-  );
-
-  const ticketNumber = getField(topic, 'number');
-  if (ticketNumber) {
-    const expectedName = getTicketChannelName(
-      ticketNumber,
-      getTicketStatus(topic),
-      (getField(topic, 'priority') ?? 'normal') as 'low' | 'normal' | 'high' | 'urgent' | 'critical',
-    );
-
-    if (context.channel.name !== expectedName) {
-      void queueTicketChannelRename(
-        context.channel,
-        expectedName,
-        'SupportForge ticket status name synchronization',
-      ).catch((error) => {
-        console.error(
-          '⚠️ Failed to synchronize ticket channel name:',
-          error,
-        );
-      });
-    }
-  }
+  await refreshTicketPanel(context.channel, topic);
 }
 
 export async function executeTicketCommand(
@@ -473,83 +498,18 @@ export async function executeTicketCommand(
         return;
       }
 
-      let topic = setField(
-        context.topic,
-        'status',
-        'archived',
-      );
-
-      topic = setField(
-        topic,
+      const transitionAt = new Date().toISOString();
+      const topic = setField(
+        setField(context.topic, 'status', 'archived'),
         'archived_at',
-        new Date().toISOString(),
+        transitionAt,
       );
 
-      await setPersistedTicketStatus(
-        context.channel.id,
-        'archived',
-        {
-          id: interaction.user.id,
-          attribution: 'actorKnown',
-          confidence: 'high',
-        },
-      );
-
-      try {
-        await moveTicketToCategory(
-          context.channel,
-          await ensureArchiveCategory(context.guild),
-        );
-      } catch (error) {
-        console.warn(
-          '⚠️ Archive storage transition failed:',
-          error,
-        );
-      }
-
-      try {
-        await setChannelTopic(
-          context.channel.id,
-          topic,
-          'SupportForge archive metadata update',
-        );
-      } catch (error) {
-        console.warn(
-          '⚠️ Archive topic update failed; persisted lifecycle state remains authoritative:',
-          error,
-        );
-      }
-
-      /*
-       * Native REST does not reliably mutate the discord.js channel cache.
-       * Keep the local topic aligned with the archived state so the next
-       * command or panel lookup does not read the old closed metadata.
-       */
-      context.channel.topic = topic;
-
-      await refreshTicketPanel(
-        context.channel,
-        topic,
-      );
-
-      const expectedName = getTicketChannelName(
-        context.ticketNumber,
-        'archived',
-        (getField(topic, 'priority') ?? 'normal') as 'low' | 'normal' | 'high' | 'urgent' | 'critical',
-      );
-
-      if (context.channel.name !== expectedName) {
-        void queueTicketChannelRename(
-          context.channel,
-          expectedName,
-          `Ticket #${context.ticketNumber} archived`,
-        ).catch((error) => {
-          console.error(
-            '⚠️ Failed to rename archived ticket:',
-            error,
-          );
-        });
-      }
+      await saveTopic(context, topic, {
+        id: interaction.user.id,
+        attribution: 'actorKnown',
+        confidence: 'high',
+      });
 
       await interaction.editReply(
         `🗄️ Ticket #${context.ticketNumber} has been archived and moved to the Archive section.`,
@@ -697,10 +657,11 @@ export async function executeTicketCommand(
         'previous_assignee',
       );
 
-      await saveTopic(
-        context,
-        topic,
-      );
+      await saveTopic(context, topic, {
+        id: interaction.user.id,
+        attribution: 'actorKnown',
+        confidence: 'high',
+      });
 
       await context.channel.send(
         `🎯 ${interaction.user} claimed ticket #${context.ticketNumber}.`,
@@ -760,10 +721,11 @@ export async function executeTicketCommand(
         topic = removeField(topic, 'previous_assignee');
       }
 
-      await saveTopic(
-        context,
-        topic,
-      );
+      await saveTopic(context, topic, {
+        id: interaction.user.id,
+        attribution: 'actorKnown',
+        confidence: 'high',
+      });
 
       await context.channel.send(
         remaining.length
@@ -910,10 +872,11 @@ export async function executeTicketCommand(
         'pending_since',
       );
 
-      await saveTopic(
-        context,
-        topic,
-      );
+      await saveTopic(context, topic, {
+        id: interaction.user.id,
+        attribution: 'actorKnown',
+        confidence: 'high',
+      });
 
       const reason =
         interaction.options
@@ -1000,10 +963,11 @@ export async function executeTicketCommand(
         'claimed_at',
       );
 
-      await saveTopic(
-        context,
-        topic,
-      );
+      await saveTopic(context, topic, {
+        id: interaction.user.id,
+        attribution: 'actorKnown',
+        confidence: 'high',
+      });
 
       await context.channel.send(
         `⏳ Ticket #${context.ticketNumber} has been marked **pending** by ${interaction.user}.`,
@@ -1045,10 +1009,11 @@ export async function executeTicketCommand(
         'pending_since',
       );
 
-      await saveTopic(
-        context,
-        topic,
-      );
+      await saveTopic(context, topic, {
+        id: interaction.user.id,
+        attribution: 'actorKnown',
+        confidence: 'high',
+      });
 
       await context.channel.send(
         `▶️ Ticket #${context.ticketNumber} has been resumed by ${interaction.user}.`,
@@ -1103,46 +1068,10 @@ export async function executeTicketCommand(
             .filter(Boolean),
         );
 
-      if (
-        subcommand === 'add-user'
-      ) {
+      if (subcommand === 'add-user') {
         users.add(target.id);
-
-        await setChannelPermissionOverwrite(
-          context.channel.id,
-          target.id,
-          [
-            PermissionFlagsBits.ViewChannel,
-            PermissionFlagsBits.SendMessages,
-            PermissionFlagsBits.ReadMessageHistory,
-            PermissionFlagsBits.AttachFiles,
-            PermissionFlagsBits.EmbedLinks,
-          ],
-          [],
-          1,
-          'SupportForge add ticket participant',
-        );
-
-        await context.channel.send(
-          `➕ ${target} was added by ${interaction.user}.`,
-        );
       } else {
-        users.delete(
-          target.id,
-        );
-
-        await setChannelPermissionOverwrite(
-          context.channel.id,
-          target.id,
-          [],
-          [],
-          1,
-          'SupportForge remove ticket participant',
-        );
-
-        await context.channel.send(
-          `➖ ${target} was removed by ${interaction.user}.`,
-        );
+        users.delete(target.id);
       }
 
       const topic =
@@ -1152,18 +1081,17 @@ export async function executeTicketCommand(
           [...users].join(','),
         );
 
-      await saveTopic(
-        context,
-        topic,
-      );
-
-      await updatePersistedTicketMetadata(context.channel.id, {
-        participantIds: [...users],
-      }, {
+      await saveTopic(context, topic, {
         id: interaction.user.id,
         attribution: 'actorKnown',
         confidence: 'high',
       });
+
+      await context.channel.send(
+        subcommand === 'add-user'
+          ? '➕ ' + target.toString() + ' was added by ' + interaction.user.toString() + '.'
+          : '➖ ' + target.toString() + ' was removed by ' + interaction.user.toString() + '.',
+      );
 
       await audit(
         interaction,
@@ -1203,48 +1131,39 @@ export async function executeTicketCommand(
         return;
       }
 
-      const priority = level as 'low' | 'normal' | 'high' | 'urgent' | 'critical';
+      const priority = level as TicketPriority;
+      const transitionAt = new Date().toISOString();
       const topic = setField(
-        context.topic,
-        'priority',
-        priority,
+        setField(context.topic, 'priority', priority),
+        'updated_at',
+        transitionAt,
       );
 
       /*
-       * Priority changes do not need a /channels PATCH. Persist the value in
-       * the ticket record and refresh the panel immediately, avoiding Discord's
-       * heavily rate-limited channel mutation bucket.
+       * Priority, audit event and outbox intent commit together. The outbox
+       * batches the channel name/topic reconciliation and observes Discord's
+       * Retry-After instead of launching a second rename retry queue.
        */
-      await updatePersistedTicketMetadata(
+      await transitionPersistedTicket(
         context.channel.id,
-        { priority },
+        context.status,
+        {
+          priority,
+          metadata: {
+            lastActivityAt: transitionAt,
+            lastStaffActivityAt: transitionAt,
+          },
+        },
         {
           id: interaction.user.id,
           attribution: 'actorKnown',
           confidence: 'high',
         },
+        transitionAt,
       );
 
       context.channel.topic = topic;
-      await refreshTicketPanel(
-        context.channel,
-        topic,
-      );
-
-      await queueTicketChannelRename(
-        context.channel,
-        getTicketChannelName(
-          context.ticketNumber,
-          context.status,
-          priority,
-        ),
-        `SupportForge priority changed to ${level}`,
-      ).catch((error) => {
-        console.warn(
-          `⚠️ Ticket #${context.ticketNumber} priority was saved, but its channel rename was deferred:`,
-          error,
-        );
-      });
+      await refreshTicketPanel(context.channel, topic);
 
       await audit(
         interaction,

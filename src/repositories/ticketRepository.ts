@@ -4,7 +4,7 @@ import {
 } from '../core/domain/ticketLifecycle';
 import { randomUUID } from 'node:crypto';
 import { SqliteEventRepository } from './eventRepository';
-import type { EventActor } from '../core/events/domainEvents';
+import type { DomainEventType, EventActor } from '../core/events/domainEvents';
 import {
   getSupportForgeDatabase,
   type SqliteDatabase,
@@ -31,6 +31,7 @@ export interface TicketRepositoryRecord {
 
 export interface TicketRepository {
   getByChannelId(channelId: string): TicketRepositoryRecord | undefined;
+  getById(ticketId: string): TicketRepositoryRecord | undefined;
   listByGuildId(guildId: string): TicketRepositoryRecord[];
   findActiveByOwnerAndDepartment(
     guildId: string,
@@ -38,13 +39,20 @@ export interface TicketRepository {
     departmentId: string,
   ): TicketRepositoryRecord[];
   listAll(): TicketRepositoryRecord[];
-  upsert(record: TicketRepositoryRecord): void;
+  upsert(record: TicketRepositoryRecord, actor?: EventActor): void;
   create(record: TicketRepositoryRecord, actor?: EventActor): void;
   listEvents(channelId: string, limit?: number): import('../core/events/domainEvents').DomainEvent[];
   setStatus(channelId: string, status: TicketStatus, updatedAt: string): void;
   transitionStatus(
     channelId: string,
     status: TicketStatus,
+    updatedAt: string,
+    actor?: EventActor,
+  ): void;
+  transitionStatusAndMetadata(
+    channelId: string,
+    status: TicketStatus,
+    updates: TicketMetadataUpdates,
     updatedAt: string,
     actor?: EventActor,
   ): void;
@@ -70,6 +78,19 @@ export interface TicketRepository {
   clearAll(): void;
 }
 
+export type TicketMetadataUpdates = Partial<
+  Pick<
+    TicketRepositoryRecord,
+    | 'departmentId'
+    | 'tagId'
+    | 'ownerId'
+    | 'priority'
+    | 'claimedByIds'
+    | 'participantIds'
+    | 'metadata'
+  >
+>;
+
 interface TicketRow extends Record<string, unknown> {
   id: string;
   guild_id: string;
@@ -90,25 +111,148 @@ interface TicketRow extends Record<string, unknown> {
 }
 
 function parseStringArray(value: string): string[] {
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed)
-      ? parsed.filter((item): item is string => typeof item === 'string')
-      : [];
-  } catch {
-    return [];
+    parsed = JSON.parse(value) as unknown;
+  } catch (error) {
+    throw new Error('Corrupt JSON array in SupportForge ticket record.', { cause: error });
   }
+
+  if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== 'string')) {
+    throw new Error('Corrupt string-array field in SupportForge ticket record.');
+  }
+  return parsed as string[];
 }
 
 function parseMetadata(value: string): Record<string, unknown> {
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(value);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {};
-  } catch {
-    return {};
+    parsed = JSON.parse(value) as unknown;
+  } catch (error) {
+    throw new Error('Corrupt JSON metadata in SupportForge ticket record.', { cause: error });
   }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Corrupt object metadata in SupportForge ticket record.');
+  }
+  return parsed as Record<string, unknown>;
+}
+
+
+function lifecycleEventType(from: TicketStatus, to: TicketStatus): DomainEventType {
+  if (to === 'claimed') return 'ticket.claimed';
+  if (to === 'pending') return 'ticket.pending';
+  if (to === 'closed') return 'ticket.closed';
+  if (to === 'reopened') return 'ticket.reopened';
+  if (to === 'archived') return 'ticket.archived';
+  if (from === 'claimed' && to === 'open') return 'ticket.unclaimed';
+  if (from === 'pending' && to === 'open') return 'ticket.resumed';
+  return 'ticket.status_changed';
+}
+
+function metadataEventType(
+  changedFields: string[],
+  current: TicketRepositoryRecord,
+  updates: Partial<Pick<TicketRepositoryRecord,
+    'departmentId' | 'tagId' | 'ownerId' | 'priority' |
+    'claimedByIds' | 'participantIds' | 'metadata'>>,
+): DomainEventType {
+  if (updates.metadata && typeof updates.metadata.lastMessageId === 'string') {
+    return 'ticket.message.received';
+  }
+  if (changedFields.length === 1) {
+    const field = changedFields[0];
+    if (field === 'priority') return 'ticket.priority.changed';
+    if (field === 'departmentId') return 'ticket.department.changed';
+    if (field === 'tagId') return 'ticket.tag.changed';
+    if (field === 'participantIds' && updates.participantIds) {
+      const before = new Set(current.participantIds);
+      const after = new Set(updates.participantIds);
+      const added = [...after].filter((id) => !before.has(id));
+      const removed = [...before].filter((id) => !after.has(id));
+      if (added.length === 1 && removed.length === 0) return 'ticket.participant.added';
+      if (removed.length === 1 && added.length === 0) return 'ticket.participant.removed';
+    }
+  }
+  return 'ticket.metadata_changed';
+}
+
+function metadataEventPayload(
+  changedFields: string[],
+  updates: Partial<Pick<TicketRepositoryRecord, 'metadata'>>,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = { changedFields };
+  const metadata = updates.metadata;
+  if (metadata && typeof metadata.lastMessageId === 'string') {
+    payload.messageId = metadata.lastMessageId;
+    payload.messageAuthorType = metadata.lastMessageAuthorType ?? 'unknown';
+    payload.messageTimestamp = metadata.lastActivityAt ?? null;
+  }
+  return payload;
+}
+
+function mergeTicketMetadata(
+  current: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged = { ...current, ...patch };
+  const firstTimestampFields = [
+    'firstCustomerMessageAt',
+    'firstStaffResponseAt',
+  ];
+  for (const field of firstTimestampFields) {
+    if (typeof current[field] === 'string' && current[field]) {
+      merged[field] = current[field];
+    }
+  }
+
+  const monotonicTimestampFields = [
+    'lastActivityAt',
+    'lastCustomerMessageAt',
+    'lastStaffActivityAt',
+    'lastStaffResponseAt',
+  ];
+  for (const field of monotonicTimestampFields) {
+    const oldValue = current[field];
+    const newValue = patch[field];
+    if (
+      typeof oldValue === 'string' &&
+      oldValue &&
+      (typeof newValue !== 'string' || newValue < oldValue)
+    ) {
+      merged[field] = oldValue;
+    }
+  }
+
+  const oldActivityAt = typeof current.lastActivityAt === 'string'
+    ? current.lastActivityAt
+    : '';
+  const newActivityAt = typeof patch.lastActivityAt === 'string'
+    ? patch.lastActivityAt
+    : '';
+  const oldMessageId = typeof current.lastMessageId === 'string'
+    ? current.lastMessageId
+    : '';
+  const newMessageId = typeof patch.lastMessageId === 'string'
+    ? patch.lastMessageId
+    : '';
+  const sameTimestampOlderSnowflake =
+    oldActivityAt === newActivityAt &&
+    /^\d+$/.test(oldMessageId) &&
+    /^\d+$/.test(newMessageId) &&
+    BigInt(newMessageId) < BigInt(oldMessageId);
+  const olderActivity =
+    Boolean(oldActivityAt && newActivityAt) &&
+    (newActivityAt < oldActivityAt || sameTimestampOlderSnowflake);
+
+  if (olderActivity && newMessageId) {
+    for (const field of ['lastMessageId', 'lastMessageAuthorId', 'lastMessageAuthorType']) {
+      if (current[field] === undefined) delete merged[field];
+      else merged[field] = current[field];
+    }
+  }
+
+  return merged;
 }
 
 function fromRow(row: TicketRow): TicketRepositoryRecord {
@@ -139,6 +283,13 @@ export class SqliteTicketRepository implements TicketRepository {
   public constructor(database = getSupportForgeDatabase()) {
     this.database = database;
     this.events = new SqliteEventRepository(database);
+  }
+
+  public getById(ticketId: string): TicketRepositoryRecord | undefined {
+    const row = this.database
+      .prepare('SELECT * FROM tickets WHERE id = ? LIMIT 1')
+      .get(ticketId) as TicketRow | undefined;
+    return row ? fromRow(row) : undefined;
   }
 
   public getByChannelId(channelId: string): TicketRepositoryRecord | undefined {
@@ -255,49 +406,41 @@ export class SqliteTicketRepository implements TicketRepository {
     return record ? this.events.listTicketEvents(record.id, limit) : [];
   }
 
-  public upsert(record: TicketRepositoryRecord): void {
-    this.database.exec('BEGIN IMMEDIATE');
-
-    try {
-      this.database.prepare(
-        'INSERT INTO tickets (' +
-        'id, guild_id, channel_id, ticket_number, status, department_id, tag_id, owner_id, priority, ' +
-        'claimed_by_json, participant_ids_json, metadata_json, created_at, updated_at, deleted_at, deletion_reason' +
-        ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
-        'ON CONFLICT(channel_id) DO UPDATE SET ' +
-        'ticket_number = excluded.ticket_number, status = excluded.status, department_id = excluded.department_id, ' +
-        'tag_id = excluded.tag_id, owner_id = excluded.owner_id, priority = excluded.priority, ' +
-        'claimed_by_json = excluded.claimed_by_json, participant_ids_json = excluded.participant_ids_json, ' +
-        'metadata_json = excluded.metadata_json, updated_at = excluded.updated_at, deleted_at = excluded.deleted_at, ' +
-        'deletion_reason = excluded.deletion_reason',
-      ).run(
-        record.id,
-        record.guildId,
-        record.channelId,
-        record.ticketNumber,
-        record.status,
-        record.departmentId,
-        record.tagId,
-        record.ownerId,
-        record.priority,
-        JSON.stringify(record.claimedByIds),
-        JSON.stringify(record.participantIds),
-        JSON.stringify(record.metadata),
-        record.createdAt,
-        record.updatedAt,
-        record.deletedAt,
-        record.deletionReason,
-      );
-
-      this.database.exec('COMMIT');
-    } catch (error) {
-      try {
-        this.database.exec('ROLLBACK');
-      } catch {
-        // Preserve the original persistence error.
-      }
-      throw error;
+  public upsert(
+    record: TicketRepositoryRecord,
+    actor: EventActor = {
+      id: 'supportforge-system',
+      attribution: 'actorKnown',
+      confidence: 'high',
+    },
+  ): void {
+    const current = this.getByChannelId(record.channelId);
+    if (!current) {
+      this.create(record, actor);
+      return;
     }
+
+    if (current.id !== record.id || current.guildId !== record.guildId) {
+      throw new Error(
+        `Refusing to overwrite immutable SupportForge ticket identity for channel ${record.channelId}.`,
+      );
+    }
+
+    this.transitionStatusAndMetadata(
+      record.channelId,
+      record.status,
+      {
+        departmentId: record.departmentId,
+        tagId: record.tagId,
+        ownerId: record.ownerId,
+        priority: record.priority,
+        claimedByIds: record.claimedByIds,
+        participantIds: record.participantIds,
+        metadata: record.metadata,
+      },
+      record.updatedAt,
+      actor,
+    );
   }
 
   public setStatus(
@@ -346,7 +489,7 @@ export class SqliteTicketRepository implements TicketRepository {
 
       this.events.append({
         id: randomUUID(),
-        type: 'ticket.status_changed',
+        type: lifecycleEventType(current.status, status),
         aggregateType: 'ticket',
         aggregateId: current.id,
         guildId: current.guildId,
@@ -367,6 +510,115 @@ export class SqliteTicketRepository implements TicketRepository {
         this.database.exec('ROLLBACK');
       } catch {
         // Preserve the original error.
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Commits lifecycle state and associated metadata in one SQLite transaction.
+   * Event history and outbox intents are included in that same transaction.
+   */
+  public transitionStatusAndMetadata(
+    channelId: string,
+    status: TicketStatus,
+    updates: TicketMetadataUpdates,
+    updatedAt: string,
+    actor: EventActor = {
+      id: 'supportforge-system',
+      attribution: 'actorKnown',
+      confidence: 'high',
+    },
+  ): void {
+    this.database.exec('BEGIN IMMEDIATE');
+
+    try {
+      const current = this.getByChannelId(channelId);
+      if (!current) {
+        throw new Error(
+          `Cannot transition SupportForge ticket ${channelId}: ticket does not exist in durable storage.`,
+        );
+      }
+
+      const statusChanged = current.status !== status;
+      if (statusChanged) assertTicketStatusTransition(current.status, status);
+
+      const changedFields = Object.keys(updates).filter(
+        (key) => updates[key as keyof TicketMetadataUpdates] !== undefined,
+      );
+      if (!statusChanged && changedFields.length === 0) {
+        this.database.exec('COMMIT');
+        return;
+      }
+
+      const assignments: string[] = [];
+      const parameters: unknown[] = [];
+      const add = (column: string, value: unknown): void => {
+        assignments.push(column + ' = ?');
+        parameters.push(value);
+      };
+
+      if (statusChanged) add('status', status);
+      if (updates.departmentId !== undefined) add('department_id', updates.departmentId);
+      if (updates.tagId !== undefined) add('tag_id', updates.tagId);
+      if (updates.ownerId !== undefined) add('owner_id', updates.ownerId);
+      if (updates.priority !== undefined) add('priority', updates.priority);
+      if (updates.claimedByIds !== undefined) add('claimed_by_json', JSON.stringify(updates.claimedByIds));
+      if (updates.participantIds !== undefined) add('participant_ids_json', JSON.stringify(updates.participantIds));
+      if (updates.metadata !== undefined) add('metadata_json', JSON.stringify(mergeTicketMetadata(current.metadata, updates.metadata)));
+
+      add('updated_at', updatedAt);
+      parameters.push(channelId, current.status);
+
+      const result = this.database.prepare(
+        'UPDATE tickets SET ' + assignments.join(', ') +
+        ' WHERE channel_id = ? AND status = ?',
+      ).run(...parameters);
+
+      if (Number(result.changes) !== 1) {
+        throw new Error(
+          `Ticket ${channelId} changed concurrently while applying a lifecycle and metadata transaction.`,
+        );
+      }
+
+      if (statusChanged) {
+        this.events.append({
+          id: randomUUID(),
+          type: lifecycleEventType(current.status, status),
+          aggregateType: 'ticket',
+          aggregateId: current.id,
+          guildId: current.guildId,
+          channelId: current.channelId,
+          actorId: actor.id,
+          actorAttribution: actor.attribution ?? 'actorUnknown',
+          actorConfidence: actor.confidence ?? 'none',
+          payload: { from: current.status, to: status, changedFields },
+          occurredAt: updatedAt,
+        });
+      }
+
+      if (changedFields.length > 0) {
+        this.events.append({
+          id: randomUUID(),
+          type: metadataEventType(changedFields, current, updates),
+          aggregateType: 'ticket',
+          aggregateId: current.id,
+          guildId: current.guildId,
+          channelId: current.channelId,
+          actorId: actor.id,
+          actorAttribution: actor.attribution ?? 'actorUnknown',
+          actorConfidence: actor.confidence ?? 'none',
+          payload: metadataEventPayload(changedFields, updates),
+          occurredAt: updatedAt,
+        });
+      }
+
+      this.database.exec('COMMIT');
+    } catch (error) {
+      try {
+        this.database.exec('ROLLBACK');
+      } catch {
+        // Preserve the original transaction error.
       }
       throw error;
     }
@@ -422,7 +674,7 @@ export class SqliteTicketRepository implements TicketRepository {
     );
     if (updates.metadata !== undefined) add(
       'metadata_json',
-      JSON.stringify(updates.metadata),
+      JSON.stringify({ ...current.metadata, ...updates.metadata }),
     );
 
     if (assignments.length === 0) return;
@@ -450,7 +702,7 @@ export class SqliteTicketRepository implements TicketRepository {
 
       this.events.append({
         id: randomUUID(),
-        type: 'ticket.metadata_changed',
+        type: metadataEventType(Object.keys(updates), current, updates),
         aggregateType: 'ticket',
         aggregateId: current.id,
         guildId: current.guildId,
@@ -458,9 +710,7 @@ export class SqliteTicketRepository implements TicketRepository {
         actorId: actor.id,
         actorAttribution: actor.attribution ?? 'actorUnknown',
         actorConfidence: actor.confidence ?? 'none',
-        payload: {
-          changedFields: Object.keys(updates),
-        },
+        payload: metadataEventPayload(Object.keys(updates), updates),
         occurredAt: updatedAt,
       });
 
@@ -525,25 +775,45 @@ export class SqliteTicketRepository implements TicketRepository {
   }
 
   public remove(channelId: string): void {
-    const current = this.getByChannelId(channelId);
-    if (!current) return;
+    this.markDeleted(
+      channelId,
+      new Date().toISOString(),
+      'Ticket removed from active SupportForge storage; history retained.',
+    );
+  }
 
+  public clearAll(): void {
+    const activeTickets = this.listAll().filter((ticket) => ticket.deletedAt === null);
+    if (!activeTickets.length) return;
+
+    const deletedAt = new Date().toISOString();
     this.database.exec('BEGIN IMMEDIATE');
 
     try {
-      this.database
-        .prepare(
-          "DELETE FROM outbox_events WHERE aggregate_type = 'ticket' AND aggregate_id = ?",
-        )
-        .run(current.id);
+      const update = this.database.prepare(
+        'UPDATE tickets SET deleted_at = ?, deletion_reason = ?, updated_at = ? ' +
+        'WHERE channel_id = ? AND deleted_at IS NULL',
+      );
 
-      this.database
-        .prepare('DELETE FROM ticket_events WHERE ticket_id = ?')
-        .run(current.id);
+      for (const ticket of activeTickets) {
+        const reason = 'SupportForge ticket store reset; history retained.';
+        const result = update.run(deletedAt, reason, deletedAt, ticket.channelId);
+        if (Number(result.changes) !== 1) continue;
 
-      this.database
-        .prepare('DELETE FROM tickets WHERE channel_id = ?')
-        .run(channelId);
+        this.events.append({
+          id: randomUUID(),
+          type: 'ticket.deleted',
+          aggregateType: 'ticket',
+          aggregateId: ticket.id,
+          guildId: ticket.guildId,
+          channelId: ticket.channelId,
+          actorId: 'supportforge-system',
+          actorAttribution: 'actorKnown',
+          actorConfidence: 'high',
+          payload: { reason },
+          occurredAt: deletedAt,
+        });
+      }
 
       this.database.exec('COMMIT');
     } catch (error) {
@@ -554,9 +824,5 @@ export class SqliteTicketRepository implements TicketRepository {
       }
       throw error;
     }
-  }
-
-  public clearAll(): void {
-    this.database.prepare('DELETE FROM tickets').run();
   }
 }

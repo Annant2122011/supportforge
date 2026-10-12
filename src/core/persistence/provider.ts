@@ -5,23 +5,30 @@ import {
 } from './sqliteDatabase';
 import { migratePostgres } from './migrationRunner';
 import { PostgresTicketRepository, type AsyncTicketRepository } from '../../repositories/postgresTicketRepository';
-import { SqliteTicketRepository } from '../../repositories/ticketRepository';
+import { SqliteTicketRepository, type TicketMetadataUpdates } from '../../repositories/ticketRepository';
+import { importLegacyJsonDocuments } from '../../repositories/jsonDocumentRepository';
+import { importLegacyJsonTickets } from './legacyTicketImporter';
 
 export type PersistenceProvider = 'sqlite' | 'postgres';
 
 export function getPersistenceProvider(): PersistenceProvider {
   const value = process.env.SUPPORTFORGE_DATABASE_PROVIDER?.trim().toLowerCase();
 
-  if (!value || value === 'sqlite') {
-    return 'sqlite';
-  }
-
-  if (value === 'postgres' || value === 'postgresql' || value === 'neon') {
+  // Neon/PostgreSQL is the live source of truth. SQLite remains available only
+  // to the explicit legacy-migration tooling and isolated repository tests; it
+  // must never be selected silently by a production/default environment.
+  if (!value || value === 'postgres' || value === 'postgresql' || value === 'neon') {
     return 'postgres';
   }
 
+  if (value === 'sqlite') {
+    throw new Error(
+      'SQLite is disabled for live SupportForge persistence. Set SUPPORTFORGE_DATABASE_PROVIDER=postgres and configure the Neon DATABASE_URL and DATABASE_URL_UNPOOLED values.',
+    );
+  }
+
   throw new Error(
-    `Unsupported SUPPORTFORGE_DATABASE_PROVIDER "${value}". Expected "sqlite" or "postgres".`,
+    `Unsupported SUPPORTFORGE_DATABASE_PROVIDER "${value}". Expected "postgres" or "neon".`,
   );
 }
 
@@ -30,6 +37,10 @@ class SqliteTicketRepositoryAdapter implements AsyncTicketRepository {
 
   public constructor(database: SqliteDatabase = getSupportForgeDatabase()) {
     this.repository = new SqliteTicketRepository(database);
+  }
+
+  async getById(ticketId: string) {
+    return this.repository.getById(ticketId);
   }
 
   async getByChannelId(channelId: string) {
@@ -56,8 +67,8 @@ class SqliteTicketRepositoryAdapter implements AsyncTicketRepository {
     return this.repository.listAll();
   }
 
-  async upsert(record: Parameters<SqliteTicketRepository['upsert']>[0]) {
-    this.repository.upsert(record);
+  async upsert(record: Parameters<SqliteTicketRepository['upsert']>[0], actor?: EventActor) {
+    this.repository.upsert(record, actor);
   }
 
   async create(
@@ -82,6 +93,16 @@ class SqliteTicketRepositoryAdapter implements AsyncTicketRepository {
     actor?: EventActor,
   ) {
     this.repository.transitionStatus(channelId, status, updatedAt, actor);
+  }
+
+  async transitionStatusAndMetadata(
+    channelId: string,
+    status: Parameters<SqliteTicketRepository['transitionStatusAndMetadata']>[1],
+    updates: TicketMetadataUpdates,
+    updatedAt: string,
+    actor?: EventActor,
+  ) {
+    this.repository.transitionStatusAndMetadata(channelId, status, updates, updatedAt, actor);
   }
 
   async updateMetadata(
@@ -127,6 +148,12 @@ export async function initializePersistence(): Promise<void> {
       } else {
         getSupportForgeDatabase();
       }
+
+      // Import the legacy settings/report documents after the destination
+      // schema exists but before any command can observe application state.
+      // Imports are insert-if-absent, so restarts cannot overwrite DB changes.
+      await importLegacyJsonDocuments(provider);
+      await importLegacyJsonTickets(provider);
 
       initialized = true;
     })().finally(() => {

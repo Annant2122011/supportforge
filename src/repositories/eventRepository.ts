@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
+import { MAX_OUTBOX_ATTEMPTS } from '../core/events/domainEvents';
+
 import type {
   DomainEvent,
   EventActorAttribution,
@@ -34,19 +36,24 @@ interface OutboxRow extends Record<string, unknown> {
   available_at: string;
   created_at: string;
   processed_at: string | null;
+  processing_started_at: string | null;
   last_error: string | null;
 }
 
 function parseObject(value: string): Record<string, unknown> {
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(value);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {};
-  } catch {
-    return {};
+    parsed = JSON.parse(value) as unknown;
+  } catch (error) {
+    throw new Error('Corrupt JSON payload in SupportForge ticket event/outbox record.', { cause: error });
   }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('SupportForge ticket event/outbox payload must be a JSON object.');
+  }
+  return parsed as Record<string, unknown>;
 }
+
 
 function fromEventRow(row: EventRow): DomainEvent {
   return {
@@ -77,6 +84,7 @@ function fromOutboxRow(row: OutboxRow): OutboxEvent {
     availableAt: row.available_at,
     createdAt: row.created_at,
     processedAt: row.processed_at,
+    processingStartedAt: row.processing_started_at,
     lastError: row.last_error,
   };
 }
@@ -115,7 +123,7 @@ export class SqliteEventRepository {
       event.aggregateId,
       event.guildId,
       event.type,
-      JSON.stringify(outboxPayload),
+      JSON.stringify({ ...outboxPayload, channelId: event.channelId, domainEventId: event.id }),
       event.occurredAt,
       event.occurredAt,
     );
@@ -133,28 +141,33 @@ export class SqliteEventRepository {
     availableAt = new Date().toISOString(),
   ): number {
     const result = this.database.prepare(
-      "UPDATE outbox_events SET status = 'pending', available_at = ? WHERE status = 'processing' AND available_at < ?",
-    ).run(availableAt, olderThan);
+      "UPDATE outbox_events SET status = 'pending', available_at = ?, processing_started_at = NULL " +
+      "WHERE status = 'processing' AND ((processing_started_at IS NOT NULL AND processing_started_at < ?) " +
+      "OR (processing_started_at IS NULL AND available_at < ?))",
+    ).run(availableAt, olderThan, olderThan);
     return Number(result.changes);
   }
 
   public listPendingOutbox(limit = 100): OutboxEvent[] {
     return this.database.prepare(
-      "SELECT * FROM outbox_events WHERE status IN ('pending', 'failed') AND available_at <= ? ORDER BY created_at ASC LIMIT ?",
-    ).all(new Date().toISOString(), Math.max(1, Math.min(limit, 500)))
+      "SELECT * FROM outbox_events WHERE status IN ('pending', 'failed') AND attempts < ? " +
+      "AND available_at <= ? ORDER BY created_at ASC LIMIT ?",
+    ).all(MAX_OUTBOX_ATTEMPTS, new Date().toISOString(), Math.max(1, Math.min(limit, 500)))
       .map((row) => fromOutboxRow(row as OutboxRow));
   }
 
   public markOutboxProcessing(id: string): boolean {
     const result = this.database.prepare(
-      "UPDATE outbox_events SET status = 'processing', attempts = attempts + 1 WHERE id = ? AND status IN ('pending', 'failed')",
-    ).run(id);
+      "UPDATE outbox_events SET status = 'processing', attempts = attempts + 1, processing_started_at = ? " +
+      "WHERE id = ? AND status IN ('pending', 'failed') AND attempts < ?",
+    ).run(new Date().toISOString(), id, MAX_OUTBOX_ATTEMPTS);
     return Number(result.changes) === 1;
   }
 
   public markOutboxPublished(id: string, processedAt = new Date().toISOString()): void {
     this.database.prepare(
-      "UPDATE outbox_events SET status = 'published', processed_at = ?, last_error = NULL WHERE id = ? AND status = 'processing'",
+      "UPDATE outbox_events SET status = 'published', processed_at = ?, processing_started_at = NULL, last_error = NULL " +
+      "WHERE id = ? AND status = 'processing'",
     ).run(processedAt, id);
   }
 
@@ -162,21 +175,25 @@ export class SqliteEventRepository {
     id: string,
     error: string,
     availableAt: string,
+    permanent = false,
   ): void {
     this.database.prepare(
-      "UPDATE outbox_events SET status = 'failed', last_error = ?, available_at = ? WHERE id = ? AND status = 'processing'",
-    ).run(error.slice(0, 2_000), availableAt, id);
+      "UPDATE outbox_events SET status = 'failed', last_error = ?, available_at = ?, " +
+      "processing_started_at = NULL, attempts = CASE WHEN ? THEN ? ELSE attempts END " +
+      "WHERE id = ? AND status = 'processing'",
+    ).run(error.slice(0, 2_000), availableAt, permanent ? 1 : 0, MAX_OUTBOX_ATTEMPTS, id);
   }
 
   public requeueProcessing(id: string, availableAt: string): void {
     this.database.prepare(
-      "UPDATE outbox_events SET status = 'pending', available_at = ? WHERE id = ? AND status = 'processing'",
+      "UPDATE outbox_events SET status = 'pending', available_at = ?, processing_started_at = NULL WHERE id = ? AND status = 'processing'",
     ).run(availableAt, id);
   }
 
   public requeueFailed(id: string, availableAt: string): void {
     this.database.prepare(
-      "UPDATE outbox_events SET status = 'pending', available_at = ?, last_error = NULL WHERE id = ? AND status = 'failed'",
+      "UPDATE outbox_events SET status = 'pending', available_at = ?, last_error = NULL, attempts = 0 " +
+      "WHERE id = ? AND status = 'failed'",
     ).run(availableAt, id);
   }
 

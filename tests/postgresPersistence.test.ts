@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -7,6 +10,7 @@ import {
 } from '../src/core/persistence/postgresDatabase';
 import { migratePostgres } from '../src/core/persistence/migrationRunner';
 import { PostgresEventRepository } from '../src/repositories/postgresEventRepository';
+import { PostgresJsonDocumentRepository, importLegacyJsonDocuments } from '../src/repositories/jsonDocumentRepository';
 import { PostgresTicketRepository } from '../src/repositories/postgresTicketRepository';
 import type { TicketRepositoryRecord } from '../src/repositories/ticketRepository';
 
@@ -103,8 +107,8 @@ test(
     assert.equal(ticketEvents.length, 3);
     assert.deepEqual(ticketEvents.map((event) => event.type), [
       'ticket.created',
-      'ticket.status_changed',
-      'ticket.metadata_changed',
+      'ticket.claimed',
+      'ticket.priority.changed',
     ]);
 
     pending = await events.listPendingOutbox();
@@ -118,9 +122,193 @@ test(
 
     await tickets.remove(record.channelId);
 
-    assert.equal(await tickets.getByChannelId(record.channelId), undefined);
-    assert.equal((await events.listTicketEvents(record.id)).length, 0);
-    assert.equal((await events.listOutbox()).length, 0);
+    const deleted = await tickets.getByChannelId(record.channelId);
+    assert.ok(deleted?.deletedAt);
+    assert.deepEqual(
+      (await events.listTicketEvents(record.id)).map((event) => event.type),
+      ['ticket.created', 'ticket.claimed', 'ticket.priority.changed', 'ticket.deleted'],
+    );
+    assert.equal((await events.listOutbox()).length, 4);
+  },
+);
+
+
+test(
+  'PostgreSQL ticket lifecycle and metadata commit atomically with their events and outbox',
+  { skip: !postgresIntegrationEnabled },
+  async () => {
+    await migratePostgres();
+    const pool = getPostgresPool();
+    await pool.query('TRUNCATE TABLE tickets CASCADE');
+
+    const tickets = new PostgresTicketRepository(pool);
+    const record: TicketRepositoryRecord = {
+      id: 'postgres-atomic-ticket',
+      guildId: 'postgres-atomic-guild',
+      channelId: 'postgres-atomic-channel',
+      ticketNumber: '43',
+      status: 'open',
+      departmentId: 'billing',
+      tagId: 'refund',
+      ownerId: 'postgres-atomic-user',
+      priority: 'normal',
+      claimedByIds: [],
+      participantIds: ['postgres-atomic-user'],
+      metadata: {},
+      createdAt: '2026-10-12T12:00:00.000Z',
+      updatedAt: '2026-10-12T12:00:00.000Z',
+      deletedAt: null,
+      deletionReason: null,
+    };
+
+    await tickets.create(record);
+    await tickets.transitionStatusAndMetadata(
+      record.channelId,
+      'claimed',
+      { priority: 'critical', claimedByIds: ['postgres-atomic-moderator'] },
+      '2026-10-12T12:01:00.000Z',
+      {
+        id: 'postgres-atomic-moderator',
+        attribution: 'actorKnown',
+        confidence: 'high',
+      },
+    );
+
+    const saved = await tickets.getByChannelId(record.channelId);
+    assert.equal(saved?.status, 'claimed');
+    assert.equal(saved?.priority, 'critical');
+    assert.deepEqual(saved?.claimedByIds, ['postgres-atomic-moderator']);
+
+    const events = await new PostgresEventRepository(pool).listTicketEvents(record.id);
+    assert.equal(events.filter((event) => event.type === 'ticket.claimed').length, 1);
+    assert.equal(events.filter((event) => event.type === 'ticket.metadata_changed').length, 1);
+    assert.equal((await new PostgresEventRepository(pool).listOutbox()).length, 3);
+  },
+);
+
+test(
+  'PostgreSQL rolls back ticket state, event history, and outbox when outbox enqueue fails',
+  { skip: !postgresIntegrationEnabled },
+  async () => {
+    await migratePostgres();
+    const pool = getPostgresPool();
+    await pool.query('TRUNCATE TABLE tickets CASCADE');
+
+    const tickets = new PostgresTicketRepository(pool);
+    const record: TicketRepositoryRecord = {
+      id: 'postgres-rollback-ticket',
+      guildId: 'postgres-rollback-guild',
+      channelId: 'postgres-rollback-channel',
+      ticketNumber: '44',
+      status: 'open',
+      departmentId: 'billing',
+      tagId: 'refund',
+      ownerId: 'postgres-rollback-user',
+      priority: 'normal',
+      claimedByIds: [],
+      participantIds: ['postgres-rollback-user'],
+      metadata: {},
+      createdAt: '2026-10-12T12:00:00.000Z',
+      updatedAt: '2026-10-12T12:00:00.000Z',
+      deletedAt: null,
+      deletionReason: null,
+    };
+
+    await tickets.create(record);
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION supportforge_test_fail_claimed_outbox()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS 'BEGIN IF NEW.event_type = ''ticket.claimed'' THEN RAISE EXCEPTION ''simulated postgres outbox failure''; END IF; RETURN NEW; END;'
+    `);
+    await pool.query(`
+      CREATE TRIGGER supportforge_test_fail_claimed_outbox_trigger
+      BEFORE INSERT ON outbox_events
+      FOR EACH ROW
+      EXECUTE FUNCTION supportforge_test_fail_claimed_outbox()
+    `);
+
+    try {
+      await assert.rejects(
+        tickets.transitionStatusAndMetadata(
+          record.channelId,
+          'claimed',
+          { priority: 'critical', claimedByIds: ['postgres-rollback-moderator'] },
+          '2026-10-12T12:01:00.000Z',
+          {
+            id: 'postgres-rollback-moderator',
+            attribution: 'actorKnown',
+            confidence: 'high',
+          },
+        ),
+        /simulated postgres outbox failure/,
+      );
+
+      const saved = await tickets.getByChannelId(record.channelId);
+      assert.equal(saved?.status, 'open');
+      assert.equal(saved?.priority, 'normal');
+      assert.deepEqual(saved?.claimedByIds, []);
+
+      const events = await new PostgresEventRepository(pool).listTicketEvents(record.id);
+      assert.deepEqual(events.map((event) => event.type), ['ticket.created']);
+      assert.equal((await new PostgresEventRepository(pool).listOutbox()).length, 1);
+    } finally {
+      await pool.query('DROP TRIGGER IF EXISTS supportforge_test_fail_claimed_outbox_trigger ON outbox_events');
+      await pool.query('DROP FUNCTION IF EXISTS supportforge_test_fail_claimed_outbox()');
+    }
+  },
+);
+
+test(
+  'legacy audit history is imported into the PostgreSQL document store without losing identifiers',
+  { skip: !postgresIntegrationEnabled },
+  async () => {
+    await migratePostgres();
+    const pool = getPostgresPool();
+    const documents = new PostgresJsonDocumentRepository();
+    await pool.query("DELETE FROM app_documents WHERE document_key = 'audit-log'");
+
+    const directory = await mkdtemp(join(tmpdir(), 'supportforge-postgres-audit-'));
+    const dataDirectory = join(directory, 'data');
+    await mkdir(dataDirectory, { recursive: true });
+
+    const auditStore = {
+      version: 2,
+      guilds: {
+        'postgres-audit-guild': {
+          events: [{
+            id: 'historical-audit-id',
+            guildId: 'postgres-audit-guild',
+            category: 'settings',
+            action: 'SETTINGS_UPDATED',
+            actorId: 'moderator-1',
+            actorName: 'Moderator',
+            actorAttribution: 'actorKnown',
+            actorConfidence: 'high',
+            timestamp: '2026-10-12T10:00:00.000Z',
+            ticketChannelId: 'historical-ticket-channel',
+          }],
+          summaries: {},
+          overallSummary: null,
+          accumulationEnabled: true,
+          developerViewers: [],
+        },
+      },
+    };
+
+    try {
+      await writeFile(
+        join(dataDirectory, 'audit-log.json'),
+        JSON.stringify(auditStore),
+        'utf8',
+      );
+      const result = await importLegacyJsonDocuments('postgres', directory, documents);
+      assert.deepEqual(result.imported, ['audit-log']);
+      assert.deepEqual(await documents.get('audit-log'), auditStore);
+    } finally {
+      await pool.query("DELETE FROM app_documents WHERE document_key = 'audit-log'");
+      await rm(directory, { recursive: true, force: true });
+    }
   },
 );
 

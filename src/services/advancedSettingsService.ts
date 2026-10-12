@@ -1,6 +1,5 @@
-import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import type { Guild } from 'discord.js';
+import { getJsonDocument, setJsonDocument } from './jsonDocumentPersistenceService';
 
 export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent' | 'critical';
 
@@ -100,9 +99,6 @@ interface SettingsFile {
   version: 5;
   guilds: Record<string, AdvancedGuildSettings>;
 }
-
-const DATA_DIR = join(process.cwd(), 'data');
-const SETTINGS_PATH = join(DATA_DIR, 'advanced-settings.json');
 
 function defaultReportCategories(): Record<string, ReportCategory> {
   const now = new Date().toISOString();
@@ -215,81 +211,35 @@ function cloneDefaults(): AdvancedGuildSettings {
 async function persist(): Promise<void> {
   if (!state) return;
 
-  writeQueue = writeQueue.catch(() => undefined).then(async () => {
-    await mkdir(DATA_DIR, { recursive: true });
-
-    const temporaryPath =
-      SETTINGS_PATH + '.tmp-' + process.pid + '-' + Date.now();
-
-    await writeFile(
-      temporaryPath,
-      JSON.stringify(state, null, 2),
-      'utf8',
-    );
-
-    try {
-      try {
-        await rename(temporaryPath, SETTINGS_PATH);
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== 'EEXIST' && code !== 'EPERM') throw error;
-
-        await unlink(SETTINGS_PATH).catch((unlinkError) => {
-          const unlinkCode = (unlinkError as NodeJS.ErrnoException).code;
-          if (unlinkCode !== 'ENOENT') throw unlinkError;
-        });
-        await rename(temporaryPath, SETTINGS_PATH);
-      }
-    } finally {
-      await unlink(temporaryPath).catch(() => undefined);
-    }
-  });
-
+  const snapshot = JSON.parse(JSON.stringify(state)) as SettingsFile;
+  writeQueue = writeQueue.catch(() => undefined).then(
+    () => setJsonDocument('advanced-settings', snapshot),
+  );
   await writeQueue;
 }
 
 async function load(): Promise<SettingsFile> {
   if (state) return state;
 
-  await mkdir(DATA_DIR, { recursive: true });
-
-  try {
-    const raw = await readFile(SETTINGS_PATH, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<SettingsFile>;
-
+  const persisted = await getJsonDocument<Partial<SettingsFile>>('advanced-settings');
+  if (persisted !== undefined) {
     if (
-      !parsed ||
-      typeof parsed !== 'object' ||
-      !parsed.guilds ||
-      typeof parsed.guilds !== 'object' ||
-      Array.isArray(parsed.guilds)
+      !persisted ||
+      typeof persisted !== 'object' ||
+      !persisted.guilds ||
+      typeof persisted.guilds !== 'object' ||
+      Array.isArray(persisted.guilds)
     ) {
       throw new Error(
-        'SupportForge advanced settings are malformed: the guild settings collection is invalid.',
+        'SupportForge advanced settings database document is malformed. Existing data was not overwritten.',
       );
     }
-
-    state = {
-      version: 5,
-      guilds: parsed.guilds as Record<string, AdvancedGuildSettings>,
-    };
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') {
-      throw new Error(
-        'SupportForge advanced settings could not be loaded safely. The existing file was not replaced.',
-        { cause: error },
-      );
-    }
-
-    state = {
-      version: 5,
-      guilds: {},
-    };
-
-    await persist();
+    state = { version: 5, guilds: persisted.guilds as Record<string, AdvancedGuildSettings> };
+    return state;
   }
 
+  state = { version: 5, guilds: {} };
+  await persist();
   return state;
 }
 

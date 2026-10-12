@@ -2,11 +2,30 @@ import { getSupportForgeDatabase } from '../persistence/sqliteDatabase';
 import { getPersistenceProvider } from '../persistence/provider';
 import { SqliteEventRepository } from '../../repositories/eventRepository';
 import { PostgresEventRepository } from '../../repositories/postgresEventRepository';
-import type { OutboxEvent } from './domainEvents';
+import { MAX_OUTBOX_ATTEMPTS, type OutboxEvent } from './domainEvents';
 
 const MAX_BATCH_SIZE = 100;
 const MAX_RETRY_DELAY_MS = 15 * 60_000;
 const STALE_PROCESSING_MS = 10 * 60_000;
+
+/**
+ * Marks an operation that should not be retried automatically. The failed
+ * record is retained for operator diagnosis and can be explicitly requeued.
+ */
+export class PermanentOutboxPublishError extends Error {
+  public constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'PermanentOutboxPublishError';
+  }
+}
+
+function isPermanentFailure(error: unknown): boolean {
+  if (error instanceof PermanentOutboxPublishError) return true;
+  if (error && typeof error === 'object' && 'retryable' in error) {
+    return (error as { retryable?: unknown }).retryable === false;
+  }
+  return false;
+}
 
 export interface OutboxPublisher {
   publish(event: OutboxEvent): Promise<void>;
@@ -18,9 +37,66 @@ export interface OutboxProcessResult {
   failed: number;
 }
 
-function retryDelayMs(attempts: number): number {
-  const exponent = Math.min(Math.max(attempts, 0), 10);
-  return Math.min(1_000 * 2 ** exponent, MAX_RETRY_DELAY_MS);
+function retryAfterMs(error: unknown): number | null {
+  let current: unknown = error;
+  const visited = new Set<unknown>();
+
+  for (let depth = 0; depth < 5 && current && !visited.has(current); depth += 1) {
+    visited.add(current);
+    if (typeof current === 'object') {
+      const record = current as Record<string, unknown>;
+
+      // discord.js RateLimitError exposes retryAfter in milliseconds.
+      const milliseconds = Number(record.retryAfter);
+      if (Number.isFinite(milliseconds) && milliseconds > 0) {
+        return Math.ceil(milliseconds);
+      }
+
+      const raw = record.rawError && typeof record.rawError === 'object'
+        ? record.rawError as Record<string, unknown>
+        : undefined;
+      for (const value of [record.retry_after, raw?.retry_after]) {
+        const seconds = Number(value);
+        if (value !== undefined && Number.isFinite(seconds) && seconds > 0) {
+          return Math.ceil(seconds * 1_000);
+        }
+      }
+
+      const headers = record.headers as { get?: (name: string) => string | null } | undefined;
+      if (headers && typeof headers.get === 'function') {
+        const seconds = Number(headers.get('retry-after'));
+        if (Number.isFinite(seconds) && seconds > 0) {
+          return Math.ceil(seconds * 1_000);
+        }
+      }
+
+      current = record.cause;
+      continue;
+    }
+
+    const message = String(current);
+    const seconds = message.match(/another\s+(\d+)s\b/i);
+    if (seconds) return Number(seconds[1]) * 1_000;
+    break;
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  const seconds = message.match(/another\s+(\d+)s\b/i);
+  if (seconds) return Number(seconds[1]) * 1_000;
+  const explicitSeconds = message.match(/retry(?:\s+after|After)[=: ]+\s*(\d+(?:\.\d+)?)\s*s\b/i);
+  if (explicitSeconds) return Math.ceil(Number(explicitSeconds[1]) * 1_000);
+  const milliseconds = message.match(/retry(?:\s+after|After)[=: ]+\s*(\d+)\s*ms/i);
+  return milliseconds ? Number(milliseconds[1]) : null;
+}
+
+export function calculateOutboxRetryDelayMs(attempts: number, error?: unknown): number {
+  const exponent = Math.min(Math.max(attempts - 1, 0), 10);
+  const exponential = Math.min(1_000 * 2 ** exponent, MAX_RETRY_DELAY_MS);
+  const serverCooldown = error === undefined ? null : retryAfterMs(error);
+  // Respect the server's Retry-After even when it exceeds normal backoff.
+  return serverCooldown === null
+    ? exponential
+    : Math.max(exponential, serverCooldown + 1_000);
 }
 
 function errorMessage(error: unknown): string {
@@ -53,11 +129,13 @@ async function processSqliteOutboxBatch(
       published += 1;
     } catch (error) {
       failed += 1;
-      const delay = retryDelayMs(event.attempts + 1);
+      const permanent = isPermanentFailure(error);
+      const delay = permanent ? 0 : calculateOutboxRetryDelayMs(event.attempts + 1, error);
       repository.markOutboxFailed(
         event.id,
         errorMessage(error),
         new Date(Date.now() + delay).toISOString(),
+        permanent,
       );
     }
   }
@@ -92,11 +170,13 @@ async function processPostgresOutboxBatch(
       }
     } catch (error) {
       failed += 1;
-      const delay = retryDelayMs(event.attempts);
+      const permanent = isPermanentFailure(error);
+      const delay = permanent ? 0 : calculateOutboxRetryDelayMs(event.attempts, error);
       await repository.markOutboxFailed(
         event.id,
         errorMessage(error),
         new Date(Date.now() + delay).toISOString(),
+        permanent,
       );
     }
   }

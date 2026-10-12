@@ -1,5 +1,5 @@
-import { copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { readLegacyTicketJson } from './legacyTicketData';
 
 import type { SqliteDatabase } from './sqliteDatabase';
 
@@ -7,28 +7,6 @@ interface Migration {
   id: number;
   name: string;
   up: (db: SqliteDatabase, legacyTicketsPath: string) => void;
-}
-
-interface LegacyTicket {
-  guildId?: unknown;
-  status?: unknown;
-  updatedAt?: unknown;
-  createdAt?: unknown;
-  ticketNumber?: unknown;
-  departmentId?: unknown;
-  tagId?: unknown;
-  ownerId?: unknown;
-  priority?: unknown;
-  claimedByIds?: unknown;
-  participantIds?: unknown;
-  metadata?: unknown;
-  deletedAt?: unknown;
-  deletionReason?: unknown;
-}
-
-interface LegacyTicketState {
-  version?: unknown;
-  tickets?: Record<string, LegacyTicket | null>;
 }
 
 const DATA_DIR = join(process.cwd(), 'data');
@@ -70,53 +48,8 @@ const migrations: readonly Migration[] = [
     id: 2,
     name: 'import_legacy_ticket_json',
     up: (db, legacyTicketsPath) => {
-      if (!existsSync(legacyTicketsPath)) return;
-
-      const raw = readFileSync(legacyTicketsPath, 'utf8');
-      let parsed: LegacyTicketState;
-
-      try {
-        parsed = JSON.parse(raw) as LegacyTicketState;
-      } catch (error) {
-        throw new Error(
-          'SupportForge could not migrate data/tickets.json because the legacy file is invalid JSON. The file was not modified.',
-          { cause: error },
-        );
-      }
-
-      if (
-        !parsed.tickets ||
-        typeof parsed.tickets !== 'object' ||
-        Array.isArray(parsed.tickets)
-      ) {
-        throw new Error(
-          'SupportForge could not migrate data/tickets.json because its tickets collection is malformed. The file was not modified.',
-        );
-      }
-
-      /*
-       * Validate the complete source before touching either the database or
-       * the legacy file. The backup is intentionally retained even if the DB
-       * transaction later fails, because recovery is preferable to cleanup.
-       */
-      const backupPath =
-        legacyTicketsPath + '.pre-sqlite-' + Date.now() + '.backup';
-      copyFileSync(legacyTicketsPath, backupPath);
-
-      const stringOrNull = (value: unknown): string | null =>
-        typeof value === 'string' && value.trim() ? value : null;
-
-      const stringArray = (value: unknown): string[] =>
-        Array.isArray(value)
-          ? value.filter((item): item is string => typeof item === 'string')
-          : [];
-
-      const metadataObject = (value: unknown): Record<string, unknown> =>
-        value &&
-        typeof value === 'object' &&
-        !Array.isArray(value)
-          ? value as Record<string, unknown>
-          : {};
+      const records = readLegacyTicketJson(legacyTicketsPath);
+      if (!records) return;
 
       const insert = db.prepare(
         'INSERT OR IGNORE INTO tickets (' +
@@ -125,36 +58,42 @@ const migrations: readonly Migration[] = [
         ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       );
 
-      for (const [channelId, rawTicket] of Object.entries(parsed.tickets)) {
-        const ticket = rawTicket ?? {};
-        const now = new Date().toISOString();
-        const status =
-          ticket.status === 'claimed' ||
-          ticket.status === 'pending' ||
-          ticket.status === 'reopened' ||
-          ticket.status === 'closed' ||
-          ticket.status === 'archived'
-            ? ticket.status
-            : 'open';
-
-        insert.run(
-          'legacy:' + channelId,
-          stringOrNull(ticket.guildId) ?? 'unknown',
-          channelId,
-          stringOrNull(ticket.ticketNumber),
-          status,
-          stringOrNull(ticket.departmentId),
-          stringOrNull(ticket.tagId),
-          stringOrNull(ticket.ownerId),
-          stringOrNull(ticket.priority),
-          JSON.stringify(stringArray(ticket.claimedByIds)),
-          JSON.stringify(stringArray(ticket.participantIds)),
-          JSON.stringify(metadataObject(ticket.metadata)),
-          stringOrNull(ticket.createdAt) ?? now,
-          stringOrNull(ticket.updatedAt) ?? now,
-          stringOrNull(ticket.deletedAt),
-          stringOrNull(ticket.deletionReason),
+      for (const ticket of records) {
+        const result = insert.run(
+          ticket.id,
+          ticket.guildId,
+          ticket.channelId,
+          ticket.ticketNumber,
+          ticket.status,
+          ticket.departmentId,
+          ticket.tagId,
+          ticket.ownerId,
+          ticket.priority,
+          JSON.stringify(ticket.claimedByIds),
+          JSON.stringify(ticket.participantIds),
+          JSON.stringify(ticket.metadata),
+          ticket.createdAt,
+          ticket.updatedAt,
+          ticket.deletedAt,
+          ticket.deletionReason,
         );
+
+        if (Number(result.changes) === 0) {
+          const existing = db.prepare(
+            'SELECT id, guild_id, channel_id FROM tickets WHERE channel_id = ?',
+          ).get(ticket.channelId);
+
+          if (
+            !existing ||
+            existing.id !== ticket.id ||
+            existing.guild_id !== ticket.guildId
+          ) {
+            throw new Error(
+              'Legacy ticket ' + ticket.channelId +
+                ' conflicts with an existing database record. The migration refused to overwrite it.',
+            );
+          }
+        }
       }
     },
   },
@@ -193,6 +132,25 @@ const migrations: readonly Migration[] = [
         ') STRICT; ' +
         'CREATE INDEX IF NOT EXISTS idx_outbox_pending ON outbox_events(status, available_at, created_at); ' +
         'CREATE INDEX IF NOT EXISTS idx_outbox_aggregate ON outbox_events(aggregate_type, aggregate_id, created_at);'
+      );
+    },
+  },
+  {
+    id: 4,
+    name: 'add_document_storage_and_outbox_processing_lease',
+    up: (db) => {
+      const columns = db.prepare('PRAGMA table_info(outbox_events)').all();
+      if (!columns.some((column) => column.name === 'processing_started_at')) {
+        db.exec('ALTER TABLE outbox_events ADD COLUMN processing_started_at TEXT');
+      }
+
+      db.exec(
+        'CREATE TABLE IF NOT EXISTS app_documents (' +
+        'document_key TEXT PRIMARY KEY, ' +
+        'payload_json TEXT NOT NULL, ' +
+        'updated_at TEXT NOT NULL' +
+        ') STRICT; ' +
+        'CREATE INDEX IF NOT EXISTS idx_app_documents_updated_at ON app_documents(updated_at);'
       );
     },
   },

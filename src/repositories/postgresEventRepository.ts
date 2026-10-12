@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 
+import { MAX_OUTBOX_ATTEMPTS } from '../core/events/domainEvents';
+
 import type {
   DomainEvent,
   DomainEventType,
@@ -78,6 +80,7 @@ function fromOutboxRow(row: OutboxRow): OutboxEvent {
     availableAt: iso(row.available_at) as string,
     createdAt: iso(row.created_at) as string,
     processedAt: iso(row.processed_at),
+    processingStartedAt: iso(row.processing_started_at),
     lastError: row.last_error,
   };
 }
@@ -122,7 +125,7 @@ export class PostgresEventRepository {
         event.aggregateId,
         event.guildId,
         event.type,
-        JSON.stringify(outboxPayload),
+        JSON.stringify({ ...outboxPayload, channelId: event.channelId, domainEventId: event.id }),
         event.occurredAt,
         event.occurredAt,
       ],
@@ -143,7 +146,9 @@ export class PostgresEventRepository {
     availableAt = new Date().toISOString(),
   ): Promise<number> {
     const result = await this.executor.query(
-      "UPDATE outbox_events SET status = 'pending', available_at = $1::timestamptz, processing_started_at = NULL WHERE status = 'processing' AND processing_started_at < $2::timestamptz",
+      "UPDATE outbox_events SET status = 'pending', available_at = $1::timestamptz, processing_started_at = NULL " +
+        "WHERE status = 'processing' AND ((processing_started_at IS NOT NULL AND processing_started_at < $2::timestamptz) " +
+        "OR (processing_started_at IS NULL AND available_at < $2::timestamptz))",
       [availableAt, olderThan],
     );
     return result.rowCount ?? 0;
@@ -163,9 +168,9 @@ export class PostgresEventRepository {
       const result = await client.query<OutboxRow>(
         "WITH candidates AS (" +
           "SELECT id FROM outbox_events " +
-          "WHERE status IN ('pending', 'failed') AND available_at <= NOW() " +
+          "WHERE status IN ('pending', 'failed') AND attempts < $1 AND available_at <= NOW() " +
           "ORDER BY created_at ASC " +
-          "LIMIT $1 " +
+          "LIMIT $2 " +
           "FOR UPDATE SKIP LOCKED" +
         ") " +
         "UPDATE outbox_events AS o " +
@@ -173,7 +178,7 @@ export class PostgresEventRepository {
         "FROM candidates " +
         "WHERE o.id = candidates.id " +
         "RETURNING o.*",
-        [safeLimit],
+        [MAX_OUTBOX_ATTEMPTS, safeLimit],
       );
 
       await client.query('COMMIT');
@@ -193,16 +198,17 @@ export class PostgresEventRepository {
   public async listPendingOutbox(limit = 100): Promise<OutboxEvent[]> {
     const safeLimit = Math.max(1, Math.min(limit, 500));
     const result = await this.executor.query<OutboxRow>(
-      "SELECT * FROM outbox_events WHERE status IN ('pending', 'failed') AND available_at <= NOW() ORDER BY created_at ASC LIMIT $1",
-      [safeLimit],
+      "SELECT * FROM outbox_events WHERE status IN ('pending', 'failed') AND attempts < $1 AND available_at <= NOW() ORDER BY created_at ASC LIMIT $2",
+      [MAX_OUTBOX_ATTEMPTS, safeLimit],
     );
     return result.rows.map(fromOutboxRow);
   }
 
   public async markOutboxProcessing(id: string): Promise<boolean> {
     const result = await this.executor.query(
-      "UPDATE outbox_events SET status = 'processing', attempts = attempts + 1, processing_started_at = NOW() WHERE id = $1 AND status IN ('pending', 'failed')",
-      [id],
+      "UPDATE outbox_events SET status = 'processing', attempts = attempts + 1, processing_started_at = NOW() " +
+        "WHERE id = $1 AND status IN ('pending', 'failed') AND attempts < $2",
+      [id, MAX_OUTBOX_ATTEMPTS],
     );
     return (result.rowCount ?? 0) === 1;
   }
@@ -222,10 +228,13 @@ export class PostgresEventRepository {
     id: string,
     error: string,
     availableAt: string,
+    permanent = false,
   ): Promise<boolean> {
     const result = await this.executor.query(
-      "UPDATE outbox_events SET status = 'failed', last_error = $1, available_at = $2::timestamptz, processing_started_at = NULL WHERE id = $3 AND status = 'processing'",
-      [error.slice(0, 2_000), availableAt, id],
+      "UPDATE outbox_events SET status = 'failed', last_error = $1, available_at = $2::timestamptz, " +
+        "processing_started_at = NULL, attempts = CASE WHEN $3 THEN $4 ELSE attempts END " +
+        "WHERE id = $5 AND status = 'processing'",
+      [error.slice(0, 2_000), availableAt, permanent, MAX_OUTBOX_ATTEMPTS, id],
     );
     return (result.rowCount ?? 0) === 1;
   }
@@ -240,7 +249,7 @@ export class PostgresEventRepository {
 
   public async requeueFailed(id: string, availableAt: string): Promise<boolean> {
     const result = await this.executor.query(
-      "UPDATE outbox_events SET status = 'pending', available_at = $1::timestamptz, last_error = NULL WHERE id = $2 AND status = 'failed'",
+      "UPDATE outbox_events SET status = 'pending', available_at = $1::timestamptz, last_error = NULL, attempts = 0 WHERE id = $2 AND status = 'failed'",
       [availableAt, id],
     );
     return (result.rowCount ?? 0) === 1;

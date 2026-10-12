@@ -90,7 +90,12 @@ export function buildTicketPanelEmbed(
       { name: '🗄️ Archived', value: formatInstant(archivedAt), inline: true },
     )
     .setFooter({ text: `${guild.name} • #${channelName}` })
-    .setTimestamp();
+    .setTimestamp(
+      getField(topic, 'updated_at') &&
+      !Number.isNaN(new Date(getField(topic, 'updated_at')!).getTime())
+        ? new Date(getField(topic, 'updated_at')!)
+        : new Date(),
+    );
 }
 
 export function buildTicketPanelComponents(
@@ -295,19 +300,38 @@ export async function refreshTicketPanel(
     return;
   }
 
+  const desiredEmbed = buildTicketPanelEmbed(
+    channel.guild,
+    channel.name,
+    effectiveTopic,
+    config,
+  );
+  const desiredComponents = buildTicketPanelComponents(
+    getTicketStatus(effectiveTopic),
+    effectiveTopic,
+  );
+
+  /*
+   * Reconciliation is deliberately idempotent. Replayed outbox events must
+   * not issue another message PATCH when the visible ticket panel is already
+   * correct, because message edits have their own Discord route limits.
+   */
+  const currentEmbeds = JSON.stringify(message.embeds.map((embed) => embed.toJSON()));
+  const nextEmbeds = JSON.stringify([desiredEmbed.toJSON()]);
+  const currentComponents = JSON.stringify(
+    message.components.map((row) => row.toJSON()),
+  );
+  const nextComponents = JSON.stringify(
+    desiredComponents.map((row) => row.toJSON()),
+  );
+
+  if (currentEmbeds === nextEmbeds && currentComponents === nextComponents) {
+    return;
+  }
+
   await message.edit({
-    embeds: [
-      buildTicketPanelEmbed(
-        channel.guild,
-        channel.name,
-        effectiveTopic,
-        config,
-      ),
-    ],
-    components: buildTicketPanelComponents(
-      getTicketStatus(effectiveTopic),
-      effectiveTopic,
-    ),
+    embeds: [desiredEmbed],
+    components: desiredComponents,
   });
 }
 

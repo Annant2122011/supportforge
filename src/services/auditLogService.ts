@@ -15,9 +15,8 @@ import {
   type Role,
   type TextChannel,
 } from 'discord.js';
-import { copyFile, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
+import { getJsonDocument, setJsonDocument } from './jsonDocumentPersistenceService';
 import { getGuildConfig, updateGuildConfig } from './configService';
 import { getAdvancedSettings } from './advancedSettingsService';
 import { ensureChannelPurposeMessage } from './channelPurposeService';
@@ -107,10 +106,6 @@ const AUDIT_DEV_TOPIC = 'supportforge:audit-dev';
 const AUDIT_NAME = 'audit-log-general';
 const AUDIT_DEV_NAME = 'audit-log-dev';
 const AUDIT_DEVELOPER_ROLE_NAME = 'developer-mode audit-log';
-const DATA_DIR = join(process.cwd(), 'data');
-const AUDIT_PATH = join(DATA_DIR, 'audit-log.json');
-const AUDIT_BACKUP_PATH = join(DATA_DIR, 'audit-log.backup.json');
-
 let state: AuditStore | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 let dailyScheduler: NodeJS.Timeout | null = null;
@@ -197,10 +192,12 @@ function cloneGuildStore(): AuditGuildStore {
 async function persist(): Promise<void> {
   if (!state) return;
 
+  // Database writes are atomic and durable. Keep the previous queue so
+  // concurrent interaction handlers serialize full-document snapshots rather
+  // than racing one another with overlapping writes.
   writeQueue = writeQueue
     .catch(() => undefined)
     .then(async () => {
-      await mkdir(DATA_DIR, { recursive: true });
       const persistedState = JSON.parse(JSON.stringify(state)) as AuditStore;
 
       for (const store of Object.values(persistedState.guilds)) {
@@ -209,26 +206,7 @@ async function persist(): Promise<void> {
         }
       }
 
-      const serialized = JSON.stringify(persistedState, null, 2);
-      const temporaryPath =
-        AUDIT_PATH + '.tmp-' + process.pid + '-' + Date.now();
-
-      await writeFile(temporaryPath, serialized, 'utf8');
-
-      try {
-        try {
-          await copyFile(AUDIT_PATH, AUDIT_BACKUP_PATH);
-        } catch (error) {
-          const code = (error as NodeJS.ErrnoException).code;
-          if (code !== 'ENOENT') {
-            throw error;
-          }
-        }
-
-        await rename(temporaryPath, AUDIT_PATH);
-      } finally {
-        await unlink(temporaryPath).catch(() => undefined);
-      }
+      await setJsonDocument('audit-log', persistedState);
     });
 
   await writeQueue;
@@ -237,41 +215,18 @@ async function persist(): Promise<void> {
 async function load(): Promise<AuditStore> {
   if (state) return state;
 
-  await mkdir(DATA_DIR, { recursive: true });
+  // Legacy audit-log.json and audit-log.backup.json are imported into the
+  // database during initializePersistence(). The database is authoritative
+  // after that one-time, insert-if-absent migration.
+  const parsed = await getJsonDocument<Partial<AuditStore>>('audit-log');
 
-  let parsed: Partial<AuditStore> | undefined;
-  let primaryError: unknown;
-
-  try {
-    const raw = await readFile(AUDIT_PATH, 'utf8');
-    parsed = JSON.parse(raw) as Partial<AuditStore>;
-  } catch (error) {
-    primaryError = error;
-  }
-
-  if (!parsed) {
-    try {
-      const backup = await readFile(AUDIT_BACKUP_PATH, 'utf8');
-      parsed = JSON.parse(backup) as Partial<AuditStore>;
-      console.warn('⚠️ SupportForge primary audit data could not be loaded; using the backup audit store.');
-    } catch (backupError) {
-      const primaryCode = (primaryError as NodeJS.ErrnoException | undefined)?.code;
-      const backupCode = (backupError as NodeJS.ErrnoException | undefined)?.code;
-
-      if (primaryCode === 'ENOENT' && backupCode === 'ENOENT') {
-        state = {
-          version: 2,
-          guilds: {},
-        };
-        await persist();
-        return state;
-      }
-
-      throw new Error(
-        'SupportForge audit data could not be loaded safely. The primary and backup audit stores are unavailable or invalid. No audit history was discarded.',
-        { cause: backupError },
-      );
-    }
+  if (parsed === undefined) {
+    state = {
+      version: 2,
+      guilds: {},
+    };
+    await persist();
+    return state;
   }
 
   const rawGuilds = parsed?.guilds;
@@ -328,6 +283,9 @@ async function load(): Promise<AuditStore> {
                   : new Date().toISOString(),
               ...(typeof event.ticketNumber === 'string'
                 ? { ticketNumber: event.ticketNumber }
+                : {}),
+              ...(typeof event.ticketChannelId === 'string'
+                ? { ticketChannelId: event.ticketChannelId }
                 : {}),
               ...(typeof event.detail === 'string'
                 ? { detail: event.detail }

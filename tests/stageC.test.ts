@@ -119,6 +119,7 @@ test('status transitions are conditional, durable, and append a domain event plu
     const eventRepository = new SqliteEventRepository(db);
     const events = eventRepository.listTicketEvents('ticket-c-1');
     assert.equal(events.length, 2);
+    assert.equal(events[1].type, 'ticket.claimed');
     assert.deepEqual(events[1].payload, {
       from: 'open',
       to: 'claimed',
@@ -126,6 +127,110 @@ test('status transitions are conditional, durable, and append a domain event plu
 
     const outbox = eventRepository.listOutbox('pending');
     assert.equal(outbox.length, 2);
+  });
+});
+
+test('atomic lifecycle and metadata transition commits state, event log, and outbox together', async () => {
+  await withDatabase(async (db) => {
+    const tickets = new SqliteTicketRepository(db);
+    tickets.create(record());
+
+    tickets.transitionStatusAndMetadata(
+      'channel-c-1',
+      'claimed',
+      {
+        priority: 'critical',
+        claimedByIds: ['moderator-1'],
+      },
+      '2026-10-06T12:03:00.000Z',
+      {
+        id: 'moderator-1',
+        attribution: 'actorKnown',
+        confidence: 'high',
+      },
+    );
+
+    const saved = tickets.getByChannelId('channel-c-1');
+    assert.equal(saved?.status, 'claimed');
+    assert.equal(saved?.priority, 'critical');
+    assert.deepEqual(saved?.claimedByIds, ['moderator-1']);
+
+    const events = new SqliteEventRepository(db);
+    assert.deepEqual(
+      events.listTicketEvents('ticket-c-1').map((event) => event.type),
+      ['ticket.created', 'ticket.claimed', 'ticket.metadata_changed'],
+    );
+    assert.equal(events.listOutbox('pending').length, 3);
+  });
+});
+
+test('failed outbox enqueue rolls back the entire ticket transition', async () => {
+  await withDatabase(async (db) => {
+    const tickets = new SqliteTicketRepository(db);
+    tickets.create(record());
+    db.exec(
+      "CREATE TRIGGER fail_claimed_outbox BEFORE INSERT ON outbox_events " +
+      "WHEN NEW.event_type = 'ticket.claimed' BEGIN SELECT RAISE(ABORT, 'simulated outbox failure'); END;",
+    );
+
+    assert.throws(
+      () => tickets.transitionStatusAndMetadata(
+        'channel-c-1',
+        'claimed',
+        { priority: 'high' },
+        '2026-10-06T12:04:00.000Z',
+      ),
+      /simulated outbox failure/,
+    );
+
+    const saved = tickets.getByChannelId('channel-c-1');
+    assert.equal(saved?.status, 'open');
+    assert.equal(saved?.priority, 'normal');
+
+    const events = new SqliteEventRepository(db);
+    assert.deepEqual(
+      events.listTicketEvents('ticket-c-1').map((event) => event.type),
+      ['ticket.created'],
+    );
+    assert.equal(events.listOutbox('pending').length, 1);
+  });
+});
+
+test('ticket message activity updates metadata and emits a typed domain event', async () => {
+  await withDatabase(async (db) => {
+    const tickets = new SqliteTicketRepository(db);
+    tickets.create(record());
+
+    const occurredAt = '2026-10-06T12:05:00.000Z';
+    tickets.transitionStatusAndMetadata(
+      'channel-c-1',
+      'open',
+      {
+        metadata: {
+          lastMessageId: 'message-1',
+          lastMessageAuthorId: 'user-1',
+          lastMessageAuthorType: 'customer',
+          lastActivityAt: occurredAt,
+          lastCustomerMessageAt: occurredAt,
+        },
+      },
+      occurredAt,
+      { id: 'user-1', attribution: 'actorKnown', confidence: 'high' },
+    );
+
+    const ticket = tickets.getByChannelId('channel-c-1');
+    assert.equal(ticket?.metadata.lastMessageId, 'message-1');
+    assert.equal(ticket?.metadata.lastCustomerMessageAt, occurredAt);
+
+    const events = new SqliteEventRepository(db);
+    const event = events.listTicketEvents('ticket-c-1')[1];
+    assert.equal(event.type, 'ticket.message.received');
+    assert.deepEqual(event.payload, {
+      changedFields: ['metadata'],
+      messageId: 'message-1',
+      messageAuthorType: 'customer',
+      messageTimestamp: occurredAt,
+    });
   });
 });
 
@@ -166,8 +271,8 @@ test('outbox claiming prevents duplicate workers and stale processing can recove
 
     const stale = new Date(Date.now() - 60 * 60_000).toISOString();
     db.prepare(
-      "UPDATE outbox_events SET available_at = ? WHERE id = ?",
-    ).run(stale, pending[0].id);
+      "UPDATE outbox_events SET available_at = ?, processing_started_at = ? WHERE id = ?",
+    ).run(stale, stale, pending[0].id);
 
     assert.equal(
       events.recoverStaleProcessing(
@@ -179,7 +284,37 @@ test('outbox claiming prevents duplicate workers and stale processing can recove
     assert.equal(events.listPendingOutbox().length, 1);
   });
 });
-test('deleting a ticket atomically purges its durable events and outbox records', async () => {
+test('outbox automatic retries are bounded and explicit requeue resets the attempt budget', async () => {
+  await withDatabase(async (db) => {
+    const tickets = new SqliteTicketRepository(db);
+    tickets.create(record());
+
+    const events = new SqliteEventRepository(db);
+    const first = events.listPendingOutbox()[0];
+    assert.ok(first);
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      db.prepare(
+        "UPDATE outbox_events SET available_at = ? WHERE id = ?",
+      ).run(new Date().toISOString(), first.id);
+      assert.equal(events.markOutboxProcessing(first.id), true);
+      events.markOutboxFailed(
+        first.id,
+        'simulated Discord error',
+        new Date().toISOString(),
+      );
+    }
+
+    assert.equal(events.listPendingOutbox().length, 0);
+    assert.equal(events.listOutbox('failed')[0]?.attempts, 10);
+
+    events.requeueFailed(first.id, new Date().toISOString());
+    assert.equal(events.listPendingOutbox().length, 1);
+    assert.equal(events.listPendingOutbox()[0]?.attempts, 0);
+  });
+});
+
+test('removing a ticket preserves the ticket tombstone, full event history, and outbox audit trail', async () => {
   await withDatabase(async (db) => {
     const tickets = new SqliteTicketRepository(db);
     tickets.create(record());
@@ -190,8 +325,14 @@ test('deleting a ticket atomically purges its durable events and outbox records'
 
     tickets.remove('channel-c-1');
 
-    assert.equal(tickets.getByChannelId('channel-c-1'), undefined);
-    assert.equal(events.listTicketEvents('ticket-c-1').length, 0);
-    assert.equal(events.listOutbox('pending').length, 0);
+    const deleted = tickets.getByChannelId('channel-c-1');
+    assert.ok(deleted);
+    assert.ok(deleted.deletedAt);
+    assert.match(deleted.deletionReason ?? '', /history retained/i);
+    assert.deepEqual(
+      events.listTicketEvents('ticket-c-1').map((event) => event.type),
+      ['ticket.created', 'ticket.deleted'],
+    );
+    assert.equal(events.listOutbox('pending').length, 2);
   });
 });

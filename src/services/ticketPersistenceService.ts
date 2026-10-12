@@ -7,7 +7,7 @@ import {
   getTicketPersistenceRepository,
   initializePersistence,
 } from '../core/persistence/provider';
-import type { TicketRepositoryRecord } from '../repositories/ticketRepository';
+import type { TicketMetadataUpdates, TicketRepositoryRecord } from '../repositories/ticketRepository';
 
 export interface PersistedTicket {
   id: string;
@@ -38,6 +38,7 @@ export interface TicketRegistration {
   createdAt: string;
   claimedByIds?: string[];
   participantIds?: string[];
+  metadata?: Record<string, unknown>;
 }
 
 async function getRepository() {
@@ -71,6 +72,14 @@ export async function getPersistedTicket(
 ): Promise<PersistedTicket | undefined> {
   const repository = await getRepository();
   const record = await repository.getByChannelId(channelId);
+  return record ? toPersistedTicket(record) : undefined;
+}
+
+export async function getPersistedTicketById(
+  ticketId: string,
+): Promise<PersistedTicket | undefined> {
+  const repository = await getRepository();
+  const record = await repository.getById(ticketId);
   return record ? toPersistedTicket(record) : undefined;
 }
 
@@ -117,7 +126,7 @@ export async function registerTicket(
     guildId: current?.guildId ?? registration.guildId,
     channelId,
     status: current?.status ?? 'open',
-    updatedAt: registration.createdAt,
+    updatedAt: current?.updatedAt ?? registration.createdAt,
     createdAt,
     ticketNumber: current?.ticketNumber ?? registration.ticketNumber,
     departmentId: current?.departmentId ?? registration.departmentId,
@@ -126,13 +135,13 @@ export async function registerTicket(
     priority: current?.priority ?? registration.priority,
     claimedByIds: current?.claimedByIds ?? registration.claimedByIds ?? [],
     participantIds: current?.participantIds ?? registration.participantIds ?? [],
-    metadata: current?.metadata ?? {},
+    metadata: { ...(current?.metadata ?? {}), ...(registration.metadata ?? {}) },
     deletedAt: current?.deletedAt ?? null,
     deletionReason: current?.deletionReason ?? null,
   };
 
   if (current) {
-    await repository.upsert(record);
+    await repository.upsert(record, actor);
   } else {
     await repository.create(record, actor);
   }
@@ -154,6 +163,23 @@ export async function setPersistedTicketStatus(
   }
 
   await repository.transitionStatus(channelId, status, now, actor);
+}
+
+export async function transitionPersistedTicket(
+  channelId: string,
+  status: TicketStatus,
+  updates: TicketMetadataUpdates,
+  actor?: EventActor,
+  updatedAt = new Date().toISOString(),
+): Promise<void> {
+  const repository = await getRepository();
+  await repository.transitionStatusAndMetadata(
+    channelId,
+    status,
+    updates,
+    updatedAt,
+    actor,
+  );
 }
 
 export async function updatePersistedTicketMetadata(
