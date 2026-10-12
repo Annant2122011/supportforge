@@ -9,6 +9,7 @@ import {
 import {
   getPersistedTicket,
   getPersistedTicketById,
+  updatePersistedTicketMetadata,
   markPersistedTicketDeleted,
   type PersistedTicket,
 } from './ticketPersistenceService';
@@ -224,7 +225,7 @@ export class TicketOutboxPublisher implements OutboxPublisher {
 
   public async publish(event: OutboxEvent): Promise<void> {
     const payloadChannelId = stringValue(event.payload.channelId);
-    const ticket = payloadChannelId
+    let ticket = payloadChannelId
       ? await getPersistedTicket(payloadChannelId)
       : await getPersistedTicketById(event.aggregateId);
 
@@ -293,6 +294,64 @@ export class TicketOutboxPublisher implements OutboxPublisher {
     }
 
     const channel = fetched as TextChannel;
+
+    /*
+     * Private voice rooms are temporary resources whose lifetime is tied to
+     * the claimed state. On a transition away from claimed, reconcile their
+     * deletion from durable metadata before removing the recovery pointer.
+     * This covers crashes between committing ticket state and deleting voice.
+     */
+    if (ticket.status !== 'claimed') {
+      const voiceChannelId =
+        stringValue(ticket.metadata.voiceChannelId) ??
+        stringValue(getField(channel.topic ?? '', 'voice_channel_id'));
+
+      if (voiceChannelId) {
+        let voiceChannel;
+        try {
+          voiceChannel = guild.channels.cache.get(voiceChannelId) ??
+            await guild.channels.fetch(voiceChannelId);
+        } catch (error) {
+          if (!isUnknownChannel(error)) throw error;
+          voiceChannel = null;
+        }
+
+        if (voiceChannel?.type === ChannelType.GuildVoice) {
+          try {
+            await voiceChannel.delete(
+              'SupportForge outbox reconciliation: ticket is no longer claimed',
+            );
+          } catch (error) {
+            if (!isUnknownChannel(error)) throw error;
+          }
+        } else if (voiceChannel) {
+          throw new PermanentOutboxPublishError(
+            'Ticket ' + ticket.id + ' voice recovery pointer refers to a non-voice Discord channel.',
+          );
+        }
+
+        await updatePersistedTicketMetadata(
+          ticketChannelId,
+          {
+            metadata: {
+              voiceChannelId: null,
+              voiceChannelName: null,
+              voiceStartedAt: null,
+              voiceStartedBy: null,
+            },
+          },
+          {
+            id: 'supportforge-system',
+            attribution: 'actorUnknown',
+            confidence: 'none',
+          },
+        );
+
+        const refreshed = await getPersistedTicket(ticketChannelId);
+        if (refreshed) ticket = refreshed;
+      }
+    }
+
     const topic = mergeDurableTicketTopic(channel.topic ?? '', ticket);
     const parent = await resolveTicketParent(guild, ticket);
     const name = getTicketChannelName(
