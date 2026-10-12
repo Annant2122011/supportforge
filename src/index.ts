@@ -54,6 +54,8 @@ import { isFactoryResetInProgress } from './services/factoryResetService';
 import { startSupportForgeUpdateMonitor } from './services/updateService';
 import type { GuildBasedChannel, TextChannel } from 'discord.js';
 import { initializePersistence } from './core/persistence/provider';
+import { startOutboxProcessor } from './core/events/outboxProcessor';
+import { TicketOutboxPublisher } from './services/ticketOutboxPublisher';
 import { configureDiscordChannelRest } from './services/discordChannelService';
 
 const token = process.env.DISCORD_TOKEN;
@@ -120,10 +122,18 @@ client.rest.on(RESTEvents.RateLimited, (rateLimit) => {
   );
 });
 
+let stopOutboxProcessor: (() => void) | undefined;
+
 client.once('clientReady', (readyClient) => {
   console.log(
     `✅ SupportForge online as ${readyClient.user.tag}`,
   );
+  if (!stopOutboxProcessor) {
+    stopOutboxProcessor = startOutboxProcessor(
+      new TicketOutboxPublisher(client),
+      5_000,
+    );
+  }
   startTicketRetentionScheduler(client);
   startAuditDailySummaryScheduler(client);
   startSupportForgeUpdateMonitor(client);
