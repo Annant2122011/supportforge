@@ -33,6 +33,10 @@ class SqliteTicketRepositoryAdapter implements AsyncTicketRepository {
     this.repository = new SqliteTicketRepository(database);
   }
 
+  async getById(ticketId: string) {
+    return this.repository.getById(ticketId);
+  }
+
   async getByChannelId(channelId: string) {
     return this.repository.getByChannelId(channelId);
   }
