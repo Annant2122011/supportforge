@@ -4,7 +4,7 @@ import {
 } from '../core/domain/ticketLifecycle';
 import { randomUUID } from 'node:crypto';
 import { SqliteEventRepository } from './eventRepository';
-import type { EventActor } from '../core/events/domainEvents';
+import type { DomainEventType, EventActor } from '../core/events/domainEvents';
 import {
   getSupportForgeDatabase,
   type SqliteDatabase,
@@ -109,6 +109,41 @@ function parseMetadata(value: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function lifecycleEventType(from: TicketStatus, to: TicketStatus): DomainEventType {
+  if (to === 'claimed') return 'ticket.claimed';
+  if (to === 'pending') return 'ticket.pending';
+  if (to === 'closed') return 'ticket.closed';
+  if (to === 'reopened') return 'ticket.reopened';
+  if (to === 'archived') return 'ticket.archived';
+  if (from === 'claimed' && to === 'open') return 'ticket.unclaimed';
+  if (from === 'pending' && to === 'open') return 'ticket.resumed';
+  return 'ticket.status_changed';
+}
+
+function metadataEventType(
+  changedFields: string[],
+  current: TicketRepositoryRecord,
+  updates: Partial<Pick<TicketRepositoryRecord,
+    'departmentId' | 'tagId' | 'ownerId' | 'priority' |
+    'claimedByIds' | 'participantIds' | 'metadata'>>,
+): DomainEventType {
+  if (changedFields.length === 1) {
+    const field = changedFields[0];
+    if (field === 'priority') return 'ticket.priority.changed';
+    if (field === 'departmentId') return 'ticket.department.changed';
+    if (field === 'tagId') return 'ticket.tag.changed';
+    if (field === 'participantIds' && updates.participantIds) {
+      const before = new Set(current.participantIds);
+      const after = new Set(updates.participantIds);
+      const added = [...after].filter((id) => !before.has(id));
+      const removed = [...before].filter((id) => !after.has(id));
+      if (added.length === 1 && removed.length === 0) return 'ticket.participant.added';
+      if (removed.length === 1 && added.length === 0) return 'ticket.participant.removed';
+    }
+  }
+  return 'ticket.metadata_changed';
 }
 
 function fromRow(row: TicketRow): TicketRepositoryRecord {
@@ -346,7 +381,7 @@ export class SqliteTicketRepository implements TicketRepository {
 
       this.events.append({
         id: randomUUID(),
-        type: 'ticket.status_changed',
+        type: lifecycleEventType(current.status, status),
         aggregateType: 'ticket',
         aggregateId: current.id,
         guildId: current.guildId,
@@ -450,7 +485,7 @@ export class SqliteTicketRepository implements TicketRepository {
 
       this.events.append({
         id: randomUUID(),
-        type: 'ticket.metadata_changed',
+        type: metadataEventType(Object.keys(updates), current, updates),
         aggregateType: 'ticket',
         aggregateId: current.id,
         guildId: current.guildId,
