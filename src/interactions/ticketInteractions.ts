@@ -3733,16 +3733,25 @@ async function applyTicketPriority(
     return;
   }
 
+  const transitionAt = new Date().toISOString();
   const newTopic = setField(
-    topic,
-    'priority',
-    priority,
+    setField(topic, 'priority', priority),
+    'updated_at',
+    transitionAt,
   );
 
-  await updatePersistedTicketMetadata(
+  await transitionPersistedTicket(
     channel.id,
-    { priority },
+    status,
+    {
+      priority,
+      metadata: {
+        lastActivityAt: transitionAt,
+        lastStaffActivityAt: transitionAt,
+      },
+    },
     interactionActor(interaction),
+    transitionAt,
   );
 
   channel.topic = newTopic;
