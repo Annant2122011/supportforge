@@ -4620,45 +4620,45 @@ async function handlePanelModal(
         userId,
       );
 
-      newTopic =
-        setField(
+      const transitionAt = new Date().toISOString();
+      newTopic = setField(
+        setField(newTopic, 'users', users.join(',')),
+        'updated_at',
+        transitionAt,
+      );
+
+      const ownerId = getField(newTopic, 'owner');
+      await transitionPersistedTicket(
+        channel.id,
+        state.status,
+        {
+          participantIds: [...new Set([...(ownerId ? [ownerId] : []), ...users])],
+          metadata: {
+            lastActivityAt: transitionAt,
+            lastStaffActivityAt: transitionAt,
+          },
+        },
+        interactionActor(interaction),
+        transitionAt,
+      );
+
+      try {
+        await applyTicketVisibilityMode(
+          channel,
           newTopic,
-          'users',
-          users.join(','),
+          state.status === 'claimed' ? 'claimed' : 'unclaimed',
+          getField(state.topic, 'claimed_by'),
+          { topic: newTopic },
         );
-
-      await setChannelPermissionOverwrite(
-        channel.id,
-        userId,
-        [
-          PermissionFlagsBits.ViewChannel,
-          PermissionFlagsBits.SendMessages,
-          PermissionFlagsBits.ReadMessageHistory,
-          PermissionFlagsBits.AttachFiles,
-          PermissionFlagsBits.EmbedLinks,
-        ],
-        [],
-        1,
-        'Add ticket user permissions',
-      );
-
-      await setChannelTopic(
-        channel.id,
-        newTopic,
-        'Add ticket user topic update',
-      );
+      } catch (error) {
+        console.warn(
+          'Ticket participant was saved durably, but Discord topic/permission synchronization is pending:',
+          error,
+        );
+      }
 
       channel.topic = newTopic;
-
-      updateRuntimeTicketState(
-        channel,
-        newTopic,
-        state.status,
-      );
-
-      await updatePersistedTicketMetadata(channel.id, {
-        participantIds: users,
-      });
+      updateRuntimeTicketState(channel, newTopic, state.status);
 
       await interaction.editReply(
         `✅ <@${userId}> has been added to the ticket.`,
