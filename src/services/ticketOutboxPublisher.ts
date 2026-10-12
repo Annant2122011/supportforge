@@ -192,7 +192,7 @@ function visibilityOverwrites(
     ownerId: ticket.ownerId ?? '',
     userIds: ticket.participantIds.filter((id) => id !== ticket.ownerId),
     claimedModeratorIds: ticket.claimedByIds,
-    formerClaimantIds: (getField(topic, 'claimed_by') ?? '')
+    formerClaimantIds: (getField(channel.topic ?? topic, 'claimed_by') ?? '')
       .split(',')
       .map((id) => id.trim())
       .filter(Boolean),
