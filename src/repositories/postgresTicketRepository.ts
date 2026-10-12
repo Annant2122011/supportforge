@@ -71,6 +71,20 @@ function metadataEventType(
   return 'ticket.metadata_changed';
 }
 
+function requireStringArray(value: unknown, field: string): string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+    throw new Error('Corrupt PostgreSQL ticket field: ' + field + ' must be a string array.');
+  }
+  return value as string[];
+}
+
+function requireJsonObject(value: unknown, field: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Corrupt PostgreSQL ticket field: ' + field + ' must be a JSON object.');
+  }
+  return value as Record<string, unknown>;
+}
+
 function fromRow(row: TicketRow): TicketRepositoryRecord {
   return {
     id: row.id,
@@ -82,12 +96,9 @@ function fromRow(row: TicketRow): TicketRepositoryRecord {
     tagId: row.tag_id,
     ownerId: row.owner_id,
     priority: row.priority,
-    claimedByIds: Array.isArray(row.claimed_by_ids) ? row.claimed_by_ids : [],
-    participantIds: Array.isArray(row.participant_ids) ? row.participant_ids : [],
-    metadata:
-      row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
-        ? row.metadata
-        : {},
+    claimedByIds: requireStringArray(row.claimed_by_ids, 'claimed_by_ids'),
+    participantIds: requireStringArray(row.participant_ids, 'participant_ids'),
+    metadata: requireJsonObject(row.metadata, 'metadata'),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
     deletedAt: row.deleted_at ? iso(row.deleted_at) : null,
