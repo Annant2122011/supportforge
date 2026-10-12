@@ -1273,22 +1273,8 @@ async function createTicket(
           error,
         );
 
-        void new Promise<void>((resolve) => {
-          setTimeout(resolve, 2_000);
-        })
-          .then(() =>
-            setChannelTopic(
-              ticketChannel!.id,
-              finalTopic,
-              'Ticket topic initialization retry',
-            ),
-          )
-          .catch((retryError) => {
-            console.warn(
-              '⚠️ Ticket topic initialization retry failed:',
-              retryError,
-            );
-          });
+        // Durable ticket registration emits an outbox event after this catch.
+        // The worker reconciles the topic with bounded, rate-limit-aware retry policy.
       }
 
       ticketChannel.topic = finalTopic;
