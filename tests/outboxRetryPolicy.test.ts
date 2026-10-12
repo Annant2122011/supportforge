@@ -31,7 +31,7 @@ test('honors Retry-After headers', () => {
 test('honors textual retry-after messages from wrapped API errors', () => {
   assert.equal(
     calculateOutboxRetryDelayMs(1, new Error('Discord rate limit: retry after 195s')),
-    1_000,
+    196_000,
   );
   assert.equal(
     calculateOutboxRetryDelayMs(3, new Error('queued after another 195s')),
