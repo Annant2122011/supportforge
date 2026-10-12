@@ -290,6 +290,7 @@ async function syncCommandTicketVisibility(
     properties,
     roleIds,
     'Synchronize SupportForge ticket topic, channel name, and visibility in one PATCH',
+    { deferLongRateLimit: false },
   );
   if (properties.topic !== undefined) context.channel.topic = properties.topic;
   if (properties.name !== undefined) context.channel.name = properties.name;
