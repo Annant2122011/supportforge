@@ -593,7 +593,7 @@ export class SqliteTicketRepository implements TicketRepository {
     );
     if (updates.metadata !== undefined) add(
       'metadata_json',
-      JSON.stringify(updates.metadata),
+      JSON.stringify({ ...current.metadata, ...updates.metadata }),
     );
 
     if (assignments.length === 0) return;
