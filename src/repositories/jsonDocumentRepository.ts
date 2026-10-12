@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -156,9 +157,12 @@ export async function importLegacyJsonDocuments(
       continue;
     }
 
-    const value = readLegacyDocument(document.path);
-    const backupPath = document.path + '.pre-database-' + Date.now() + '.backup';
+    // Backup before parsing so even a malformed legacy file has an exact
+    // recovery copy. Never modify or delete the original JSON source.
+    const backupPath =
+      document.path + '.pre-database-' + Date.now() + '-' + randomUUID() + '.backup';
     copyFileSync(document.path, backupPath);
+    const value = readLegacyDocument(document.path);
 
     if (await repository.putIfAbsent(document.key, value)) {
       imported.push(document.key);
