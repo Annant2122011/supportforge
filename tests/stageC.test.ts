@@ -196,6 +196,44 @@ test('failed outbox enqueue rolls back the entire ticket transition', async () =
   });
 });
 
+test('ticket message activity updates metadata and emits a typed domain event', async () => {
+  await withDatabase(async (db) => {
+    const tickets = new SqliteTicketRepository(db);
+    tickets.create(record());
+
+    const occurredAt = '2026-10-06T12:05:00.000Z';
+    tickets.transitionStatusAndMetadata(
+      'channel-c-1',
+      'open',
+      {
+        metadata: {
+          lastMessageId: 'message-1',
+          lastMessageAuthorId: 'user-1',
+          lastMessageAuthorType: 'customer',
+          lastActivityAt: occurredAt,
+          lastCustomerMessageAt: occurredAt,
+        },
+      },
+      occurredAt,
+      { id: 'user-1', attribution: 'actorKnown', confidence: 'high' },
+    );
+
+    const ticket = tickets.getByChannelId('channel-c-1');
+    assert.equal(ticket?.metadata.lastMessageId, 'message-1');
+    assert.equal(ticket?.metadata.lastCustomerMessageAt, occurredAt);
+
+    const events = new SqliteEventRepository(db);
+    const event = events.listTicketEvents('ticket-c-1')[1];
+    assert.equal(event.type, 'ticket.message.received');
+    assert.deepEqual(event.payload, {
+      changedFields: ['metadata'],
+      messageId: 'message-1',
+      messageAuthorType: 'customer',
+      messageTimestamp: occurredAt,
+    });
+  });
+});
+
 test('invalid status transitions do not mutate durable state or create events', async () => {
   await withDatabase(async (db) => {
     const tickets = new SqliteTicketRepository(db);
