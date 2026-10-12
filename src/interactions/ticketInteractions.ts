@@ -553,7 +553,16 @@ async function removePreviousTicketTranscript(
     return;
   }
 
-  const transcriptChannel = guild.channels.cache.get(transcriptChannelId);
+  const transcriptChannel =
+    guild.channels.cache.get(transcriptChannelId) ??
+    await guild.channels.fetch(transcriptChannelId).catch((error) => {
+      console.warn(
+        '⚠️ Could not resolve the configured transcript channel while reopening a ticket:',
+        error,
+      );
+      return null;
+    });
+
   if (!transcriptChannel || transcriptChannel.type !== ChannelType.GuildText) {
     return;
   }
