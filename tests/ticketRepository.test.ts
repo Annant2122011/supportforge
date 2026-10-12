@@ -114,6 +114,65 @@ test('SQLite schema is migrated and repository preserves structured ticket data'
   });
 });
 
+test('legacy ticket migration preserves the source backup and rejects malformed records without coercion', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'supportforge-invalid-legacy-'));
+  const databasePath = join(directory, 'supportforge.sqlite');
+  const legacyTicketsPath = join(directory, 'tickets.json');
+  const source = {
+    version: 1,
+    tickets: {
+      'channel-invalid': {
+        guildId: 'guild-1',
+        status: 'not-a-ticket-status',
+        createdAt: '2026-10-06T10:00:00.000Z',
+        updatedAt: '2026-10-06T10:00:00.000Z',
+      },
+    },
+  };
+
+  await writeFile(legacyTicketsPath, JSON.stringify(source), 'utf8');
+
+  try {
+    assert.throws(
+      () => createSupportForgeDatabase(databasePath, legacyTicketsPath),
+      /unsupported or missing status/,
+    );
+
+    assert.deepEqual(JSON.parse(await readFile(legacyTicketsPath, 'utf8')), source);
+    const backups = (await readdir(directory)).filter((name) => name.includes('.pre-sqlite-'));
+    assert.equal(backups.length, 1);
+    assert.deepEqual(
+      JSON.parse(await readFile(join(directory, backups[0]!), 'utf8')),
+      source,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('legacy ticket migration rejects invalid JSON while keeping a recovery copy', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'supportforge-invalid-json-'));
+  const databasePath = join(directory, 'supportforge.sqlite');
+  const legacyTicketsPath = join(directory, 'tickets.json');
+  const source = '{"version":1,"tickets":';
+
+  await writeFile(legacyTicketsPath, source, 'utf8');
+
+  try {
+    assert.throws(
+      () => createSupportForgeDatabase(databasePath, legacyTicketsPath),
+      /legacy file is invalid JSON/,
+    );
+
+    assert.equal(await readFile(legacyTicketsPath, 'utf8'), source);
+    const backups = (await readdir(directory)).filter((name) => name.includes('.pre-sqlite-'));
+    assert.equal(backups.length, 1);
+    assert.equal(await readFile(join(directory, backups[0]!), 'utf8'), source);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('active owner/department lookup excludes closed and deleted tickets', async () => {
   await withTempDatabase(async (database) => {
     const repository = new SqliteTicketRepository(database);
