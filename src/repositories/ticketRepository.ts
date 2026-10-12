@@ -111,26 +111,33 @@ interface TicketRow extends Record<string, unknown> {
 }
 
 function parseStringArray(value: string): string[] {
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed)
-      ? parsed.filter((item): item is string => typeof item === 'string')
-      : [];
-  } catch {
-    return [];
+    parsed = JSON.parse(value) as unknown;
+  } catch (error) {
+    throw new Error('Corrupt JSON array in SupportForge ticket record.', { cause: error });
   }
+
+  if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== 'string')) {
+    throw new Error('Corrupt string-array field in SupportForge ticket record.');
+  }
+  return parsed as string[];
 }
 
 function parseMetadata(value: string): Record<string, unknown> {
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(value);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {};
-  } catch {
-    return {};
+    parsed = JSON.parse(value) as unknown;
+  } catch (error) {
+    throw new Error('Corrupt JSON metadata in SupportForge ticket record.', { cause: error });
   }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Corrupt object metadata in SupportForge ticket record.');
+  }
+  return parsed as Record<string, unknown>;
 }
+
 
 function lifecycleEventType(from: TicketStatus, to: TicketStatus): DomainEventType {
   if (to === 'claimed') return 'ticket.claimed';
