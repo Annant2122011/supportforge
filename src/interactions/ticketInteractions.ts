@@ -1190,6 +1190,7 @@ async function createTicket(
       )}`,
       `number=${number}`,
       `opened_at=${now}`,
+      `updated_at=${now}`,
     ].join(' ');
 
     const bot =
@@ -1937,6 +1938,7 @@ async function transition(
      * calls fail or are interrupted by a process restart.
      */
     const transitionTime = new Date().toISOString();
+    newTopic = setField(newTopic, 'updated_at', transitionTime);
     const metadataPatch: Record<string, unknown> = {};
     if (newStatus === 'pending') {
       metadataPatch.pendingSince = getField(newTopic, 'pending_since') ?? transitionTime;
