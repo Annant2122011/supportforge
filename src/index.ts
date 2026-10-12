@@ -21,7 +21,9 @@ import {
 } from './services/ticketStateService';
 
 import {
+  getPersistedTicket,
   getPersistedTicketStatus,
+  transitionPersistedTicket,
   markPersistedTicketDeleted,
 } from './services/ticketPersistenceService';
 
@@ -669,8 +671,8 @@ client.on('messageCreate', async (message) => {
   }
 
   const topicStatus = getTicketStatus(topic);
-  const persistedStatus = await getPersistedTicketStatus(message.channel.id);
-  const status = persistedStatus ?? topicStatus;
+  const persistedTicket = await getPersistedTicket(message.channel.id);
+  const status = persistedTicket?.status ?? topicStatus;
 
   if (
     status === 'closed' ||
@@ -712,6 +714,56 @@ client.on('messageCreate', async (message) => {
     }
 
     return;
+  }
+
+  if (persistedTicket && !persistedTicket.deletedAt) {
+    const department = persistedTicket.departmentId
+      ? guildConfig.departments[persistedTicket.departmentId]
+      : undefined;
+    const hasStaffRole = Boolean(
+      department?.staffRoleId &&
+      message.member?.roles.cache.has(department.staffRoleId),
+    );
+    const isOwnerOrParticipant = Boolean(
+      message.author.id === persistedTicket.ownerId ||
+      persistedTicket.participantIds.includes(message.author.id),
+    );
+    const authorType = hasStaffRole
+      ? 'staff'
+      : isOwnerOrParticipant
+        ? 'customer'
+        : 'unknown';
+    const occurredAt = message.createdAt.toISOString();
+
+    void transitionPersistedTicket(
+      message.channel.id,
+      status,
+      {
+        metadata: {
+          lastMessageId: message.id,
+          lastMessageAuthorId: message.author.id,
+          lastMessageAuthorType: authorType,
+          lastActivityAt: occurredAt,
+          ...(authorType === 'customer'
+            ? { lastCustomerMessageAt: occurredAt }
+            : {}),
+          ...(authorType === 'staff'
+            ? { lastStaffActivityAt: occurredAt }
+            : {}),
+        },
+      },
+      {
+        id: message.author.id,
+        attribution: 'actorKnown',
+        confidence: 'high',
+      },
+      occurredAt,
+    ).catch((error) => {
+      console.error(
+        'SupportForge could not persist ticket message activity for ' + message.channel.id + ':',
+        error,
+      );
+    });
   }
 
   void recordTicketMessageForPanel(message).catch((error) => {
