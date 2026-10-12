@@ -5,7 +5,7 @@ import {
 } from './sqliteDatabase';
 import { migratePostgres } from './migrationRunner';
 import { PostgresTicketRepository, type AsyncTicketRepository } from '../../repositories/postgresTicketRepository';
-import { SqliteTicketRepository } from '../../repositories/ticketRepository';
+import { SqliteTicketRepository, type TicketMetadataUpdates } from '../../repositories/ticketRepository';
 import { importLegacyJsonDocuments } from '../../repositories/jsonDocumentRepository';
 
 export type PersistenceProvider = 'sqlite' | 'postgres';
@@ -83,6 +83,16 @@ class SqliteTicketRepositoryAdapter implements AsyncTicketRepository {
     actor?: EventActor,
   ) {
     this.repository.transitionStatus(channelId, status, updatedAt, actor);
+  }
+
+  async transitionStatusAndMetadata(
+    channelId: string,
+    status: Parameters<SqliteTicketRepository['transitionStatusAndMetadata']>[1],
+    updates: TicketMetadataUpdates,
+    updatedAt: string,
+    actor?: EventActor,
+  ) {
+    this.repository.transitionStatusAndMetadata(channelId, status, updates, updatedAt, actor);
   }
 
   async updateMetadata(
