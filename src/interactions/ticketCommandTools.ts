@@ -251,6 +251,7 @@ async function syncCommandTicketVisibility(
   const properties: {
     topic?: string;
     name?: string;
+    parentId?: string;
     permissionOverwrites?: ChannelPermissionOverwrite[];
   } = {};
   if ((context.channel.topic ?? '') !== newTopic) properties.topic = newTopic;
