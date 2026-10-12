@@ -102,6 +102,70 @@ function requireJsonObject(value: unknown, field: string): Record<string, unknow
   return value as Record<string, unknown>;
 }
 
+function mergeTicketMetadata(
+  current: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged = { ...current, ...patch };
+  const firstTimestampFields = [
+    'firstCustomerMessageAt',
+    'firstStaffResponseAt',
+  ];
+  for (const field of firstTimestampFields) {
+    if (typeof current[field] === 'string' && current[field]) {
+      merged[field] = current[field];
+    }
+  }
+
+  const monotonicTimestampFields = [
+    'lastActivityAt',
+    'lastCustomerMessageAt',
+    'lastStaffActivityAt',
+    'lastStaffResponseAt',
+  ];
+  for (const field of monotonicTimestampFields) {
+    const oldValue = current[field];
+    const newValue = patch[field];
+    if (
+      typeof oldValue === 'string' &&
+      oldValue &&
+      (typeof newValue !== 'string' || newValue < oldValue)
+    ) {
+      merged[field] = oldValue;
+    }
+  }
+
+  const oldActivityAt = typeof current.lastActivityAt === 'string'
+    ? current.lastActivityAt
+    : '';
+  const newActivityAt = typeof patch.lastActivityAt === 'string'
+    ? patch.lastActivityAt
+    : '';
+  const oldMessageId = typeof current.lastMessageId === 'string'
+    ? current.lastMessageId
+    : '';
+  const newMessageId = typeof patch.lastMessageId === 'string'
+    ? patch.lastMessageId
+    : '';
+  const sameTimestampOlderSnowflake =
+    oldActivityAt === newActivityAt &&
+    /^\d+$/.test(oldMessageId) &&
+    /^\d+$/.test(newMessageId) &&
+    BigInt(newMessageId) < BigInt(oldMessageId);
+  const olderActivity =
+    Boolean(oldActivityAt && newActivityAt) &&
+    (newActivityAt < oldActivityAt || sameTimestampOlderSnowflake);
+
+  if (olderActivity && newMessageId) {
+    for (const field of ['lastMessageId', 'lastMessageAuthorId', 'lastMessageAuthorType']) {
+      if (current[field] === undefined) delete merged[field];
+      else merged[field] = current[field];
+    }
+  }
+
+  return merged;
+}
+
 function fromRow(row: TicketRow): TicketRepositoryRecord {
   return {
     id: row.id,
@@ -455,7 +519,7 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
         status,
         claimedByIds: updates.claimedByIds ?? current.claimedByIds,
         participantIds: updates.participantIds ?? current.participantIds,
-        metadata: updates.metadata !== undefined ? { ...current.metadata, ...updates.metadata } : current.metadata,
+        metadata: updates.metadata !== undefined ? mergeTicketMetadata(current.metadata, updates.metadata) : current.metadata,
         updatedAt,
       };
 
@@ -576,7 +640,7 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
         ...updates,
         claimedByIds: updates.claimedByIds ?? currentRecord.claimedByIds,
         participantIds: updates.participantIds ?? currentRecord.participantIds,
-        metadata: updates.metadata !== undefined ? { ...currentRecord.metadata, ...updates.metadata } : currentRecord.metadata,
+        metadata: updates.metadata !== undefined ? mergeTicketMetadata(currentRecord.metadata, updates.metadata) : currentRecord.metadata,
         updatedAt,
       };
 
