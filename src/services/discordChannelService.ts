@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { Routes, type REST } from 'discord.js';
+import { getDiscordRetryAfterMs as getRateLimitRetryAfterMs } from '../utils/discordRateLimit';
 
 const MAX_INLINE_RATE_LIMIT_WAIT_MS = 5_000;
 const RATE_LIMIT_SAFETY_MARGIN_MS = 750;
@@ -73,54 +74,6 @@ function resolveDiscordRoute(method: DiscordMutationMethod, path: string): `/${s
   }
 
   throw new Error('Unsupported SupportForge Discord REST route: ' + method + ' ' + path);
-}
-
-function getRateLimitRetryAfterMs(error: unknown): number | null {
-  if (typeof error === 'object' && error !== null) {
-    const record = error as Record<string, unknown>;
-
-    // discord.js RateLimitError exposes retryAfter in milliseconds.
-    const retryAfterMs = Number(record.retryAfter);
-    if (Number.isFinite(retryAfterMs) && retryAfterMs > 0) {
-      return Math.ceil(retryAfterMs);
-    }
-
-    // Discord's raw 429 response uses retry_after in seconds. Support both
-    // the direct response shape and common wrapped API-error shapes.
-    const candidates = [
-      record.retry_after,
-      (record.data as Record<string, unknown> | undefined)?.retry_after,
-      (record.rawError as Record<string, unknown> | undefined)?.retry_after,
-    ];
-    for (const candidate of candidates) {
-      const seconds = Number(candidate);
-      if (candidate !== undefined && Number.isFinite(seconds) && seconds > 0) {
-        return Math.ceil(seconds * 1000);
-      }
-    }
-
-    const headers = record.headers as { get?: (name: string) => string | null } | undefined;
-    if (headers && typeof headers.get === 'function') {
-      const headerSeconds = Number(headers.get('retry-after'));
-      if (Number.isFinite(headerSeconds) && headerSeconds > 0) {
-        return Math.ceil(headerSeconds * 1000);
-      }
-    }
-  }
-
-  const message = error instanceof Error ? error.message : String(error);
-  const milliseconds = message.match(/retry(?:\s+after|After)[=: ]+\s*(\d+)\s*ms/i);
-  if (milliseconds) {
-    const value = Number(milliseconds[1]);
-    return Number.isFinite(value) && value > 0 ? value : null;
-  }
-
-  const seconds = message.match(/another\s+(\d+)s\b/i);
-  if (seconds) {
-    const value = Number(seconds[1]) * 1000;
-    return Number.isFinite(value) && value > 0 ? value : null;
-  }
-  return null;
 }
 
 function isGlobalRateLimit(error: unknown): boolean {
