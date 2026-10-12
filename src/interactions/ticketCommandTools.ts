@@ -254,6 +254,13 @@ async function syncCommandTicketVisibility(
     permissionOverwrites?: ChannelPermissionOverwrite[];
   } = {};
   if ((context.channel.topic ?? '') !== newTopic) properties.topic = newTopic;
+  const desiredStatus = getTicketStatus(newTopic);
+  if (desiredStatus === 'archived') {
+    const archiveCategory = await ensureArchiveCategory(context.guild);
+    if (context.channel.parentId !== archiveCategory.id) {
+      properties.parentId = archiveCategory.id;
+    }
+  }
 
   const ticketNumber = getField(newTopic, 'number');
   if (ticketNumber) {
