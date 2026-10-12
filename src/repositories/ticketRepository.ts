@@ -31,6 +31,7 @@ export interface TicketRepositoryRecord {
 
 export interface TicketRepository {
   getByChannelId(channelId: string): TicketRepositoryRecord | undefined;
+  getById(ticketId: string): TicketRepositoryRecord | undefined;
   listByGuildId(guildId: string): TicketRepositoryRecord[];
   findActiveByOwnerAndDepartment(
     guildId: string,
@@ -194,6 +195,13 @@ export class SqliteTicketRepository implements TicketRepository {
   public constructor(database = getSupportForgeDatabase()) {
     this.database = database;
     this.events = new SqliteEventRepository(database);
+  }
+
+  public getById(ticketId: string): TicketRepositoryRecord | undefined {
+    const row = this.database
+      .prepare('SELECT * FROM tickets WHERE id = ? LIMIT 1')
+      .get(ticketId) as TicketRow | undefined;
+    return row ? fromRow(row) : undefined;
   }
 
   public getByChannelId(channelId: string): TicketRepositoryRecord | undefined {
