@@ -27,6 +27,7 @@ import {
 } from '../services/configService';
 
 import { assertTicketStatusTransition } from '../core/domain/ticketLifecycle';
+import { projectDurableTicketTopic } from '../services/ticketTopicProjectionService';
 import { buildTicketVisibilityPlan } from '../core/domain/ticketPermissionPlan';
 import { classifyTicketRoutingComponent } from '../core/domain/ticketInteractionRouting';
 
@@ -357,41 +358,11 @@ async function getEffectiveTicketTopic(
   channel: TextChannel,
   topic: string,
 ): Promise<string> {
-  const persisted = await getPersistedTicket(channel.id).catch(() => undefined);
+  // Database failures must surface instead of falling back to stale Discord
+  // topic state that could authorize an action against an obsolete ticket.
+  const persisted = await getPersistedTicket(channel.id);
   if (!persisted) return topic;
-
-  let effective = setField(topic, 'status', persisted.status);
-
-  if (persisted.priority) {
-    effective = setField(effective, 'priority', persisted.priority);
-  }
-  if (persisted.departmentId) {
-    effective = setField(effective, 'department', persisted.departmentId);
-    const config = await getGuildConfig(channel.guild.id);
-    const department = config.departments[persisted.departmentId];
-    effective = setField(effective, 'staff', department?.staffRoleId ?? 'none');
-  }
-  if (persisted.tagId) {
-    effective = setField(effective, 'tag', persisted.tagId);
-    effective = setField(effective, 'tags', persisted.tagId);
-  }
-  if (persisted.ownerId) {
-    effective = setField(effective, 'owner', persisted.ownerId);
-  }
-
-  if (persisted.participantIds.length) {
-    effective = setField(effective, 'users', persisted.participantIds.join(','));
-  } else {
-    effective = removeField(effective, 'users');
-  }
-
-  if (persisted.claimedByIds.length) {
-    effective = setField(effective, 'claimed_by', persisted.claimedByIds.join(','));
-  } else {
-    effective = removeField(effective, 'claimed_by');
-  }
-
-  return effective;
+  return projectDurableTicketTopic(topic, persisted);
 }
 
 function getStaffContext(
