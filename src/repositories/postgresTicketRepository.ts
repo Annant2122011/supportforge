@@ -675,13 +675,61 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
   }
 
   public async remove(channelId: string): Promise<void> {
-    await this.executor.query(
-      'DELETE FROM tickets WHERE channel_id = $1',
-      [channelId],
+    await this.markDeleted(
+      channelId,
+      new Date().toISOString(),
+      'Ticket removed from active SupportForge storage; history retained.',
     );
   }
 
   public async clearAll(): Promise<void> {
-    await this.executor.query('DELETE FROM tickets');
+    const client = await getPostgresPool().connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const result = await client.query<TicketRow>(
+        'SELECT * FROM tickets WHERE deleted_at IS NULL FOR UPDATE',
+      );
+      const deletedAt = new Date().toISOString();
+
+      for (const row of result.rows) {
+        const current = fromRow(row);
+        const reason = 'SupportForge ticket store reset; history retained.';
+        const update = await client.query(
+          'UPDATE tickets SET deleted_at = $1::timestamptz, deletion_reason = $2, updated_at = $1::timestamptz ' +
+          'WHERE channel_id = $3 AND deleted_at IS NULL',
+          [deletedAt, reason, current.channelId],
+        );
+
+        if ((update.rowCount ?? 0) !== 1) continue;
+
+        const resolved = resolveActor();
+        await this.events.append({
+          id: randomUUID(),
+          type: 'ticket.deleted',
+          aggregateType: 'ticket',
+          aggregateId: current.id,
+          guildId: current.guildId,
+          channelId: current.channelId,
+          actorId: resolved.id,
+          actorAttribution: resolved.attribution,
+          actorConfidence: resolved.confidence,
+          payload: { reason },
+          occurredAt: deletedAt,
+        }, undefined, client);
+      }
+
+      await client.query('COMMIT');
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // Preserve original reset error.
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 }
