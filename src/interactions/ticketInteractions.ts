@@ -3526,6 +3526,7 @@ async function applyTicketRouting(interaction: StringSelectMenuInteraction, depa
         departmentId: department.id,
         tagId,
         metadata: {
+          staffRoleId: department.staffRoleId ?? 'none',
           lastActivityAt: transitionAt,
           lastStaffActivityAt: transitionAt,
         },
