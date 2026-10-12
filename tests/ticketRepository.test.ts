@@ -139,7 +139,7 @@ test('legacy ticket migration preserves the source backup and rejects malformed 
     );
 
     assert.deepEqual(JSON.parse(await readFile(legacyTicketsPath, 'utf8')), source);
-    const backups = (await readdir(directory)).filter((name) => name.includes('.pre-sqlite-'));
+    const backups = (await readdir(directory)).filter((name) => name.includes('.pre-database-'));
     assert.equal(backups.length, 1);
     assert.deepEqual(
       JSON.parse(await readFile(join(directory, backups[0]!), 'utf8')),
@@ -165,7 +165,7 @@ test('legacy ticket migration rejects invalid JSON while keeping a recovery copy
     );
 
     assert.equal(await readFile(legacyTicketsPath, 'utf8'), source);
-    const backups = (await readdir(directory)).filter((name) => name.includes('.pre-sqlite-'));
+    const backups = (await readdir(directory)).filter((name) => name.includes('.pre-database-'));
     assert.equal(backups.length, 1);
     assert.equal(await readFile(join(directory, backups[0]!), 'utf8'), source);
   } finally {
@@ -264,7 +264,7 @@ test('legacy tickets migrate with claimant, participant, and metadata fields int
       const files = await readdir(directory);
       assert.equal(
         files.filter((name) =>
-          name.startsWith('tickets.json.pre-sqlite-') &&
+          name.startsWith('tickets.json.pre-database-') &&
           name.endsWith('.backup')
         ).length,
         1,
@@ -370,7 +370,7 @@ test('malformed legacy JSON fails safely and can be retried after repair', async
 
     assert.equal(
       (await readdir(directory)).some((name) =>
-        name.startsWith('tickets.json.pre-sqlite-')
+        name.startsWith('tickets.json.pre-database-')
       ),
       true,
     );
