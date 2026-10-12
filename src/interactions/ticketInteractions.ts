@@ -1309,6 +1309,19 @@ async function createTicket(
           priority: advancedSettings.ticketDefaults.priority,
           createdAt: now,
           participantIds: [interaction.user.id],
+          metadata: {
+            panelMessageId: panel.id,
+            panelChannelId: panel.channelId,
+            sourcePanelMessageId: interaction.message?.id ?? null,
+            sourcePanelChannelId: interaction.channelId,
+            sourcePanelMessageUrl: interaction.message?.url ?? null,
+            subject: cleanSubject,
+            staffRoleId: department.staffRoleId,
+            openedAt: now,
+            lastActivityAt: now,
+            lastCustomerMessageAt: now,
+            ticketChannelType: 'text',
+          },
         },
         {
           id: interaction.user.id,
@@ -1317,7 +1330,7 @@ async function createTicket(
         },
       );
 
-      await ticketChannel.send({
+      const requestMessage = await ticketChannel.send({
           allowedMentions: {
             parse: [],
           },
@@ -1354,6 +1367,23 @@ async function createTicket(
               ),
           ],
         });
+
+      await updatePersistedTicketMetadata(
+        ticketChannel.id,
+        {
+          metadata: {
+            firstCustomerMessageId: requestMessage.id,
+            firstCustomerMessageAt: now,
+            lastActivityAt: now,
+            lastCustomerMessageAt: now,
+          },
+        },
+        {
+          id: interaction.user.id,
+          attribution: 'actorKnown',
+          confidence: 'high',
+        },
+      );
 
       await interaction.editReply({
         content:
