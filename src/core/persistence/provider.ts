@@ -7,6 +7,7 @@ import { migratePostgres } from './migrationRunner';
 import { PostgresTicketRepository, type AsyncTicketRepository } from '../../repositories/postgresTicketRepository';
 import { SqliteTicketRepository, type TicketMetadataUpdates } from '../../repositories/ticketRepository';
 import { importLegacyJsonDocuments } from '../../repositories/jsonDocumentRepository';
+import { importLegacyJsonTickets } from './legacyTicketImporter';
 
 export type PersistenceProvider = 'sqlite' | 'postgres';
 
@@ -147,6 +148,7 @@ export async function initializePersistence(): Promise<void> {
       // schema exists but before any command can observe application state.
       // Imports are insert-if-absent, so restarts cannot overwrite DB changes.
       await importLegacyJsonDocuments(provider);
+      await importLegacyJsonTickets(provider);
 
       initialized = true;
     })().finally(() => {
