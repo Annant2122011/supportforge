@@ -427,6 +427,115 @@ export class SqliteTicketRepository implements TicketRepository {
     }
   }
 
+  /**
+   * Commits lifecycle state and associated metadata in one SQLite transaction.
+   * Event history and outbox intents are included in that same transaction.
+   */
+  public transitionStatusAndMetadata(
+    channelId: string,
+    status: TicketStatus,
+    updates: TicketMetadataUpdates,
+    updatedAt: string,
+    actor: EventActor = {
+      id: 'supportforge-system',
+      attribution: 'actorKnown',
+      confidence: 'high',
+    },
+  ): void {
+    this.database.exec('BEGIN IMMEDIATE');
+
+    try {
+      const current = this.getByChannelId(channelId);
+      if (!current) {
+        throw new Error(
+          `Cannot transition SupportForge ticket ${channelId}: ticket does not exist in durable storage.`,
+        );
+      }
+
+      const statusChanged = current.status !== status;
+      if (statusChanged) assertTicketStatusTransition(current.status, status);
+
+      const changedFields = Object.keys(updates).filter(
+        (key) => updates[key as keyof TicketMetadataUpdates] !== undefined,
+      );
+      if (!statusChanged && changedFields.length === 0) {
+        this.database.exec('COMMIT');
+        return;
+      }
+
+      const assignments: string[] = [];
+      const parameters: unknown[] = [];
+      const add = (column: string, value: unknown): void => {
+        assignments.push(column + ' = ?');
+        parameters.push(value);
+      };
+
+      if (statusChanged) add('status', status);
+      if (updates.departmentId !== undefined) add('department_id', updates.departmentId);
+      if (updates.tagId !== undefined) add('tag_id', updates.tagId);
+      if (updates.ownerId !== undefined) add('owner_id', updates.ownerId);
+      if (updates.priority !== undefined) add('priority', updates.priority);
+      if (updates.claimedByIds !== undefined) add('claimed_by_json', JSON.stringify(updates.claimedByIds));
+      if (updates.participantIds !== undefined) add('participant_ids_json', JSON.stringify(updates.participantIds));
+      if (updates.metadata !== undefined) add('metadata_json', JSON.stringify(updates.metadata));
+
+      add('updated_at', updatedAt);
+      parameters.push(channelId, current.status);
+
+      const result = this.database.prepare(
+        'UPDATE tickets SET ' + assignments.join(', ') +
+        ' WHERE channel_id = ? AND status = ?',
+      ).run(...parameters);
+
+      if (Number(result.changes) !== 1) {
+        throw new Error(
+          `Ticket ${channelId} changed concurrently while applying a lifecycle and metadata transaction.`,
+        );
+      }
+
+      if (statusChanged) {
+        this.events.append({
+          id: randomUUID(),
+          type: lifecycleEventType(current.status, status),
+          aggregateType: 'ticket',
+          aggregateId: current.id,
+          guildId: current.guildId,
+          channelId: current.channelId,
+          actorId: actor.id,
+          actorAttribution: actor.attribution ?? 'actorUnknown',
+          actorConfidence: actor.confidence ?? 'none',
+          payload: { from: current.status, to: status, changedFields },
+          occurredAt: updatedAt,
+        });
+      }
+
+      if (changedFields.length > 0) {
+        this.events.append({
+          id: randomUUID(),
+          type: metadataEventType(changedFields, current, updates),
+          aggregateType: 'ticket',
+          aggregateId: current.id,
+          guildId: current.guildId,
+          channelId: current.channelId,
+          actorId: actor.id,
+          actorAttribution: actor.attribution ?? 'actorUnknown',
+          actorConfidence: actor.confidence ?? 'none',
+          payload: { changedFields },
+          occurredAt: updatedAt,
+        });
+      }
+
+      this.database.exec('COMMIT');
+    } catch (error) {
+      try {
+        this.database.exec('ROLLBACK');
+      } catch {
+        // Preserve the original transaction error.
+      }
+      throw error;
+    }
+  }
+
   public updateMetadata(
     channelId: string,
     updates: Partial<
