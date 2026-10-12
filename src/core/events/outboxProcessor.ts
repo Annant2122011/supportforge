@@ -2,11 +2,30 @@ import { getSupportForgeDatabase } from '../persistence/sqliteDatabase';
 import { getPersistenceProvider } from '../persistence/provider';
 import { SqliteEventRepository } from '../../repositories/eventRepository';
 import { PostgresEventRepository } from '../../repositories/postgresEventRepository';
-import type { OutboxEvent } from './domainEvents';
+import { MAX_OUTBOX_ATTEMPTS, type OutboxEvent } from './domainEvents';
 
 const MAX_BATCH_SIZE = 100;
 const MAX_RETRY_DELAY_MS = 15 * 60_000;
 const STALE_PROCESSING_MS = 10 * 60_000;
+
+/**
+ * Marks an operation that should not be retried automatically. The failed
+ * record is retained for operator diagnosis and can be explicitly requeued.
+ */
+export class PermanentOutboxPublishError extends Error {
+  public constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'PermanentOutboxPublishError';
+  }
+}
+
+function isPermanentFailure(error: unknown): boolean {
+  if (error instanceof PermanentOutboxPublishError) return true;
+  if (error && typeof error === 'object' && 'retryable' in error) {
+    return (error as { retryable?: unknown }).retryable === false;
+  }
+  return false;
+}
 
 export interface OutboxPublisher {
   publish(event: OutboxEvent): Promise<void>;
@@ -19,7 +38,7 @@ export interface OutboxProcessResult {
 }
 
 function retryDelayMs(attempts: number): number {
-  const exponent = Math.min(Math.max(attempts, 0), 10);
+  const exponent = Math.min(Math.max(attempts - 1, 0), 10);
   return Math.min(1_000 * 2 ** exponent, MAX_RETRY_DELAY_MS);
 }
 
@@ -53,11 +72,13 @@ async function processSqliteOutboxBatch(
       published += 1;
     } catch (error) {
       failed += 1;
-      const delay = retryDelayMs(event.attempts + 1);
+      const permanent = isPermanentFailure(error);
+      const delay = permanent ? 0 : retryDelayMs(event.attempts + 1);
       repository.markOutboxFailed(
         event.id,
         errorMessage(error),
         new Date(Date.now() + delay).toISOString(),
+        permanent,
       );
     }
   }
@@ -92,11 +113,13 @@ async function processPostgresOutboxBatch(
       }
     } catch (error) {
       failed += 1;
-      const delay = retryDelayMs(event.attempts);
+      const permanent = isPermanentFailure(error);
+      const delay = permanent ? 0 : retryDelayMs(event.attempts);
       await repository.markOutboxFailed(
         event.id,
         errorMessage(error),
         new Date(Date.now() + delay).toISOString(),
+        permanent,
       );
     }
   }
