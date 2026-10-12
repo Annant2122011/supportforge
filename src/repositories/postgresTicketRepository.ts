@@ -349,6 +349,127 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
     }
   }
 
+  /**
+   * Atomically persists the ticket state and related metadata, including the
+   * event log and outbox intents. SELECT FOR UPDATE serializes concurrent
+   * writers to the same ticket across bot processes.
+   */
+  public async transitionStatusAndMetadata(
+    channelId: string,
+    status: TicketStatus,
+    updates: import('./ticketRepository').TicketMetadataUpdates,
+    updatedAt: string,
+    actor?: EventActor,
+  ): Promise<void> {
+    const client = await getPostgresPool().connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const currentResult = await client.query<TicketRow>(
+        'SELECT * FROM tickets WHERE channel_id = $1 FOR UPDATE',
+        [channelId],
+      );
+      const row = currentResult.rows[0];
+      if (!row) {
+        throw new Error(
+          `Cannot transition SupportForge ticket ${channelId}: ticket does not exist in durable storage.`,
+        );
+      }
+
+      const current = fromRow(row);
+      const statusChanged = current.status !== status;
+      if (statusChanged) assertTicketStatusTransition(current.status, status);
+
+      const changedFields = Object.keys(updates).filter(
+        (key) => updates[key as keyof import('./ticketRepository').TicketMetadataUpdates] !== undefined,
+      );
+      if (!statusChanged && changedFields.length === 0) {
+        await client.query('COMMIT');
+        return;
+      }
+
+      const next: TicketRepositoryRecord = {
+        ...current,
+        ...updates,
+        status,
+        claimedByIds: updates.claimedByIds ?? current.claimedByIds,
+        participantIds: updates.participantIds ?? current.participantIds,
+        metadata: updates.metadata ?? current.metadata,
+        updatedAt,
+      };
+
+      const result = await client.query(
+        'UPDATE tickets SET status = $1, department_id = $2, tag_id = $3, owner_id = $4, priority = $5, ' +
+          'claimed_by_ids = $6::text[], participant_ids = $7::text[], metadata = $8::jsonb, ' +
+          'updated_at = $9::timestamptz WHERE channel_id = $10 AND status = $11',
+        [
+          next.status,
+          next.departmentId,
+          next.tagId,
+          next.ownerId,
+          next.priority,
+          next.claimedByIds,
+          next.participantIds,
+          JSON.stringify(next.metadata),
+          updatedAt,
+          channelId,
+          current.status,
+        ],
+      );
+
+      if ((result.rowCount ?? 0) !== 1) {
+        throw new Error(
+          `Ticket ${channelId} changed concurrently while applying a lifecycle and metadata transaction.`,
+        );
+      }
+
+      const resolved = resolveActor(actor);
+      if (statusChanged) {
+        await this.events.append({
+          id: randomUUID(),
+          type: lifecycleEventType(current.status, status),
+          aggregateType: 'ticket',
+          aggregateId: current.id,
+          guildId: current.guildId,
+          channelId: current.channelId,
+          actorId: resolved.id,
+          actorAttribution: resolved.attribution,
+          actorConfidence: resolved.confidence,
+          payload: { from: current.status, to: status, changedFields },
+          occurredAt: updatedAt,
+        }, undefined, client);
+      }
+
+      if (changedFields.length > 0) {
+        await this.events.append({
+          id: randomUUID(),
+          type: metadataEventType(changedFields, current, updates),
+          aggregateType: 'ticket',
+          aggregateId: current.id,
+          guildId: current.guildId,
+          channelId: current.channelId,
+          actorId: resolved.id,
+          actorAttribution: resolved.attribution,
+          actorConfidence: resolved.confidence,
+          payload: { changedFields },
+          occurredAt: updatedAt,
+        }, undefined, client);
+      }
+
+      await client.query('COMMIT');
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // Preserve original transaction error.
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   public async updateMetadata(
     channelId: string,
     updates: Partial<
