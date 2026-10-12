@@ -39,7 +39,7 @@ export interface TicketRepository {
     departmentId: string,
   ): TicketRepositoryRecord[];
   listAll(): TicketRepositoryRecord[];
-  upsert(record: TicketRepositoryRecord): void;
+  upsert(record: TicketRepositoryRecord, actor?: EventActor): void;
   create(record: TicketRepositoryRecord, actor?: EventActor): void;
   listEvents(channelId: string, limit?: number): import('../core/events/domainEvents').DomainEvent[];
   setStatus(channelId: string, status: TicketStatus, updatedAt: string): void;
@@ -318,49 +318,41 @@ export class SqliteTicketRepository implements TicketRepository {
     return record ? this.events.listTicketEvents(record.id, limit) : [];
   }
 
-  public upsert(record: TicketRepositoryRecord): void {
-    this.database.exec('BEGIN IMMEDIATE');
-
-    try {
-      this.database.prepare(
-        'INSERT INTO tickets (' +
-        'id, guild_id, channel_id, ticket_number, status, department_id, tag_id, owner_id, priority, ' +
-        'claimed_by_json, participant_ids_json, metadata_json, created_at, updated_at, deleted_at, deletion_reason' +
-        ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
-        'ON CONFLICT(channel_id) DO UPDATE SET ' +
-        'ticket_number = excluded.ticket_number, status = excluded.status, department_id = excluded.department_id, ' +
-        'tag_id = excluded.tag_id, owner_id = excluded.owner_id, priority = excluded.priority, ' +
-        'claimed_by_json = excluded.claimed_by_json, participant_ids_json = excluded.participant_ids_json, ' +
-        'metadata_json = excluded.metadata_json, updated_at = excluded.updated_at, deleted_at = excluded.deleted_at, ' +
-        'deletion_reason = excluded.deletion_reason',
-      ).run(
-        record.id,
-        record.guildId,
-        record.channelId,
-        record.ticketNumber,
-        record.status,
-        record.departmentId,
-        record.tagId,
-        record.ownerId,
-        record.priority,
-        JSON.stringify(record.claimedByIds),
-        JSON.stringify(record.participantIds),
-        JSON.stringify(record.metadata),
-        record.createdAt,
-        record.updatedAt,
-        record.deletedAt,
-        record.deletionReason,
-      );
-
-      this.database.exec('COMMIT');
-    } catch (error) {
-      try {
-        this.database.exec('ROLLBACK');
-      } catch {
-        // Preserve the original persistence error.
-      }
-      throw error;
+  public upsert(
+    record: TicketRepositoryRecord,
+    actor: EventActor = {
+      id: 'supportforge-system',
+      attribution: 'actorKnown',
+      confidence: 'high',
+    },
+  ): void {
+    const current = this.getByChannelId(record.channelId);
+    if (!current) {
+      this.create(record, actor);
+      return;
     }
+
+    if (current.id !== record.id || current.guildId !== record.guildId) {
+      throw new Error(
+        `Refusing to overwrite immutable SupportForge ticket identity for channel ${record.channelId}.`,
+      );
+    }
+
+    this.transitionStatusAndMetadata(
+      record.channelId,
+      record.status,
+      {
+        departmentId: record.departmentId,
+        tagId: record.tagId,
+        ownerId: record.ownerId,
+        priority: record.priority,
+        claimedByIds: record.claimedByIds,
+        participantIds: record.participantIds,
+        metadata: record.metadata,
+      },
+      record.updatedAt,
+      actor,
+    );
   }
 
   public setStatus(
