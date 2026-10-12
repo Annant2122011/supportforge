@@ -903,6 +903,7 @@ async function applyTicketVisibilityMode(
     properties,
     roleIds,
     'Synchronize SupportForge ticket metadata and privacy in one channel update',
+    { deferLongRateLimit: false },
   );
   if (properties.topic !== undefined) channel.topic = properties.topic;
   if (properties.name !== undefined) channel.name = properties.name;
