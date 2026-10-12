@@ -29,7 +29,7 @@ import {
 } from './discordChannelService';
 import { buildTicketVisibilityPlan } from '../core/domain/ticketPermissionPlan';
 import type { OutboxEvent } from '../core/events/domainEvents';
-import type { OutboxPublisher } from '../core/events/outboxProcessor';
+import { PermanentOutboxPublishError, type OutboxPublisher } from '../core/events/outboxProcessor';
 import {
   TICKET_PREFIX,
   getField,
@@ -231,14 +231,22 @@ export class TicketOutboxPublisher implements OutboxPublisher {
     // Hard/soft deletion events have no live Discord representation to repair.
     if (!ticket || ticket.deletedAt) return;
 
+    const guildId = stringValue(ticket.guildId);
+    const ticketChannelId = stringValue(ticket.channelId);
+    if (!guildId || !ticketChannelId) {
+      throw new PermanentOutboxPublishError(
+        'Durable ticket ' + event.aggregateId + ' has missing guild/channel identifiers.',
+      );
+    }
+
     let guild: Guild;
     try {
-      guild = this.client.guilds.cache.get(ticket.guildId) ??
-        await this.client.guilds.fetch(ticket.guildId);
+      guild = this.client.guilds.cache.get(guildId) ??
+        await this.client.guilds.fetch(guildId);
     } catch (error) {
       if (isUnknownGuild(error)) {
         await markPersistedTicketDeleted(
-          ticket.channelId,
+          ticketChannelId,
           'Guild no longer exists or is inaccessible during outbox reconciliation.',
           {
             id: 'supportforge-system',
@@ -253,12 +261,12 @@ export class TicketOutboxPublisher implements OutboxPublisher {
 
     let fetched;
     try {
-      fetched = guild.channels.cache.get(ticket.channelId) ??
-        await guild.channels.fetch(ticket.channelId);
+      fetched = guild.channels.cache.get(ticketChannelId) ??
+        await guild.channels.fetch(ticketChannelId);
     } catch (error) {
       if (isUnknownChannel(error)) {
         await markPersistedTicketDeleted(
-          ticket.channelId,
+          ticketChannelId,
           'Ticket channel no longer exists during outbox reconciliation.',
           {
             id: 'supportforge-system',
@@ -273,7 +281,7 @@ export class TicketOutboxPublisher implements OutboxPublisher {
 
     if (!fetched || fetched.type !== ChannelType.GuildText) {
       await markPersistedTicketDeleted(
-        ticket.channelId,
+        ticketChannelId,
         'Ticket channel was missing or no longer a text channel during outbox reconciliation.',
         {
           id: 'supportforge-system',
