@@ -59,6 +59,7 @@ import {
   markPersistedTicketDeleted,
   registerTicket,
   setPersistedTicketStatus,
+  transitionPersistedTicket,
   updatePersistedTicketMetadata,
 } from '../services/ticketPersistenceService';
 
@@ -1828,17 +1829,7 @@ async function transition(
       newStatus ===
       'reopened'
     ) {
-      try {
-        await removePreviousTicketTranscript(
-          interaction.guild!,
-          oldTopic,
-        );
-      } catch (error) {
-        console.warn(
-          '⚠️ Previous ticket transcript could not be removed during reopen:',
-          error,
-        );
-      }
+      // Transcript cleanup is deferred until the durable reopen transition commits.
 
       newTopic =
         setField(
@@ -1910,10 +1901,68 @@ async function transition(
       );
 
     /*
-     * Clear voice metadata before assembling the final channel update. The
-     * voice helper normally patches the ticket topic and queues a rename; the
-     * transition below now performs those changes together with permissions
-     * and category placement in one Modify Channel request.
+     * The database transition, ticket metadata, domain events, and outbox
+     * intent commit together before any Discord-side lifecycle mutations.
+     * The outbox worker repairs the Discord representation if the following
+     * calls fail or are interrupted by a process restart.
+     */
+    const transitionTime = new Date().toISOString();
+    const metadataPatch: Record<string, unknown> = {};
+    if (newStatus === 'pending') {
+      metadataPatch.pendingSince = getField(newTopic, 'pending_since') ?? transitionTime;
+    } else if (oldStatus === 'pending') {
+      metadataPatch.pendingSince = null;
+    }
+    if (newStatus === 'reopened') {
+      metadataPatch.reopenedAt = getField(newTopic, 'reopened_at') ?? transitionTime;
+      metadataPatch.closedAt = null;
+      metadataPatch.archivedAt = null;
+      metadataPatch.transcriptId = null;
+      metadataPatch.transcriptDestinationId = null;
+      metadataPatch.pendingSince = null;
+    }
+    if (newStatus === 'archived') {
+      metadataPatch.archivedAt = getField(newTopic, 'archived_at') ?? transitionTime;
+    }
+    if (newStatus !== 'claimed' && getField(oldTopic, 'voice_channel_id')) {
+      metadataPatch.voiceChannelId = null;
+      metadataPatch.voiceChannelName = null;
+      metadataPatch.voiceStartedAt = null;
+      metadataPatch.voiceParticipantIds = [];
+    }
+
+    await transitionPersistedTicket(
+      channel.id,
+      newStatus,
+      {
+        claimedByIds: (getField(newTopic, 'claimed_by') ?? '')
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+        participantIds: (getField(newTopic, 'users') ?? '')
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+        ...(Object.keys(metadataPatch).length ? { metadata: metadataPatch } : {}),
+      },
+      interactionActor(interaction),
+    );
+
+    if (newStatus === 'reopened') {
+      try {
+        await removePreviousTicketTranscript(interaction.guild!, oldTopic);
+      } catch (error) {
+        console.warn(
+          '⚠️ Previous ticket transcript could not be removed after durable reopen:',
+          error,
+        );
+      }
+    }
+
+    /*
+     * Voice room cleanup is now secondary to the durable ticket state. Keep
+     * the old voice fields available to the cleanup service, while avoiding
+     * a separate ticket-topic REST request.
      */
     if (newStatus !== 'claimed' && getField(oldTopic, 'voice_channel_id')) {
       newTopic = await endTicketVoiceMode(
@@ -2060,27 +2109,6 @@ async function transition(
         );
       }
     }
-
-    await setPersistedTicketStatus(
-      channel.id,
-      newStatus,
-      interactionActor(interaction),
-    );
-
-    await updatePersistedTicketMetadata(
-      channel.id,
-      {
-        claimedByIds: (getField(newTopic, 'claimed_by') ?? '')
-          .split(',')
-          .map((id) => id.trim())
-          .filter(Boolean),
-        participantIds: (getField(newTopic, 'users') ?? '')
-          .split(',')
-          .map((id) => id.trim())
-          .filter(Boolean),
-      },
-      interactionActor(interaction),
-    );
 
     /*
      * Keep the local runtime state immediately consistent with the persisted
