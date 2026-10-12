@@ -97,6 +97,7 @@ function fromRow(row: TicketRow): TicketRepositoryRecord {
 
 export interface AsyncTicketRepository {
   getByChannelId(channelId: string): Promise<TicketRepositoryRecord | undefined>;
+  getById(ticketId: string): Promise<TicketRepositoryRecord | undefined>;
   listByGuildId(guildId: string): Promise<TicketRepositoryRecord[]>;
   findActiveByOwnerAndDepartment(
     guildId: string,
@@ -185,6 +186,15 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
   public constructor(executor: DatabaseExecutor = getPostgresPool()) {
     this.executor = executor;
     this.events = new PostgresEventRepository(executor);
+  }
+
+  public async getById(ticketId: string): Promise<TicketRepositoryRecord | undefined> {
+    const result = await this.executor.query<TicketRow>(
+      'SELECT * FROM tickets WHERE id = $1 LIMIT 1',
+      [ticketId],
+    );
+    const row = result.rows[0];
+    return row ? fromRow(row) : undefined;
   }
 
   public async getByChannelId(
