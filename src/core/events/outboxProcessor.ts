@@ -37,9 +37,64 @@ export interface OutboxProcessResult {
   failed: number;
 }
 
-function retryDelayMs(attempts: number): number {
+function retryAfterMs(error: unknown): number | null {
+  let current: unknown = error;
+  const visited = new Set<unknown>();
+
+  for (let depth = 0; depth < 5 && current && !visited.has(current); depth += 1) {
+    visited.add(current);
+    if (typeof current === 'object') {
+      const record = current as Record<string, unknown>;
+
+      // discord.js RateLimitError exposes retryAfter in milliseconds.
+      const milliseconds = Number(record.retryAfter);
+      if (Number.isFinite(milliseconds) && milliseconds > 0) {
+        return Math.ceil(milliseconds);
+      }
+
+      const raw = record.rawError && typeof record.rawError === 'object'
+        ? record.rawError as Record<string, unknown>
+        : undefined;
+      for (const value of [record.retry_after, raw?.retry_after]) {
+        const seconds = Number(value);
+        if (value !== undefined && Number.isFinite(seconds) && seconds > 0) {
+          return Math.ceil(seconds * 1_000);
+        }
+      }
+
+      const headers = record.headers as { get?: (name: string) => string | null } | undefined;
+      if (headers && typeof headers.get === 'function') {
+        const seconds = Number(headers.get('retry-after'));
+        if (Number.isFinite(seconds) && seconds > 0) {
+          return Math.ceil(seconds * 1_000);
+        }
+      }
+
+      current = record.cause;
+      continue;
+    }
+
+    const message = String(current);
+    const seconds = message.match(/another\\s+(\\d+)s\\b/i);
+    if (seconds) return Number(seconds[1]) * 1_000;
+    break;
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  const seconds = message.match(/another\\s+(\\d+)s\\b/i);
+  if (seconds) return Number(seconds[1]) * 1_000;
+  const milliseconds = message.match(/retry(?:\\s+after|After)[=: ]+\\s*(\\d+)\\s*ms/i);
+  return milliseconds ? Number(milliseconds[1]) : null;
+}
+
+function retryDelayMs(attempts: number, error?: unknown): number {
   const exponent = Math.min(Math.max(attempts - 1, 0), 10);
-  return Math.min(1_000 * 2 ** exponent, MAX_RETRY_DELAY_MS);
+  const exponential = Math.min(1_000 * 2 ** exponent, MAX_RETRY_DELAY_MS);
+  const serverCooldown = error === undefined ? null : retryAfterMs(error);
+  // Respect the server's Retry-After even when it exceeds normal backoff.
+  return serverCooldown === null
+    ? exponential
+    : Math.max(exponential, serverCooldown + 1_000);
 }
 
 function errorMessage(error: unknown): string {
@@ -73,7 +128,7 @@ async function processSqliteOutboxBatch(
     } catch (error) {
       failed += 1;
       const permanent = isPermanentFailure(error);
-      const delay = permanent ? 0 : retryDelayMs(event.attempts + 1);
+      const delay = permanent ? 0 : retryDelayMs(event.attempts + 1, error);
       repository.markOutboxFailed(
         event.id,
         errorMessage(error),
@@ -114,7 +169,7 @@ async function processPostgresOutboxBatch(
     } catch (error) {
       failed += 1;
       const permanent = isPermanentFailure(error);
-      const delay = permanent ? 0 : retryDelayMs(event.attempts);
+      const delay = permanent ? 0 : retryDelayMs(event.attempts, error);
       await repository.markOutboxFailed(
         event.id,
         errorMessage(error),
