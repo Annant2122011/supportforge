@@ -219,14 +219,7 @@ test(
       CREATE OR REPLACE FUNCTION supportforge_test_fail_claimed_outbox()
       RETURNS trigger
       LANGUAGE plpgsql
-      AS $
-      BEGIN
-        IF NEW.event_type = 'ticket.claimed' THEN
-          RAISE EXCEPTION 'simulated postgres outbox failure';
-        END IF;
-        RETURN NEW;
-      END;
-      $
+      AS 'BEGIN IF NEW.event_type = ''ticket.claimed'' THEN RAISE EXCEPTION ''simulated postgres outbox failure''; END IF; RETURN NEW; END;'
     `);
     await pool.query(`
       CREATE TRIGGER supportforge_test_fail_claimed_outbox_trigger
