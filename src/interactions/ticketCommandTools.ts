@@ -1135,46 +1135,10 @@ export async function executeTicketCommand(
             .filter(Boolean),
         );
 
-      if (
-        subcommand === 'add-user'
-      ) {
+      if (subcommand === 'add-user') {
         users.add(target.id);
-
-        await setChannelPermissionOverwrite(
-          context.channel.id,
-          target.id,
-          [
-            PermissionFlagsBits.ViewChannel,
-            PermissionFlagsBits.SendMessages,
-            PermissionFlagsBits.ReadMessageHistory,
-            PermissionFlagsBits.AttachFiles,
-            PermissionFlagsBits.EmbedLinks,
-          ],
-          [],
-          1,
-          'SupportForge add ticket participant',
-        );
-
-        await context.channel.send(
-          `➕ ${target} was added by ${interaction.user}.`,
-        );
       } else {
-        users.delete(
-          target.id,
-        );
-
-        await setChannelPermissionOverwrite(
-          context.channel.id,
-          target.id,
-          [],
-          [],
-          1,
-          'SupportForge remove ticket participant',
-        );
-
-        await context.channel.send(
-          `➖ ${target} was removed by ${interaction.user}.`,
-        );
+        users.delete(target.id);
       }
 
       const topic =
@@ -1190,13 +1154,11 @@ export async function executeTicketCommand(
         confidence: 'high',
       });
 
-      await updatePersistedTicketMetadata(context.channel.id, {
-        participantIds: [...users],
-      }, {
-        id: interaction.user.id,
-        attribution: 'actorKnown',
-        confidence: 'high',
-      });
+      await context.channel.send(
+        subcommand === 'add-user'
+          ? '➕ ' + target.toString() + ' was added by ' + interaction.user.toString() + '.'
+          : '➖ ' + target.toString() + ' was removed by ' + interaction.user.toString() + '.',
+      );
 
       await audit(
         interaction,
