@@ -1273,22 +1273,52 @@ async function showAppearance(interaction: ButtonInteraction): Promise<void> {
   ]);
 }
 
+const USE_CASE_PRESETS: Record<string, { name: string; emoji: string; tags: string[] }> = {
+  'technical-support': {
+    name: 'Technical Support', emoji: '🛠️',
+    tags: ['Bug Report', 'Error Message', 'Performance Issue', 'Installation', 'Configuration', 'Integration', 'Feature Request', 'Compatibility'],
+  },
+  sales: {
+    name: 'Sales', emoji: '💼',
+    tags: ['Pricing', 'Plan Comparison', 'Quote Request', 'Product Demo', 'Enterprise Inquiry', 'Volume Discount', 'Purchase Assistance', 'Upgrade Inquiry'],
+  },
+  'account-access': {
+    name: 'Account & Access', emoji: '🔐',
+    tags: ['Login Issue', 'Password Reset', 'Email Change', 'Two-Factor Authentication', 'Account Verification', 'Account Recovery', 'Permission Issue', 'Account Deletion'],
+  },
+  partnerships: {
+    name: 'Partnerships', emoji: '🤝',
+    tags: ['Partnership Proposal', 'Affiliate Program', 'Integration Proposal', 'Reseller Inquiry', 'Co-Marketing', 'Sponsorship', 'API Collaboration', 'Business Development'],
+  },
+  'reports-abuse': {
+    name: 'Reports & Abuse', emoji: '🚩',
+    tags: ['Harassment', 'Spam', 'Scam Attempt', 'Impersonation', 'Malicious Content', 'Terms Violation', 'Privacy Concern', 'Appeal'],
+  },
+  'refunds-returns': {
+    name: 'Refunds & Returns', emoji: '↩️',
+    tags: ['Refund Request', 'Return Request', 'Duplicate Charge', 'Billing Error', 'Cancel Order', 'Missing Refund', 'Damaged Item', 'Exchange Request'],
+  },
+  'product-support': {
+    name: 'Product Support', emoji: '📦',
+    tags: ['Product Question', 'Setup Assistance', 'Feature Guidance', 'Product Defect', 'Compatibility', 'Warranty Claim', 'Replacement Request', 'Documentation'],
+  },
+  'vip-support': {
+    name: 'VIP Support', emoji: '⭐',
+    tags: ['Priority Escalation', 'Service Outage', 'Executive Request', 'Dedicated Assistance', 'SLA Concern', 'Critical Business Impact', 'Account Review', 'Renewal Assistance'],
+  },
+};
+
 async function showUseCases(interaction: ButtonInteraction): Promise<void> {
-  const presets = [
-    ['Technical Support', '🛠️', 'technical-support'],
-    ['Sales', '💼', 'sales'],
-    ['Account & Access', '🔐', 'account-access'],
-    ['Partnerships', '🤝', 'partnerships'],
-    ['Reports & Abuse', '🚩', 'reports-abuse'],
-    ['Refunds & Returns', '↩️', 'refunds-returns'],
-    ['Product Support', '📦', 'product-support'],
-    ['VIP Support', '⭐', 'vip-support'],
-  ];
+  const presets = Object.entries(USE_CASE_PRESETS);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
   for (let i = 0; i < presets.length; i += 4) {
     rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-      ...presets.slice(i, i + 4).map(([name, emoji, key]) =>
-        new ButtonBuilder().setCustomId('sf:settings:usecases:add:' + key).setLabel(name).setEmoji(emoji).setStyle(ButtonStyle.Secondary),
+      ...presets.slice(i, i + 4).map(([key, preset]) =>
+        new ButtonBuilder()
+          .setCustomId('sf:settings:usecases:add:' + key)
+          .setLabel(preset.name)
+          .setEmoji(preset.emoji)
+          .setStyle(ButtonStyle.Secondary),
       ),
     ));
   }
@@ -1297,7 +1327,7 @@ async function showUseCases(interaction: ButtonInteraction): Promise<void> {
   await renderSettingsView(interaction, [
     new EmbedBuilder()
       .setTitle('🧩 Use Cases')
-      .setDescription('Optional department presets for common support operations. They create ordinary departments only, so each server keeps control of its own requirements.'),
+      .setDescription('Optional department presets for common support operations. Each preset adds eight relevant starter tags (ticket subcategories). You can rename or remove them later in Departments & Tags. Departments are created without a Discord category; that category is provisioned only when the first ticket is opened.'),
   ], rows);
 }
 
@@ -1858,22 +1888,12 @@ export async function handleSettingsInteraction(
 
     if (id.startsWith('sf:settings:usecases:add:')) {
       const key = id.slice('sf:settings:usecases:add:'.length);
-      const presetMap: Record<string, string> = {
-        'technical-support': 'Technical Support',
-        'sales': 'Sales',
-        'account-access': 'Account & Access',
-        'partnerships': 'Partnerships',
-        'reports-abuse': 'Reports & Abuse',
-        'refunds-returns': 'Refunds & Returns',
-        'product-support': 'Product Support',
-        'vip-support': 'VIP Support',
-      };
-
-      const name = presetMap[key];
-      if (!name) {
+      const preset = USE_CASE_PRESETS[key];
+      if (!preset) {
         await reject(interaction, '❌ Unknown support use case.');
         return true;
       }
+      const { name, tags: starterTags } = preset;
 
       const config = await getGuildConfig(guild.id);
       if (Object.values(config.departments).some((department) => department.name.toLowerCase() === name.toLowerCase())) {
@@ -1883,17 +1903,20 @@ export async function handleSettingsInteraction(
 
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const departmentId = newDepartmentId();
-      const tagId = newTagId();
       const now = new Date().toISOString();
+      const tags = Object.fromEntries(
+        starterTags.map((tagName) => {
+          const tagId = newTagId();
+          return [tagId, { id: tagId, name: tagName, createdAt: now }];
+        }),
+      );
       await updateGuildConfig(guild.id, (current) => {
         current.departments[departmentId] = {
           id: departmentId,
           name,
           staffRoleId: null,
           categoryId: null,
-          tags: {
-            [tagId]: { id: tagId, name: 'General', createdAt: now },
-          },
+          tags,
           createdAt: now,
         };
       });
@@ -1904,11 +1927,11 @@ export async function handleSettingsInteraction(
         embeds: [
           new EmbedBuilder()
             .setTitle('✅ Use Case Added')
-            .setDescription('Added **' + name + '**. Its Discord category will be created when the first ticket is opened in this department.'),
+            .setDescription('Added **' + name + '** with ' + starterTags.length + ' starter tags: ' + starterTags.join(', ') + '. Its Discord category will be created when the first ticket is opened in this department.'),
         ],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
-      await auditSettingsAction(guild, interaction, 'USE_CASE_ADDED', 'Added use case department ' + name + '. Its Discord category will be provisioned when the first ticket is created.');
+      await auditSettingsAction(guild, interaction, 'USE_CASE_ADDED', 'Added use case department ' + name + ' with ' + starterTags.length + ' starter tags. Its Discord category will be provisioned when the first ticket is created.');
       return true;
     }
 
