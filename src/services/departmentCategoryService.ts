@@ -256,7 +256,7 @@ export async function ensureAllDepartmentCategories(
 
   const ticketDepartments = new Set<string>();
   for (const channel of channels.values()) {
-    if (channel.type !== ChannelType.GuildText) continue;
+    if (!channel || channel.type !== ChannelType.GuildText) continue;
     const topic = channel.topic ?? '';
     if (isTicketTopic(topic)) {
       const departmentId = getField(topic, 'department');
