@@ -280,31 +280,35 @@ export async function ensureAllDepartmentCategories(
           saved.children.cache.size === 0 &&
           isKnownManagedCategory
         ) {
-          await saved.delete(
+          const removed = await saved.delete(
             'SupportForge cleanup: no tickets exist for this department',
-          ).catch((error) => {
+          ).then(() => true).catch((error) => {
             console.warn(
               '⚠️ Could not remove unused empty department category ' +
                 saved.name + ' (' + saved.id + '):',
               error,
             );
+            return false;
           });
 
-          await updateGuildConfig(guild.id, (current) => {
-            const currentDepartment = current.departments[department.id];
-            if (currentDepartment?.categoryId === saved.id) {
-              currentDepartment.categoryId = null;
-            }
-            current.managedCategoryIds = (current.managedCategoryIds ?? [])
-              .filter((id) => id !== saved.id);
-          });
+          if (removed) {
+            await updateGuildConfig(guild.id, (current) => {
+              const currentDepartment = current.departments[department.id];
+              if (currentDepartment?.categoryId === saved.id) {
+                currentDepartment.categoryId = null;
+              }
+              current.managedCategoryIds = (current.managedCategoryIds ?? [])
+                .filter((id) => id !== saved.id);
+            });
+          }
         }
       }
       continue;
     }
 
-    if (!department.categoryId) continue;
-
+    // A ticket may have been preserved in the main SupportForge category
+    // after an earlier category-provisioning failure. Setup should repair it
+    // even when no department category ID was saved.
     const category = await ensureDepartmentCategory(guild, department);
 
     if (department.categoryId !== category.id) {
