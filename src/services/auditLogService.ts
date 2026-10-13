@@ -855,10 +855,14 @@ async function createOrRepairAuditDeveloperInfrastructure(
       );
 
     if (aclEvidenceRoles.length === 1) {
-      role = aclEvidenceRoles[0]!;
-      console.warn(
-        '♻️ Recovered the SupportForge developer audit role from the existing channel permission overwrite.',
-      );
+      const aclRole = aclEvidenceRoles[0]!;
+      const needsRoleRecoveryLog = role?.id !== aclRole.id;
+      role = aclRole;
+      if (needsRoleRecoveryLog) {
+        console.warn(
+          '♻️ Recovered the SupportForge developer audit role from the existing channel permission overwrite.',
+        );
+      }
     } else if (
       aclEvidenceRoles.length > 1 &&
       (!role || !aclEvidenceRoles.some((candidate) => candidate.id === role!.id))

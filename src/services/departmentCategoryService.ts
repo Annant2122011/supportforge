@@ -242,18 +242,73 @@ export async function ensureAllDepartmentCategories(
 ): Promise<void> {
   const config = await getGuildConfig(guild.id);
 
-  for (const department of Object.values(config.departments)) {
-    /*
-     * A department may exist without a Discord category. That is intentional:
-     * SupportForge provisions the category lazily when the first ticket is
-     * actually created for that department.
-     *
-     * Repair/setup only reconciles categories that have already been
-     * provisioned. It must never create empty categories for unused
-     * departments.
-     */
-    if (!department.categoryId) continue;
+  // Fetch a complete channel snapshot before deciding whether a previously
+  // provisioned department category is still justified by an existing ticket.
+  // If Discord is unavailable, fail closed: do not create or delete categories.
+  const channels = await guild.channels.fetch().catch(() => null);
+  if (!channels) {
+    console.warn(
+      '⚠️ Department category repair skipped for guild ' + guild.id +
+        ' because Discord channels could not be fetched safely.',
+    );
+    return;
+  }
 
+  const ticketDepartments = new Set<string>();
+  for (const channel of channels.values()) {
+    if (!channel || channel.type !== ChannelType.GuildText) continue;
+    const topic = channel.topic ?? '';
+    if (isTicketTopic(topic)) {
+      const departmentId = getField(topic, 'department');
+      if (departmentId) ticketDepartments.add(departmentId);
+    }
+  }
+
+  for (const department of Object.values(config.departments)) {
+    // Departments with no ticket must not cause a category to be created or
+    // repaired merely because a stale categoryId remains in configuration.
+    if (!ticketDepartments.has(department.id)) {
+      if (department.categoryId) {
+        const saved = channels.get(department.categoryId);
+        const isKnownManagedCategory =
+          (config.managedCategoryIds ?? []).includes(department.categoryId);
+
+        // Remove only a provably SupportForge-managed, empty category. Never
+        // delete a non-empty category or one whose ownership is uncertain.
+        if (
+          saved?.type === ChannelType.GuildCategory &&
+          saved.children.cache.size === 0 &&
+          isKnownManagedCategory
+        ) {
+          const removed = await saved.delete(
+            'SupportForge cleanup: no tickets exist for this department',
+          ).then(() => true).catch((error) => {
+            console.warn(
+              '⚠️ Could not remove unused empty department category ' +
+                saved.name + ' (' + saved.id + '):',
+              error,
+            );
+            return false;
+          });
+
+          if (removed) {
+            await updateGuildConfig(guild.id, (current) => {
+              const currentDepartment = current.departments[department.id];
+              if (currentDepartment?.categoryId === saved.id) {
+                currentDepartment.categoryId = null;
+              }
+              current.managedCategoryIds = (current.managedCategoryIds ?? [])
+                .filter((id) => id !== saved.id);
+            });
+          }
+        }
+      }
+      continue;
+    }
+
+    // A ticket may have been preserved in the main SupportForge category
+    // after an earlier category-provisioning failure. Setup should repair it
+    // even when no department category ID was saved.
     const category = await ensureDepartmentCategory(guild, department);
 
     if (department.categoryId !== category.id) {

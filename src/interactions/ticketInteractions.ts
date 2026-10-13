@@ -437,6 +437,46 @@ function getStaffContext(
  * This function deliberately does not attempt a second acknowledgement.
  * Discord interactions can only be acknowledged once.
  */
+function getDiscordApiErrorCode(error: unknown): number | null {
+  if (!error || typeof error !== 'object') return null;
+  const candidate = error as { code?: unknown; rawError?: { code?: unknown } };
+  const code = candidate.code ?? candidate.rawError?.code;
+  return typeof code === 'number' ? code : null;
+}
+
+function isUnknownChannelError(error: unknown): boolean {
+  return getDiscordApiErrorCode(error) === 10003;
+}
+
+function isUnknownMessageError(error: unknown): boolean {
+  return getDiscordApiErrorCode(error) === 10008;
+}
+
+async function editReplyOrFollowUp(
+  interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
+  content: string,
+): Promise<void> {
+  try {
+    await interaction.editReply(content);
+  } catch (error) {
+    if (!isUnknownMessageError(error)) throw error;
+
+    // The original interaction response may have been deleted by another
+    // handler. The ticket operation must not be reported as failed merely
+    // because its acknowledgement message no longer exists.
+    await interaction.followUp({
+      content,
+      flags: MessageFlags.Ephemeral,
+    }).catch((followUpError) => {
+      console.warn(
+        '⚠️ The original interaction response was missing and a follow-up could not be delivered (Discord code ' +
+          String(getDiscordApiErrorCode(followUpError) ?? 'unknown') +
+          ').',
+      );
+    });
+  }
+}
+
 async function replyError(
   interaction:
     | ButtonInteraction
@@ -449,9 +489,7 @@ async function replyError(
       interaction.deferred &&
       !interaction.replied
     ) {
-      await interaction.editReply(
-        content,
-      );
+      await interaction.editReply(content);
       return;
     }
 
@@ -461,15 +499,25 @@ async function replyError(
     ) {
       await interaction.reply({
         content,
-        flags:
-          MessageFlags.Ephemeral,
+        flags: MessageFlags.Ephemeral,
       });
     }
   } catch (error) {
-    console.error(
-      '❌ Failed to send interaction error:',
-      error,
-    );
+    if (isUnknownMessageError(error)) {
+      await interaction.followUp({
+        content,
+        flags: MessageFlags.Ephemeral,
+      }).catch((followUpError) => {
+        console.warn(
+          '⚠️ Could not deliver an interaction error response (Discord code ' +
+            String(getDiscordApiErrorCode(followUpError) ?? 'unknown') +
+            ').',
+        );
+      });
+      return;
+    }
+
+    console.error('❌ Failed to send interaction error:', error);
   }
 }
 
@@ -1099,35 +1147,10 @@ async function createTicket(
     }
 
     /*
-     * This is the first point at which we know a real ticket is actually
-     * being created. Do not create an otherwise-empty department category
-     * before validating the submitted ticket.
+     * Create the ticket in the existing SupportForge parent first. The
+     * department-specific category is provisioned only after the ticket,
+     * its panel, and its durable record have been created successfully.
      */
-    const departmentCategory =
-      await ensureDepartmentCategory(guild, department);
-
-    if (department.categoryId !== departmentCategory.id) {
-      await updateGuildConfig(guild.id, (current) => {
-        const currentDepartment = current.departments[departmentId];
-        if (currentDepartment) {
-          currentDepartment.categoryId = departmentCategory.id;
-        }
-      });
-    }
-
-    const ticketCategory =
-      guild.channels.cache.get(departmentCategory.id);
-
-    if (
-      ticketCategory?.type !== ChannelType.GuildCategory
-    ) {
-      await replyError(
-        interaction,
-        '❌ The ticket destination category is missing. Run `/supportforge setup` to repair it.',
-      );
-      return;
-    }
-
     const number =
       await allocateTicketNumber(
           guild.id,
@@ -1207,7 +1230,7 @@ async function createTicket(
             type:
               ChannelType.GuildText,
             parent:
-              departmentCategory.id,
+              auditParentCategoryId,
             topic,
             permissionOverwrites:
               overwrites,
@@ -1355,6 +1378,27 @@ async function createTicket(
         },
       );
 
+      let departmentCategoryName = department.name;
+      try {
+        // At this point the ticket channel, panel, customer request, and
+        // durable ticket record all exist. Only now may the department
+        // category be created or repaired.
+        const departmentCategory = await ensureDepartmentCategory(guild, department);
+        departmentCategoryName = departmentCategory.name;
+
+        // ensureDepartmentCategory reconciles all active tickets into the
+        // category, including this new ticket. This avoids a second redundant
+        // channel PATCH and lets the shared REST queue handle rate limits.
+      } catch (categoryError) {
+        // Preserve the ticket even if category provisioning fails. It remains
+        // in the main SupportForge category and can be reconciled by setup.
+        console.warn(
+          '⚠️ Ticket #' + number +
+            ' was created successfully, but department category provisioning is pending:',
+          categoryError,
+        );
+      }
+
       await interaction.editReply({
         content:
           `✅ Your ticket has been created: ${ticketChannel}`,
@@ -1375,7 +1419,7 @@ async function createTicket(
               actor: interaction.user.tag,
               actorId: interaction.user.id,
               actorName: interaction.user.tag,
-              detail: `Ticket created in department ${department.name} under ${departmentCategory.name}.`,
+              detail: `Ticket created in department ${department.name} under ${departmentCategoryName}.`,
             },
           );
         } catch (error) {
@@ -2602,6 +2646,7 @@ async function closeTicket(
     );
 
     let channelSyncFailed = false;
+    let channelMissing = false;
     if (voiceChannelId) {
       try {
         closedTopic = await endTicketVoiceMode(
@@ -2662,10 +2707,17 @@ async function closeTicket(
       channel.name = closedChannelName;
     } catch (error) {
       channelSyncFailed = true;
-      console.warn(
-        `⚠️ Ticket #${ticketNumber} is closed in durable storage, but the Discord topic/category/name update is pending or failed:`,
-        error,
-      );
+      channelMissing = isUnknownChannelError(error);
+      if (channelMissing) {
+        console.warn(
+          `⚠️ Ticket #${ticketNumber} was closed durably, but its Discord channel no longer exists; channel synchronization was skipped.`,
+        );
+      } else {
+        console.warn(
+          `⚠️ Ticket #${ticketNumber} is closed in durable storage, but the Discord topic/category/name update is pending or failed:`,
+          error,
+        );
+      }
     }
 
     updateRuntimeTicketState(
@@ -2674,38 +2726,41 @@ async function closeTicket(
       'closed',
     );
 
-    await interaction.editReply(
-      channelSyncFailed
-        ? `⚠️ Ticket **#${ticketNumber}** is closed and its transcript has been saved, but the Discord topic/category/name update is pending or failed. Check the bot log for details.`
-        : `✅ Ticket **#${ticketNumber}** has been closed and its transcript has been saved.`,
+    await editReplyOrFollowUp(
+      interaction,
+      channelMissing
+        ? `⚠️ Ticket **#${ticketNumber}** was closed and its transcript was saved, but its Discord channel no longer exists. The durable closed record was retained.`
+        : channelSyncFailed
+          ? `⚠️ Ticket **#${ticketNumber}** is closed and its transcript has been saved, but the Discord topic/category/name update is pending or failed. Check the bot log for details.`
+          : `✅ Ticket **#${ticketNumber}** has been closed and its transcript has been saved.`,
     );
 
+    if (!channelMissing) {
+      /*
+       * Panel update happens after the state is committed and remains
+       * background work so it cannot delay the successful close response.
+       */
+      void updateMainMessage(
+        channel,
+        messageId,
+        'closed',
+        closedTopic,
+      );
 
-
-    /*
-     * Panel update happens after the state is committed and remains
-     * background work so it cannot delay the successful close response.
-     */
-    void updateMainMessage(
-      channel,
-      messageId,
-      'closed',
-      closedTopic,
-    );
-
-    /*
-     * Background announcement.
-     */
-    void channel
-      .send(
-        `🔒 Ticket **#${ticketNumber}** has been closed by ${interaction.user}.`,
-      )
-      .catch((error) => {
-        console.error(
-          '⚠️ Close announcement failed:',
-          error,
-        );
-      });
+      /*
+       * Background announcement.
+       */
+      void channel
+        .send(
+          `🔒 Ticket **#${ticketNumber}** has been closed by ${interaction.user}.`,
+        )
+        .catch((error) => {
+          console.error(
+            '⚠️ Close announcement failed:',
+            error,
+          );
+        });
+    }
 
     /*
      * Background audit.
