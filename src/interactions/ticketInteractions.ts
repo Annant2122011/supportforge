@@ -1319,10 +1319,6 @@ async function createTicket(
               `SupportForge ticket #${number}`,
           })) as TextChannel;
 
-      if (formDraftRecorded) {
-        await setTicketFormSubmissionChannel(interaction.id, ticketChannel.id);
-      }
-
       const panel =
         await ticketChannel.send({
             embeds: [
@@ -1399,6 +1395,11 @@ async function createTicket(
             lastActivityAt: now,
             lastCustomerMessageAt: now,
             ticketChannelType: 'text',
+            ...(selectedForm ? {
+              formSubmissionInteractionId: interaction.id,
+              formId: selectedForm.id,
+              formVersion: selectedForm.version,
+            } : {}),
           },
         },
         {
@@ -1492,6 +1493,7 @@ async function createTicket(
         if (!persistedTicket) {
           throw new Error('Ticket form answers were saved, but the durable ticket record could not be found.');
         }
+        await setTicketFormSubmissionChannel(interaction.id, ticketChannel.id);
         await attachTicketFormSubmission({
           interactionId: interaction.id,
           ticketId: persistedTicket.id,
