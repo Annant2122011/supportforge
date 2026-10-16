@@ -906,6 +906,7 @@ interface RecoverableFormSubmissionRow extends QueryResultRow {
   form_id: string;
   form_version: number;
   submitted_by: string;
+  form_snapshot: unknown;
   status: 'pending' | 'failed';
 }
 
@@ -986,7 +987,25 @@ async function recoverTicketRowFromDiscordTopic(
   const tagId = safeTopicValue(fields, 'tag');
   const ticketNumber = safeTopicValue(fields, 'number');
   if (!ownerId || !/^\d{17,20}$/.test(ownerId) ||
+      ownerId !== submission.submitted_by ||
       !departmentId || !tagId || !ticketNumber || !/^\d{1,20}$/.test(ticketNumber)) {
+    return false;
+  }
+
+  let snapshot: unknown = submission.form_snapshot;
+  if (typeof snapshot === 'string') {
+    try { snapshot = JSON.parse(snapshot) as unknown; } catch { return false; }
+  }
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return false;
+  const savedForm = snapshot as Record<string, unknown>;
+  if (savedForm.departmentId !== departmentId ||
+      (typeof savedForm.tagId === 'string' && savedForm.tagId !== tagId)) {
+    return false;
+  }
+  try {
+    await ensureValidMapping(submission.guild_id, departmentId, tagId);
+  } catch {
+    // A deleted/misconfigured route must not be reconstructed from a topic.
     return false;
   }
 
@@ -1067,7 +1086,7 @@ export async function recoverPendingTicketFormSubmissions(client: Client): Promi
   await initializePersistence();
   let recovered = await attachRecoverableSubmissions();
   const pending = await getPostgresPool().query<RecoverableFormSubmissionRow>(
-    'SELECT interaction_id, guild_id, channel_id, form_id, form_version, submitted_by, status ' +
+    'SELECT interaction_id, guild_id, channel_id, form_id, form_version, submitted_by, form_snapshot, status ' +
     'FROM ticket_form_submissions WHERE ticket_id IS NULL AND status IN (\\'pending\\',\\'failed\\') ' +
     'ORDER BY submitted_at ASC LIMIT 100',
   );
