@@ -29,6 +29,7 @@ import {
 
 import { executeTicketCommand } from '../interactions/ticketCommandTools';
 import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
+import { handleSettingsSlashCommand } from '../interactions/settingsCommandTools';
 import {
   applyTicketFormTemplate,
   createTicketForm,
@@ -1380,6 +1381,40 @@ export async function execute(
   }
 
   try {
+    if (group === 'settings') {
+      await handleSettingsSlashCommand(interaction, {
+        syncPanel,
+        repair: async (targetGuild, mode) => {
+          if (mode === 'storage') {
+            await ensureClosedCategory(targetGuild);
+            await ensureArchiveCategory(targetGuild);
+            await refreshSettingsChannel(targetGuild);
+            return 'Storage repair complete. Closed and Archive categories are ready.';
+          }
+          const supportCategory = await ensureContainer(targetGuild);
+          await getOrCreateAuditChannel(targetGuild, supportCategory.id);
+          await ensureTranscriptChannel(targetGuild, supportCategory.id);
+          await ensurePanelChannel(targetGuild, supportCategory.id);
+          await ensureOpenCategory(targetGuild);
+          await ensureClosedCategory(targetGuild);
+          await ensureArchiveCategory(targetGuild);
+          await ensureSettingsChannel(targetGuild, supportCategory.id);
+          await ensureAllDepartmentCategories(targetGuild);
+          await ensureSupportForgeCategoryPurposeMessages(targetGuild, supportCategory.id);
+          await syncPanel(targetGuild);
+          await refreshSettingsChannel(targetGuild);
+          return 'Normal infrastructure repair complete. Core channels and department categories have been checked.';
+        },
+        refresh: async (targetGuild) => {
+          const supportCategory = await ensureContainer(targetGuild);
+          await ensureSettingsChannel(targetGuild, supportCategory.id);
+          await syncPanel(targetGuild);
+          await refreshSettingsChannel(targetGuild);
+        },
+      });
+      return;
+    }
+
     // ─────────────────────────────────────────────
     // SETUP
     // ─────────────────────────────────────────────
