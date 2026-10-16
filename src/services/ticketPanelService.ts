@@ -190,14 +190,6 @@ export function buildTicketPanelComponents(
       }
     }
 
-    const safety = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId('ticket:panel:report')
-        .setLabel('Report User')
-        .setEmoji('🛡️')
-        .setStyle(ButtonStyle.Primary),
-    );
-
     const positioning = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId('ticket:panel:note')
@@ -222,8 +214,8 @@ export function buildTicketPanelComponents(
     );
 
     return voiceControls.components.length
-      ? [lifecycle, tools, voiceControls, safety, positioning]
-      : [lifecycle, tools, safety, positioning];
+      ? [lifecycle, tools, voiceControls, positioning]
+      : [lifecycle, tools, positioning];
   }
 
   return status === 'archived' ? [lifecycle] : [lifecycle, tools];
