@@ -1075,9 +1075,9 @@ async function recoverTicketRowFromDiscordTopic(
 
 async function attachRecoverableSubmissions(): Promise<number> {
   const result = await getPostgresPool().query(
-    'UPDATE ticket_form_submissions s SET ticket_id=t.id, channel_id=t.channel_id, status=\\'attached\\', attached_at=COALESCE(s.attached_at,NOW()), last_error=NULL ' +
-    'FROM tickets t WHERE s.guild_id=t.guild_id AND s.ticket_id IS NULL AND s.status IN (\\'pending\\',\\'failed\\') ' +
-    'AND (s.channel_id=t.channel_id OR s.interaction_id=t.metadata->>\\'formSubmissionInteractionId\\')',
+    'UPDATE ticket_form_submissions s SET ticket_id=t.id, channel_id=t.channel_id, status=\'attached\', attached_at=COALESCE(s.attached_at,NOW()), last_error=NULL ' +
+    'FROM tickets t WHERE s.guild_id=t.guild_id AND s.ticket_id IS NULL AND s.status IN (\'pending\',\'failed\') ' +
+    'AND (s.channel_id=t.channel_id OR s.interaction_id=t.metadata->>\'formSubmissionInteractionId\')',
   );
   return result.rowCount ?? 0;
 }
@@ -1088,7 +1088,7 @@ export async function recoverPendingTicketFormSubmissions(client: Client): Promi
   let recovered = await attachRecoverableSubmissions();
   const pending = await getPostgresPool().query<RecoverableFormSubmissionRow>(
     'SELECT interaction_id, guild_id, channel_id, form_id, form_version, submitted_by, form_snapshot, status ' +
-    'FROM ticket_form_submissions WHERE ticket_id IS NULL AND status IN (\\'pending\\',\\'failed\\') ' +
+    'FROM ticket_form_submissions WHERE ticket_id IS NULL AND status IN (\'pending\',\'failed\') ' +
     'ORDER BY submitted_at ASC LIMIT 100',
   );
 
