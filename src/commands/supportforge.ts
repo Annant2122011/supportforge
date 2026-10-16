@@ -1338,6 +1338,49 @@ export const data =
             .addStringOption((option) => option.setName('confirmation').setDescription('Type DELETE SUPPORT FORGE exactly').setRequired(true).setMinLength(20).setMaxLength(20))
             .addBooleanOption((option) => option.setName('accumulate-audit').setDescription('Keep individual audit events for future summaries').setRequired(true)),
         ),
+    )
+    .addSubcommandGroup((group) =>
+      group
+        .setName('audit')
+        .setDescription('Review audit summaries and manage audit controls')
+        .addSubcommand((subcommand) =>
+          subcommand.setName('summary').setDescription('Show the overall audit summary'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('daily').setDescription('Show the latest saved daily audit summary'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('accumulation')
+            .setDescription('View or manage raw audit-event retention')
+            .addStringOption((option) => option.setName('action').setDescription('Audit retention action').setRequired(true).addChoices(
+              { name: 'Show current status', value: 'status' },
+              { name: 'Enable raw-event accumulation', value: 'enable' },
+              { name: 'Revert raw-event accumulation', value: 'disable' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('developer')
+            .setDescription('Open developer audit view controls')
+            .addStringOption((option) => option.setName('action').setDescription('Developer view action').setRequired(true).addChoices(
+              { name: 'Show options', value: 'options' },
+              { name: 'Enable Developer View', value: 'enable' },
+              { name: 'Disable Developer View', value: 'disable' },
+              { name: 'Open a Developer View page', value: 'page' },
+            ))
+            .addIntegerOption((option) => option.setName('page').setDescription('Developer audit page (only for page action)').setMinValue(0).setMaxValue(999)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('panel')
+            .setDescription('Move or refresh the audit control panel')
+            .addStringOption((option) => option.setName('action').setDescription('Audit panel action').setRequired(true).addChoices(
+              { name: 'Move panel down', value: 'move' },
+              { name: 'Restore audit panel', value: 'restore' },
+              { name: 'Refresh panel', value: 'refresh' },
+            )),
+        ),
     );
 
 export async function runSupportForgeSetup(
