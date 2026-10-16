@@ -5381,8 +5381,8 @@ async function handlePanelModal(
           )
           .filter(Boolean);
 
-      const ownerId = getField(state.topic, 'owner');
-      if (removingUser && userId === ownerId) {
+      const ticketOwnerId = getField(state.topic, 'owner');
+      if (removingUser && userId === ticketOwnerId) {
         await interaction.editReply('❌ You cannot remove the ticket owner.');
         return;
       }
