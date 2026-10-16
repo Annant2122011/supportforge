@@ -763,6 +763,7 @@ async function showPremiumSettings(interaction: SettingsViewInteraction, notice 
     new EmbedBuilder()
       .setTitle('💎 Premium & Feature Demo')
       .setDescription(
+        (notice ? notice + '\\n\\n' : '') +
         'Current tier: **' + tierLabel(tier) + '**. Premium and Pro are demo entitlements for preview only, not real billing. ' +
         'This control cycles Free → Premium Demo → Pro Demo → Free.',
       ),
