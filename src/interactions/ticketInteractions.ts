@@ -999,17 +999,22 @@ async function applyTicketVisibilityMode(
 /* Ticket creation                                                            */
 /* -------------------------------------------------------------------------- */
 
+interface PreparedTicketFormData {
+  form: TicketFormVersion;
+  answers: Record<string, unknown>;
+  subject: string;
+  description: string;
+}
+
 async function createTicket(
   interaction: ModalSubmitInteraction,
   departmentId: string,
   tagId: string,
-  formRoute?: { formId: string; version: number; expiresAt: number },
+  formRoute?: { formId: string; version: number; expiresAt: number; submissionId?: string },
+  preparedForm?: PreparedTicketFormData,
+  alreadyAcknowledged = false,
 ): Promise<void> {
-  if (
-    !(await safeDeferReply(
-      interaction,
-    ))
-  ) {
+  if (!alreadyAcknowledged && !(await safeDeferReply(interaction))) {
     return;
   }
 
@@ -1103,58 +1108,63 @@ async function createTicket(
         return;
       }
 
-      selectedForm = await getTicketFormForSubmission({
-        guildId: guild.id,
-        departmentId,
-        tagId,
-        formId: formRoute.formId,
-        version: formRoute.version,
-      });
-
-      const rawAnswers: Record<string, unknown> = {};
-      for (const field of selectedForm.fields) {
-        const customId = 'form_' + field.id;
-        switch (field.type) {
-          case 'dropdown':
-          case 'multi_select':
-            rawAnswers[field.id] = Array.from(interaction.fields.getStringSelectValues(customId));
-            break;
-          case 'checkbox':
-            rawAnswers[field.id] = Array.from(interaction.fields.getCheckboxGroup(customId));
-            break;
-          case 'discord_user':
-            rawAnswers[field.id] = Array.from(interaction.fields.getSelectedUsers(customId)?.keys() ?? []);
-            break;
-          case 'discord_role':
-            rawAnswers[field.id] = Array.from(interaction.fields.getSelectedRoles(customId)?.keys() ?? []);
-            break;
-          case 'attachment':
-            rawAnswers[field.id] = Array.from(interaction.fields.getUploadedFiles(customId)?.values() ?? []).map((file) => ({
-              id: file.id,
-              url: file.url,
-              name: file.name,
-              size: file.size,
-              contentType: file.contentType,
-            }));
-            break;
-          default:
-            rawAnswers[field.id] = interaction.fields.getTextInputValue(customId);
-            break;
+      if (preparedForm) {
+        selectedForm = preparedForm.form;
+        formAnswers = preparedForm.answers;
+      } else {
+        selectedForm = await getTicketFormForSubmission({
+          guildId: guild.id,
+          departmentId,
+          tagId,
+          formId: formRoute.formId,
+          version: formRoute.version,
+        });
+  
+        const rawAnswers: Record<string, unknown> = {};
+        for (const field of selectedForm.fields) {
+          const customId = 'form_' + field.id;
+          switch (field.type) {
+            case 'dropdown':
+            case 'multi_select':
+              rawAnswers[field.id] = Array.from(interaction.fields.getStringSelectValues(customId));
+              break;
+            case 'checkbox':
+              rawAnswers[field.id] = Array.from(interaction.fields.getCheckboxGroup(customId));
+              break;
+            case 'discord_user':
+              rawAnswers[field.id] = Array.from(interaction.fields.getSelectedUsers(customId)?.keys() ?? []);
+              break;
+            case 'discord_role':
+              rawAnswers[field.id] = Array.from(interaction.fields.getSelectedRoles(customId)?.keys() ?? []);
+              break;
+            case 'attachment':
+              rawAnswers[field.id] = Array.from(interaction.fields.getUploadedFiles(customId)?.values() ?? []).map((file) => ({
+                id: file.id,
+                url: file.url,
+                name: file.name,
+                size: file.size,
+                contentType: file.contentType,
+              }));
+              break;
+            default:
+              rawAnswers[field.id] = interaction.fields.getTextInputValue(customId);
+              break;
+          }
         }
-      }
-      formAnswers = validateTicketFormAnswers(selectedForm.fields, rawAnswers);
-
-      // Mentions/IDs are untrusted text. Verify that selected principals exist
-      // in this server before accepting a response as valid.
-      for (const field of selectedForm.fields) {
-        const answer = formAnswers[field.id];
-        if (typeof answer !== 'string') continue;
-        if (field.type === 'discord_user') {
-          const member = await guild.members.fetch(answer).catch(() => null);
-          if (!member) throw new Error('"' + field.label + '" must reference a member of this server.');
-        } else if (field.type === 'discord_role') {
-          const role = await guild.roles.fetch(answer).catch(() => null);
-          if (!role || role.managed) throw new Error('"' + field.label + '" must reference a normal role in this server.');
+        formAnswers = validateTicketFormAnswers(selectedForm.fields, rawAnswers);
+  
+        // Mentions/IDs are untrusted text. Verify that selected principals exist
+        // in this server before accepting a response as valid.
+        for (const field of selectedForm.fields) {
+          const answer = formAnswers[field.id];
+          if (typeof answer !== 'string') continue;
+          if (field.type === 'discord_user') {
+            const member = await guild.members.fetch(answer).catch(() => null);
+            if (!member) throw new Error('"' + field.label + '" must reference a member of this server.');
+          } else if (field.type === 'discord_role') {
+            const role = await guild.roles.fetch(answer).catch(() => null);
+            if (!role || role.managed) throw new Error('"' + field.label + '" must reference a normal role in this server.');
+          }
         }
       }
     }
@@ -1233,17 +1243,11 @@ async function createTicket(
     }
 
     const subject =
-      interaction.fields
-        .getTextInputValue(
-          'subject',
-        )
+      (preparedForm?.subject ?? interaction.fields.getTextInputValue('subject'))
         .trim();
 
     const description =
-      interaction.fields
-        .getTextInputValue(
-          'description',
-        )
+      (preparedForm?.description ?? interaction.fields.getTextInputValue('description'))
         .trim();
 
     if (
@@ -1292,13 +1296,16 @@ async function createTicket(
 
     if (selectedForm && formAnswers) {
       await recordTicketFormSubmissionDraft({
-        interactionId: interaction.id,
+        interactionId: formRoute?.submissionId ?? interaction.id,
         guildId: guild.id,
         form: selectedForm,
         submittedBy: interaction.user.id,
         answers: formAnswers,
       });
       formDraftRecorded = true;
+      if (formRoute?.submissionId) {
+        await markTicketFormWizardCompleted(formRoute.submissionId);
+      }
     }
 
     let topic = [
@@ -1323,7 +1330,7 @@ async function createTicket(
     // reconstruct the ticket if Discord creates the channel but PostgreSQL
     // temporarily fails before registerTicket commits.
     if (selectedForm) {
-      topic = setField(topic, 'form_submission', interaction.id);
+      topic = setField(topic, 'form_submission', formRoute?.submissionId ?? interaction.id);
       topic = setField(topic, 'form_id', selectedForm.id);
       topic = setField(topic, 'form_version', String(selectedForm.version));
     }
@@ -1368,7 +1375,7 @@ async function createTicket(
           })) as TextChannel;
 
       if (formDraftRecorded) {
-        await setTicketFormSubmissionChannel(interaction.id, ticketChannel.id).catch((error) => {
+        await setTicketFormSubmissionChannel(formRoute?.submissionId ?? interaction.id, ticketChannel.id).catch((error) => {
           // Continue creating the ticket; its topic includes the submission ID,
           // allowing the recovery worker to find the channel if this write fails.
           console.warn('Could not associate the new ticket channel with its form draft yet:', error);
@@ -1452,7 +1459,7 @@ async function createTicket(
             lastCustomerMessageAt: now,
             ticketChannelType: 'text',
             ...(selectedForm ? {
-              formSubmissionInteractionId: interaction.id,
+              formSubmissionInteractionId: formRoute?.submissionId ?? interaction.id,
               formId: selectedForm.id,
               formVersion: selectedForm.version,
             } : {}),
@@ -1528,7 +1535,7 @@ async function createTicket(
         }
         await setTicketFormSubmissionChannel(interaction.id, ticketChannel.id);
         await attachTicketFormSubmission({
-          interactionId: interaction.id,
+          interactionId: formRoute?.submissionId ?? interaction.id,
           ticketId: persistedTicket.id,
           channelId: ticketChannel.id,
         });
@@ -1585,7 +1592,7 @@ async function createTicket(
     } catch (error) {
       if (formDraftRecorded) {
         await markTicketFormSubmissionFailure(
-          interaction.id,
+          formRoute?.submissionId ?? interaction.id,
           'Ticket initialization is incomplete; the response has been retained for recovery.',
         ).catch((persistenceError) => {
           console.warn('Could not mark the retained form response for recovery:', persistenceError);
