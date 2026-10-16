@@ -150,7 +150,7 @@ function rejectUnsafePattern(pattern: string): void {
   // User-defined expressions run on the bot event loop. Reject common nested
   // repetition patterns that can cause catastrophic backtracking.
   if (
-    /\([^)]*[+*{][^)]*\)[+*{]/.test(pattern) ||
+    /\)[+*{]/.test(pattern) ||
      /\\)[+*{]/.test(pattern) ||
     /(?:\.\*|\.\+){2}/.test(pattern) ||
     /\\[1-9]/.test(pattern)
