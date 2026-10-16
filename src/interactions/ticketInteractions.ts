@@ -3360,15 +3360,21 @@ async function showTicketCreationModal(
       return;
     }
     const form = cachedForm.form;
-    const expiresAt = Date.now() + TICKET_FORM_MODAL_TTL_MS;
-    const customId = form
-      ? `ticket:modal:${departmentId}:${tagId}:${form.id}:${form.version}:${expiresAt}`
-      : `ticket:modal:${departmentId}:${tagId}`;
+    if (form) {
+      const expiresAt = Date.now() + TICKET_FORM_MODAL_TTL_MS;
+      const sessionId = randomBytes(10).toString('base64url');
+      await interaction.showModal(
+        buildTicketFormModal(form, tagId, expiresAt, sessionId, 1, {}),
+      );
+      return;
+    }
 
-    const modal =
-      new ModalBuilder()
-        .setCustomId(customId)
-        .setTitle(form ? form.name.slice(0, 45) : 'Support Request');
+    // Keep the no-form legacy flow compact. Department and tag are validated
+    // by createTicket after it acknowledges the modal submission.
+    const customId = `ticket:modal:${departmentId}:${tagId}`;
+    const modal = new ModalBuilder()
+      .setCustomId(customId)
+      .setTitle('Support Request');
 
     const subjectInput = new TextInputBuilder()
       .setCustomId('subject')
