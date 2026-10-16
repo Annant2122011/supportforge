@@ -38,6 +38,8 @@ export interface TicketFormField {
   max?: number;
   choices?: string[];
   pattern?: string;
+  maxBytes?: number;
+  allowedMimeTypes?: string[];
 }
 
 export interface TicketFormSchema {
@@ -268,6 +270,30 @@ export function parseTicketFormFields(input: string | unknown): TicketFormField[
       rejectUnsafePattern(pattern);
     }
 
+    let maxBytes: number | undefined;
+    let allowedMimeTypes: string[] | undefined;
+    if (value.type === 'attachment') {
+      maxBytes = value.maxBytes === undefined ? 8 * 1024 * 1024 : value.maxBytes as number;
+      if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > 25 * 1024 * 1024) {
+        throw new Error('Attachment field ' + id + ' maxBytes must be an integer between 1 byte and 25 MiB.');
+      }
+      const rawTypes = value.allowedMimeTypes === undefined
+        ? ['image/*', 'application/pdf']
+        : value.allowedMimeTypes;
+      if (!Array.isArray(rawTypes) || rawTypes.length < 1 || rawTypes.length > 20) {
+        throw new Error('Attachment field ' + id + ' must allow 1–20 MIME types.');
+      }
+      allowedMimeTypes = rawTypes.map((mime) => {
+        if (typeof mime !== 'string') throw new Error('Allowed MIME types for ' + id + ' must be strings.');
+        const normalized = mime.trim().toLowerCase();
+        if (!/^[a-z0-9!#    const pattern = typeof value.pattern === 'string' ? value.pattern : undefined;
+    if (pattern !== undefined) {
+      if (value.type !== 'short_text' && value.type !== 'long_text') {
+        throw new Error('Field ' + id + ' can define pattern only for short_text or long_text.');
+      }
+      rejectUnsafePattern(pattern);
+    }
+
     return {
       id,
       label,
@@ -280,6 +306,49 @@ export function parseTicketFormFields(input: string | unknown): TicketFormField[
       ...(max !== undefined ? { max: max as number } : {}),
       ...(choices ? { choices } : {}),
       ...(pattern !== undefined ? { pattern } : {}),
+    };^_.+-]+\/(?:[a-z0-9!#    const pattern = typeof value.pattern === 'string' ? value.pattern : undefined;
+    if (pattern !== undefined) {
+      if (value.type !== 'short_text' && value.type !== 'long_text') {
+        throw new Error('Field ' + id + ' can define pattern only for short_text or long_text.');
+      }
+      rejectUnsafePattern(pattern);
+    }
+
+    return {
+      id,
+      label,
+      type: value.type,
+      required,
+      ...(placeholder ? { placeholder } : {}),
+      minLength: minLength as number,
+      maxLength: maxLength as number,
+      ...(min !== undefined ? { min: min as number } : {}),
+      ...(max !== undefined ? { max: max as number } : {}),
+      ...(choices ? { choices } : {}),
+      ...(pattern !== undefined ? { pattern } : {}),
+    };^_.+-]+|\*)$/.test(normalized) || normalized.startsWith('*/')) {
+          throw new Error('Invalid MIME type "' + mime + '" in attachment field ' + id + '. Use values such as image/* or application/pdf.');
+        }
+        return normalized;
+      });
+    } else if (value.maxBytes !== undefined || value.allowedMimeTypes !== undefined) {
+      throw new Error('Attachment size/type settings can only be used with attachment fields.');
+    }
+
+    return {
+      id,
+      label,
+      type: value.type,
+      required,
+      ...(placeholder ? { placeholder } : {}),
+      minLength: minLength as number,
+      maxLength: maxLength as number,
+      ...(min !== undefined ? { min: min as number } : {}),
+      ...(max !== undefined ? { max: max as number } : {}),
+      ...(choices ? { choices } : {}),
+      ...(pattern !== undefined ? { pattern } : {}),
+      ...(maxBytes !== undefined ? { maxBytes } : {}),
+      ...(allowedMimeTypes ? { allowedMimeTypes } : {}),
     };
   });
 }
@@ -288,16 +357,32 @@ function normalizedChoice(value: string, choices: string[]): string | undefined 
   return choices.find((choice) => choice.toLowerCase() === value.toLowerCase());
 }
 
+export interface TicketFormAttachmentAnswer {
+  id: string;
+  url: string;
+  name: string;
+  size: number;
+  contentType: string | null;
+}
+
+function mimeTypeAllowed(contentType: string, allowed: string[]): boolean {
+  const normalized = contentType.split(';', 1)[0].trim().toLowerCase();
+  return allowed.some((entry) => entry === normalized ||
+    (entry.endsWith('/*') && normalized.startsWith(entry.slice(0, -1))));
+}
+
+/** Strictly validate every submitted answer on the server, regardless of UI component validation. */
 export function validateTicketFormAnswers(
   fields: TicketFormField[],
-  rawAnswers: Record<string, string>,
+  rawAnswers: Record<string, unknown>,
 ): Record<string, unknown> {
   const answers: Record<string, unknown> = {};
   for (const field of fields) {
-    const raw = typeof rawAnswers[field.id] === 'string' ? rawAnswers[field.id] : '';
-    const value = raw.trim();
-
-    if (!value) {
+    const raw = rawAnswers[field.id];
+    const blank = raw === undefined || raw === null ||
+      (typeof raw === 'string' && raw.trim().length === 0) ||
+      (Array.isArray(raw) && raw.length === 0);
+    if (blank) {
       if (field.required) throw new Error('"' + field.label + '" is required.');
       continue;
     }
@@ -305,11 +390,13 @@ export function validateTicketFormAnswers(
     switch (field.type) {
       case 'short_text':
       case 'long_text': {
+        if (typeof raw !== 'string') throw new Error('"' + field.label + '" must be text.');
+        const value = raw.trim();
         if (value.length < (field.minLength ?? 0)) {
-          throw new Error('"' + field.label + '" must contain at least ' + field.minLength + ' characters.');
+          throw new Error('"' + field.label + '" must contain at least ' + (field.minLength ?? 0) + ' characters.');
         }
         if (value.length > (field.maxLength ?? (field.type === 'long_text' ? 1_500 : 100))) {
-          throw new Error('"' + field.label + '" must not exceed ' + field.maxLength + ' characters.');
+          throw new Error('"' + field.label + '" must not exceed ' + (field.maxLength ?? 100) + ' characters.');
         }
         if (field.pattern && !new RegExp(field.pattern).test(value)) {
           throw new Error('"' + field.label + '" does not match the required format.');
@@ -319,7 +406,8 @@ export function validateTicketFormAnswers(
       }
       case 'number':
       case 'decimal': {
-        const number = Number(value);
+        if (typeof raw !== 'string' && typeof raw !== 'number') throw new Error('"' + field.label + '" must be numeric.');
+        const number = typeof raw === 'number' ? raw : Number(raw.trim());
         if (!Number.isFinite(number) || (field.type === 'number' && !Number.isInteger(number))) {
           throw new Error('"' + field.label + '" must be a valid ' + (field.type === 'number' ? 'whole number' : 'decimal number') + '.');
         }
@@ -329,13 +417,16 @@ export function validateTicketFormAnswers(
         break;
       }
       case 'url': {
+        if (typeof raw !== 'string') throw new Error('"' + field.label + '" must be a URL.');
         let url: URL;
-        try { url = new URL(value); } catch { throw new Error('"' + field.label + '" must be a valid URL.'); }
+        try { url = new URL(raw.trim()); } catch { throw new Error('"' + field.label + '" must be a valid URL.'); }
         if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('"' + field.label + '" must use HTTP or HTTPS.');
         answers[field.id] = url.toString();
         break;
       }
       case 'email': {
+        if (typeof raw !== 'string') throw new Error('"' + field.label + '" must be an email address.');
+        const value = raw.trim();
         if (value.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
           throw new Error('"' + field.label + '" must be a valid email address.');
         }
@@ -343,7 +434,9 @@ export function validateTicketFormAnswers(
         break;
       }
       case 'date': {
-        const parsedDate = /^\\d{4}-\\d{2}-\\d{2}$/.test(value)
+        if (typeof raw !== 'string') throw new Error('"' + field.label + '" must be a date.');
+        const value = raw.trim();
+        const parsedDate = /^\d{4}-\d{2}-\d{2}$/.test(value)
           ? new Date(value + 'T00:00:00.000Z')
           : null;
         if (!parsedDate || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== value) {
@@ -353,47 +446,75 @@ export function validateTicketFormAnswers(
         break;
       }
       case 'dropdown': {
-        const choice = normalizedChoice(value, field.choices ?? []);
+        if (typeof raw !== 'string' && !Array.isArray(raw)) throw new Error('"' + field.label + '" must be one configured option.');
+        const submitted = Array.isArray(raw) ? raw : [raw];
+        if (submitted.length !== 1 || typeof submitted[0] !== 'string') {
+          throw new Error('Choose exactly one option for "' + field.label + '".');
+        }
+        const choice = normalizedChoice(submitted[0], field.choices ?? []);
         if (!choice) throw new Error('Choose one of the configured options for "' + field.label + '": ' + (field.choices ?? []).join(', ') + '.');
         answers[field.id] = choice;
         break;
       }
       case 'multi_select': {
-        const entries = value.split('|').map((entry) => entry.trim()).filter(Boolean);
-        if (!entries.length) {
-          if (field.required) throw new Error('Select at least one option for "' + field.label + '".');
-          continue;
+        if (!Array.isArray(raw) || raw.some((entry) => typeof entry !== 'string')) {
+          throw new Error('"' + field.label + '" must be selected from the configured options.');
         }
-        const selected = entries.map((entry) => normalizedChoice(entry, field.choices ?? []));
+        const selected = raw.map((entry) => normalizedChoice(entry as string, field.choices ?? []));
         if (selected.some((entry) => !entry)) {
-          throw new Error('Use only configured options for "' + field.label + '": ' + (field.choices ?? []).join(', ') + '. Separate selections with |.');
+          throw new Error('Use only configured options for "' + field.label + '": ' + (field.choices ?? []).join(', ') + '.');
         }
         const unique = Array.from(new Set(selected as string[]));
+        if (unique.length !== selected.length) throw new Error('Do not select duplicate options for "' + field.label + '".');
         answers[field.id] = unique;
         break;
       }
       case 'checkbox': {
-        if (!['true', 'false', 'yes', 'no', 'checked', 'unchecked'].includes(value.toLowerCase())) {
-          throw new Error('"' + field.label + '" must be answered with true/false or yes/no.');
+        if (typeof raw === 'boolean') {
+          answers[field.id] = raw;
+          break;
         }
-        answers[field.id] = ['true', 'yes', 'checked'].includes(value.toLowerCase());
+        if (!Array.isArray(raw) || raw.some((entry) => typeof entry !== 'string')) {
+          throw new Error('"' + field.label + '" must be answered with a checkbox.');
+        }
+        answers[field.id] = raw.includes('checked');
         break;
       }
       case 'discord_user':
       case 'discord_role': {
-        const match = value.match(field.type === 'discord_role' ? /^<@&(\d{17,20})>$|^(\d{17,20})$/ : /^<@!?(\d{17,20})>$|^(\d{17,20})$/);
-        const id = match?.[1] ?? match?.[2];
-        if (!id) throw new Error('"' + field.label + '" must contain a valid Discord ' + (field.type === 'discord_user' ? 'user' : 'role') + ' mention or ID.');
-        answers[field.id] = id;
+        if (!Array.isArray(raw) || raw.length !== 1 || typeof raw[0] !== 'string' || !/^\d{17,20}$/.test(raw[0])) {
+          throw new Error('"' + field.label + '" must select exactly one valid Discord ' + (field.type === 'discord_user' ? 'user' : 'role') + '.');
+        }
+        answers[field.id] = raw[0];
         break;
       }
       case 'attachment': {
-        let url: URL;
-        try { url = new URL(value); } catch { throw new Error('"' + field.label + '" must contain a direct attachment URL.'); }
-        if (url.protocol !== 'https:' || !['cdn.discordapp.com', 'media.discordapp.net'].includes(url.hostname.toLowerCase())) {
-          throw new Error('"' + field.label + '" must be a direct HTTPS Discord attachment link.');
+        if (!Array.isArray(raw) || raw.length !== 1 || !raw[0] || typeof raw[0] !== 'object') {
+          throw new Error('"' + field.label + '" must upload exactly one file.');
         }
-        answers[field.id] = url.toString();
+        const file = raw[0] as Partial<TicketFormAttachmentAnswer>;
+        if (typeof file.id !== 'string' || typeof file.url !== 'string' ||
+            typeof file.name !== 'string' || typeof file.size !== 'number' ||
+            !Number.isFinite(file.size) || file.size < 0 ||
+            typeof file.contentType !== 'string' || !file.contentType.trim()) {
+          throw new Error('The uploaded file for "' + field.label + '" did not include verifiable file metadata.');
+        }
+        if (file.size > (field.maxBytes ?? 8 * 1024 * 1024)) {
+          throw new Error('"' + field.label + '" must be no larger than ' + Math.floor((field.maxBytes ?? 8 * 1024 * 1024) / (1024 * 1024)) + ' MiB.');
+        }
+        if (!mimeTypeAllowed(file.contentType, field.allowedMimeTypes ?? ['image/*', 'application/pdf'])) {
+          throw new Error('The file type for "' + field.label + '" is not allowed. Accepted types: ' + (field.allowedMimeTypes ?? ['image/*', 'application/pdf']).join(', ') + '.');
+        }
+        if (!/^https:\/\/(?:cdn\.discordapp\.com|media\.discordapp\.net)\//i.test(file.url)) {
+          throw new Error('The uploaded file for "' + field.label + '" did not come from a trusted Discord attachment host.');
+        }
+        answers[field.id] = {
+          id: file.id,
+          url: file.url,
+          name: file.name.slice(0, 255),
+          size: file.size,
+          contentType: file.contentType.split(';', 1)[0].toLowerCase(),
+        } satisfies TicketFormAttachmentAnswer;
         break;
       }
     }
