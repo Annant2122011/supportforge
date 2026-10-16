@@ -43,22 +43,29 @@ import {
 
 import {
   getAdvancedSettings,
+  updateAdvancedSettings,
+  type TicketPriority,
 } from '../services/advancedSettingsService';
 
 import {
   ensureArchiveCategory,
   ensureClosedCategory,
   ensureOpenCategory,
+  ensureOptionalStatusCategory,
 } from '../services/ticketStorageService';
 
 import {
   ensureAllDepartmentCategories,
 } from '../services/departmentCategoryService';
 
-import { getOrCreateAuditChannel, logSettingsEvent, logSystemEvent } from '../services/auditLogService';
+import { getOrCreateAuditChannel, logSettingsEvent, logSystemEvent, getTicketAuditHistory, getAuditAccumulation, setAuditAccumulation, refreshAuditPanel } from '../services/auditLogService';
+import { performFactoryReset } from '../services/factoryResetService';
+import { addUseCasePreset } from '../services/useCasePresetService';
+import { moveTicketPanelToBottom } from '../services/ticketPanelService';
 
 import {
   ensureSettingsChannel,
+  refreshSettingsChannel,
 } from '../services/settingsChannelService';
 import {
   ensureChannelPurposeMessage,
