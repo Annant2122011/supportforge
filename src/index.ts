@@ -59,6 +59,7 @@ import { initializePersistence } from './core/persistence/provider';
 import { startOutboxProcessor } from './core/events/outboxProcessor';
 import { TicketOutboxPublisher } from './services/ticketOutboxPublisher';
 import { configureDiscordChannelRest } from './services/discordChannelService';
+import { startTicketFormSubmissionRecovery } from './services/ticketFormService';
 
 const token = process.env.DISCORD_TOKEN;
 
@@ -137,6 +138,7 @@ client.once('clientReady', (readyClient) => {
     );
   }
   startTicketRetentionScheduler(client);
+  startTicketFormSubmissionRecovery();
   startAuditDailySummaryScheduler(client);
   startSupportForgeUpdateMonitor(client);
   /*
