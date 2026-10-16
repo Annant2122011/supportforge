@@ -68,6 +68,21 @@ import {
   getTicketAuditHistory,
   logTicketEvent,
 } from '../services/auditLogService';
+import {
+  TICKET_FORM_MODAL_TTL_MS,
+  getActiveTicketFormForRouting,
+  getTicketFormForSubmission,
+  validateTicketFormAnswers,
+  recordTicketFormSubmissionDraft,
+  setTicketFormSubmissionChannel,
+  attachTicketFormSubmission,
+  markTicketFormSubmissionFailure,
+  type TicketFormVersion,
+} from '../services/ticketFormService';
+import {
+  acquireTicketCreationLease,
+  releaseTicketCreationLease,
+} from '../services/ticketCreationLeaseService';
 
 import {
   TICKET_PREFIX,
@@ -974,6 +989,7 @@ async function createTicket(
   interaction: ModalSubmitInteraction,
   departmentId: string,
   tagId: string,
+  formRoute?: { formId: string; version: number; expiresAt: number },
 ): Promise<void> {
   if (
     !(await safeDeferReply(
@@ -1013,21 +1029,37 @@ async function createTicket(
     lockKey,
   );
 
-  if (await isTicketCreationRestricted(guild.id, interaction.user.id)) {
-    const flags = await getUserFlagCount(guild.id, interaction.user.id);
-    await replyError(
-      interaction,
-      `🚫 You are currently restricted from opening new SupportForge tickets because your account has reached **${flags}** moderation flag(s).`,
-    );
-    ticketCreationLocks.delete(lockKey);
-    return;
-  }
-
   let ticketChannel:
     | TextChannel
     | undefined;
+  let creationLease: string | null = null;
+  let selectedForm: TicketFormVersion | undefined;
+  let formAnswers: Record<string, unknown> | undefined;
+  let formDraftRecorded = false;
 
   try {
+    creationLease = await acquireTicketCreationLease(
+      guild.id,
+      interaction.user.id,
+      departmentId,
+    );
+    if (!creationLease) {
+      await replyError(
+        interaction,
+        '⏳ Another ticket request for this department is already being processed. Please wait a moment and try again.',
+      );
+      return;
+    }
+
+    if (await isTicketCreationRestricted(guild.id, interaction.user.id)) {
+      const flags = await getUserFlagCount(guild.id, interaction.user.id);
+      await replyError(
+        interaction,
+        `🚫 You are currently restricted from opening new SupportForge tickets because your account has reached **${flags}** moderation flag(s).`,
+      );
+      return;
+    }
+
     const config =
       await getGuildConfig(
           guild.id,
@@ -1046,6 +1078,44 @@ async function createTicket(
         '❌ This department/tag combination no longer exists. Please refresh the support panel.',
       );
       return;
+    }
+
+    if (formRoute) {
+      if (!Number.isFinite(formRoute.expiresAt) || formRoute.expiresAt <= Date.now()) {
+        await replyError(
+          interaction,
+          '⌛ This form expired. Reopen the support panel and submit the current form.',
+        );
+        return;
+      }
+
+      selectedForm = await getTicketFormForSubmission({
+        guildId: guild.id,
+        departmentId,
+        tagId,
+        formId: formRoute.formId,
+        version: formRoute.version,
+      });
+
+      const rawAnswers: Record<string, string> = {};
+      for (const field of selectedForm.fields) {
+        rawAnswers[field.id] = interaction.fields.getTextInputValue('form_' + field.id);
+      }
+      formAnswers = validateTicketFormAnswers(selectedForm.fields, rawAnswers);
+
+      // Mentions/IDs are untrusted text. Verify that selected principals exist
+      // in this server before accepting a response as valid.
+      for (const field of selectedForm.fields) {
+        const answer = formAnswers[field.id];
+        if (typeof answer !== 'string') continue;
+        if (field.type === 'discord_user') {
+          const member = await guild.members.fetch(answer).catch(() => null);
+          if (!member) throw new Error('"' + field.label + '" must reference a member of this server.');
+        } else if (field.type === 'discord_role') {
+          const role = await guild.roles.fetch(answer).catch(() => null);
+          if (!role || role.managed) throw new Error('"' + field.label + '" must reference a normal role in this server.');
+        }
+      }
     }
 
     const auditParentCategoryId = config.supportCategoryId;
@@ -1179,6 +1249,17 @@ async function createTicket(
         .replace(/\r\n/g, '\n')
         .replace(/\r/g, '\n');
 
+    if (selectedForm && formAnswers) {
+      await recordTicketFormSubmissionDraft({
+        interactionId: interaction.id,
+        guildId: guild.id,
+        form: selectedForm,
+        submittedBy: interaction.user.id,
+        answers: formAnswers,
+      });
+      formDraftRecorded = true;
+    }
+
     const topic = [
       TICKET_PREFIX,
       'v=2',
@@ -1237,6 +1318,10 @@ async function createTicket(
             reason:
               `SupportForge ticket #${number}`,
           })) as TextChannel;
+
+      if (formDraftRecorded) {
+        await setTicketFormSubmissionChannel(interaction.id, ticketChannel.id);
+      }
 
       const panel =
         await ticketChannel.send({
@@ -1323,6 +1408,30 @@ async function createTicket(
         },
       );
 
+      if (selectedForm && formAnswers) {
+        const responseEmbed = new EmbedBuilder()
+          .setTitle('📋 ' + selectedForm.name + ' • Form v' + selectedForm.version)
+          .setDescription('Submitted by <@' + interaction.user.id + '>. These answers are retained with the exact form version used.')
+          .setTimestamp(new Date());
+        for (const field of selectedForm.fields) {
+          const answer = formAnswers[field.id];
+          const rendered = Array.isArray(answer)
+            ? answer.join(', ')
+            : typeof answer === 'boolean'
+              ? (answer ? 'Yes' : 'No')
+              : String(answer ?? '—');
+          responseEmbed.addFields({
+            name: field.label.slice(0, 256),
+            value: (rendered || '—').slice(0, 1024),
+            inline: false,
+          });
+        }
+        await ticketChannel.send({
+          allowedMentions: { parse: [] },
+          embeds: [responseEmbed],
+        });
+      }
+
       const requestMessage = await ticketChannel.send({
           allowedMentions: {
             parse: [],
@@ -1378,6 +1487,18 @@ async function createTicket(
         },
       );
 
+      if (selectedForm && formDraftRecorded) {
+        const persistedTicket = await getPersistedTicket(ticketChannel.id);
+        if (!persistedTicket) {
+          throw new Error('Ticket form answers were saved, but the durable ticket record could not be found.');
+        }
+        await attachTicketFormSubmission({
+          interactionId: interaction.id,
+          ticketId: persistedTicket.id,
+          channelId: ticketChannel.id,
+        });
+      }
+
       let departmentCategoryName = department.name;
       try {
         // At this point the ticket channel, panel, customer request, and
@@ -1427,6 +1548,15 @@ async function createTicket(
         }
       })();
     } catch (error) {
+      if (formDraftRecorded) {
+        await markTicketFormSubmissionFailure(
+          interaction.id,
+          'Ticket initialization is incomplete; the response has been retained for recovery.',
+        ).catch((persistenceError) => {
+          console.warn('Could not mark the retained form response for recovery:', persistenceError);
+        });
+      }
+
       /*
        * A ticket channel is a real user-facing record as soon as Discord
        * creates it. Never delete it merely because a later initialization
@@ -1481,9 +1611,17 @@ async function createTicket(
       '❌ SupportForge could not create the ticket. Please try again.',
     );
   } finally {
-    ticketCreationLocks.delete(
-      lockKey,
-    );
+    if (creationLease) {
+      await releaseTicketCreationLease(
+        guild.id,
+        interaction.user.id,
+        departmentId,
+        creationLease,
+      ).catch((error) => {
+        console.warn('Could not release SupportForge ticket creation lease:', error);
+      });
+    }
+    ticketCreationLocks.delete(lockKey);
   }
 }
 
@@ -2947,68 +3085,80 @@ async function showTicketCreationModal(
      * interaction (10062). The modal submit revalidates the department/tag
      * before any ticket is created.
      */
+    /*
+     * Form configuration is stored durably in Neon. Only the matching
+     * active form version is embedded in the modal ID; submission validates
+     * that version again so a stale modal can never silently use edited rules.
+     */
+    const form = await getActiveTicketFormForRouting(
+      interaction.guild.id,
+      departmentId,
+      tagId,
+    );
+    const expiresAt = Date.now() + TICKET_FORM_MODAL_TTL_MS;
+    const customId = form
+      ? `ticket:modal:${departmentId}:${tagId}:${form.id}:${form.version}:${expiresAt}`
+      : `ticket:modal:${departmentId}:${tagId}`;
+
     const modal =
       new ModalBuilder()
-        .setCustomId(
-          `ticket:modal:${departmentId}:${tagId}`,
-        )
-        .setTitle(
-          'Support Request',
-        );
+        .setCustomId(customId)
+        .setTitle(form ? form.name.slice(0, 45) : 'Support Request');
 
     const subjectInput =
       new TextInputBuilder()
-        .setCustomId(
-          'subject',
-        )
-        .setLabel(
-          'What do you need help with?',
-        )
-        .setPlaceholder(
-          'Briefly describe your issue',
-        )
-        .setStyle(
-          TextInputStyle.Short,
-        )
-        .setRequired(
-          true,
-        )
-        .setMaxLength(
-          100,
-        );
+        .setCustomId('subject')
+        .setLabel('What do you need help with?')
+        .setPlaceholder('Briefly describe your issue')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(100);
 
     const descriptionInput =
       new TextInputBuilder()
-        .setCustomId(
-          'description',
-        )
-        .setLabel(
-          'Describe your issue (up to 4,000 characters)',
-        )
-        .setPlaceholder(
-          'Paste or type the full issue. Keep paragraphs and bullet points as written.',
-        )
-        .setStyle(
-          TextInputStyle.Paragraph,
-        )
-        .setRequired(
-          true,
-        )
-        .setMaxLength(
-          4000,
-        );
+        .setCustomId('description')
+        .setLabel('Describe your issue (up to 4,000 characters)')
+        .setPlaceholder('Keep paragraphs and bullet points as written.')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true)
+        .setMaxLength(4000);
 
-    modal.addComponents(
-      new ActionRowBuilder<TextInputBuilder>()
-        .addComponents(
-          subjectInput,
-        ),
+    const inputRows: ActionRowBuilder<TextInputBuilder>[] = [
+      new ActionRowBuilder<TextInputBuilder>().addComponents(subjectInput),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(descriptionInput),
+    ];
 
-      new ActionRowBuilder<TextInputBuilder>()
-        .addComponents(
-          descriptionInput,
-        ),
-    );
+    for (const field of form?.fields ?? []) {
+      const hint = field.type === 'dropdown' || field.type === 'multi_select'
+        ? (field.choices ?? []).join(', ')
+        : field.type === 'checkbox'
+          ? 'Enter yes/no or true/false'
+          : field.type === 'discord_user'
+            ? 'Enter a server member mention or user ID'
+            : field.type === 'discord_role'
+              ? 'Enter a server role mention or role ID'
+              : field.type === 'attachment'
+                ? 'Paste an HTTPS Discord attachment URL'
+                : field.type === 'date'
+                  ? 'Use YYYY-MM-DD'
+                  : field.type === 'number'
+                    ? 'Enter a whole number'
+                    : field.type === 'decimal'
+                      ? 'Enter a number; decimals are allowed'
+                      : field.placeholder ?? '';
+
+      const input = new TextInputBuilder()
+        .setCustomId('form_' + field.id)
+        .setLabel(field.label.slice(0, 45))
+        .setPlaceholder((hint || field.placeholder || field.label).slice(0, 100))
+        .setStyle(field.type === 'long_text' ? TextInputStyle.Paragraph : TextInputStyle.Short)
+        .setRequired(field.required)
+        .setMaxLength(Math.min(4000, Math.max(1, field.maxLength ?? (field.type === 'long_text' ? 1500 : 100))));
+
+      inputRows.push(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
+    }
+
+    modal.addComponents(...inputRows);
 
     /*
      * IMPORTANT:
@@ -5114,33 +5264,19 @@ export async function handleTicketInteraction(
           return;
         }
 
-        await createTicket(
-          interaction,
-          departmentId,
-          tagId,
-        );
+        const formId = parts[4];
+        const version = Number(parts[5]);
+        const expiresAt = Number(parts[6]);
+        const formRoute = formId
+          ? Number.isInteger(version) && version > 0 && Number.isFinite(expiresAt)
+            ? { formId, version, expiresAt }
+            : undefined
+          : undefined;
 
-        return;
-      }
-
-      if (interaction.customId.startsWith('ticket:report:modal:')) {
-        await handleReportModal(interaction);
-        return;
-      }
-
-      if (
-        interaction.customId.startsWith(
-          'ticket:modal:',
-        )
-      ) {
-        const parts = interaction.customId.split(':');
-        const departmentId = parts[2] ?? '';
-        const tagId = parts[3] ?? '';
-
-        if (!departmentId || !tagId) {
+        if (formId && !formRoute) {
           await replyError(
             interaction,
-            '❌ Ticket department/tag could not be determined.',
+            '❌ This form submission link is malformed. Reopen the support panel.',
           );
           return;
         }
@@ -5149,7 +5285,14 @@ export async function handleTicketInteraction(
           interaction,
           departmentId,
           tagId,
+          formRoute,
         );
+
+        return;
+      }
+
+      if (interaction.customId.startsWith('ticket:report:modal:')) {
+        await handleReportModal(interaction);
         return;
       }
 
