@@ -13,6 +13,7 @@ import { refreshSettingsChannel } from '../services/settingsChannelService';
 import { addUseCasePreset } from '../services/useCasePresetService';
 import { performFactoryReset } from '../services/factoryResetService';
 import { logSettingsEvent } from '../services/auditLogService';
+import { approveRetentionDeletion, declineRetentionDeletion, getEligibleRetentionTickets } from '../services/ticketRetentionService';
 
 export interface SettingsSlashHooks {
   syncPanel(guild: Guild): Promise<void>;
@@ -140,6 +141,62 @@ export async function handleSettingsSlashCommand(
         'Closed tickets: **' + (settings.retention.closedDays === 0 ? 'No timer (365-day maximum)' : settings.retention.closedDays + ' days') +
         '**\nArchived tickets: **' + (settings.retention.archiveDays === 0 ? 'No timer (365-day maximum)' : settings.retention.archiveDays + ' days') + '**.'
       );
+      return;
+    }
+
+    if (action === 'retention-action') {
+      const mode = interaction.options.getString('action', true);
+      const scope = interaction.options.getString('scope', true) as 'closed' | 'archive';
+      const settings = await getAdvancedSettings(guild.id);
+      const pending = settings.retention.pendingApprovals[scope];
+
+      if (mode === 'review') {
+        const eligible = await getEligibleRetentionTickets(guild, scope);
+        const preview = eligible.slice(0, 12).map((channel) => '• ' + channel.name + ' (' + channel.id + ')').join('\n');
+        const requestText = pending
+          ? '\nPending approval requested by <@' + pending.requestedById + '> on ' + pending.requestedAt + '.'
+          : '\nThere is no pending deletion approval for this scope.';
+        await interaction.editReply(
+          '**Retention Review: ' + (scope === 'closed' ? 'Closed Tickets' : 'Archived Tickets') + '**\n' +
+          'Eligible tickets: **' + eligible.length + '**.' + requestText + '\n\n' +
+          (preview || 'No eligible tickets were found.') +
+          (eligible.length > 12 ? '\n…and ' + (eligible.length - 12) + ' more.' : '') +
+          '\n\nReview does not delete anything.'
+        );
+        return;
+      }
+
+      if (!pending) throw new Error('There is no pending retention approval for that scope.');
+      if (pending.requestedById !== interaction.user.id && guild.ownerId !== interaction.user.id) {
+        throw new Error('Only the administrator who was asked, or the server owner, can approve or decline this deletion.');
+      }
+
+      if (mode === 'decline') {
+        await declineRetentionDeletion(guild, scope, interaction.user.id);
+        await refreshSettingsChannel(guild);
+        audit('RETENTION_DECLINED', 'Declined pending ' + scope + ' retention deletion through slash command.');
+        await interaction.editReply('✅ Declined the pending ' + scope + ' retention deletion. No tickets were deleted.');
+        return;
+      }
+
+      const confirmDelete = interaction.options.getBoolean('confirm-delete') ?? false;
+      const eligible = await getEligibleRetentionTickets(guild, scope);
+      const preview = eligible.slice(0, 12).map((channel) => '• ' + channel.name + ' (' + channel.id + ')').join('\n');
+      if (!confirmDelete) {
+        await interaction.editReply(
+          '**Retention Deletion Confirmation Required**\n\n' +
+          'Scope: **' + scope + '** · Eligible tickets: **' + eligible.length + '**.\n' +
+          (preview || 'No eligible tickets were found.') +
+          (eligible.length > 12 ? '\n…and ' + (eligible.length - 12) + ' more.' : '') +
+          '\n\nNo tickets were deleted. Repeat this command with **confirm-delete: True** to approve the deletion.'
+        );
+        return;
+      }
+
+      const deleted = await approveRetentionDeletion(guild, scope, interaction.user.id);
+      await refreshSettingsChannel(guild);
+      audit('RETENTION_APPROVED', 'Approved deletion of ' + deleted + ' eligible ' + scope + ' ticket(s) through slash command.');
+      await interaction.editReply('✅ Approved retention cleanup. Deleted **' + deleted + '** eligible ' + scope + ' ticket(s).');
       return;
     }
 
