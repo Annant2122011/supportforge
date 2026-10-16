@@ -833,7 +833,15 @@ export const data =
         .addSubcommand((subcommand) =>
           subcommand
             .setName('list')
-            .setDescription('List forms and valid department/tag IDs'),
+            .setDescription('List forms and valid department/tag IDs')
+            .addIntegerOption((option) =>
+              option
+                .setName('page')
+                .setDescription('Page number for long form/department lists')
+                .setRequired(false)
+                .setMinValue(1)
+                .setMaxValue(999),
+            ),
         )
         .addSubcommand((subcommand) =>
           subcommand
@@ -1649,14 +1657,33 @@ export async function execute(
             '  • ' + tag.name + ' · tag ID `' + tag.id + '`',
           ),
         ]);
-        const content = [
-          '**Ticket Forms**',
-          formLines.join('\n') || 'No forms configured yet.',
-          '',
-          '**Available routing IDs**',
-          mappingLines.join('\n') || 'No departments are configured. Create a department first.',
-        ].join('\n').slice(0, 1900);
-        await interaction.editReply(content);
+
+        // Paginate at line boundaries so department and tag identifiers are
+        // never silently truncated from a Discord response.
+        const allLines: string[] = ['**Ticket Forms**'];
+        allLines.push(...(formLines.length ? formLines : ['No forms configured yet.']));
+        allLines.push('', '**Available routing IDs**');
+        allLines.push(...(mappingLines.length ? mappingLines : ['No departments are configured. Create a department first.']));
+
+        const pages: string[] = [];
+        let currentPage = '';
+        for (const line of allLines) {
+          const next = currentPage ? currentPage + '\n' + line : line;
+          if (next.length > 1_650 && currentPage) {
+            pages.push(currentPage);
+            currentPage = line;
+          } else {
+            currentPage = next;
+          }
+        }
+        if (currentPage) pages.push(currentPage);
+
+        const requestedPage = interaction.options.getInteger('page') ?? 1;
+        if (requestedPage > pages.length) {
+          await interaction.editReply('❌ Page ' + requestedPage + ' does not exist. This list has ' + pages.length + ' page(s). Use `/supportforge form list page:1` to start.');
+          return;
+        }
+        await interaction.editReply('**Ticket Form List • Page ' + requestedPage + ' / ' + pages.length + '**\n\n' + pages[requestedPage - 1]);
         return;
       }
 
