@@ -1900,22 +1900,22 @@ export async function handleSettingsInteraction(
 
     if (id.startsWith('sf:settings:usecases:add:')) {
       const key = id.slice('sf:settings:usecases:add:'.length);
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
         const added = await addUseCasePreset(guild.id, key);
         await syncPanel(guild);
         await refreshSettingsChannel(guild);
-        await interaction.reply({
+        await interaction.editReply({
           embeds: [
             new EmbedBuilder()
               .setTitle('✅ Use Case Added')
               .setDescription('Added **' + added.name + '** with ' + added.tagNames.length + ' starter tags: ' + added.tagNames.join(', ') + '. Its Discord category will be created when the first ticket is opened in this department.'),
           ],
           components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
-          flags: MessageFlags.Ephemeral,
         });
         await auditSettingsAction(guild, interaction, 'USE_CASE_ADDED', 'Added use case department ' + added.name + ' with ' + added.tagNames.length + ' starter tags. Its Discord category will be provisioned when the first ticket is created.');
       } catch (error) {
-        await reject(interaction, '❌ ' + (error instanceof Error ? error.message : 'Could not add that use case.'));
+        await interaction.editReply('❌ ' + (error instanceof Error ? error.message : 'Could not add that use case.')).catch(() => undefined);
       }
       return true;
     }
