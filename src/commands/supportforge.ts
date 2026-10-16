@@ -1340,6 +1340,59 @@ export const data =
         ),
     );
 
+export async function runSupportForgeSetup(
+  guild: Guild,
+  restoreMode = false,
+): Promise<{ supportCategoryId: string; departmentCount: number; legacyOpenCategoryId: string | null }> {
+  const supportCategory = await ensureContainer(guild);
+  await getOrCreateAuditChannel(guild, supportCategory.id);
+  await ensureTranscriptChannel(guild, supportCategory.id);
+  await ensurePanelChannel(guild, supportCategory.id);
+  await ensureOpenCategory(guild);
+  await ensureClosedCategory(guild);
+  await ensureArchiveCategory(guild);
+  await ensureSettingsChannel(guild, supportCategory.id);
+  await ensureAllDepartmentCategories(guild);
+  await ensureSupportForgeCategoryPurposeMessages(guild, supportCategory.id);
+
+  let config = await getGuildConfig(guild.id);
+  if (Object.keys(config.departments).length === 0) {
+    const departmentId = newDepartmentId();
+    await updateGuildConfig(guild.id, (current) => {
+      const now = new Date().toISOString();
+      const tagId = newTagId();
+      current.departments[departmentId] = {
+        id: departmentId,
+        name: 'General Support',
+        staffRoleId: null,
+        tags: { [tagId]: { id: tagId, name: 'General', createdAt: now } },
+        createdAt: now,
+      };
+    });
+    config = await getGuildConfig(guild.id);
+  }
+
+  await syncPanel(guild);
+  const legacyOpenCategory = config.openCategoryId
+    ? guild.channels.cache.get(config.openCategoryId)
+    : undefined;
+  await logSystemEvent(
+    guild,
+    supportCategory.id,
+    restoreMode ? 'SUPPORTFORGE_RESTORED' : 'SETUP_COMPLETED',
+    (restoreMode ? 'SupportForge restore completed.' : 'SupportForge setup/repair completed.') +
+      ' Support Forge=' + supportCategory.id +
+      '; Open=' + (legacyOpenCategory?.id ?? 'not-created') +
+      '; departments=' + Object.keys(config.departments).length + '.',
+  );
+  await refreshSettingsChannel(guild);
+  return {
+    supportCategoryId: supportCategory.id,
+    departmentCount: Object.keys(config.departments).length,
+    legacyOpenCategoryId: legacyOpenCategory?.id ?? null,
+  };
+}
+
 export async function execute(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
@@ -1419,122 +1472,22 @@ export async function execute(
     // SETUP
     // ─────────────────────────────────────────────
 
-    if (
-      !group &&
-      (subcommand === 'setup' || subcommand === 'restore')
-    ) {
-      await interaction.deferReply({
-        flags: MessageFlags.Ephemeral,
-      });
-
-      const supportCategory =
-        await ensureContainer(guild);
-
-      // The audit channel is core SupportForge infrastructure. Create/repair
-      // it during setup instead of waiting for a later ticket event.
-      await getOrCreateAuditChannel(
-        guild,
-        supportCategory.id,
-      );
-
-      await ensureTranscriptChannel(
-        guild,
-        supportCategory.id,
-      );
-
-      await ensurePanelChannel(
-        guild,
-        supportCategory.id,
-      );
-
-      await ensureOpenCategory(guild);
-      await ensureClosedCategory(guild);
-      await ensureArchiveCategory(guild);
-      await ensureSettingsChannel(guild, supportCategory.id);
-      await ensureAllDepartmentCategories(guild);
-      await ensureSupportForgeCategoryPurposeMessages(
-        guild,
-        supportCategory.id,
-      );
-
-      let config =
-        await getGuildConfig(guild.id);
-
-      if (
-        Object.keys(
-          config.departments,
-        ).length === 0
-      ) {
-        const id =
-          newDepartmentId();
-
-        await updateGuildConfig(
-          guild.id,
-          (current) => {
-            const now = new Date().toISOString();
-            const tagId = newTagId();
-            current.departments[id] = {
-              id,
-              name: 'General Support',
-              staffRoleId: null,
-              tags: {
-                [tagId]: {
-                  id: tagId,
-                  name: 'General',
-                  createdAt: now,
-                },
-              },
-              createdAt: now,
-            };
-          },
-        );
-
-        config =
-          await getGuildConfig(
-            guild.id,
-          );
-      }
-
-          await syncPanel(guild);
-
+    if (!group && (subcommand === 'setup' || subcommand === 'restore')) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const restoreMode = subcommand === 'restore';
-      const legacyOpenCategory = config.openCategoryId
-        ? guild.channels.cache.get(config.openCategoryId)
-        : undefined;
-
-      await logSystemEvent(
-        guild,
-        supportCategory.id,
-        restoreMode ? 'SUPPORTFORGE_RESTORED' : 'SETUP_COMPLETED',
-        (restoreMode
-          ? 'SupportForge restore completed.'
-          : 'SupportForge setup/repair completed.') +
-          ' Support Forge=' +
-          supportCategory.id +
-          '; Open=' +
-          (legacyOpenCategory?.id ?? 'not-created') +
-          '; departments=' +
-          Object.keys(config.departments).length +
-          '.',
-      );
-
+      const result = await runSupportForgeSetup(guild, restoreMode);
       await interaction.editReply(
-        (restoreMode
-          ? `✅ **SupportForge restored successfully.**`
-          : `✅ **SupportForge setup complete.**`) +
-          `\n\n📁 Container: ${supportCategory}\n` +
-          `📂 Department categories: **${Object.keys(config.departments).length}**\n` +
-          (legacyOpenCategory ? `🟢 Legacy Open bucket: ${legacyOpenCategory}\n` : '') +
-          `📋 Departments: **${Object.keys(
-            config.departments,
-          ).length}**\n` +
-          `🎫 Panel has been created/repaired and is ready.`,
+        (restoreMode ? '✅ **SupportForge restored successfully.**' : '✅ **SupportForge setup complete.**') +
+        '\n\n📁 Container: <#' + result.supportCategoryId + '>\n' +
+        '📂 Department categories: **' + result.departmentCount + '**\n' +
+        (result.legacyOpenCategoryId ? '🟢 Legacy Open bucket: <#' + result.legacyOpenCategoryId + '>\n' : '') +
+        '📋 Departments: **' + result.departmentCount + '**\n' +
+        '🎫 Panel has been created/repaired and is ready.'
       );
-
       return;
     }
 
-    // ─────────────────────────────────────────────
+        // ─────────────────────────────────────────────
     // CATEGORY ADD
     // ─────────────────────────────────────────────
 
