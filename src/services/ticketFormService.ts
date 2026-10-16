@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { QueryResultRow } from 'pg';
+import type { PoolClient, QueryResultRow } from 'pg';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
 import { initializePersistence } from '../core/persistence/provider';
@@ -438,7 +438,7 @@ async function ensureValidMapping(guildId: string, departmentId: string, tagId: 
   }
 }
 
-async function transaction<T>(run: (client: ReturnType<ReturnType<typeof getPostgresPool>['connect']> extends Promise<infer C> ? C : never) => Promise<T>): Promise<T> {
+async function transaction<T>(run: (client: PoolClient) => Promise<T>): Promise<T> {
   await initializePersistence();
   const client = await getPostgresPool().connect();
   try {
@@ -634,7 +634,7 @@ function canonicalJson(value: unknown): string {
       JSON.stringify(key) + ':' + canonicalJson((value as Record<string, unknown>)[key]),
     ).join(',') + '}';
   }
-  return JSON.stringify(value);
+  return JSON.stringify(value) ?? 'undefined';
 }
 
 export async function setTicketFormSubmissionChannel(interactionId: string, channelId: string): Promise<void> {
