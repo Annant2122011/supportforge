@@ -1765,7 +1765,7 @@ export async function execute(
         const pages: string[] = [];
         let pageText = '';
         for (const line of (lines.length ? lines : ['No form templates saved yet.'])) {
-          const next = pageText ? pageText + '\\n' + line : line;
+          const next = pageText ? pageText + '\n' + line : line;
           if (next.length > 1_650 && pageText) {
             pages.push(pageText);
             pageText = line;
@@ -1780,7 +1780,7 @@ export async function execute(
           return;
         }
         await interaction.editReply(
-          '**Form Templates • Page ' + requestedPage + ' / ' + pages.length + '**\\n\\n' + pages[requestedPage - 1],
+          '**Form Templates • Page ' + requestedPage + ' / ' + pages.length + '**\n\n' + pages[requestedPage - 1],
         );
         return;
       }
