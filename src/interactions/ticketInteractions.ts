@@ -1409,11 +1409,21 @@ async function createTicket(
         },
       );
 
+      const requestEmbed = new EmbedBuilder()
+        .setTitle('📨 Support Request')
+        .setDescription(cleanDescription)
+        .addFields(
+          { name: 'Subject', value: cleanSubject, inline: false },
+          { name: 'Ticket', value: `#${number}`, inline: true },
+          { name: 'Department', value: department.name, inline: true },
+        );
+
       if (selectedForm && formAnswers) {
-        const responseEmbed = new EmbedBuilder()
-          .setTitle('📋 ' + selectedForm.name + ' • Form v' + selectedForm.version)
-          .setDescription('Submitted by <@' + interaction.user.id + '>. These answers are retained with the exact form version used.')
-          .setTimestamp(new Date());
+        requestEmbed.addFields({
+          name: 'Form',
+          value: selectedForm.name + ' • version ' + selectedForm.version,
+          inline: false,
+        });
         for (const field of selectedForm.fields) {
           const answer = formAnswers[field.id];
           const rendered = Array.isArray(answer)
@@ -1421,55 +1431,18 @@ async function createTicket(
             : typeof answer === 'boolean'
               ? (answer ? 'Yes' : 'No')
               : String(answer ?? '—');
-          responseEmbed.addFields({
+          requestEmbed.addFields({
             name: field.label.slice(0, 256),
             value: (rendered || '—').slice(0, 1024),
             inline: false,
           });
         }
-        await ticketChannel.send({
-          allowedMentions: { parse: [] },
-          embeds: [responseEmbed],
-        });
       }
 
       const requestMessage = await ticketChannel.send({
-          allowedMentions: {
-            parse: [],
-          },
-          embeds: [
-            new EmbedBuilder()
-              .setTitle(
-                '📨 Support Request',
-              )
-              .setDescription(
-                cleanDescription,
-              )
-              .addFields(
-                {
-                  name:
-                    'Subject',
-                  value:
-                    cleanSubject,
-                  inline: false,
-                },
-                {
-                  name:
-                    'Ticket',
-                  value:
-                    `#${number}`,
-                  inline: true,
-                },
-                {
-                  name:
-                    'Department',
-                  value:
-                    department.name,
-                  inline: true,
-                },
-              ),
-          ],
-        });
+        allowedMentions: { parse: [] },
+        embeds: [requestEmbed],
+      });
 
       await updatePersistedTicketMetadata(
         ticketChannel.id,
