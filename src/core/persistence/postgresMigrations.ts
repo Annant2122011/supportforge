@@ -259,6 +259,29 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+  {
+    id: 7,
+    name: 'create_reusable_ticket_form_templates',
+    up: async (db) => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS ticket_form_templates (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          name TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 80),
+          schema JSONB NOT NULL,
+          created_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_ticket_form_templates_name
+          ON ticket_form_templates (guild_id, LOWER(name));
+
+        CREATE INDEX IF NOT EXISTS idx_ticket_form_templates_guild_created
+          ON ticket_form_templates (guild_id, created_at DESC);
+      `);
+    },
+  },
 ];
 
 export async function runPostgresMigrations(
