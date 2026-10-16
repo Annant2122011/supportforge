@@ -30,6 +30,7 @@ export interface PersistedTicket {
 
 export interface TicketRegistration {
   guildId: string;
+  status?: TicketStatus;
   ticketNumber: string;
   departmentId: string;
   tagId: string;
@@ -125,7 +126,7 @@ export async function registerTicket(
     id: current?.id ?? randomUUID(),
     guildId: current?.guildId ?? registration.guildId,
     channelId,
-    status: current?.status ?? 'open',
+    status: current?.status ?? registration.status ?? 'open',
     updatedAt: current?.updatedAt ?? registration.createdAt,
     createdAt,
     ticketNumber: current?.ticketNumber ?? registration.ticketNumber,

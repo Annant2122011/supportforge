@@ -59,6 +59,7 @@ import { initializePersistence } from './core/persistence/provider';
 import { startOutboxProcessor } from './core/events/outboxProcessor';
 import { TicketOutboxPublisher } from './services/ticketOutboxPublisher';
 import { configureDiscordChannelRest } from './services/discordChannelService';
+import { refreshActiveTicketFormCache, startTicketFormCacheRefresh, startTicketFormSubmissionRecovery } from './services/ticketFormService';
 
 const token = process.env.DISCORD_TOKEN;
 
@@ -76,6 +77,9 @@ if (!token) {
 async function initializeAndLogin(): Promise<void> {
   try {
     await initializePersistence();
+    await refreshActiveTicketFormCache().catch((error) => {
+      console.warn('⚠️ Ticket form cache could not be initialized before login; scheduled refresh will retry:', error);
+    });
   } catch (error) {
     throw new Error(
       'SupportForge durable database initialization failed. The bot will not start with unverified persistence.',
@@ -137,6 +141,8 @@ client.once('clientReady', (readyClient) => {
     );
   }
   startTicketRetentionScheduler(client);
+  startTicketFormCacheRefresh();
+  startTicketFormSubmissionRecovery(client);
   startAuditDailySummaryScheduler(client);
   startSupportForgeUpdateMonitor(client);
   /*

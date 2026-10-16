@@ -1,12 +1,19 @@
+import { randomBytes } from 'node:crypto';
 import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
   EmbedBuilder,
+  FileUploadBuilder,
+  LabelBuilder,
   MessageFlags,
   ModalBuilder,
+  RoleSelectMenuBuilder,
   StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
+  UserSelectMenuBuilder,
+  CheckboxGroupBuilder,
   type Message,
   PermissionFlagsBits,
   TextInputBuilder,
@@ -68,6 +75,28 @@ import {
   getTicketAuditHistory,
   logTicketEvent,
 } from '../services/auditLogService';
+import {
+  TICKET_FORM_MODAL_TTL_MS,
+  getCachedActiveTicketFormById,
+  getCachedActiveTicketFormForRouting,
+  getTicketFormForSubmission,
+  getTicketFormForWizard,
+  getTicketFormStepCount,
+  getTicketFormWizardSession,
+  getVisibleTicketFormFields,
+  markTicketFormWizardCompleted,
+  saveTicketFormWizardStep,
+  validateTicketFormAnswers,
+  recordTicketFormSubmissionDraft,
+  setTicketFormSubmissionChannel,
+  attachTicketFormSubmission,
+  markTicketFormSubmissionFailure,
+  type TicketFormVersion,
+} from '../services/ticketFormService';
+import {
+  acquireTicketCreationLease,
+  releaseTicketCreationLease,
+} from '../services/ticketCreationLeaseService';
 
 import {
   TICKET_PREFIX,
@@ -970,16 +999,22 @@ async function applyTicketVisibilityMode(
 /* Ticket creation                                                            */
 /* -------------------------------------------------------------------------- */
 
+interface PreparedTicketFormData {
+  form: TicketFormVersion;
+  answers: Record<string, unknown>;
+  subject: string;
+  description: string;
+}
+
 async function createTicket(
   interaction: ModalSubmitInteraction,
   departmentId: string,
   tagId: string,
+  formRoute?: { formId: string; version: number; expiresAt: number; submissionId?: string },
+  preparedForm?: PreparedTicketFormData,
+  alreadyAcknowledged = false,
 ): Promise<void> {
-  if (
-    !(await safeDeferReply(
-      interaction,
-    ))
-  ) {
+  if (!alreadyAcknowledged && !(await safeDeferReply(interaction))) {
     return;
   }
 
@@ -1013,21 +1048,37 @@ async function createTicket(
     lockKey,
   );
 
-  if (await isTicketCreationRestricted(guild.id, interaction.user.id)) {
-    const flags = await getUserFlagCount(guild.id, interaction.user.id);
-    await replyError(
-      interaction,
-      `🚫 You are currently restricted from opening new SupportForge tickets because your account has reached **${flags}** moderation flag(s).`,
-    );
-    ticketCreationLocks.delete(lockKey);
-    return;
-  }
-
   let ticketChannel:
     | TextChannel
     | undefined;
+  let creationLease: string | null = null;
+  let selectedForm: TicketFormVersion | undefined;
+  let formAnswers: Record<string, unknown> | undefined;
+  let formDraftRecorded = false;
 
   try {
+    creationLease = await acquireTicketCreationLease(
+      guild.id,
+      interaction.user.id,
+      departmentId,
+    );
+    if (!creationLease) {
+      await replyError(
+        interaction,
+        '⏳ Another ticket request for this department is already being processed. Please wait a moment and try again.',
+      );
+      return;
+    }
+
+    if (await isTicketCreationRestricted(guild.id, interaction.user.id)) {
+      const flags = await getUserFlagCount(guild.id, interaction.user.id);
+      await replyError(
+        interaction,
+        `🚫 You are currently restricted from opening new SupportForge tickets because your account has reached **${flags}** moderation flag(s).`,
+      );
+      return;
+    }
+
     const config =
       await getGuildConfig(
           guild.id,
@@ -1046,6 +1097,76 @@ async function createTicket(
         '❌ This department/tag combination no longer exists. Please refresh the support panel.',
       );
       return;
+    }
+
+    if (formRoute) {
+      if (!Number.isFinite(formRoute.expiresAt) || formRoute.expiresAt <= Date.now()) {
+        await replyError(
+          interaction,
+          '⌛ This form expired. Reopen the support panel and submit the current form.',
+        );
+        return;
+      }
+
+      if (preparedForm) {
+        selectedForm = preparedForm.form;
+        formAnswers = preparedForm.answers;
+      } else {
+        selectedForm = await getTicketFormForSubmission({
+          guildId: guild.id,
+          departmentId,
+          tagId,
+          formId: formRoute.formId,
+          version: formRoute.version,
+        });
+  
+        const rawAnswers: Record<string, unknown> = {};
+        for (const field of selectedForm.fields) {
+          const customId = 'form_' + field.id;
+          switch (field.type) {
+            case 'dropdown':
+            case 'multi_select':
+              rawAnswers[field.id] = Array.from(interaction.fields.getStringSelectValues(customId));
+              break;
+            case 'checkbox':
+              rawAnswers[field.id] = Array.from(interaction.fields.getCheckboxGroup(customId));
+              break;
+            case 'discord_user':
+              rawAnswers[field.id] = Array.from(interaction.fields.getSelectedUsers(customId)?.keys() ?? []);
+              break;
+            case 'discord_role':
+              rawAnswers[field.id] = Array.from(interaction.fields.getSelectedRoles(customId)?.keys() ?? []);
+              break;
+            case 'attachment':
+              rawAnswers[field.id] = Array.from(interaction.fields.getUploadedFiles(customId)?.values() ?? []).map((file) => ({
+                id: file.id,
+                url: file.url,
+                name: file.name,
+                size: file.size,
+                contentType: file.contentType,
+              }));
+              break;
+            default:
+              rawAnswers[field.id] = interaction.fields.getTextInputValue(customId);
+              break;
+          }
+        }
+        formAnswers = validateTicketFormAnswers(selectedForm.fields, rawAnswers);
+  
+        // Mentions/IDs are untrusted text. Verify that selected principals exist
+        // in this server before accepting a response as valid.
+        for (const field of selectedForm.fields) {
+          const answer = formAnswers[field.id];
+          if (typeof answer !== 'string') continue;
+          if (field.type === 'discord_user') {
+            const member = await guild.members.fetch(answer).catch(() => null);
+            if (!member) throw new Error('"' + field.label + '" must reference a member of this server.');
+          } else if (field.type === 'discord_role') {
+            const role = await guild.roles.fetch(answer).catch(() => null);
+            if (!role || role.managed) throw new Error('"' + field.label + '" must reference a normal role in this server.');
+          }
+        }
+      }
     }
 
     const auditParentCategoryId = config.supportCategoryId;
@@ -1122,17 +1243,11 @@ async function createTicket(
     }
 
     const subject =
-      interaction.fields
-        .getTextInputValue(
-          'subject',
-        )
+      (preparedForm?.subject ?? interaction.fields.getTextInputValue('subject'))
         .trim();
 
     const description =
-      interaction.fields
-        .getTextInputValue(
-          'description',
-        )
+      (preparedForm?.description ?? interaction.fields.getTextInputValue('description'))
         .trim();
 
     if (
@@ -1179,7 +1294,21 @@ async function createTicket(
         .replace(/\r\n/g, '\n')
         .replace(/\r/g, '\n');
 
-    const topic = [
+    if (selectedForm && formAnswers) {
+      await recordTicketFormSubmissionDraft({
+        interactionId: formRoute?.submissionId ?? interaction.id,
+        guildId: guild.id,
+        form: selectedForm,
+        submittedBy: interaction.user.id,
+        answers: formAnswers,
+      });
+      formDraftRecorded = true;
+      if (formRoute?.submissionId) {
+        await markTicketFormWizardCompleted(formRoute.submissionId);
+      }
+    }
+
+    let topic = [
       TICKET_PREFIX,
       'v=2',
       'status=open',
@@ -1191,13 +1320,20 @@ async function createTicket(
       `tags=${tagId}`,
       'users=',
       'claimed_by=',
-      `subject=${encodeURIComponent(
-        cleanSubject,
-      )}`,
+      `subject=${encodeURIComponent(cleanSubject)}`,
       `number=${number}`,
       `opened_at=${now}`,
       `updated_at=${now}`,
     ].join(' ');
+
+    // Keep the durable form-submission key in channel metadata so recovery can
+    // reconstruct the ticket if Discord creates the channel but PostgreSQL
+    // temporarily fails before registerTicket commits.
+    if (selectedForm) {
+      topic = setField(topic, 'form_submission', formRoute?.submissionId ?? interaction.id);
+      topic = setField(topic, 'form_id', selectedForm.id);
+      topic = setField(topic, 'form_version', String(selectedForm.version));
+    }
 
     const bot =
       guild.members.me;
@@ -1237,6 +1373,14 @@ async function createTicket(
             reason:
               `SupportForge ticket #${number}`,
           })) as TextChannel;
+
+      if (formDraftRecorded) {
+        await setTicketFormSubmissionChannel(formRoute?.submissionId ?? interaction.id, ticketChannel.id).catch((error) => {
+          // Continue creating the ticket; its topic includes the submission ID,
+          // allowing the recovery worker to find the channel if this write fails.
+          console.warn('Could not associate the new ticket channel with its form draft yet:', error);
+        });
+      }
 
       const panel =
         await ticketChannel.send({
@@ -1314,6 +1458,11 @@ async function createTicket(
             lastActivityAt: now,
             lastCustomerMessageAt: now,
             ticketChannelType: 'text',
+            ...(selectedForm ? {
+              formSubmissionInteractionId: formRoute?.submissionId ?? interaction.id,
+              formId: selectedForm.id,
+              formVersion: selectedForm.version,
+            } : {}),
           },
         },
         {
@@ -1323,43 +1472,69 @@ async function createTicket(
         },
       );
 
-      const requestMessage = await ticketChannel.send({
-          allowedMentions: {
-            parse: [],
-          },
-          embeds: [
-            new EmbedBuilder()
-              .setTitle(
-                '📨 Support Request',
-              )
-              .setDescription(
-                cleanDescription,
-              )
-              .addFields(
-                {
-                  name:
-                    'Subject',
-                  value:
-                    cleanSubject,
-                  inline: false,
-                },
-                {
-                  name:
-                    'Ticket',
-                  value:
-                    `#${number}`,
-                  inline: true,
-                },
-                {
-                  name:
-                    'Department',
-                  value:
-                    department.name,
-                  inline: true,
-                },
-              ),
-          ],
+      const requestEmbed = new EmbedBuilder()
+        .setTitle('📨 Support Request')
+        .setDescription(cleanDescription)
+        .addFields(
+          { name: 'Subject', value: cleanSubject, inline: false },
+          { name: 'Ticket', value: `#${number}`, inline: true },
+          { name: 'Department', value: department.name, inline: true },
+        );
+
+      if (selectedForm && formAnswers) {
+        requestEmbed.addFields({
+          name: 'Form',
+          value: selectedForm.name + ' • version ' + selectedForm.version,
+          inline: false,
         });
+      }
+
+      const requestMessage = await ticketChannel.send({
+        allowedMentions: { parse: [] },
+        embeds: [requestEmbed],
+      });
+
+      /*
+       * Discord limits one embed to 25 fields and all embeds in a message to
+       * 6,000 combined characters. Keep the initial request embed compact,
+       * then send bounded answer pages so a valid 25-field form cannot break
+       * ticket creation during message serialization.
+       */
+      if (selectedForm && formAnswers) {
+        const submittedAnswers = formAnswers;
+        const answerFields = selectedForm.fields.map((field) => {
+          const answer = submittedAnswers[field.id];
+          const rendered = Array.isArray(answer)
+            ? answer.join(', ')
+            : typeof answer === 'boolean'
+              ? (answer ? 'Yes' : 'No')
+              : answer && typeof answer === 'object' && 'url' in answer
+                ? String((answer as { name?: unknown }).name ?? 'Attachment') +
+                  ' (' + String((answer as { size?: unknown }).size ?? '?') + ' bytes) ' +
+                  String((answer as { url?: unknown }).url ?? '')
+                : String(answer ?? '—');
+          return {
+            name: field.label.slice(0, 45),
+            value: (rendered || '—').slice(0, 400),
+            inline: false,
+          };
+        });
+
+        const pageSize = 10;
+        const pageCount = Math.ceil(answerFields.length / pageSize);
+        for (let page = 0; page < pageCount; page += 1) {
+          const pageFields = answerFields.slice(page * pageSize, (page + 1) * pageSize);
+          await ticketChannel.send({
+            allowedMentions: { parse: [] },
+            embeds: [
+              new EmbedBuilder()
+                .setTitle('📋 Ticket Form Answers' + (pageCount > 1 ? ' • ' + (page + 1) + '/' + pageCount : ''))
+                .setDescription('Form **' + selectedForm.name.slice(0, 80) + '** • version ' + selectedForm.version)
+                .addFields(pageFields),
+            ],
+          });
+        }
+      }
 
       await updatePersistedTicketMetadata(
         ticketChannel.id,
@@ -1377,6 +1552,19 @@ async function createTicket(
           confidence: 'high',
         },
       );
+
+      if (selectedForm && formDraftRecorded) {
+        const persistedTicket = await getPersistedTicket(ticketChannel.id);
+        if (!persistedTicket) {
+          throw new Error('Ticket form answers were saved, but the durable ticket record could not be found.');
+        }
+        await setTicketFormSubmissionChannel(formRoute?.submissionId ?? interaction.id, ticketChannel.id);
+        await attachTicketFormSubmission({
+          interactionId: formRoute?.submissionId ?? interaction.id,
+          ticketId: persistedTicket.id,
+          channelId: ticketChannel.id,
+        });
+      }
 
       let departmentCategoryName = department.name;
       try {
@@ -1427,6 +1615,15 @@ async function createTicket(
         }
       })();
     } catch (error) {
+      if (formDraftRecorded) {
+        await markTicketFormSubmissionFailure(
+          formRoute?.submissionId ?? interaction.id,
+          'Ticket initialization is incomplete; the response has been retained for recovery.',
+        ).catch((persistenceError) => {
+          console.warn('Could not mark the retained form response for recovery:', persistenceError);
+        });
+      }
+
       /*
        * A ticket channel is a real user-facing record as soon as Discord
        * creates it. Never delete it merely because a later initialization
@@ -1481,9 +1678,17 @@ async function createTicket(
       '❌ SupportForge could not create the ticket. Please try again.',
     );
   } finally {
-    ticketCreationLocks.delete(
-      lockKey,
-    );
+    if (creationLease) {
+      await releaseTicketCreationLease(
+        guild.id,
+        interaction.user.id,
+        departmentId,
+        creationLease,
+      ).catch((error) => {
+        console.warn('Could not release SupportForge ticket creation lease:', error);
+      });
+    }
+    ticketCreationLocks.delete(lockKey);
   }
 }
 
@@ -2927,6 +3132,221 @@ async function handleTicketTagSelection(interaction: StringSelectMenuInteraction
   await showTicketCreationModal(interaction, departmentId, tagId);
 }
 
+interface ParsedTicketFormModalId {
+  formId: string;
+  version: number;
+  expiresAt: number;
+  sessionId: string;
+  tagId: string;
+  step: number;
+}
+
+function encodeFormIdForModal(formId: string): string {
+  const hex = formId.replace(/-/g, '');
+  if (!/^[a-f0-9]{32}$/i.test(hex)) throw new Error('The ticket form identifier is malformed.');
+  return Buffer.from(hex, 'hex').toString('base64url');
+}
+
+function decodeFormIdFromModal(encoded: string): string | null {
+  try {
+    const hex = Buffer.from(encoded, 'base64url').toString('hex');
+    if (!/^[a-f0-9]{32}$/i.test(hex)) return null;
+    return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' +
+      hex.slice(16, 20) + '-' + hex.slice(20);
+  } catch {
+    return null;
+  }
+}
+
+function buildTicketFormModalCustomId(args: {
+  formId: string;
+  version: number;
+  expiresAt: number;
+  sessionId: string;
+  tagId: string;
+  step: number;
+}): string {
+  const customId = [
+    'tf',
+    encodeFormIdForModal(args.formId),
+    String(args.version),
+    Math.floor(args.expiresAt / 1000).toString(36),
+    args.sessionId,
+    Buffer.from(args.tagId, 'utf8').toString('base64url'),
+    String(args.step),
+  ].join(':');
+  if (customId.length > 100) throw new Error('This form route is too long to fit Discord’s modal custom-id limit.');
+  return customId;
+}
+
+function parseTicketFormModalCustomId(customId: string): ParsedTicketFormModalId | null {
+  const parts = customId.split(':');
+  if (parts.length !== 7 || parts[0] !== 'tf') return null;
+  const formId = decodeFormIdFromModal(parts[1] ?? '');
+  const version = Number(parts[2]);
+  const expiresSeconds = Number.parseInt(parts[3] ?? '', 36);
+  const sessionId = parts[4] ?? '';
+  const tagIdEncoded = parts[5] ?? '';
+  const step = Number(parts[6]);
+  let tagId = '';
+  try {
+    tagId = Buffer.from(tagIdEncoded, 'base64url').toString('utf8');
+  } catch {
+    return null;
+  }
+  if (!formId || !Number.isSafeInteger(version) || version < 1 ||
+      !Number.isSafeInteger(expiresSeconds) || expiresSeconds < 1 ||
+      !/^[A-Za-z0-9_-]{12,20}$/.test(sessionId) ||
+      !tagId || tagId.length > 100 ||
+      !Number.isInteger(step) || step < 1 || step > 10) {
+    return null;
+  }
+  return { formId, version, expiresAt: expiresSeconds * 1000, sessionId, tagId, step };
+}
+
+function buildTicketFormModal(
+  form: TicketFormVersion,
+  tagId: string,
+  expiresAt: number,
+  sessionId: string,
+  step: number,
+  priorAnswers: Record<string, unknown>,
+): ModalBuilder {
+  const customId = buildTicketFormModalCustomId({
+    formId: form.id,
+    version: form.version,
+    expiresAt,
+    sessionId,
+    tagId,
+    step,
+  });
+  const modal = new ModalBuilder()
+    .setCustomId(customId)
+    .setTitle((form.name + (step > 1 ? ' • Step ' + step : '')).slice(0, 45));
+  const labels: LabelBuilder[] = [];
+
+  if (step === 1) {
+    labels.push(
+      new LabelBuilder()
+        .setLabel('What do you need help with?')
+        .setTextInputComponent(
+          new TextInputBuilder()
+            .setCustomId('subject')
+            .setPlaceholder('Briefly describe your issue')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setMaxLength(100),
+        ),
+      new LabelBuilder()
+        .setLabel('Describe your issue')
+        .setDescription('Up to 4,000 characters')
+        .setTextInputComponent(
+          new TextInputBuilder()
+            .setCustomId('description')
+            .setPlaceholder('Keep paragraphs and bullet points as written.')
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(true)
+            .setMaxLength(4000),
+        ),
+    );
+  }
+
+  for (const field of getVisibleTicketFormFields(form.fields, step, priorAnswers)) {
+    const customId = 'form_' + field.id;
+    const label = new LabelBuilder().setLabel(field.label.slice(0, 45));
+    if (field.placeholder) label.setDescription(field.placeholder.slice(0, 100));
+
+    switch (field.type) {
+      case 'dropdown': {
+        const select = new StringSelectMenuBuilder()
+          .setCustomId(customId)
+          .setPlaceholder((field.placeholder || 'Choose an option').slice(0, 150))
+          .setRequired(field.required)
+          .setMinValues(field.required ? 1 : 0)
+          .setMaxValues(1)
+          .addOptions((field.choices ?? []).map((choice) =>
+            new StringSelectMenuOptionBuilder().setLabel(choice.slice(0, 100)).setValue(choice),
+          ));
+        label.setStringSelectMenuComponent(select);
+        break;
+      }
+      case 'multi_select': {
+        const select = new StringSelectMenuBuilder()
+          .setCustomId(customId)
+          .setPlaceholder((field.placeholder || 'Choose one or more options').slice(0, 150))
+          .setRequired(field.required)
+          .setMinValues(field.required ? 1 : 0)
+          .setMaxValues(Math.max(1, Math.min(25, field.choices?.length ?? 1)))
+          .addOptions((field.choices ?? []).map((choice) =>
+            new StringSelectMenuOptionBuilder().setLabel(choice.slice(0, 100)).setValue(choice),
+          ));
+        label.setStringSelectMenuComponent(select);
+        break;
+      }
+      case 'discord_user': {
+        label.setUserSelectMenuComponent(
+          new UserSelectMenuBuilder()
+            .setCustomId(customId)
+            .setPlaceholder((field.placeholder || 'Choose a server member').slice(0, 150))
+            .setRequired(field.required)
+            .setMinValues(field.required ? 1 : 0)
+            .setMaxValues(1),
+        );
+        break;
+      }
+      case 'discord_role': {
+        label.setRoleSelectMenuComponent(
+          new RoleSelectMenuBuilder()
+            .setCustomId(customId)
+            .setPlaceholder((field.placeholder || 'Choose a server role').slice(0, 150))
+            .setRequired(field.required)
+            .setMinValues(field.required ? 1 : 0)
+            .setMaxValues(1),
+        );
+        break;
+      }
+      case 'checkbox': {
+        label.setCheckboxGroupComponent(
+          new CheckboxGroupBuilder()
+            .setCustomId(customId)
+            .setRequired(field.required)
+            .setMinValues(field.required ? 1 : 0)
+            .setMaxValues(1)
+            .addOptions({ label: 'Confirm', value: 'checked' }),
+        );
+        break;
+      }
+      case 'attachment': {
+        label.setFileUploadComponent(
+          new FileUploadBuilder()
+            .setCustomId(customId)
+            .setRequired(field.required)
+            .setMinValues(field.required ? 1 : 0)
+            .setMaxValues(1),
+        );
+        break;
+      }
+      default: {
+        const maxLength = Math.min(4000, Math.max(1, field.maxLength ?? (field.type === 'long_text' ? 1500 : 100)));
+        const input = new TextInputBuilder()
+          .setCustomId(customId)
+          .setPlaceholder((field.placeholder || field.label).slice(0, 100))
+          .setStyle(field.type === 'long_text' ? TextInputStyle.Paragraph : TextInputStyle.Short)
+          .setRequired(field.required)
+          .setMaxLength(maxLength);
+        if ((field.minLength ?? 0) > 0) input.setMinLength(field.minLength ?? 0);
+        label.setTextInputComponent(input);
+        break;
+      }
+    }
+    labels.push(label);
+  }
+
+  if (labels.length === 0) throw new Error('This step has no visible fields and cannot be displayed.');
+  modal.addLabelComponents(...labels);
+  return modal;
+}
+
 async function showTicketCreationModal(
   interaction: ButtonInteraction | StringSelectMenuInteraction,
   departmentId: string,
@@ -2947,68 +3367,65 @@ async function showTicketCreationModal(
      * interaction (10062). The modal submit revalidates the department/tag
      * before any ticket is created.
      */
-    const modal =
-      new ModalBuilder()
-        .setCustomId(
-          `ticket:modal:${departmentId}:${tagId}`,
-        )
-        .setTitle(
-          'Support Request',
-        );
-
-    const subjectInput =
-      new TextInputBuilder()
-        .setCustomId(
-          'subject',
-        )
-        .setLabel(
-          'What do you need help with?',
-        )
-        .setPlaceholder(
-          'Briefly describe your issue',
-        )
-        .setStyle(
-          TextInputStyle.Short,
-        )
-        .setRequired(
-          true,
-        )
-        .setMaxLength(
-          100,
-        );
-
-    const descriptionInput =
-      new TextInputBuilder()
-        .setCustomId(
-          'description',
-        )
-        .setLabel(
-          'Describe your issue (up to 4,000 characters)',
-        )
-        .setPlaceholder(
-          'Paste or type the full issue. Keep paragraphs and bullet points as written.',
-        )
-        .setStyle(
-          TextInputStyle.Paragraph,
-        )
-        .setRequired(
-          true,
-        )
-        .setMaxLength(
-          4000,
-        );
-
-    modal.addComponents(
-      new ActionRowBuilder<TextInputBuilder>()
-        .addComponents(
-          subjectInput,
-        ),
-
-      new ActionRowBuilder<TextInputBuilder>()
-        .addComponents(
-          descriptionInput,
-        ),
+    /*
+     * Form configuration is stored durably in Neon. Only the matching
+     * active form version is embedded in the modal ID; submission validates
+     * that version again so a stale modal can never silently use edited rules.
+     */
+    const cachedForm = getCachedActiveTicketFormForRouting(
+      interaction.guild.id,
+      departmentId,
+      tagId,
     );
+    if (!cachedForm.ready) {
+      await replyError(
+        interaction,
+        '⌛ Ticket forms are still loading. Please try again in a moment.',
+      );
+      return;
+    }
+    const form = cachedForm.form;
+    if (form) {
+      const expiresAt = Date.now() + TICKET_FORM_MODAL_TTL_MS;
+      const sessionId = randomBytes(10).toString('base64url');
+      await interaction.showModal(
+        buildTicketFormModal(form, tagId, expiresAt, sessionId, 1, {}),
+      );
+      return;
+    }
+
+    // Keep the no-form legacy flow compact. Department and tag are validated
+    // by createTicket after it acknowledges the modal submission.
+    const customId = `ticket:modal:${departmentId}:${tagId}`;
+    const modal = new ModalBuilder()
+      .setCustomId(customId)
+      .setTitle('Support Request');
+
+    const subjectInput = new TextInputBuilder()
+      .setCustomId('subject')
+      .setPlaceholder('Briefly describe your issue')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true)
+      .setMaxLength(100);
+
+    const descriptionInput = new TextInputBuilder()
+      .setCustomId('description')
+      .setPlaceholder('Keep paragraphs and bullet points as written.')
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(true)
+      .setMaxLength(4000);
+
+    const labels: LabelBuilder[] = [
+      new LabelBuilder()
+        .setLabel('What do you need help with?')
+        .setTextInputComponent(subjectInput),
+      new LabelBuilder()
+        .setLabel('Describe your issue')
+        .setDescription('Up to 4,000 characters')
+        .setTextInputComponent(descriptionInput),
+    ];
+
+    modal.addLabelComponents(...labels);
 
     /*
      * IMPORTANT:
@@ -3033,6 +3450,280 @@ async function showTicketCreationModal(
     await replyError(
       interaction,
       '❌ SupportForge could not open the ticket creation form. Please try again.',
+    );
+  }
+}
+
+function readTicketFormStepAnswers(
+  interaction: ModalSubmitInteraction,
+  fields: TicketFormVersion['fields'],
+): Record<string, unknown> {
+  const rawAnswers: Record<string, unknown> = {};
+  for (const field of fields) {
+    const customId = 'form_' + field.id;
+    switch (field.type) {
+      case 'dropdown':
+      case 'multi_select':
+        rawAnswers[field.id] = Array.from(interaction.fields.getStringSelectValues(customId));
+        break;
+      case 'checkbox':
+        rawAnswers[field.id] = Array.from(interaction.fields.getCheckboxGroup(customId));
+        break;
+      case 'discord_user':
+        rawAnswers[field.id] = Array.from(interaction.fields.getSelectedUsers(customId)?.keys() ?? []);
+        break;
+      case 'discord_role':
+        rawAnswers[field.id] = Array.from(interaction.fields.getSelectedRoles(customId)?.keys() ?? []);
+        break;
+      case 'attachment':
+        rawAnswers[field.id] = Array.from(interaction.fields.getUploadedFiles(customId)?.values() ?? []).map((file) => ({
+          id: file.id,
+          url: file.url,
+          name: file.name,
+          size: file.size,
+          contentType: file.contentType,
+        }));
+        break;
+      default:
+        rawAnswers[field.id] = interaction.fields.getTextInputValue(customId);
+        break;
+    }
+  }
+  return validateTicketFormAnswers(fields, rawAnswers);
+}
+
+async function validateTicketFormPrincipals(
+  interaction: ModalSubmitInteraction,
+  answers: Record<string, unknown>,
+  fields: TicketFormVersion['fields'],
+): Promise<void> {
+  if (!interaction.guild) throw new Error('This form must be submitted inside a server.');
+  for (const field of fields) {
+    const answer = answers[field.id];
+    if (typeof answer !== 'string') continue;
+    if (field.type === 'discord_user') {
+      const member = await interaction.guild.members.fetch(answer).catch(() => null);
+      if (!member) throw new Error('"' + field.label + '" must reference a member of this server.');
+    } else if (field.type === 'discord_role') {
+      const role = await interaction.guild.roles.fetch(answer).catch(() => null);
+      if (!role || role.managed) throw new Error('"' + field.label + '" must reference a normal role in this server.');
+    }
+  }
+}
+
+async function handleTicketFormWizardContinue(interaction: ButtonInteraction): Promise<void> {
+  const route = parseTicketFormModalCustomId(interaction.customId);
+  if (!interaction.guild || !route) {
+    await replyError(interaction, 'This form continuation is invalid. Reopen the support panel and start again.');
+    return;
+  }
+  if (route.expiresAt <= Date.now()) {
+    await replyError(interaction, 'This form expired. Reopen the support panel and start again.');
+    return;
+  }
+
+  try {
+    const cached = getCachedActiveTicketFormById(
+      interaction.guild.id,
+      route.formId,
+      route.version,
+      route.tagId,
+    );
+    if (!cached.ready) {
+      await replyError(interaction, 'Ticket forms are still loading. Please try again in a moment.');
+      return;
+    }
+    if (!cached.form) {
+      await replyError(interaction, 'This form changed or was disabled. Reopen the support panel and start again.');
+      return;
+    }
+    const session = await getTicketFormWizardSession({
+      sessionId: route.sessionId,
+      guildId: interaction.guild.id,
+      submittedBy: interaction.user.id,
+      formId: route.formId,
+      formVersion: route.version,
+      tagId: route.tagId,
+      step: route.step,
+    });
+    const visibleFields = getVisibleTicketFormFields(cached.form.fields, route.step, session.answers);
+    if (!visibleFields.length) {
+      await replyError(interaction, 'This form step has no visible questions. Reopen the support panel and start again.');
+      return;
+    }
+    await interaction.showModal(
+      buildTicketFormModal(
+        cached.form,
+        route.tagId,
+        route.expiresAt,
+        route.sessionId,
+        route.step,
+        session.answers,
+      ),
+    );
+  } catch (error) {
+    console.error('Failed to continue ticket form wizard:', error);
+    await replyError(
+      interaction,
+      error instanceof Error ? error.message : 'Could not continue this form. Reopen the support panel and start again.',
+    );
+  }
+}
+
+async function handleTicketFormWizardModal(interaction: ModalSubmitInteraction): Promise<void> {
+  if (!interaction.guild) {
+    await replyError(interaction, '❌ This action can only be used inside a server.');
+    return;
+  }
+
+  if (!(await safeDeferReply(interaction))) return;
+
+  const route = parseTicketFormModalCustomId(interaction.customId);
+  if (!route) {
+    await replyError(interaction, '❌ This ticket form link is malformed. Reopen the support panel.');
+    return;
+  }
+  if (route.expiresAt <= Date.now()) {
+    await replyError(interaction, '⌛ This form expired. Reopen the support panel and submit the current form.');
+    return;
+  }
+
+  try {
+    const cached = getCachedActiveTicketFormById(
+      interaction.guild.id,
+      route.formId,
+      route.version,
+      route.tagId,
+    );
+    if (!cached.ready) {
+      await replyError(interaction, '⌛ Ticket forms are still loading. Please reopen the support panel in a moment.');
+      return;
+    }
+    if (!cached.form) {
+      await replyError(interaction, 'This form changed or was disabled. Reopen the support panel and start again.');
+      return;
+    }
+
+    let priorSession: Awaited<ReturnType<typeof getTicketFormWizardSession>> | undefined;
+    if (route.step > 1) {
+      priorSession = await getTicketFormWizardSession({
+        sessionId: route.sessionId,
+        guildId: interaction.guild.id,
+        submittedBy: interaction.user.id,
+        formId: route.formId,
+        formVersion: route.version,
+        tagId: route.tagId,
+        step: route.step,
+      });
+    }
+
+    // Use the last known-good schema for component extraction, then compare
+    // it to the current DB version before advancing or creating a ticket.
+    const cachedForm = cached.form;
+    const visibleFields = getVisibleTicketFormFields(
+      cachedForm.fields,
+      route.step,
+      priorSession?.answers ?? {},
+    );
+    if (visibleFields.length === 0) {
+      await replyError(interaction, 'This form step no longer has visible questions. Reopen the support panel and start again.');
+      return;
+    }
+
+    let subject = priorSession?.subject ?? null;
+    let description = priorSession?.description ?? null;
+    if (route.step === 1) {
+      subject = interaction.fields.getTextInputValue('subject').trim();
+      description = interaction.fields.getTextInputValue('description').trim();
+      if (!subject || subject.length > 100 || !description || description.length > 4000) {
+        await replyError(interaction, '❌ Enter a subject of 1–100 characters and a description of 1–4,000 characters.');
+        return;
+      }
+    }
+
+    const stepAnswers = readTicketFormStepAnswers(interaction, visibleFields);
+    await validateTicketFormPrincipals(interaction, stepAnswers, visibleFields);
+    const answersForVisibility = { ...(priorSession?.answers ?? {}), ...stepAnswers };
+
+    const maxStep = getTicketFormStepCount(cachedForm.fields);
+    let nextStep: number | undefined;
+    for (let candidateStep = route.step + 1; candidateStep <= maxStep; candidateStep += 1) {
+      if (getVisibleTicketFormFields(cachedForm.fields, candidateStep, answersForVisibility).length > 0) {
+        nextStep = candidateStep;
+        break;
+      }
+    }
+    const finalStep = nextStep === undefined;
+    const currentForm = await getTicketFormForWizard({
+      guildId: interaction.guild.id,
+      formId: route.formId,
+      version: route.version,
+      tagId: route.tagId,
+    });
+    if (currentForm.departmentId !== cachedForm.departmentId) {
+      await replyError(interaction, 'This form’s routing changed. Reopen the support panel and start again.');
+      return;
+    }
+
+    const session = await saveTicketFormWizardStep({
+      sessionId: route.sessionId,
+      guildId: interaction.guild.id,
+      submittedBy: interaction.user.id,
+      form: currentForm,
+      tagId: route.tagId,
+      step: route.step,
+      nextStep: nextStep ?? maxStep + 1,
+      answerDelta: stepAnswers,
+      ...(route.step === 1 ? { subject: subject ?? '', description: description ?? '' } : {}),
+      expiresAt: route.expiresAt,
+      finalStep,
+    });
+
+    if (!finalStep && nextStep !== undefined) {
+      const continueCustomId = buildTicketFormModalCustomId({
+        formId: currentForm.id,
+        version: currentForm.version,
+        expiresAt: route.expiresAt,
+        sessionId: route.sessionId,
+        tagId: route.tagId,
+        step: nextStep,
+      });
+      await interaction.editReply({
+        content: '✅ Your answers are saved. Continue to the next section when ready.',
+        components: [
+          new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setCustomId(continueCustomId)
+              .setLabel('Continue form')
+              .setStyle(ButtonStyle.Primary),
+          ),
+        ],
+      });
+      return;
+    }
+
+    await createTicket(
+      interaction,
+      currentForm.departmentId,
+      route.tagId,
+      {
+        formId: currentForm.id,
+        version: currentForm.version,
+        expiresAt: route.expiresAt,
+        submissionId: route.sessionId,
+      },
+      {
+        form: currentForm,
+        answers: session.answers,
+        subject: session.subject ?? '',
+        description: session.description ?? '',
+      },
+      true,
+    );
+  } catch (error) {
+    await replyError(
+      interaction,
+      '❌ ' + (error instanceof Error ? error.message : 'The ticket form could not be processed. Please try again.'),
     );
   }
 }
@@ -4975,6 +5666,11 @@ export async function handleTicketInteraction(
       return;
     }
 
+    if (interaction.isButton() && interaction.customId.startsWith('tf:')) {
+      await handleTicketFormWizardContinue(interaction);
+      return;
+    }
+
     if (
       interaction.isButton()
     ) {
@@ -5092,6 +5788,14 @@ export async function handleTicketInteraction(
     }
 
     if (
+      interaction.isModalSubmit() &&
+      interaction.customId.startsWith('tf:')
+    ) {
+      await handleTicketFormWizardModal(interaction);
+      return;
+    }
+
+    if (
       interaction.isModalSubmit()
     ) {
       /*
@@ -5114,33 +5818,19 @@ export async function handleTicketInteraction(
           return;
         }
 
-        await createTicket(
-          interaction,
-          departmentId,
-          tagId,
-        );
+        const formId = parts[4];
+        const version = Number(parts[5]);
+        const expiresAt = Number(parts[6]);
+        const formRoute = formId
+          ? Number.isInteger(version) && version > 0 && Number.isFinite(expiresAt)
+            ? { formId, version, expiresAt }
+            : undefined
+          : undefined;
 
-        return;
-      }
-
-      if (interaction.customId.startsWith('ticket:report:modal:')) {
-        await handleReportModal(interaction);
-        return;
-      }
-
-      if (
-        interaction.customId.startsWith(
-          'ticket:modal:',
-        )
-      ) {
-        const parts = interaction.customId.split(':');
-        const departmentId = parts[2] ?? '';
-        const tagId = parts[3] ?? '';
-
-        if (!departmentId || !tagId) {
+        if (formId && !formRoute) {
           await replyError(
             interaction,
-            '❌ Ticket department/tag could not be determined.',
+            '❌ This form submission link is malformed. Reopen the support panel.',
           );
           return;
         }
@@ -5149,7 +5839,14 @@ export async function handleTicketInteraction(
           interaction,
           departmentId,
           tagId,
+          formRoute,
         );
+
+        return;
+      }
+
+      if (interaction.customId.startsWith('ticket:report:modal:')) {
+        await handleReportModal(interaction);
         return;
       }
 

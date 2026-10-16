@@ -788,108 +788,59 @@ This becomes essential once the project moves into a real database.
 
 ## F-015 — Advanced Ticket Forms
 
-**Status:** `PLANNED`  
+**Status:** `IMPLEMENTED — GitHub verification pending`  
 **Priority:** `P1`
 
-### Supported future field types
+### Delivered behavior
 
-- short text
-- long text
-- number
-- decimal
-- URL
-- email
-- date
-- dropdown
-- multi-select
-- checkbox
-- Discord user
-- Discord role
-- attachment
-
-### Validation
-
-Each field should be able to define:
-
-- required/optional
-- minimum length
-- maximum length
-- numeric range
-- allowed choices
-- regex/pattern where appropriate
-- attachment size/type limitations
-
-### Example
-
-```text
-Billing Support
-
-Order ID:       [__________]
-Payment Method: [ Visa ▼ ]
-Amount:         [__________]
-Problem:        [____________________________]
-Attachment:     [ Upload ]
-```
-
----
+- Administrator-managed, reusable ticket forms routed to existing departments and optionally a tag.
+- Immutable numbered versions. Updating a form creates a new version and retains older schemas and submission snapshots.
+- Field types: `short_text`, `long_text`, `number`, `decimal`, `url`, `email`, `date`, `dropdown`, `multi_select`, `checkbox`, `discord_user`, `discord_role`, and `attachment`.
+- Server-side validation of required/optional values, length and numeric bounds, choices, email/date/URL syntax, selected guild users/roles, and attachment size/MIME/source host.
+- Up to 25 custom fields distributed across steps. Each step has at most three custom fields so the first step also fits the built-in Subject and Description within Discord's five top-level modal components.
+- Expiring form modal IDs, stale-version checks, PostgreSQL-backed routing cache and durable answer drafts before ticket channel creation.
+- PostgreSQL submission recovery reconciles a retained answer with an existing persisted ticket or reconstructs the ticket record from a matching ticket topic when channel creation succeeded but ticket registration failed.
+- Commands: `/supportforge form list`, `create`, `update`, `activate`, and `deactivate`.
 
 ## F-016 — Conditional Form Fields
 
-**Status:** `PLANNED`  
+**Status:** `IMPLEMENTED — GitHub verification pending`  
 **Priority:** `P1`
 
-### Purpose
+A field may contain a `step` number from 1 through 10 and a `condition` object, for example:
 
-Display fields only when relevant.
-
-### Example
-
-```text
-Issue Type: Refund
-
-→ Show:
-Order ID
-Purchase Date
-Refund Reason
-Payment Method
+```json
+{
+  "id": "refund_amount",
+  "label": "Requested refund amount",
+  "type": "decimal",
+  "step": 2,
+  "required": true,
+  "min": 0.01,
+  "condition": {
+    "fieldId": "reason",
+    "operator": "equals",
+    "value": "Refund"
+  }
+}
 ```
 
-Another example:
-
-```text
-Payment Method: Cryptocurrency
-
-→ Show:
-Transaction Hash
-Network
-Wallet Address
-```
-
-### Long-term implementation concept
-
-Forms should have a declarative schema containing fields, conditions, validation rules, and workflow destination.
-
----
+- Supported operators: `equals`, `not_equals`, `contains`, and `not_contains`.
+- A condition can only reference an existing controller in an earlier step. The service rejects missing/self/same-or-later-step dependencies, invalid value types and steps with more than three fields.
+- The first modal collects Subject, Description and up to three fields. Further steps show only fields whose conditions match answers already saved in the PostgreSQL wizard session.
+- When a controller was skipped or has no answer, dependent fields remain hidden, including fields using negative operators. Hidden field answers are not accepted or stored as submitted answers.
+- Wizard step order, user/guild/form/version route, answers, expiry and completion state are durable in Neon PostgreSQL. Replayed, out-of-order, expired, disabled-form and stale-version submissions are rejected.
 
 ## F-017 — Form Templates
 
-**Status:** `FUTURE`  
+**Status:** `IMPLEMENTED — GitHub verification pending`  
 **Priority:** `P2`
 
-Admins should be able to save reusable form templates.
-
-Example:
-
-```text
-Bug Report Form
-Refund Request Form
-Partnership Form
-Account Recovery Form
-```
-
----
-
-# 9. TICKET CONTROLS
+- `/supportforge form template-save` stores a validated schema as a server-scoped reusable template.
+- `/supportforge form template-list` is paginated and displays stable template IDs.
+- `/supportforge form template-apply` creates a new inactive form from a template for an existing department/tag mapping.
+- `/supportforge form template-delete` deletes only the template. Forms already created from it, their versions, and historical submissions remain unchanged.
+- Template names are unique case-insensitively per guild. Templates and all resulting forms remain isolated by guild ID.
 
 ## F-018 — Add / Remove Ticket Users
 
@@ -4834,3 +4785,29 @@ If the entire SupportForge structure is deleted, use:
 
 The setup command provisions/repairs the Support Forge container, Open category, Settings channel, Audit channel, Transcript channel, panel, storage categories, and department categories.
 
+
+
+# 81. STAGE A RELIABILITY AND STAGE D ADVANCED TICKET FORMS
+
+## Stage A reliability and audit fixes
+
+- Normal Repair now detects SupportForge ticket channels that are missing a durable Neon/PostgreSQL ticket row and reconstructs only those missing rows from validated channel metadata.
+- Existing durable ticket rows remain authoritative. Repair never overwrites their lifecycle status or metadata from the Discord channel topic.
+- Recovered records preserve ticket status, owner, department, tag, priority, claimants, participants, creation/update timestamps, panel message ID, and form-submission reference when available.
+- Ticket creation uses a PostgreSQL lease keyed by guild, requester, and department to prevent concurrent bot workers from creating duplicate tickets.
+- Failed post-channel creation steps preserve the user-facing ticket channel and durable form response for recovery rather than deleting a valid support request.
+- Form submission draft/channel association uses the same durable submission key throughout the creation workflow.
+- Request messages and form answers are split into bounded embeds/messages so the maximum supported form cannot exceed Discord's embed field or combined-character limits.
+- Interaction acknowledgement and multi-step modal progression avoid attempting to open a second modal directly from a modal-submit interaction.
+
+## Stage D advanced ticket forms
+
+- Administrators can create, list, update, activate, and deactivate versioned ticket forms through `/supportforge form`.
+- Forms are bound to an existing department and optional routing tag. Only one active form can own a department/tag mapping at a time.
+- Supported question types: short/long text, whole number, decimal, URL, email, date, dropdown, multi-select, checkbox, Discord user, Discord role, and attachment.
+- Every submitted answer is validated server-side. Validation covers required fields, lengths, numeric bounds, valid dates, configured choices, text patterns, Discord principals, and attachment size/type/trusted host.
+- Forms support up to 25 custom fields across up to 10 steps, with at most three custom fields per step so Subject and Description fit in the first Discord modal.
+- Conditional questions can depend on answers from earlier steps. The wizard persists each step in Neon/PostgreSQL and revalidates the active form version and session ownership before advancing.
+- Reusable templates can be saved, listed, applied to create a new form, and deleted without modifying forms or historical submissions already created from them.
+- Form definitions and immutable versions, wizard sessions, submission drafts, answer snapshots, ticket associations, and creation leases are stored in Neon/PostgreSQL migrations. No SQLite persistence path is introduced.
+- CI on the Stage A/D branch completed the TypeScript build, automated tests, and database verification successfully after the interaction/build fixes.
