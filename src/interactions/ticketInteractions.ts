@@ -3309,7 +3309,7 @@ function buildTicketFormModal(
           .setStyle(field.type === 'long_text' ? TextInputStyle.Paragraph : TextInputStyle.Short)
           .setRequired(field.required)
           .setMaxLength(maxLength);
-        if ((field.minLength ?? 0) > 0) input.setMinLength(field.minLength);
+        if ((field.minLength ?? 0) > 0) input.setMinLength(field.minLength ?? 0);
         label.setTextInputComponent(input);
         break;
       }
@@ -3400,97 +3400,6 @@ async function showTicketCreationModal(
         .setTextInputComponent(descriptionInput),
     ];
 
-    for (const field of form?.fields ?? []) {
-      const customId = 'form_' + field.id;
-      const label = new LabelBuilder().setLabel(field.label.slice(0, 45));
-      if (field.placeholder) label.setDescription(field.placeholder.slice(0, 100));
-
-      switch (field.type) {
-        case 'dropdown': {
-          const select = new StringSelectMenuBuilder()
-            .setCustomId(customId)
-            .setPlaceholder((field.placeholder || 'Choose an option').slice(0, 150))
-            .setRequired(field.required)
-            .setMinValues(field.required ? 1 : 0)
-            .setMaxValues(1)
-            .addOptions((field.choices ?? []).map((choice) =>
-              new StringSelectMenuOptionBuilder()
-                .setLabel(choice.slice(0, 100))
-                .setValue(choice),
-            ));
-          label.setStringSelectMenuComponent(select);
-          break;
-        }
-        case 'multi_select': {
-          const select = new StringSelectMenuBuilder()
-            .setCustomId(customId)
-            .setPlaceholder((field.placeholder || 'Choose one or more options').slice(0, 150))
-            .setRequired(field.required)
-            .setMinValues(field.required ? 1 : 0)
-            .setMaxValues(Math.max(1, Math.min(25, field.choices?.length ?? 1)))
-            .addOptions((field.choices ?? []).map((choice) =>
-              new StringSelectMenuOptionBuilder()
-                .setLabel(choice.slice(0, 100))
-                .setValue(choice),
-            ));
-          label.setStringSelectMenuComponent(select);
-          break;
-        }
-        case 'discord_user': {
-          const select = new UserSelectMenuBuilder()
-            .setCustomId(customId)
-            .setPlaceholder((field.placeholder || 'Choose a server member').slice(0, 150))
-            .setRequired(field.required)
-            .setMinValues(field.required ? 1 : 0)
-            .setMaxValues(1);
-          label.setUserSelectMenuComponent(select);
-          break;
-        }
-        case 'discord_role': {
-          const select = new RoleSelectMenuBuilder()
-            .setCustomId(customId)
-            .setPlaceholder((field.placeholder || 'Choose a server role').slice(0, 150))
-            .setRequired(field.required)
-            .setMinValues(field.required ? 1 : 0)
-            .setMaxValues(1);
-          label.setRoleSelectMenuComponent(select);
-          break;
-        }
-        case 'checkbox': {
-          const checkbox = new CheckboxGroupBuilder()
-            .setCustomId(customId)
-            .setRequired(field.required)
-            .setMinValues(field.required ? 1 : 0)
-            .setMaxValues(1)
-            .addOptions({ label: 'Confirm', value: 'checked' });
-          label.setCheckboxGroupComponent(checkbox);
-          break;
-        }
-        case 'attachment': {
-          const upload = new FileUploadBuilder()
-            .setCustomId(customId)
-            .setRequired(field.required)
-            .setMinValues(field.required ? 1 : 0)
-            .setMaxValues(1);
-          label.setFileUploadComponent(upload);
-          break;
-        }
-        default: {
-          const maxLength = Math.min(4000, Math.max(1, field.maxLength ?? (field.type === 'long_text' ? 1500 : 100)));
-          const input = new TextInputBuilder()
-            .setCustomId(customId)
-            .setPlaceholder((field.placeholder || field.label).slice(0, 100))
-            .setStyle(field.type === 'long_text' ? TextInputStyle.Paragraph : TextInputStyle.Short)
-            .setRequired(field.required)
-            .setMaxLength(maxLength);
-          if ((field.minLength ?? 0) > 0) input.setMinLength(field.minLength!);
-          label.setTextInputComponent(input);
-          break;
-        }
-      }
-      labels.push(label);
-    }
-
     modal.addLabelComponents(...labels);
 
     /*
@@ -3577,11 +3486,72 @@ async function validateTicketFormPrincipals(
   }
 }
 
+async function handleTicketFormWizardContinue(interaction: ButtonInteraction): Promise<void> {
+  const route = parseTicketFormModalCustomId(interaction.customId);
+  if (!interaction.guild || !route) {
+    await replyError(interaction, 'This form continuation is invalid. Reopen the support panel and start again.');
+    return;
+  }
+  if (route.expiresAt <= Date.now()) {
+    await replyError(interaction, 'This form expired. Reopen the support panel and start again.');
+    return;
+  }
+
+  try {
+    const cached = getCachedActiveTicketFormById(
+      interaction.guild.id,
+      route.formId,
+      route.version,
+      route.tagId,
+    );
+    if (!cached.ready) {
+      await replyError(interaction, 'Ticket forms are still loading. Please try again in a moment.');
+      return;
+    }
+    if (!cached.form) {
+      await replyError(interaction, 'This form changed or was disabled. Reopen the support panel and start again.');
+      return;
+    }
+    const session = await getTicketFormWizardSession({
+      sessionId: route.sessionId,
+      guildId: interaction.guild.id,
+      submittedBy: interaction.user.id,
+      formId: route.formId,
+      formVersion: route.version,
+      tagId: route.tagId,
+      step: route.step,
+    });
+    const visibleFields = getVisibleTicketFormFields(cached.form.fields, route.step, session.answers);
+    if (!visibleFields.length) {
+      await replyError(interaction, 'This form step has no visible questions. Reopen the support panel and start again.');
+      return;
+    }
+    await interaction.showModal(
+      buildTicketFormModal(
+        cached.form,
+        route.tagId,
+        route.expiresAt,
+        route.sessionId,
+        route.step,
+        session.answers,
+      ),
+    );
+  } catch (error) {
+    console.error('Failed to continue ticket form wizard:', error);
+    await replyError(
+      interaction,
+      error instanceof Error ? error.message : 'Could not continue this form. Reopen the support panel and start again.',
+    );
+  }
+}
+
 async function handleTicketFormWizardModal(interaction: ModalSubmitInteraction): Promise<void> {
   if (!interaction.guild) {
     await replyError(interaction, '❌ This action can only be used inside a server.');
     return;
   }
+
+  if (!(await safeDeferReply(interaction))) return;
 
   const route = parseTicketFormModalCustomId(interaction.customId);
   if (!route) {
@@ -3659,8 +3629,6 @@ async function handleTicketFormWizardModal(interaction: ModalSubmitInteraction):
       }
     }
     const finalStep = nextStep === undefined;
-    if (finalStep && !(await safeDeferReply(interaction))) return;
-
     const currentForm = await getTicketFormForWizard({
       guildId: interaction.guild.id,
       formId: route.formId,
@@ -3687,16 +3655,25 @@ async function handleTicketFormWizardModal(interaction: ModalSubmitInteraction):
     });
 
     if (!finalStep && nextStep !== undefined) {
-      await interaction.showModal(
-        buildTicketFormModal(
-          currentForm,
-          route.tagId,
-          route.expiresAt,
-          route.sessionId,
-          nextStep,
-          session.answers,
-        ),
-      );
+      const continueCustomId = buildTicketFormModalCustomId({
+        formId: currentForm.id,
+        version: currentForm.version,
+        expiresAt: route.expiresAt,
+        sessionId: route.sessionId,
+        tagId: route.tagId,
+        step: nextStep,
+      });
+      await interaction.editReply({
+        content: '✅ Your answers are saved. Continue to the next section when ready.',
+        components: [
+          new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setCustomId(continueCustomId)
+              .setLabel('Continue form')
+              .setStyle(ButtonStyle.Primary),
+          ),
+        ],
+      });
       return;
     }
 
@@ -5661,6 +5638,11 @@ export async function handleTicketInteraction(
         content: 'Ticket tag selection cancelled.',
         components: [],
       });
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('tf:')) {
+      await handleTicketFormWizardContinue(interaction);
       return;
     }
 
