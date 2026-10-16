@@ -317,8 +317,9 @@ export function parseTicketFormFields(input: string | unknown): TicketFormField[
       type: value.type,
       required,
       ...(placeholder ? { placeholder } : {}),
-      minLength: minLength as number,
-      maxLength: maxLength as number,
+      ...((value.type === 'short_text' || value.type === 'long_text')
+        ? { minLength: minLength as number, maxLength: maxLength as number }
+        : {}),
       ...(min !== undefined ? { min: min as number } : {}),
       ...(max !== undefined ? { max: max as number } : {}),
       ...(choices ? { choices } : {}),
