@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import { ChannelType, type Client } from 'discord.js';
 import type { PoolClient, QueryResultRow } from 'pg';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
 import { initializePersistence } from '../core/persistence/provider';
 import { getGuildConfig } from './configService';
+import { getPersistedTicket, registerTicket } from './ticketPersistenceService';
+import type { TicketPriority } from './advancedSettingsService';
 
 export const MAX_TICKET_FORM_FIELDS = 3;
 export const TICKET_FORM_MODAL_TTL_MS = 15 * 60_000;
@@ -896,22 +899,202 @@ export async function markTicketFormSubmissionFailure(interactionId: string, saf
 }
 
 /** Reconcile a persisted form response whose Discord channel/ticket setup later failed. */
-export async function recoverPendingTicketFormSubmissions(): Promise<number> {
-  await initializePersistence();
+interface RecoverableFormSubmissionRow extends QueryResultRow {
+  interaction_id: string;
+  guild_id: string;
+  channel_id: string | null;
+  form_id: string;
+  form_version: number;
+  submitted_by: string;
+  status: 'pending' | 'failed';
+}
+
+function parseTicketTopic(topic: string): Record<string, string> {
+  const fields: Record<string, string> = {};
+  for (const token of topic.trim().split(/\s+/)) {
+    const separator = token.indexOf('=');
+    if (separator <= 0) continue;
+    const key = token.slice(0, separator);
+    const value = token.slice(separator + 1);
+    if (key && fields[key] === undefined) fields[key] = value;
+  }
+  return fields;
+}
+
+function safeTopicValue(fields: Record<string, string>, key: string): string | undefined {
+  const value = fields[key];
+  return value && value !== 'none' ? value : undefined;
+}
+
+function parseOpenedAt(value: string | undefined): string {
+  if (!value) return new Date().toISOString();
+  try {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+  } catch {
+    return new Date().toISOString();
+  }
+}
+
+const VALID_RECOVERY_PRIORITIES: readonly TicketPriority[] = [
+  'critical', 'urgent', 'high', 'normal', 'low',
+];
+
+/**
+ * Rebuild a missing durable ticket row only when a retained form draft points
+ * at a Discord ticket topic containing the same submission/form identifiers.
+ * The topic is treated as an untrusted recovery hint and validated before any
+ * row is reconstructed. This closes the channel-created/DB-registration gap.
+ */
+async function recoverTicketRowFromDiscordTopic(
+  client: Client,
+  submission: RecoverableFormSubmissionRow,
+): Promise<boolean> {
+  const guild = client.guilds.cache.get(submission.guild_id) ??
+    await client.guilds.fetch(submission.guild_id).catch(() => null);
+  if (!guild) return false;
+
+  let channel;
+  if (submission.channel_id) {
+    channel = guild.channels.cache.get(submission.channel_id) ??
+      await guild.channels.fetch(submission.channel_id).catch(() => null);
+  } else {
+    const guildChannels = await guild.channels.fetch().catch(() => null);
+    channel = guildChannels
+      ? [...guildChannels.values()].find((candidate) =>
+          candidate.type === ChannelType.GuildText &&
+          candidate.topic?.startsWith('supportforge:ticket') &&
+          parseTicketTopic(candidate.topic).form_submission === submission.interaction_id,
+        ) ?? null
+      : null;
+  }
+
+  if (!channel || channel.type !== ChannelType.GuildText ||
+      !channel.topic?.startsWith('supportforge:ticket')) {
+    return false;
+  }
+
+  const fields = parseTicketTopic(channel.topic);
+  if (fields.form_submission !== submission.interaction_id ||
+      fields.form_id !== submission.form_id ||
+      Number(fields.form_version) !== Number(submission.form_version)) {
+    return false;
+  }
+
+  const ownerId = safeTopicValue(fields, 'owner');
+  const departmentId = safeTopicValue(fields, 'department');
+  const tagId = safeTopicValue(fields, 'tag');
+  const ticketNumber = safeTopicValue(fields, 'number');
+  if (!ownerId || !/^\d{17,20}$/.test(ownerId) ||
+      !departmentId || !tagId || !ticketNumber || !/^\d{1,20}$/.test(ticketNumber)) {
+    return false;
+  }
+
+  const priorityValue = safeTopicValue(fields, 'priority');
+  const priority: TicketPriority = priorityValue &&
+    (VALID_RECOVERY_PRIORITIES as readonly string[]).includes(priorityValue)
+      ? priorityValue as TicketPriority
+      : 'normal';
+  const openedAt = parseOpenedAt(safeTopicValue(fields, 'opened_at'));
+  const updatedAt = parseOpenedAt(safeTopicValue(fields, 'updated_at'));
+  const panelMessageId = safeTopicValue(fields, 'message');
+  const staffRoleId = safeTopicValue(fields, 'staff');
+  const subject = safeTopicValue(fields, 'subject');
+  let decodedSubject = 'Recovered ticket #' + ticketNumber;
+  if (subject) {
+    try {
+      decodedSubject = decodeURIComponent(subject).slice(0, 100);
+    } catch {
+      // Keep the recovery process alive when an old/corrupt topic has encoding errors.
+    }
+  }
+  const users = (safeTopicValue(fields, 'users') ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter((id) => /^\d{17,20}$/.test(id));
+  const participants = [...new Set([ownerId, ...users])];
+
+  const existing = await getPersistedTicket(channel.id);
+  if (!existing) {
+    await registerTicket(
+      channel.id,
+      {
+        guildId: submission.guild_id,
+        ticketNumber,
+        departmentId,
+        tagId,
+        ownerId,
+        priority,
+        createdAt: openedAt,
+        participantIds: participants,
+        metadata: {
+          ...(panelMessageId ? { panelMessageId } : {}),
+          panelChannelId: channel.id,
+          subject: decodedSubject,
+          ...(staffRoleId ? { staffRoleId } : {}),
+          openedAt,
+          lastActivityAt: updatedAt,
+          lastCustomerMessageAt: openedAt,
+          ticketChannelType: 'text',
+          formSubmissionInteractionId: submission.interaction_id,
+          formId: submission.form_id,
+          formVersion: Number(submission.form_version),
+          recoveredFromDiscordTopic: true,
+        },
+      },
+      {
+        id: 'supportforge-system',
+        attribution: 'actorUnknown',
+        confidence: 'none',
+      },
+    );
+  }
+
+  return true;
+}
+
+async function attachRecoverableSubmissions(): Promise<number> {
   const result = await getPostgresPool().query(
-    'UPDATE ticket_form_submissions s SET ticket_id=t.id, channel_id=t.channel_id, status=\'attached\', attached_at=COALESCE(s.attached_at,NOW()), last_error=NULL ' +
-    'FROM tickets t WHERE s.guild_id=t.guild_id AND s.ticket_id IS NULL AND s.status IN (\'pending\',\'failed\') ' +
-    'AND (s.channel_id=t.channel_id OR s.interaction_id=t.metadata->>\'formSubmissionInteractionId\')',
+    'UPDATE ticket_form_submissions s SET ticket_id=t.id, channel_id=t.channel_id, status=\\'attached\\', attached_at=COALESCE(s.attached_at,NOW()), last_error=NULL ' +
+    'FROM tickets t WHERE s.guild_id=t.guild_id AND s.ticket_id IS NULL AND s.status IN (\\'pending\\',\\'failed\\') ' +
+    'AND (s.channel_id=t.channel_id OR s.interaction_id=t.metadata->>\\'formSubmissionInteractionId\\')',
   );
   return result.rowCount ?? 0;
 }
 
-export function startTicketFormSubmissionRecovery(intervalMs = 60_000): () => void {
+/** Recover ticket records, then attach the response to the durable ticket id. */
+export async function recoverPendingTicketFormSubmissions(client: Client): Promise<number> {
+  await initializePersistence();
+  let recovered = await attachRecoverableSubmissions();
+  const pending = await getPostgresPool().query<RecoverableFormSubmissionRow>(
+    'SELECT interaction_id, guild_id, channel_id, form_id, form_version, submitted_by, status ' +
+    'FROM ticket_form_submissions WHERE ticket_id IS NULL AND status IN (\\'pending\\',\\'failed\\') ' +
+    'ORDER BY submitted_at ASC LIMIT 100',
+  );
+
+  for (const submission of pending.rows) {
+    try {
+      if (await recoverTicketRowFromDiscordTopic(client, submission)) recovered += 1;
+    } catch (error) {
+      // Keep answers and the pending status intact; the next cycle retries.
+      console.warn(
+        'Could not reconstruct ticket metadata for retained form submission ' +
+        submission.interaction_id + ':',
+        error instanceof Error ? error.message : 'temporary recovery error',
+      );
+    }
+  }
+
+  recovered += await attachRecoverableSubmissions();
+  return recovered;
+}
+
+export function startTicketFormSubmissionRecovery(client: Client, intervalMs = 60_000): () => void {
   let running = false;
   const tick = (): void => {
     if (running) return;
     running = true;
-    void recoverPendingTicketFormSubmissions()
+    void recoverPendingTicketFormSubmissions(client)
       .then((count) => {
         if (count > 0) console.info('Recovered ' + count + ' pending SupportForge form submission(s).');
       })
