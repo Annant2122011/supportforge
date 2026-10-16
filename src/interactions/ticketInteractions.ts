@@ -3100,6 +3100,221 @@ async function handleTicketTagSelection(interaction: StringSelectMenuInteraction
   await showTicketCreationModal(interaction, departmentId, tagId);
 }
 
+interface ParsedTicketFormModalId {
+  formId: string;
+  version: number;
+  expiresAt: number;
+  sessionId: string;
+  tagId: string;
+  step: number;
+}
+
+function encodeFormIdForModal(formId: string): string {
+  const hex = formId.replace(/-/g, '');
+  if (!/^[a-f0-9]{32}$/i.test(hex)) throw new Error('The ticket form identifier is malformed.');
+  return Buffer.from(hex, 'hex').toString('base64url');
+}
+
+function decodeFormIdFromModal(encoded: string): string | null {
+  try {
+    const hex = Buffer.from(encoded, 'base64url').toString('hex');
+    if (!/^[a-f0-9]{32}$/i.test(hex)) return null;
+    return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' +
+      hex.slice(16, 20) + '-' + hex.slice(20);
+  } catch {
+    return null;
+  }
+}
+
+function buildTicketFormModalCustomId(args: {
+  formId: string;
+  version: number;
+  expiresAt: number;
+  sessionId: string;
+  tagId: string;
+  step: number;
+}): string {
+  const customId = [
+    'tf',
+    encodeFormIdForModal(args.formId),
+    String(args.version),
+    Math.floor(args.expiresAt / 1000).toString(36),
+    args.sessionId,
+    Buffer.from(args.tagId, 'utf8').toString('base64url'),
+    String(args.step),
+  ].join(':');
+  if (customId.length > 100) throw new Error('This form route is too long to fit Discord’s modal custom-id limit.');
+  return customId;
+}
+
+function parseTicketFormModalCustomId(customId: string): ParsedTicketFormModalId | null {
+  const parts = customId.split(':');
+  if (parts.length !== 7 || parts[0] !== 'tf') return null;
+  const formId = decodeFormIdFromModal(parts[1] ?? '');
+  const version = Number(parts[2]);
+  const expiresSeconds = Number.parseInt(parts[3] ?? '', 36);
+  const sessionId = parts[4] ?? '';
+  const tagIdEncoded = parts[5] ?? '';
+  const step = Number(parts[6]);
+  let tagId = '';
+  try {
+    tagId = Buffer.from(tagIdEncoded, 'base64url').toString('utf8');
+  } catch {
+    return null;
+  }
+  if (!formId || !Number.isSafeInteger(version) || version < 1 ||
+      !Number.isSafeInteger(expiresSeconds) || expiresSeconds < 1 ||
+      !/^[A-Za-z0-9_-]{12,20}$/.test(sessionId) ||
+      !tagId || tagId.length > 100 ||
+      !Number.isInteger(step) || step < 1 || step > 10) {
+    return null;
+  }
+  return { formId, version, expiresAt: expiresSeconds * 1000, sessionId, tagId, step };
+}
+
+function buildTicketFormModal(
+  form: TicketFormVersion,
+  tagId: string,
+  expiresAt: number,
+  sessionId: string,
+  step: number,
+  priorAnswers: Record<string, unknown>,
+): ModalBuilder {
+  const customId = buildTicketFormModalCustomId({
+    formId: form.id,
+    version: form.version,
+    expiresAt,
+    sessionId,
+    tagId,
+    step,
+  });
+  const modal = new ModalBuilder()
+    .setCustomId(customId)
+    .setTitle((form.name + (step > 1 ? ' • Step ' + step : '')).slice(0, 45));
+  const labels: LabelBuilder[] = [];
+
+  if (step === 1) {
+    labels.push(
+      new LabelBuilder()
+        .setLabel('What do you need help with?')
+        .setTextInputComponent(
+          new TextInputBuilder()
+            .setCustomId('subject')
+            .setPlaceholder('Briefly describe your issue')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setMaxLength(100),
+        ),
+      new LabelBuilder()
+        .setLabel('Describe your issue')
+        .setDescription('Up to 4,000 characters')
+        .setTextInputComponent(
+          new TextInputBuilder()
+            .setCustomId('description')
+            .setPlaceholder('Keep paragraphs and bullet points as written.')
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(true)
+            .setMaxLength(4000),
+        ),
+    );
+  }
+
+  for (const field of getVisibleTicketFormFields(form.fields, step, priorAnswers)) {
+    const customId = 'form_' + field.id;
+    const label = new LabelBuilder().setLabel(field.label.slice(0, 45));
+    if (field.placeholder) label.setDescription(field.placeholder.slice(0, 100));
+
+    switch (field.type) {
+      case 'dropdown': {
+        const select = new StringSelectMenuBuilder()
+          .setCustomId(customId)
+          .setPlaceholder((field.placeholder || 'Choose an option').slice(0, 150))
+          .setRequired(field.required)
+          .setMinValues(field.required ? 1 : 0)
+          .setMaxValues(1)
+          .addOptions((field.choices ?? []).map((choice) =>
+            new StringSelectMenuOptionBuilder().setLabel(choice.slice(0, 100)).setValue(choice),
+          ));
+        label.setStringSelectMenuComponent(select);
+        break;
+      }
+      case 'multi_select': {
+        const select = new StringSelectMenuBuilder()
+          .setCustomId(customId)
+          .setPlaceholder((field.placeholder || 'Choose one or more options').slice(0, 150))
+          .setRequired(field.required)
+          .setMinValues(field.required ? 1 : 0)
+          .setMaxValues(Math.max(1, Math.min(25, field.choices?.length ?? 1)))
+          .addOptions((field.choices ?? []).map((choice) =>
+            new StringSelectMenuOptionBuilder().setLabel(choice.slice(0, 100)).setValue(choice),
+          ));
+        label.setStringSelectMenuComponent(select);
+        break;
+      }
+      case 'discord_user': {
+        label.setUserSelectMenuComponent(
+          new UserSelectMenuBuilder()
+            .setCustomId(customId)
+            .setPlaceholder((field.placeholder || 'Choose a server member').slice(0, 150))
+            .setRequired(field.required)
+            .setMinValues(field.required ? 1 : 0)
+            .setMaxValues(1),
+        );
+        break;
+      }
+      case 'discord_role': {
+        label.setRoleSelectMenuComponent(
+          new RoleSelectMenuBuilder()
+            .setCustomId(customId)
+            .setPlaceholder((field.placeholder || 'Choose a server role').slice(0, 150))
+            .setRequired(field.required)
+            .setMinValues(field.required ? 1 : 0)
+            .setMaxValues(1),
+        );
+        break;
+      }
+      case 'checkbox': {
+        label.setCheckboxGroupComponent(
+          new CheckboxGroupBuilder()
+            .setCustomId(customId)
+            .setRequired(field.required)
+            .setMinValues(field.required ? 1 : 0)
+            .setMaxValues(1)
+            .addOptions({ label: 'Confirm', value: 'checked' }),
+        );
+        break;
+      }
+      case 'attachment': {
+        label.setFileUploadComponent(
+          new FileUploadBuilder()
+            .setCustomId(customId)
+            .setRequired(field.required)
+            .setMinValues(field.required ? 1 : 0)
+            .setMaxValues(1),
+        );
+        break;
+      }
+      default: {
+        const maxLength = Math.min(4000, Math.max(1, field.maxLength ?? (field.type === 'long_text' ? 1500 : 100)));
+        const input = new TextInputBuilder()
+          .setCustomId(customId)
+          .setPlaceholder((field.placeholder || field.label).slice(0, 100))
+          .setStyle(field.type === 'long_text' ? TextInputStyle.Paragraph : TextInputStyle.Short)
+          .setRequired(field.required)
+          .setMaxLength(maxLength);
+        if ((field.minLength ?? 0) > 0) input.setMinLength(field.minLength);
+        label.setTextInputComponent(input);
+        break;
+      }
+    }
+    labels.push(label);
+  }
+
+  if (labels.length === 0) throw new Error('This step has no visible fields and cannot be displayed.');
+  modal.addLabelComponents(...labels);
+  return modal;
+}
+
 async function showTicketCreationModal(
   interaction: ButtonInteraction | StringSelectMenuInteraction,
   departmentId: string,
