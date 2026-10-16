@@ -1487,7 +1487,21 @@ async function createTicket(
           value: selectedForm.name + ' • version ' + selectedForm.version,
           inline: false,
         });
-        for (const field of selectedForm.fields) {
+      }
+
+      const requestMessage = await ticketChannel.send({
+        allowedMentions: { parse: [] },
+        embeds: [requestEmbed],
+      });
+
+      /*
+       * Discord limits one embed to 25 fields and all embeds in a message to
+       * 6,000 combined characters. Keep the initial request embed compact,
+       * then send bounded answer pages so a valid 25-field form cannot break
+       * ticket creation during message serialization.
+       */
+      if (selectedForm && formAnswers) {
+        const answerFields = selectedForm.fields.map((field) => {
           const answer = formAnswers[field.id];
           const rendered = Array.isArray(answer)
             ? answer.join(', ')
@@ -1498,18 +1512,28 @@ async function createTicket(
                   ' (' + String((answer as { size?: unknown }).size ?? '?') + ' bytes) ' +
                   String((answer as { url?: unknown }).url ?? '')
                 : String(answer ?? '—');
-          requestEmbed.addFields({
-            name: field.label.slice(0, 256),
-            value: (rendered || '—').slice(0, 1024),
+          return {
+            name: field.label.slice(0, 45),
+            value: (rendered || '—').slice(0, 400),
             inline: false,
+          };
+        });
+
+        const pageSize = 10;
+        const pageCount = Math.ceil(answerFields.length / pageSize);
+        for (let page = 0; page < pageCount; page += 1) {
+          const pageFields = answerFields.slice(page * pageSize, (page + 1) * pageSize);
+          await ticketChannel.send({
+            allowedMentions: { parse: [] },
+            embeds: [
+              new EmbedBuilder()
+                .setTitle('📋 Ticket Form Answers' + (pageCount > 1 ? ' • ' + (page + 1) + '/' + pageCount : ''))
+                .setDescription('Form **' + selectedForm.name.slice(0, 80) + '** • version ' + selectedForm.version)
+                .addFields(pageFields),
+            ],
           });
         }
       }
-
-      const requestMessage = await ticketChannel.send({
-        allowedMentions: { parse: [] },
-        embeds: [requestEmbed],
-      });
 
       await updatePersistedTicketMetadata(
         ticketChannel.id,
