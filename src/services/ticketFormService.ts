@@ -151,7 +151,6 @@ function rejectUnsafePattern(pattern: string): void {
   // repetition patterns that can cause catastrophic backtracking.
   if (
     /\)[+*{]/.test(pattern) ||
-     /\\)[+*{]/.test(pattern) ||
     /(?:\.\*|\.\+){2}/.test(pattern) ||
     /\\[1-9]/.test(pattern)
   ) {
