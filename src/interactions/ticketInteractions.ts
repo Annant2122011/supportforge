@@ -1501,8 +1501,9 @@ async function createTicket(
        * ticket creation during message serialization.
        */
       if (selectedForm && formAnswers) {
+        const submittedAnswers = formAnswers;
         const answerFields = selectedForm.fields.map((field) => {
-          const answer = formAnswers[field.id];
+          const answer = submittedAnswers[field.id];
           const rendered = Array.isArray(answer)
             ? answer.join(', ')
             : typeof answer === 'boolean'
