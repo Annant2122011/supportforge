@@ -1115,10 +1115,10 @@ async function createTicket(
             rawAnswers[field.id] = Array.from(interaction.fields.getCheckboxGroup(customId));
             break;
           case 'discord_user':
-            rawAnswers[field.id] = Array.from(interaction.fields.getSelectedUsers(customId).keys());
+            rawAnswers[field.id] = Array.from(interaction.fields.getSelectedUsers(customId)?.keys() ?? []);
             break;
           case 'discord_role':
-            rawAnswers[field.id] = Array.from(interaction.fields.getSelectedRoles(customId).keys());
+            rawAnswers[field.id] = Array.from(interaction.fields.getSelectedRoles(customId)?.keys() ?? []);
             break;
           case 'attachment':
             rawAnswers[field.id] = Array.from(interaction.fields.getUploadedFiles(customId)?.values() ?? []).map((file) => ({
