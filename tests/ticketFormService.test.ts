@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  getTicketFormStepCount,
+  getVisibleTicketFormFields,
   parseTicketFormFields,
   validateTicketFormAnswers,
 } from '../src/services/ticketFormService';
@@ -42,7 +44,7 @@ test('stored normalized schemas can be validated and loaded again', () => {
   );
 });
 
-test('rejects duplicate ids, too many inputs and unsafe regex expressions', () => {
+test('rejects duplicate ids, oversized schemas and unsafe regex expressions', () => {
   assert.throws(
     () => parseTicketFormFields([
       { id: 'issue', label: 'Issue', type: 'short_text' },
@@ -52,13 +54,24 @@ test('rejects duplicate ids, too many inputs and unsafe regex expressions', () =
   );
 
   assert.throws(
+    () => parseTicketFormFields(
+      Array.from({ length: 26 }, (_, index) => ({
+        id: 'field_' + index,
+        label: 'Field ' + index,
+        type: 'short_text',
+      })),
+    ),
+    /between 1 and 25 custom fields/,
+  );
+
+  assert.throws(
     () => parseTicketFormFields([
-      { id: 'a', label: 'A', type: 'short_text' },
-      { id: 'b', label: 'B', type: 'short_text' },
-      { id: 'c', label: 'C', type: 'short_text' },
-      { id: 'd', label: 'D', type: 'short_text' },
+      { id: 'a', label: 'A', type: 'short_text', step: 1 },
+      { id: 'b', label: 'B', type: 'short_text', step: 1 },
+      { id: 'c', label: 'C', type: 'short_text', step: 1 },
+      { id: 'd', label: 'D', type: 'short_text', step: 1 },
     ]),
-    /between 1 and 3 custom fields/,
+    /Step 1 contains 4 fields/,
   );
 
   assert.throws(
@@ -66,6 +79,46 @@ test('rejects duplicate ids, too many inputs and unsafe regex expressions', () =
       { id: 'pattern', label: 'Pattern', type: 'short_text', pattern: '(a|aa)+' },
     ]),
     /potentially unsafe repetition/,
+  );
+});
+
+test('conditional fields are shown only when earlier-step conditions match', () => {
+  const fields = parseTicketFormFields([
+    { id: 'reason', label: 'Reason', type: 'dropdown', required: true, choices: ['Question', 'Refund'] },
+    { id: 'order', label: 'Order ID', type: 'short_text', required: false },
+    { id: 'details', label: 'Additional details', type: 'short_text', required: false },
+    {
+      id: 'refund_amount',
+      label: 'Refund amount',
+      type: 'decimal',
+      required: true,
+      min: 0.01,
+      step: 2,
+      condition: { fieldId: 'reason', operator: 'equals', value: 'Refund' },
+    },
+  ]);
+
+  assert.equal(getTicketFormStepCount(fields), 2);
+  assert.deepEqual(
+    getVisibleTicketFormFields(fields, 2, { reason: 'Question' }).map((field) => field.id),
+    [],
+  );
+  assert.deepEqual(
+    getVisibleTicketFormFields(fields, 2, { reason: 'Refund' }).map((field) => field.id),
+    ['refund_amount'],
+  );
+  assert.deepEqual(
+    getVisibleTicketFormFields(fields, 2, {}).map((field) => field.id),
+    [],
+    'a missing controller must never reveal a negative or positive condition',
+  );
+
+  assert.throws(
+    () => parseTicketFormFields([
+      { id: 'reason', label: 'Reason', type: 'dropdown', choices: ['Question', 'Refund'], step: 1 },
+      { id: 'amount', label: 'Amount', type: 'number', step: 1, condition: { fieldId: 'reason', operator: 'equals', value: 'Refund' } },
+    ]),
+    /earlier step/,
   );
 });
 
