@@ -343,7 +343,10 @@ export function validateTicketFormAnswers(
         break;
       }
       case 'date': {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || new Date(value + 'T00:00:00.000Z').toISOString().slice(0, 10) !== value) {
+        const parsedDate = /^\\d{4}-\\d{2}-\\d{2}$/.test(value)
+          ? new Date(value + 'T00:00:00.000Z')
+          : null;
+        if (!parsedDate || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== value) {
           throw new Error('"' + field.label + '" must use a real date in YYYY-MM-DD format.');
         }
         answers[field.id] = value;
@@ -356,14 +359,14 @@ export function validateTicketFormAnswers(
         break;
       }
       case 'multi_select': {
-        const entries = value.split(',').map((entry) => entry.trim()).filter(Boolean);
+        const entries = value.split('|').map((entry) => entry.trim()).filter(Boolean);
         if (!entries.length) {
           if (field.required) throw new Error('Select at least one option for "' + field.label + '".');
           continue;
         }
         const selected = entries.map((entry) => normalizedChoice(entry, field.choices ?? []));
         if (selected.some((entry) => !entry)) {
-          throw new Error('Use only configured options for "' + field.label + '": ' + (field.choices ?? []).join(', ') + '. Separate selections with commas.');
+          throw new Error('Use only configured options for "' + field.label + '": ' + (field.choices ?? []).join(', ') + '. Separate selections with |.');
         }
         const unique = Array.from(new Set(selected as string[]));
         answers[field.id] = unique;
