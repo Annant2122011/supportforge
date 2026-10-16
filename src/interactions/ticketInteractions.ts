@@ -1611,7 +1611,7 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
       error,
     );
   }
-  updateRuntimeTicketState(channel, channel.topic ?? newTopic, 'open');
+  updateRuntimeTicketState(channel, newTopic, 'open');
 
   await updateMainMessage(channel, getField(newTopic, 'message'), 'open', newTopic);
   await interaction.editReply('✅ You left the ticket. It is now open for another moderator to claim.');
