@@ -148,10 +148,10 @@ export function buildTicketPanelComponents(
 
     tools.addComponents(
       new ButtonBuilder().setCustomId('ticket:panel:add-user').setLabel('Add User').setEmoji('👥').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('ticket:panel:remove-user').setLabel('Remove User').setEmoji('➖').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('ticket:panel:priority').setLabel('Priority').setEmoji('⚡').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('ticket:panel:department').setLabel('Department').setEmoji('📂').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('ticket:panel:tag').setLabel('Tag').setEmoji('🏷️').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('ticket:panel:note').setLabel('Note').setEmoji('📝').setStyle(ButtonStyle.Secondary),
     );
   }
 
@@ -199,6 +199,16 @@ export function buildTicketPanelComponents(
     );
 
     const positioning = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId('ticket:panel:note')
+        .setLabel('Internal Note')
+        .setEmoji('📝')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('ticket:panel:report')
+        .setLabel('Report User')
+        .setEmoji('🛡️')
+        .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
         .setCustomId('ticket:panel:move-bottom')
         .setLabel('Move Controls Here')
