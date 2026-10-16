@@ -4,9 +4,15 @@ import {
   ButtonStyle,
   ChannelType,
   EmbedBuilder,
+  FileUploadBuilder,
+  LabelBuilder,
   MessageFlags,
   ModalBuilder,
+  RoleSelectMenuBuilder,
   StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
+  UserSelectMenuBuilder,
+  CheckboxGroupBuilder,
   type Message,
   PermissionFlagsBits,
   TextInputBuilder,
@@ -1097,9 +1103,36 @@ async function createTicket(
         version: formRoute.version,
       });
 
-      const rawAnswers: Record<string, string> = {};
+      const rawAnswers: Record<string, unknown> = {};
       for (const field of selectedForm.fields) {
-        rawAnswers[field.id] = interaction.fields.getTextInputValue('form_' + field.id);
+        const customId = 'form_' + field.id;
+        switch (field.type) {
+          case 'dropdown':
+          case 'multi_select':
+            rawAnswers[field.id] = Array.from(interaction.fields.getStringSelectValues(customId));
+            break;
+          case 'checkbox':
+            rawAnswers[field.id] = Array.from(interaction.fields.getCheckboxGroup(customId));
+            break;
+          case 'discord_user':
+            rawAnswers[field.id] = Array.from(interaction.fields.getSelectedUsers(customId).keys());
+            break;
+          case 'discord_role':
+            rawAnswers[field.id] = Array.from(interaction.fields.getSelectedRoles(customId).keys());
+            break;
+          case 'attachment':
+            rawAnswers[field.id] = Array.from(interaction.fields.getUploadedFiles(customId)?.values() ?? []).map((file) => ({
+              id: file.id,
+              url: file.url,
+              name: file.name,
+              size: file.size,
+              contentType: file.contentType,
+            }));
+            break;
+          default:
+            rawAnswers[field.id] = interaction.fields.getTextInputValue(customId);
+            break;
+        }
       }
       formAnswers = validateTicketFormAnswers(selectedForm.fields, rawAnswers);
 
@@ -1430,7 +1463,11 @@ async function createTicket(
             ? answer.join(', ')
             : typeof answer === 'boolean'
               ? (answer ? 'Yes' : 'No')
-              : String(answer ?? '—');
+              : answer && typeof answer === 'object' && 'url' in answer
+                ? String((answer as { name?: unknown }).name ?? 'Attachment') +
+                  ' (' + String((answer as { size?: unknown }).size ?? '?') + ' bytes) ' +
+                  String((answer as { url?: unknown }).url ?? '')
+                : String(answer ?? '—');
           requestEmbed.addFields({
             name: field.label.slice(0, 256),
             value: (rendered || '—').slice(0, 1024),
@@ -3080,60 +3117,122 @@ async function showTicketCreationModal(
         .setCustomId(customId)
         .setTitle(form ? form.name.slice(0, 45) : 'Support Request');
 
-    const subjectInput =
-      new TextInputBuilder()
-        .setCustomId('subject')
+    const subjectInput = new TextInputBuilder()
+      .setCustomId('subject')
+      .setPlaceholder('Briefly describe your issue')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true)
+      .setMaxLength(100);
+
+    const descriptionInput = new TextInputBuilder()
+      .setCustomId('description')
+      .setPlaceholder('Keep paragraphs and bullet points as written.')
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(true)
+      .setMaxLength(4000);
+
+    const labels: LabelBuilder[] = [
+      new LabelBuilder()
         .setLabel('What do you need help with?')
-        .setPlaceholder('Briefly describe your issue')
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true)
-        .setMaxLength(100);
-
-    const descriptionInput =
-      new TextInputBuilder()
-        .setCustomId('description')
-        .setLabel('Describe your issue (up to 4,000 characters)')
-        .setPlaceholder('Keep paragraphs and bullet points as written.')
-        .setStyle(TextInputStyle.Paragraph)
-        .setRequired(true)
-        .setMaxLength(4000);
-
-    const inputRows: ActionRowBuilder<TextInputBuilder>[] = [
-      new ActionRowBuilder<TextInputBuilder>().addComponents(subjectInput),
-      new ActionRowBuilder<TextInputBuilder>().addComponents(descriptionInput),
+        .setTextInputComponent(subjectInput),
+      new LabelBuilder()
+        .setLabel('Describe your issue')
+        .setDescription('Up to 4,000 characters')
+        .setTextInputComponent(descriptionInput),
     ];
 
     for (const field of form?.fields ?? []) {
-      const hint = field.type === 'dropdown' || field.type === 'multi_select'
-        ? (field.choices ?? []).join(', ')
-        : field.type === 'checkbox'
-          ? 'Enter yes/no or true/false'
-          : field.type === 'discord_user'
-            ? 'Enter a server member mention or user ID'
-            : field.type === 'discord_role'
-              ? 'Enter a server role mention or role ID'
-              : field.type === 'attachment'
-                ? 'Paste an HTTPS Discord attachment URL'
-                : field.type === 'date'
-                  ? 'Use YYYY-MM-DD'
-                  : field.type === 'number'
-                    ? 'Enter a whole number'
-                    : field.type === 'decimal'
-                      ? 'Enter a number; decimals are allowed'
-                      : field.placeholder ?? '';
+      const customId = 'form_' + field.id;
+      const label = new LabelBuilder().setLabel(field.label.slice(0, 45));
+      if (field.placeholder) label.setDescription(field.placeholder.slice(0, 100));
 
-      const input = new TextInputBuilder()
-        .setCustomId('form_' + field.id)
-        .setLabel(field.label.slice(0, 45))
-        .setPlaceholder((hint || field.placeholder || field.label).slice(0, 100))
-        .setStyle(field.type === 'long_text' ? TextInputStyle.Paragraph : TextInputStyle.Short)
-        .setRequired(field.required)
-        .setMaxLength(Math.min(4000, Math.max(1, field.maxLength ?? (field.type === 'long_text' ? 1500 : 100))));
-
-      inputRows.push(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
+      switch (field.type) {
+        case 'dropdown': {
+          const select = new StringSelectMenuBuilder()
+            .setCustomId(customId)
+            .setPlaceholder((field.placeholder || 'Choose an option').slice(0, 150))
+            .setRequired(field.required)
+            .setMinValues(field.required ? 1 : 0)
+            .setMaxValues(1)
+            .addOptions((field.choices ?? []).map((choice) =>
+              new StringSelectMenuOptionBuilder()
+                .setLabel(choice.slice(0, 100))
+                .setValue(choice),
+            ));
+          label.setStringSelectMenuComponent(select);
+          break;
+        }
+        case 'multi_select': {
+          const select = new StringSelectMenuBuilder()
+            .setCustomId(customId)
+            .setPlaceholder((field.placeholder || 'Choose one or more options').slice(0, 150))
+            .setRequired(field.required)
+            .setMinValues(field.required ? 1 : 0)
+            .setMaxValues(Math.max(1, Math.min(25, field.choices?.length ?? 1)))
+            .addOptions((field.choices ?? []).map((choice) =>
+              new StringSelectMenuOptionBuilder()
+                .setLabel(choice.slice(0, 100))
+                .setValue(choice),
+            ));
+          label.setStringSelectMenuComponent(select);
+          break;
+        }
+        case 'discord_user': {
+          const select = new UserSelectMenuBuilder()
+            .setCustomId(customId)
+            .setPlaceholder((field.placeholder || 'Choose a server member').slice(0, 150))
+            .setRequired(field.required)
+            .setMinValues(field.required ? 1 : 0)
+            .setMaxValues(1);
+          label.setUserSelectMenuComponent(select);
+          break;
+        }
+        case 'discord_role': {
+          const select = new RoleSelectMenuBuilder()
+            .setCustomId(customId)
+            .setPlaceholder((field.placeholder || 'Choose a server role').slice(0, 150))
+            .setRequired(field.required)
+            .setMinValues(field.required ? 1 : 0)
+            .setMaxValues(1);
+          label.setRoleSelectMenuComponent(select);
+          break;
+        }
+        case 'checkbox': {
+          const checkbox = new CheckboxGroupBuilder()
+            .setCustomId(customId)
+            .setRequired(field.required)
+            .setMinValues(field.required ? 1 : 0)
+            .setMaxValues(1)
+            .addOptions({ label: 'Confirm', value: 'checked' });
+          label.setCheckboxGroupComponent(checkbox);
+          break;
+        }
+        case 'attachment': {
+          const upload = new FileUploadBuilder()
+            .setCustomId(customId)
+            .setRequired(field.required)
+            .setMinValues(field.required ? 1 : 0)
+            .setMaxValues(1);
+          label.setFileUploadComponent(upload);
+          break;
+        }
+        default: {
+          const maxLength = Math.min(4000, Math.max(1, field.maxLength ?? (field.type === 'long_text' ? 1500 : 100)));
+          const input = new TextInputBuilder()
+            .setCustomId(customId)
+            .setPlaceholder((field.placeholder || field.label).slice(0, 100))
+            .setStyle(field.type === 'long_text' ? TextInputStyle.Paragraph : TextInputStyle.Short)
+            .setRequired(field.required)
+            .setMaxLength(maxLength);
+          if ((field.minLength ?? 0) > 0) input.setMinLength(field.minLength!);
+          label.setTextInputComponent(input);
+          break;
+        }
+      }
+      labels.push(label);
     }
 
-    modal.addComponents(...inputRows);
+    modal.addLabelComponents(...labels);
 
     /*
      * IMPORTANT:
