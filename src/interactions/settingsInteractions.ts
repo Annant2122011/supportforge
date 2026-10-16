@@ -18,6 +18,9 @@ import {
 
 import {
   getGuildConfig,
+  getTier,
+  setTier,
+  tierLabel,
   newDepartmentId,
   newTagId,
   updateGuildConfig,
@@ -751,6 +754,28 @@ async function showHome(interaction: SettingsViewInteraction): Promise<void> {
     ],
     buildSettingsDashboardComponents(),
   );
+}
+
+async function showPremiumSettings(interaction: SettingsViewInteraction, notice = ''): Promise<void> {
+  const tier = await getTier(interaction.guild!.id);
+  const next = tier === 'free' ? 'premium-demo' : tier === 'premium-demo' ? 'pro-demo' : 'free';
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('💎 Premium & Feature Demo')
+      .setDescription(
+        'Current tier: **' + tierLabel(tier) + '**. Premium and Pro are demo entitlements for preview only, not real billing. ' +
+        'This control cycles Free → Premium Demo → Pro Demo → Free.',
+      ),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId('sf:settings:premium:toggle')
+        .setLabel('Switch to ' + tierLabel(next))
+        .setEmoji('🔁')
+        .setStyle(ButtonStyle.Primary),
+      backButton(),
+    ),
+  ]);
 }
 
 async function showPanelSettings(interaction: ButtonInteraction): Promise<void> {
@@ -1580,6 +1605,21 @@ export async function handleSettingsInteraction(
         'SETTINGS_REFRESH',
         'Settings dashboard refreshed and the current dashboard message was replaced with the latest persisted configuration.',
       );
+      return true;
+    }
+
+    if (id === 'sf:settings:premium') {
+      await showPremiumSettings(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:premium:toggle') {
+      const current = await getTier(guild.id);
+      const next = current === 'free' ? 'premium-demo' : current === 'premium-demo' ? 'pro-demo' : 'free';
+      await setTier(guild.id, next);
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'TIER_CHANGED', 'Tier changed from ' + tierLabel(current) + ' to ' + tierLabel(next) + '.');
+      await showPremiumSettings(interaction, '✅ Tier changed: **' + tierLabel(current) + '** → **' + tierLabel(next) + '**.');
       return true;
     }
 
