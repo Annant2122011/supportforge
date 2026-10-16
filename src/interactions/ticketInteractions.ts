@@ -5116,6 +5116,8 @@ async function handlePanelButton(
     id ===
       'ticket:panel:add-user' ||
     id ===
+      'ticket:panel:remove-user' ||
+    id ===
       'ticket:panel:priority' ||
     id ===
       'ticket:panel:department' ||
@@ -5128,15 +5130,16 @@ async function handlePanelButton(
       new ModalBuilder();
 
     if (
-      id ===
-      'ticket:panel:add-user'
+      id === 'ticket:panel:add-user' ||
+      id === 'ticket:panel:remove-user'
     ) {
+      const removingUser = id === 'ticket:panel:remove-user';
       modal
         .setCustomId(
-          'ticket:panel-modal:add-user',
+          removingUser ? 'ticket:panel-modal:remove-user' : 'ticket:panel-modal:add-user',
         )
         .setTitle(
-          'Add User to Ticket',
+          removingUser ? 'Remove User from Ticket' : 'Add User to Ticket',
         );
 
       const input =
@@ -5344,9 +5347,10 @@ async function handlePanelModal(
     /* ---------------------------------------------------------------------- */
 
     if (
-      id ===
-      'ticket:panel-modal:add-user'
+      id === 'ticket:panel-modal:add-user' ||
+      id === 'ticket:panel-modal:remove-user'
     ) {
+      const removingUser = id === 'ticket:panel-modal:remove-user';
       const raw =
         interaction.fields
           .getTextInputValue(
@@ -5377,24 +5381,29 @@ async function handlePanelModal(
           )
           .filter(Boolean);
 
-      if (
-        users.includes(
-          userId,
-        )
-      ) {
-        await interaction.editReply(
-          'ℹ️ That user is already on this ticket.',
-        );
+      const ownerId = getField(state.topic, 'owner');
+      if (removingUser && userId === ownerId) {
+        await interaction.editReply('❌ You cannot remove the ticket owner.');
         return;
       }
 
-      users.push(
-        userId,
-      );
+      const alreadyOnTicket = users.includes(userId);
+      if (removingUser && !alreadyOnTicket) {
+        await interaction.editReply('ℹ️ That user is not explicitly added to this ticket.');
+        return;
+      }
+      if (!removingUser && alreadyOnTicket) {
+        await interaction.editReply('ℹ️ That user is already on this ticket.');
+        return;
+      }
+
+      const nextUsers = removingUser
+        ? users.filter((id) => id !== userId)
+        : [...users, userId];
 
       const transitionAt = new Date().toISOString();
       newTopic = setField(
-        setField(newTopic, 'users', users.join(',')),
+        setField(newTopic, 'users', nextUsers.join(',')),
         'updated_at',
         transitionAt,
       );
@@ -5404,7 +5413,7 @@ async function handlePanelModal(
         channel.id,
         state.status,
         {
-          participantIds: [...new Set([...(ownerId ? [ownerId] : []), ...users])],
+          participantIds: [...new Set([...(ownerId ? [ownerId] : []), ...nextUsers])],
           metadata: {
             lastActivityAt: transitionAt,
             lastStaffActivityAt: transitionAt,
@@ -5433,7 +5442,9 @@ async function handlePanelModal(
       updateRuntimeTicketState(channel, newTopic, state.status);
 
       await interaction.editReply(
-        `✅ <@${userId}> has been added to the ticket.`,
+        removingUser
+          ? `✅ <@${userId}> has been removed from the ticket.`
+          : `✅ <@${userId}> has been added to the ticket.`,
       );
 
       const userConfig = await getGuildConfig(channel.guild.id);
@@ -5443,11 +5454,11 @@ async function handlePanelModal(
           userConfig.supportCategoryId,
           {
             ticketNumber: getField(channel.topic ?? '', 'number') ?? 'unknown',
-            event: 'ticket_user_added',
+            event: removingUser ? 'ticket_user_removed' : 'ticket_user_added',
             actor: interaction.user.tag,
             actorId: interaction.user.id,
             actorName: interaction.user.tag,
-            detail: 'Added user <@' + userId + '> to the ticket.',
+            detail: (removingUser ? 'Removed user <@' : 'Added user <@') + userId + '> from the ticket.',
           },
         );
       }
