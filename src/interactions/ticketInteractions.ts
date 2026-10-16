@@ -2568,6 +2568,7 @@ async function closeTicket(
   ticketActionLocks.add(
     lockKey,
   );
+  let closeSyncRunningInBackground = false;
 
   try {
     /*
@@ -2850,154 +2851,150 @@ async function closeTicket(
       closeTimestamp,
     );
 
-    let channelSyncFailed = false;
-    let channelMissing = false;
-    if (voiceChannelId) {
-      try {
-        closedTopic = await endTicketVoiceMode(
-          interaction.guild!,
-          channel,
-          closedTopic,
-          'closed',
-          'SupportForge voice mode ended because ticket was closed',
-          { deferTicketTopicUpdate: true, queueRename: false },
-        );
-        closedTopic = setField(closedTopic, 'updated_at', closeTimestamp);
-        await transitionPersistedTicket(
-          channel.id,
-          'closed',
-          {
-            metadata: {
-              voiceChannelId: null,
-              voiceChannelName: null,
-              voiceStartedAt: null,
-              voiceStartedBy: null,
-            },
-          },
-          interactionActor(interaction),
-          closeTimestamp,
-        );
-      } catch (error) {
-        channelSyncFailed = true;
-        console.warn(
-          `⚠️ Ticket #${ticketNumber} was closed durably, but private voice cleanup remains pending:`,
-          error,
-        );
-      }
-    }
-
     /*
-     * Persist the topic, storage-category move, and channel name together.
-     * The outbox retries this reconciliation if Discord is rate-limited or
-     * temporarily unavailable.
+     * The transcript and closed lifecycle state are now durable. Do not keep
+     * the Discord interaction in its thinking state while Discord applies
+     * channel/category changes, which can be delayed by per-route rate limits.
+     * The outbox also retries failed channel reconciliation.
      */
-    const closedChannelName = getTicketChannelName(
-      ticketNumber,
-      'closed',
-      await getEffectiveTicketPriority(channel.id, closedTopic),
-    );
-    try {
-      const closedCategory = await ensureClosedCategory(interaction.guild!);
-      await setChannelProperties(
-        channel.id,
-        {
-          topic: closedTopic,
-          name: closedChannelName,
-          parentId: closedCategory.id,
-        },
-        new Set<string>(),
-        'SupportForge persist closed ticket metadata and storage location',
-      );
-      channel.topic = closedTopic;
-      channel.name = closedChannelName;
-    } catch (error) {
-      channelSyncFailed = true;
-      channelMissing = isUnknownChannelError(error);
-      if (channelMissing) {
-        console.warn(
-          `⚠️ Ticket #${ticketNumber} was closed durably, but its Discord channel no longer exists; channel synchronization was skipped.`,
-        );
-      } else {
-        console.warn(
-          `⚠️ Ticket #${ticketNumber} is closed in durable storage, but the Discord topic/category/name update is pending or failed:`,
-          error,
-        );
-      }
-    }
-
-    updateRuntimeTicketState(
-      channel,
-      closedTopic,
-      'closed',
-    );
-
+    updateRuntimeTicketState(channel, closedTopic, 'closed');
     await editReplyOrFollowUp(
       interaction,
-      channelMissing
-        ? `⚠️ Ticket **#${ticketNumber}** was closed and its transcript was saved, but its Discord channel no longer exists. The durable closed record was retained.`
-        : channelSyncFailed
-          ? `⚠️ Ticket **#${ticketNumber}** is closed and its transcript has been saved, but the Discord topic/category/name update is pending or failed. Check the bot log for details.`
-          : `✅ Ticket **#${ticketNumber}** has been closed and its transcript has been saved.`,
+      `✅ Ticket **#${ticketNumber}** is closed and its transcript has been saved. Discord channel organization is syncing in the background.`,
     );
 
-    if (!channelMissing) {
-      /*
-       * Panel update happens after the state is committed and remains
-       * background work so it cannot delay the successful close response.
-       */
-      void updateMainMessage(
-        channel,
-        messageId,
-        'closed',
-        closedTopic,
-      );
-
-      /*
-       * Background announcement.
-       */
-      void channel
-        .send(
-          `🔒 Ticket **#${ticketNumber}** has been closed by ${interaction.user}.`,
-        )
-        .catch((error) => {
-          console.error(
-            '⚠️ Close announcement failed:',
-            error,
-          );
-        });
-    }
-
-    /*
-     * Background audit.
-     */
+    closeSyncRunningInBackground = true;
     void (async () => {
+      let channelSyncFailed = false;
+      let channelMissing = false;
+
       try {
-        if (
-          !config.supportCategoryId
-        ) {
-          return;
+        if (voiceChannelId) {
+          try {
+            closedTopic = await endTicketVoiceMode(
+              interaction.guild!,
+              channel,
+              closedTopic,
+              'closed',
+              'SupportForge voice mode ended because ticket was closed',
+              { deferTicketTopicUpdate: true, queueRename: false },
+            );
+            closedTopic = setField(closedTopic, 'updated_at', closeTimestamp);
+            await transitionPersistedTicket(
+              channel.id,
+              'closed',
+              {
+                metadata: {
+                  voiceChannelId: null,
+                  voiceChannelName: null,
+                  voiceStartedAt: null,
+                  voiceStartedBy: null,
+                },
+              },
+              interactionActor(interaction),
+              closeTimestamp,
+            );
+          } catch (error) {
+            channelSyncFailed = true;
+            console.warn(
+              `⚠️ Ticket #${ticketNumber} was closed durably, but private voice cleanup remains pending:`,
+              error,
+            );
+          }
         }
 
-        await logTicketEvent(
-          interaction.guild!,
-          config.supportCategoryId,
-          {
-            ticketNumber,
-            event:
-              'ticket_closed',
-            actor:
-              interaction.user.tag,
-            detail:
-              'Transcript uploaded successfully and ticket status changed to closed.',
-          },
+        const closedChannelName = getTicketChannelName(
+          ticketNumber,
+          'closed',
+          await getEffectiveTicketPriority(channel.id, closedTopic),
         );
+
+        try {
+          const closedCategory = await ensureClosedCategory(interaction.guild!);
+          await setChannelProperties(
+            channel.id,
+            {
+              topic: closedTopic,
+              name: closedChannelName,
+              parentId: closedCategory.id,
+            },
+            new Set<string>(),
+            'SupportForge persist closed ticket metadata and storage location',
+          );
+          channel.topic = closedTopic;
+          channel.name = closedChannelName;
+          console.log(`✅ Closed ticket #${ticketNumber} Discord channel sync completed.`);
+        } catch (error) {
+          channelSyncFailed = true;
+          channelMissing = isUnknownChannelError(error);
+          if (channelMissing) {
+            console.warn(
+              `⚠️ Ticket #${ticketNumber} was closed durably, but its Discord channel no longer exists; channel synchronization was skipped.`,
+            );
+          } else {
+            console.warn(
+              `⚠️ Ticket #${ticketNumber} is closed in durable storage, but the Discord topic/category/name update is pending or failed:`,
+              error,
+            );
+          }
+        }
+
+        updateRuntimeTicketState(channel, closedTopic, 'closed');
+
+        if (!channelMissing) {
+          /*
+           * These Discord messages are ancillary. They must not delay the
+           * close acknowledgement or block durable ticket closure.
+           */
+          void updateMainMessage(
+            channel,
+            messageId,
+            'closed',
+            closedTopic,
+          ).catch((error) => {
+            console.warn(`⚠️ Closed ticket #${ticketNumber} panel refresh failed:`, error);
+          });
+
+          void channel
+            .send(`🔒 Ticket **#${ticketNumber}** has been closed by ${interaction.user}.`)
+            .catch((error) => {
+              console.error('⚠️ Close announcement failed:', error);
+            });
+        }
+
+        if (channelSyncFailed) {
+          console.warn(
+            `⚠️ Ticket #${ticketNumber} is closed in PostgreSQL; background Discord synchronization needs reconciliation.`,
+          );
+        }
+
+        try {
+          if (config.supportCategoryId) {
+            await logTicketEvent(
+              interaction.guild!,
+              config.supportCategoryId,
+              {
+                ticketNumber,
+                event: 'ticket_closed',
+                actor: interaction.user.tag,
+                detail: 'Transcript uploaded successfully and ticket status changed to closed.',
+              },
+            );
+          }
+        } catch (error) {
+          console.error('⚠️ Close audit failed:', error);
+        }
       } catch (error) {
         console.error(
-          '⚠️ Close audit failed:',
+          `❌ Background synchronization failed for durably closed ticket #${ticketNumber}:`,
           error,
         );
+      } finally {
+        ticketActionLocks.delete(lockKey);
       }
     })();
+
+    return;
   } catch (error) {
     console.error(
       '❌ Failed to close ticket:',
@@ -3013,9 +3010,11 @@ async function closeTicket(
       '❌ The ticket could not be closed safely. The ticket remains active where possible.',
     );
   } finally {
-    ticketActionLocks.delete(
-      lockKey,
-    );
+    if (!closeSyncRunningInBackground) {
+      ticketActionLocks.delete(
+        lockKey,
+      );
+    }
   }
 }
 
