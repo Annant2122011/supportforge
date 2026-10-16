@@ -193,7 +193,7 @@ export function parseTicketFormFields(input: string | unknown): TicketFormField[
   }
 
   const seen = new Set<string>();
-  return candidate.map((entry, index) => {
+  return candidate.map((entry, index): TicketFormField => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
       throw new Error('Field ' + (index + 1) + ' must be a JSON object.');
     }
@@ -216,7 +216,9 @@ export function parseTicketFormFields(input: string | unknown): TicketFormField[
     if (typeof required !== 'boolean') {
       throw new Error('Field ' + id + ' property "required" must be true or false.');
     }
-
+    if (value.placeholder !== undefined && typeof value.placeholder !== 'string') {
+      throw new Error('Field ' + id + ' placeholder must be a string.');
+    }
     const placeholder = typeof value.placeholder === 'string' ? value.placeholder.trim() : undefined;
     if (placeholder && placeholder.length > 100) {
       throw new Error('Field ' + id + ' placeholder cannot exceed 100 characters.');
@@ -229,6 +231,12 @@ export function parseTicketFormFields(input: string | unknown): TicketFormField[
         !Number.isInteger(maxLength) || (maxLength as number) < 1 || (maxLength as number) > 4_000 ||
         (minLength as number) > (maxLength as number)) {
       throw new Error('Field ' + id + ' must use valid minLength/maxLength limits (0–4000, with maxLength at least 1).');
+    }
+    if (value.minLength !== undefined && value.type !== 'short_text' && value.type !== 'long_text') {
+      throw new Error('Field ' + id + ' can define minLength only for text fields.');
+    }
+    if (value.maxLength !== undefined && value.type !== 'short_text' && value.type !== 'long_text') {
+      throw new Error('Field ' + id + ' can define maxLength only for text fields.');
     }
 
     const min = value.min === undefined ? undefined : value.min;
@@ -262,8 +270,9 @@ export function parseTicketFormFields(input: string | unknown): TicketFormField[
       throw new Error('Field ' + id + ' can define choices only for dropdown or multi_select.');
     }
 
-    const pattern = typeof value.pattern === 'string' ? value.pattern : undefined;
+    const pattern = value.pattern;
     if (pattern !== undefined) {
+      if (typeof pattern !== 'string') throw new Error('Field ' + id + ' pattern must be a string.');
       if (value.type !== 'short_text' && value.type !== 'long_text') {
         throw new Error('Field ' + id + ' can define pattern only for short_text or long_text.');
       }
@@ -273,10 +282,13 @@ export function parseTicketFormFields(input: string | unknown): TicketFormField[
     let maxBytes: number | undefined;
     let allowedMimeTypes: string[] | undefined;
     if (value.type === 'attachment') {
-      maxBytes = value.maxBytes === undefined ? 8 * 1024 * 1024 : value.maxBytes as number;
-      if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > 25 * 1024 * 1024) {
+      const rawMaxBytes = value.maxBytes === undefined ? 8 * 1024 * 1024 : value.maxBytes;
+      if (typeof rawMaxBytes !== 'number' || !Number.isInteger(rawMaxBytes) ||
+          rawMaxBytes < 1 || rawMaxBytes > 25 * 1024 * 1024) {
         throw new Error('Attachment field ' + id + ' maxBytes must be an integer between 1 byte and 25 MiB.');
       }
+      maxBytes = rawMaxBytes;
+
       const rawTypes = value.allowedMimeTypes === undefined
         ? ['image/*', 'application/pdf']
         : value.allowedMimeTypes;
@@ -286,47 +298,7 @@ export function parseTicketFormFields(input: string | unknown): TicketFormField[
       allowedMimeTypes = rawTypes.map((mime) => {
         if (typeof mime !== 'string') throw new Error('Allowed MIME types for ' + id + ' must be strings.');
         const normalized = mime.trim().toLowerCase();
-        if (!/^[a-z0-9!#    const pattern = typeof value.pattern === 'string' ? value.pattern : undefined;
-    if (pattern !== undefined) {
-      if (value.type !== 'short_text' && value.type !== 'long_text') {
-        throw new Error('Field ' + id + ' can define pattern only for short_text or long_text.');
-      }
-      rejectUnsafePattern(pattern);
-    }
-
-    return {
-      id,
-      label,
-      type: value.type,
-      required,
-      ...(placeholder ? { placeholder } : {}),
-      minLength: minLength as number,
-      maxLength: maxLength as number,
-      ...(min !== undefined ? { min: min as number } : {}),
-      ...(max !== undefined ? { max: max as number } : {}),
-      ...(choices ? { choices } : {}),
-      ...(pattern !== undefined ? { pattern } : {}),
-    };^_.+-]+\/(?:[a-z0-9!#    const pattern = typeof value.pattern === 'string' ? value.pattern : undefined;
-    if (pattern !== undefined) {
-      if (value.type !== 'short_text' && value.type !== 'long_text') {
-        throw new Error('Field ' + id + ' can define pattern only for short_text or long_text.');
-      }
-      rejectUnsafePattern(pattern);
-    }
-
-    return {
-      id,
-      label,
-      type: value.type,
-      required,
-      ...(placeholder ? { placeholder } : {}),
-      minLength: minLength as number,
-      maxLength: maxLength as number,
-      ...(min !== undefined ? { min: min as number } : {}),
-      ...(max !== undefined ? { max: max as number } : {}),
-      ...(choices ? { choices } : {}),
-      ...(pattern !== undefined ? { pattern } : {}),
-    };^_.+-]+|\*)$/.test(normalized) || normalized.startsWith('*/')) {
+        if (!/^[a-z0-9!#$&^_.+-]+\/(?:[a-z0-9!#$&^_.+-]+|\*)$/.test(normalized) || normalized.startsWith('*/')) {
           throw new Error('Invalid MIME type "' + mime + '" in attachment field ' + id + '. Use values such as image/* or application/pdf.');
         }
         return normalized;
@@ -346,7 +318,7 @@ export function parseTicketFormFields(input: string | unknown): TicketFormField[
       ...(min !== undefined ? { min: min as number } : {}),
       ...(max !== undefined ? { max: max as number } : {}),
       ...(choices ? { choices } : {}),
-      ...(pattern !== undefined ? { pattern } : {}),
+      ...(pattern !== undefined ? { pattern: pattern as string } : {}),
       ...(maxBytes !== undefined ? { maxBytes } : {}),
       ...(allowedMimeTypes ? { allowedMimeTypes } : {}),
     };
