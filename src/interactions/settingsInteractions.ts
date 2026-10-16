@@ -53,6 +53,7 @@ import { getField, getTicketStatus, isTicketTopic, setField } from '../services/
 import { setChannelPermissionOverwrite, setChannelTopic } from '../services/discordChannelService';
 import { getPersistedTicket, getPersistedTicketStatus, registerTicket } from '../services/ticketPersistenceService';
 import { performFactoryReset } from '../services/factoryResetService';
+import { handleTicketFormSettingsInteraction } from './ticketFormSettingsInteractions';
 import {
   approveRetentionDeletion,
   declineRetentionDeletion,
@@ -1478,7 +1479,11 @@ export async function handleSettingsInteraction(
 
   const guild = interaction.guild;
 
-  if (interaction.isStringSelectMenu() && interaction.customId.startsWith('sf:settings:reports:subcategory:pick:')) {
+  if (interaction.customId.startsWith('sf:settings:forms:')) {
+    return await handleTicketFormSettingsInteraction(interaction);
+  }
+
+  if (interaction.isStringSelectMenu() && interaction.customId.startsWith('sf:settings:reports:subcategory:pick:'));
     const categoryId = interaction.customId.slice('sf:settings:reports:subcategory:pick:'.length);
     const subcategoryId = interaction.values[0];
     const settings = await getAdvancedSettings(guild.id);
