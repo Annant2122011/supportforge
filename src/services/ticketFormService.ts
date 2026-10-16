@@ -963,11 +963,13 @@ async function recoverTicketRowFromDiscordTopic(
   } else {
     const guildChannels = await guild.channels.fetch().catch(() => null);
     channel = guildChannels
-      ? [...guildChannels.values()].find((candidate) =>
-          candidate.type === ChannelType.GuildText &&
-          candidate.topic?.startsWith('supportforge:ticket') &&
-          parseTicketTopic(candidate.topic).form_submission === submission.interaction_id,
-        ) ?? null
+      ? [...guildChannels.values()].find((candidate) => {
+          if (candidate.type !== ChannelType.GuildText) return false;
+          const topic = candidate.topic;
+          return typeof topic === 'string' &&
+            topic.startsWith('supportforge:ticket') &&
+            parseTicketTopic(topic).form_submission === submission.interaction_id;
+        }) ?? null
       : null;
   }
 
