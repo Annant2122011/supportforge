@@ -25,6 +25,23 @@ test('normalizes a valid schema and preserves optional field constraints', () =>
   assert.equal(fields[0].required, true);
 });
 
+test('stored normalized schemas can be validated and loaded again', () => {
+  const initial = parseTicketFormFields([
+    { id: 'reason', label: 'Reason', type: 'short_text', required: true, minLength: 2, maxLength: 120 },
+    { id: 'payment', label: 'Payment', type: 'dropdown', required: true, choices: ['Card', 'UPI'] },
+    { id: 'verified', label: 'Verified', type: 'checkbox', required: false },
+  ]);
+
+  const persistedShape = JSON.stringify({ fields: initial });
+  const loaded = parseTicketFormFields(JSON.parse(persistedShape));
+
+  assert.deepEqual(loaded, initial);
+  assert.deepEqual(
+    validateTicketFormAnswers(loaded, { reason: 'Help', payment: ['UPI'], verified: [] }),
+    { reason: 'Help', payment: 'UPI' },
+  );
+});
+
 test('rejects duplicate ids, too many inputs and unsafe regex expressions', () => {
   assert.throws(
     () => parseTicketFormFields([
