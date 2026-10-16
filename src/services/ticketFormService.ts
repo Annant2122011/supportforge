@@ -181,8 +181,9 @@ function rejectUnsafePattern(pattern: string): void {
 
 /**
  * Parse and normalize the JSON configuration used by /supportforge form.
- * The two built-in ticket fields plus at most three custom fields fit Discord's
- * five-input modal limit. All client input is validated again on submission.
+ * Custom questions are grouped into steps of at most three fields, leaving
+ * room for Subject and Description in step one within Discord's five-component
+ * modal limit. Conditional questions may only depend on earlier steps.
  */
 export function parseTicketFormFields(input: string | unknown): TicketFormField[] {
   let raw: unknown = input;
