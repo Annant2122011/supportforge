@@ -5383,7 +5383,7 @@ async function handlePanelModal(
           await interaction.editReply('❌ This ticket has no configured department staff role, so reassignment cannot be validated safely.');
           return;
         }
-        const targetMember = await guild.members.fetch(userId).catch(() => null);
+        const targetMember = await channel.guild.members.fetch(userId).catch(() => null);
         if (!targetMember) {
           await interaction.editReply('❌ That user could not be found in this server.');
           return;
@@ -5434,9 +5434,9 @@ async function handlePanelModal(
           ' was reassigned from ' + before + ' to <@' + userId + '> by ' + interaction.user.tag +
           (reason ? '\nReason: ' + reason : ''));
 
-        const config = await getGuildConfig(guild.id);
+        const config = await getGuildConfig(channel.guild.id);
         if (config.supportCategoryId) {
-          await logTicketEvent(guild, config.supportCategoryId, {
+          await logTicketEvent(channel.guild, config.supportCategoryId, {
             ticketNumber: getField(reassignedTopic, 'number') ?? 'unknown',
             event: 'ticket_reassigned',
             actor: interaction.user.tag,
