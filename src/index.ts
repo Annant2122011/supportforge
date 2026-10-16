@@ -142,7 +142,7 @@ client.once('clientReady', (readyClient) => {
   }
   startTicketRetentionScheduler(client);
   startTicketFormCacheRefresh();
-  startTicketFormSubmissionRecovery();
+  startTicketFormSubmissionRecovery(client);
   startAuditDailySummaryScheduler(client);
   startSupportForgeUpdateMonitor(client);
   /*
