@@ -4785,3 +4785,29 @@ If the entire SupportForge structure is deleted, use:
 
 The setup command provisions/repairs the Support Forge container, Open category, Settings channel, Audit channel, Transcript channel, panel, storage categories, and department categories.
 
+
+
+# 81. STAGE A RELIABILITY AND STAGE D ADVANCED TICKET FORMS
+
+## Stage A reliability and audit fixes
+
+- Normal Repair now detects SupportForge ticket channels that are missing a durable Neon/PostgreSQL ticket row and reconstructs only those missing rows from validated channel metadata.
+- Existing durable ticket rows remain authoritative. Repair never overwrites their lifecycle status or metadata from the Discord channel topic.
+- Recovered records preserve ticket status, owner, department, tag, priority, claimants, participants, creation/update timestamps, panel message ID, and form-submission reference when available.
+- Ticket creation uses a PostgreSQL lease keyed by guild, requester, and department to prevent concurrent bot workers from creating duplicate tickets.
+- Failed post-channel creation steps preserve the user-facing ticket channel and durable form response for recovery rather than deleting a valid support request.
+- Form submission draft/channel association uses the same durable submission key throughout the creation workflow.
+- Request messages and form answers are split into bounded embeds/messages so the maximum supported form cannot exceed Discord's embed field or combined-character limits.
+- Interaction acknowledgement and multi-step modal progression avoid attempting to open a second modal directly from a modal-submit interaction.
+
+## Stage D advanced ticket forms
+
+- Administrators can create, list, update, activate, and deactivate versioned ticket forms through `/supportforge form`.
+- Forms are bound to an existing department and optional routing tag. Only one active form can own a department/tag mapping at a time.
+- Supported question types: short/long text, whole number, decimal, URL, email, date, dropdown, multi-select, checkbox, Discord user, Discord role, and attachment.
+- Every submitted answer is validated server-side. Validation covers required fields, lengths, numeric bounds, valid dates, configured choices, text patterns, Discord principals, and attachment size/type/trusted host.
+- Forms support up to 25 custom fields across up to 10 steps, with at most three custom fields per step so Subject and Description fit in the first Discord modal.
+- Conditional questions can depend on answers from earlier steps. The wizard persists each step in Neon/PostgreSQL and revalidates the active form version and session ownership before advancing.
+- Reusable templates can be saved, listed, applied to create a new form, and deleted without modifying forms or historical submissions already created from them.
+- Form definitions and immutable versions, wizard sessions, submission drafts, answer snapshots, ticket associations, and creation leases are stored in Neon/PostgreSQL migrations. No SQLite persistence path is introduced.
+- CI on the Stage A/D branch completed the TypeScript build, automated tests, and database verification successfully after the interaction/build fixes.
