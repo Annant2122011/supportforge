@@ -1557,7 +1557,7 @@ async function createTicket(
         if (!persistedTicket) {
           throw new Error('Ticket form answers were saved, but the durable ticket record could not be found.');
         }
-        await setTicketFormSubmissionChannel(interaction.id, ticketChannel.id);
+        await setTicketFormSubmissionChannel(formRoute?.submissionId ?? interaction.id, ticketChannel.id);
         await attachTicketFormSubmission({
           interactionId: formRoute?.submissionId ?? interaction.id,
           ticketId: persistedTicket.id,
