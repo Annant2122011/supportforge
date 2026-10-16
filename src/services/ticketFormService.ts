@@ -682,8 +682,9 @@ export async function markTicketFormSubmissionFailure(interactionId: string, saf
 export async function recoverPendingTicketFormSubmissions(): Promise<number> {
   await initializePersistence();
   const result = await getPostgresPool().query(
-    'UPDATE ticket_form_submissions s SET ticket_id=t.id, status=\'attached\', attached_at=COALESCE(s.attached_at,NOW()), last_error=NULL ' +
-    'FROM tickets t WHERE s.channel_id=t.channel_id AND s.guild_id=t.guild_id AND s.ticket_id IS NULL AND s.status IN (\'pending\',\'failed\')',
+    'UPDATE ticket_form_submissions s SET ticket_id=t.id, channel_id=t.channel_id, status=\'attached\', attached_at=COALESCE(s.attached_at,NOW()), last_error=NULL ' +
+    'FROM tickets t WHERE s.guild_id=t.guild_id AND s.ticket_id IS NULL AND s.status IN (\'pending\',\'failed\') ' +
+    'AND (s.channel_id=t.channel_id OR s.interaction_id=t.metadata->>\'formSubmissionInteractionId\')',
   );
   return result.rowCount ?? 0;
 }
