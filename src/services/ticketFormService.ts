@@ -135,7 +135,7 @@ function readSchema(value: unknown): TicketFormSchema {
   if (!Array.isArray(fields)) {
     throw new Error('The stored ticket form schema is missing its fields array.');
   }
-  return { fields: fields as TicketFormField[] };
+  return { fields: parseTicketFormFields(fields) };
 }
 
 function fieldType(value: unknown): value is TicketFormFieldType {
@@ -606,7 +606,7 @@ export function getCachedActiveTicketFormForRouting(
       fields: selected.fields.map((field) => ({ ...field, ...(field.choices ? { choices: [...field.choices] } : {}) })),
       snapshot: {
         ...selected.snapshot,
-        fields: selected.snapshot.fields.map((field) => ({ ...field, ...(field.choices ? { choices: [...field.choices] } : {}) })),
+        fields: selected.fields.map((field) => ({ ...field, ...(field.choices ? { choices: [...field.choices] } : {}) })),
       },
     },
   } : { ready: true };
@@ -777,6 +777,15 @@ export async function setTicketFormActive(args: {
 }): Promise<TicketForm> {
   await initializePersistence();
   try {
+    const selected = await getPostgresPool().query<TicketFormRow>(
+      'SELECT ' + FORM_COLUMNS + ' FROM ticket_forms WHERE guild_id=$1 AND id=$2',
+      [args.guildId, args.formId],
+    );
+    const existing = selected.rows[0];
+    if (!existing) throw new Error('Ticket form not found in this server.');
+    if (args.active) {
+      await ensureValidMapping(args.guildId, existing.department_id, existing.tag_id);
+    }
     const result = await getPostgresPool().query<TicketFormRow>(
       'UPDATE ticket_forms SET active=$3, updated_at=NOW() WHERE guild_id=$1 AND id=$2 RETURNING ' + FORM_COLUMNS,
       [args.guildId, args.formId, args.active],
