@@ -70,6 +70,7 @@ import {
   ensurePanelChannel,
   ensureTranscriptChannel,
   syncPanel,
+  runSupportForgeSetup,
 } from '../commands/supportforge';
 
 const SETTINGS_TOPIC_PREFIX = 'supportforge:settings';
@@ -2105,6 +2106,23 @@ export async function handleSettingsInteraction(
       return true;
     }
 
+    if (id === 'sf:settings:setup-restore') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        const result = await runSupportForgeSetup(guild, true);
+        await interaction.editReply(
+          '✅ **SupportForge restored successfully.**\n\n' +
+          'Container: <#' + result.supportCategoryId + '>\n' +
+          'Department categories: **' + result.departmentCount + '**\n' +
+          (result.legacyOpenCategoryId ? 'Legacy Open bucket: <#' + result.legacyOpenCategoryId + '>\n' : '') +
+          'The support panel, audit channel, Settings, transcripts, and department categories were checked and repaired.'
+        );
+      } catch (error) {
+        await interaction.editReply('❌ SupportForge could not complete setup/restore: ' + (error instanceof Error ? error.message : 'Unknown error.'));
+      }
+      return true;
+    }
+
     if (id === 'sf:settings:repair:normal') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
@@ -2743,6 +2761,11 @@ async function showRepairSystem(interaction: ButtonInteraction): Promise<void> {
           .setCustomId('sf:settings:repair:storage')
           .setLabel('Storage Repair')
           .setEmoji('🗄️')
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId('sf:settings:setup-restore')
+          .setLabel('Setup / Restore')
+          .setEmoji('🧭')
           .setStyle(ButtonStyle.Secondary),
         backButton(),
       ),
