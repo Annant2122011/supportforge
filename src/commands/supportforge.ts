@@ -1113,9 +1113,222 @@ export const data =
         .addSubcommand((subcommand) =>
           subcommand
             .setName('resume')
-            .setDescription(
-              'Move a pending ticket back to open',
-            ),
+            .setDescription('Move a pending ticket back to open'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('close').setDescription('Start the ticket close workflow'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('reopen').setDescription('Reopen this closed ticket'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('department').setDescription('Choose a new department for this ticket'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('tag').setDescription('Choose a tag for this ticket'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('voice')
+            .setDescription('Open private ticket voice controls')
+            .addStringOption((option) => option.setName('action').setDescription('Voice action').setRequired(true).addChoices(
+              { name: 'Start voice mode', value: 'start' },
+              { name: 'End voice mode', value: 'end' },
+              { name: 'Join private voice', value: 'join' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('report').setDescription('Start the ticket report workflow'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('move-panel').setDescription('Move the ticket controls to the bottom'),
+        ),
+    )
+    .addSubcommandGroup((group) =>
+      group
+        .setName('settings')
+        .setDescription('Manage SupportForge settings from slash commands')
+        .addSubcommand((subcommand) =>
+          subcommand.setName('overview').setDescription('Show a Settings overview and current configuration'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('panel')
+            .setDescription('View or update ticket panel automation')
+            .addStringOption((option) => option.setName('action').setDescription('Automation action').setRequired(true).addChoices(
+              { name: 'Show settings', value: 'show' },
+              { name: 'Toggle', value: 'toggle' },
+              { name: 'Enable', value: 'enable' },
+              { name: 'Disable', value: 'disable' },
+            ))
+            .addIntegerOption((option) => option.setName('visual-lines').setDescription('Visual line budget (6-40)').setMinValue(6).setMaxValue(40))
+            .addIntegerOption((option) => option.setName('message-cap').setDescription('Message safety cap (5-30)').setMinValue(5).setMaxValue(30))
+            .addIntegerOption((option) => option.setName('minimum-messages').setDescription('Minimum messages before moving (3-20)').setMinValue(3).setMaxValue(20)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('defaults')
+            .setDescription('View or change default priority for new tickets')
+            .addStringOption((option) => option.setName('priority').setDescription('Default priority').addChoices(
+              { name: 'Low', value: 'low' }, { name: 'Normal', value: 'normal' },
+              { name: 'High', value: 'high' }, { name: 'Urgent', value: 'urgent' }, { name: 'Critical', value: 'critical' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('team')
+            .setDescription('View or change the simultaneous moderator limit')
+            .addIntegerOption((option) => option.setName('max-moderators').setDescription('Moderator limit (1-3)').setMinValue(1).setMaxValue(3)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('retention')
+            .setDescription('View or change ticket retention settings')
+            .addIntegerOption((option) => option.setName('closed-days').setDescription('Closed-ticket retention days (0-365)').setMinValue(0).setMaxValue(365))
+            .addIntegerOption((option) => option.setName('archive-days').setDescription('Archived-ticket retention days (0-365)').setMinValue(0).setMaxValue(365)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('appearance')
+            .setDescription('View or update the public support panel appearance')
+            .addStringOption((option) => option.setName('title').setDescription('Panel title').setMaxLength(256))
+            .addStringOption((option) => option.setName('description').setDescription('Panel description').setMaxLength(1500))
+            .addStringOption((option) => option.setName('footer').setDescription('Panel footer').setMaxLength(2048)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('reports')
+            .setDescription('View or change report intake')
+            .addStringOption((option) => option.setName('action').setDescription('Report intake action').setRequired(true).addChoices(
+              { name: 'Show status', value: 'show' }, { name: 'Toggle', value: 'toggle' },
+              { name: 'Enable', value: 'enable' }, { name: 'Disable', value: 'disable' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('report-rules')
+            .setDescription('View or update report flag thresholds')
+            .addIntegerOption((option) => option.setName('ticket-threshold').setDescription('Ticket restrictions; 0 disables').setMinValue(0).setMaxValue(1000))
+            .addIntegerOption((option) => option.setName('server-threshold').setDescription('Server action threshold; 0 disables').setMinValue(0).setMaxValue(1000))
+            .addIntegerOption((option) => option.setName('channel-threshold').setDescription('Channel action threshold; 0 disables').setMinValue(0).setMaxValue(1000))
+            .addChannelOption((option) => option.setName('channel').setDescription('Channel for channel-restriction rule').addChannelTypes(ChannelType.GuildText)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('department-edit')
+            .setDescription('Rename a department or change its staff role')
+            .addStringOption((option) => option.setName('department-name').setDescription('Current department name').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('new-name').setDescription('New department name').setRequired(true).setMaxLength(80))
+            .addRoleOption((option) => option.setName('staff-role').setDescription('New staff role (optional)'))
+            .addBooleanOption((option) => option.setName('clear-staff-role').setDescription('Remove current staff role')),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('tag-add')
+            .setDescription('Add a ticket tag to a department')
+            .addStringOption((option) => option.setName('department-name').setDescription('Department name').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('name').setDescription('Tag name').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('tag-rename')
+            .setDescription('Rename a ticket tag')
+            .addStringOption((option) => option.setName('department-name').setDescription('Department name').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('current-name').setDescription('Current tag name').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('new-name').setDescription('New tag name').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('tag-remove')
+            .setDescription('Remove a ticket tag')
+            .addStringOption((option) => option.setName('department-name').setDescription('Department name').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('tag-name').setDescription('Tag name to remove').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('usecase-add')
+            .setDescription('Add a department preset with eight starter tags')
+            .addStringOption((option) => option.setName('preset').setDescription('Preset to add').setRequired(true).addChoices(
+              { name: 'Technical Support', value: 'technical-support' },
+              { name: 'Sales', value: 'sales' },
+              { name: 'Account & Access', value: 'account-access' },
+              { name: 'Partnerships', value: 'partnerships' },
+              { name: 'Reports & Abuse', value: 'reports-abuse' },
+              { name: 'Refunds & Returns', value: 'refunds-returns' },
+              { name: 'Product Support', value: 'product-support' },
+              { name: 'VIP Support', value: 'vip-support' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('storage')
+            .setDescription('Add an optional status category or repair storage')
+            .addStringOption((option) => option.setName('action').setDescription('Storage action').setRequired(true).addChoices(
+              { name: 'Add Claimed category', value: 'claimed' },
+              { name: 'Add Pending category', value: 'pending' },
+              { name: 'Repair Closed/Archive storage', value: 'repair' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('priority-role')
+            .setDescription('Create or delete a SupportForge-managed priority role')
+            .addStringOption((option) => option.setName('priority').setDescription('Priority').setRequired(true).addChoices(
+              { name: 'Low', value: 'low' }, { name: 'Normal', value: 'normal' },
+              { name: 'High', value: 'high' }, { name: 'Urgent', value: 'urgent' }, { name: 'Critical', value: 'critical' },
+            ))
+            .addStringOption((option) => option.setName('action').setDescription('Role action').setRequired(true).addChoices(
+              { name: 'Create role', value: 'create' }, { name: 'Delete managed role', value: 'delete' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('report-subcategory-add')
+            .setDescription('Add a report subcategory')
+            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('name').setDescription('Subcategory name').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('report-subcategory-edit')
+            .setDescription('Rename a report subcategory')
+            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('subcategory-id').setDescription('Subcategory ID').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('name').setDescription('New subcategory name').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('report-subcategory-remove')
+            .setDescription('Remove a report subcategory')
+            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('subcategory-id').setDescription('Subcategory ID').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('repair')
+            .setDescription('Repair SupportForge infrastructure')
+            .addStringOption((option) => option.setName('mode').setDescription('Repair mode').setRequired(true).addChoices(
+              { name: 'Normal infrastructure repair', value: 'normal' },
+              { name: 'Closed/Archive storage repair', value: 'storage' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('refresh').setDescription('Refresh the Settings dashboard and support panel'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('manual')
+            .setDescription('Display the quick or detailed staff manual summary')
+            .addStringOption((option) => option.setName('version').setDescription('Manual version').setRequired(true).addChoices(
+              { name: 'Quick overview', value: 'quick' }, { name: 'Detailed manual', value: 'detailed' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('reset')
+            .setDescription('Factory-reset SupportForge after typed confirmation')
+            .addStringOption((option) => option.setName('confirmation').setDescription('Type DELETE SUPPORT FORGE exactly').setRequired(true).setMinLength(20).setMaxLength(20))
+            .addBooleanOption((option) => option.setName('accumulate-audit').setDescription('Keep individual audit events for future summaries').setRequired(true)),
         ),
     );
 
