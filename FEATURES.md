@@ -788,10 +788,25 @@ This becomes essential once the project moves into a real database.
 
 ## F-015 — Advanced Ticket Forms
 
-**Status:** `PLANNED`  
+**Status:** `IMPLEMENTED — verification pending`  
 **Priority:** `P1`
 
-### Supported future field types
+### Implemented behavior
+
+- Reusable, administrator-managed ticket forms scoped to existing department/tag mappings.
+- Immutable, versioned form schemas with historical snapshots retained for every submission.
+- Native Discord modal fields: short/long text, number/decimal, URL, email, date, dropdown, multi-select, checkbox, Discord user, Discord role, and attachment upload.
+- Server-side validation repeats every constraint instead of trusting the modal UI, including field lengths, safe regex restrictions, numeric ranges, choices, actual uploaded-file size and MIME type.
+- Active forms are cached and refreshed outside the interaction acknowledgement window. Stale, expired, disabled, or remapped modal submissions are rejected.
+- Form answers and the exact submitted form snapshot are durably written to Neon PostgreSQL before ticket-channel creation. Each response is associated with its Discord interaction, submitter, guild, form version, ticket and channel when available; an idempotent recovery worker reconnects pending records to persisted tickets.
+- The request summary includes the custom answers while suppressing mention parsing. Form answers are never copied into form-management audit details.
+- Slash commands: `/supportforge form list`, `create`, `update`, `activate`, `deactivate`. The list is paginated to preserve full identifiers.
+
+### Platform constraint
+
+Discord modals allow only five top-level labeled components. The current ticket flow reserves two for Subject and Description, leaving at most three custom fields. Forms that need more fields require a multi-step interaction flow, which is a separate interaction design.
+
+### Field types
 
 - short text
 - long text
