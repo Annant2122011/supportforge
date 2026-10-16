@@ -124,7 +124,7 @@ test('validates real uploaded attachment size, MIME type and source host', () =>
   };
 
   assert.deepEqual(validateTicketFormAnswers(fields, { evidence: [file] }), { evidence: file });
-  assert.throws(() => validateTicketFormAnswers(fields, { evidence: [{ ...file, size: 2048 }] }), /no larger than 0 MiB/);
+  assert.throws(() => validateTicketFormAnswers(fields, { evidence: [{ ...file, size: 2048 }] }), /no larger than 1 KiB/);
   assert.throws(() => validateTicketFormAnswers(fields, { evidence: [{ ...file, contentType: 'application/x-msdownload' }] }), /file type .* is not allowed/);
   assert.throws(() => validateTicketFormAnswers(fields, { evidence: [{ ...file, url: 'https://example.com/evidence.png' }] }), /trusted Discord attachment host/);
 });
