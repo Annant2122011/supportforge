@@ -59,7 +59,7 @@ import {
   ensureAllDepartmentCategories,
 } from '../services/departmentCategoryService';
 
-import { getOrCreateAuditChannel, logSettingsEvent, logSystemEvent, getTicketAuditHistory, getAuditAccumulation, setAuditAccumulation, refreshAuditPanel } from '../services/auditLogService';
+import { getOrCreateAuditChannel, logSettingsEvent, logSystemEvent, handleAuditSlashCommand } from '../services/auditLogService';
 import { performFactoryReset } from '../services/factoryResetService';
 import { addUseCasePreset } from '../services/useCasePresetService';
 import { moveTicketPanelToBottom } from '../services/ticketPanelService';
@@ -1477,6 +1477,11 @@ export async function execute(
   }
 
   try {
+    if (group === 'audit') {
+      await handleAuditSlashCommand(interaction);
+      return;
+    }
+
     if (group === 'settings') {
       await handleSettingsSlashCommand(interaction, {
         syncPanel,
