@@ -736,6 +736,34 @@ export function getCachedActiveTicketFormForRouting(
  * Refresh the active routing cache away from Discord's 3-second component
  * acknowledgement window. Failed reads preserve the last known-good cache.
  */
+/** Resolve a compact form-modal ID from the last good routing cache. */
+export function getCachedActiveTicketFormById(
+  guildId: string,
+  formId: string,
+  version: number,
+  tagId: string,
+): { ready: boolean; form?: TicketFormVersion } {
+  if (!activeTicketFormCacheReady) return { ready: false };
+  const matching = [...activeTicketFormCache.values()]
+    .filter((form) =>
+      form.guildId === guildId && form.id === formId && form.active &&
+      form.currentVersion === version && (form.tagId === tagId || form.tagId === null),
+    )
+    .sort((a, b) => Number(b.tagId === tagId) - Number(a.tagId === tagId));
+  const form = matching[0];
+  return form ? {
+    ready: true,
+    form: {
+      ...form,
+      fields: form.fields.map((field) => ({ ...field, ...(field.choices ? { choices: [...field.choices] } : {}) })),
+      snapshot: {
+        ...form.snapshot,
+        fields: form.fields.map((field) => ({ ...field, ...(field.choices ? { choices: [...field.choices] } : {}) })),
+      },
+    },
+  } : { ready: true };
+}
+
 async function refreshActiveTicketFormCacheForGuild(guildId: string): Promise<void> {
   try {
     await refreshActiveTicketFormCache(guildId);
@@ -1040,6 +1068,31 @@ export async function getActiveTicketFormForRouting(
   );
   const row = result.rows[0];
   return row ? mapVersion(row, Number(row.version), row.schema, row.snapshot) : undefined;
+}
+
+/** Resolve a compact form-modal ID back to the current active PostgreSQL form version. */
+export async function getTicketFormForWizard(args: {
+  guildId: string;
+  formId: string;
+  version: number;
+  tagId: string;
+}): Promise<TicketFormVersion> {
+  await initializePersistence();
+  const result = await getPostgresPool().query<TicketFormRow>(
+    'SELECT f.id, f.guild_id, f.name, f.department_id, f.tag_id, f.current_version, f.active, f.created_by, f.created_at, f.updated_at, v.version, v.schema, v.snapshot ' +
+    'FROM ticket_forms f JOIN ticket_form_versions v ON v.form_id=f.id AND v.version=$3 ' +
+    'WHERE f.guild_id=$1 AND f.id=$2 AND (f.tag_id=$4 OR f.tag_id IS NULL) AND f.active=TRUE AND f.current_version=$3',
+    [args.guildId, args.formId, args.version, args.tagId],
+  );
+  const forms = result.rows
+    .map((row) => mapVersion(row, Number(row.version), row.schema, row.snapshot))
+    .sort((a, b) => Number(b.tagId === args.tagId) - Number(a.tagId === args.tagId));
+  const form = forms[0];
+  if (!form) {
+    throw new Error('This form changed, was disabled, or no longer matches this ticket route. Reopen the support panel and start again.');
+  }
+  await ensureValidMapping(args.guildId, form.departmentId, args.tagId);
+  return form;
 }
 
 /** Reject stale or expired modal submissions instead of silently using edited form fields. */
