@@ -5118,6 +5118,8 @@ async function handlePanelButton(
     id ===
       'ticket:panel:remove-user' ||
     id ===
+      'ticket:panel:reassign' ||
+    id ===
       'ticket:panel:priority' ||
     id ===
       'ticket:panel:department' ||
@@ -5131,44 +5133,40 @@ async function handlePanelButton(
 
     if (
       id === 'ticket:panel:add-user' ||
-      id === 'ticket:panel:remove-user'
+      id === 'ticket:panel:remove-user' ||
+      id === 'ticket:panel:reassign'
     ) {
       const removingUser = id === 'ticket:panel:remove-user';
+      const reassigningUser = id === 'ticket:panel:reassign';
       modal
         .setCustomId(
-          removingUser ? 'ticket:panel-modal:remove-user' : 'ticket:panel-modal:add-user',
+          reassigningUser ? 'ticket:panel-modal:reassign' :
+            removingUser ? 'ticket:panel-modal:remove-user' : 'ticket:panel-modal:add-user',
         )
         .setTitle(
-          removingUser ? 'Remove User from Ticket' : 'Add User to Ticket',
+          reassigningUser ? 'Reassign Ticket' :
+            removingUser ? 'Remove User from Ticket' : 'Add User to Ticket',
         );
 
-      const input =
-        new TextInputBuilder()
-          .setCustomId(
-            'user',
-          )
-          .setLabel(
-            'User ID or mention',
-          )
-          .setPlaceholder(
-            '123456789012345678 or @user',
-          )
-          .setStyle(
-            TextInputStyle.Short,
-          )
-          .setRequired(
-            true,
-          )
-          .setMaxLength(
-            100,
-          );
+      const input = new TextInputBuilder()
+        .setCustomId('user')
+        .setLabel(reassigningUser ? 'New assigned staff ID or mention' : 'User ID or mention')
+        .setPlaceholder('123456789012345678 or @user')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(100);
 
-      modal.addComponents(
-        new ActionRowBuilder<TextInputBuilder>()
-          .addComponents(
-            input,
-          ),
-      );
+      modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
+      if (reassigningUser) {
+        const reason = new TextInputBuilder()
+          .setCustomId('reason')
+          .setLabel('Reason (optional)')
+          .setPlaceholder('Brief reason for reassignment')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(false)
+          .setMaxLength(500);
+        modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(reason));
+      }
     } else if (id === 'ticket:panel:department') {
       if (!interaction.replied && !interaction.deferred) {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -5348,9 +5346,11 @@ async function handlePanelModal(
 
     if (
       id === 'ticket:panel-modal:add-user' ||
-      id === 'ticket:panel-modal:remove-user'
+      id === 'ticket:panel-modal:remove-user' ||
+      id === 'ticket:panel-modal:reassign'
     ) {
       const removingUser = id === 'ticket:panel-modal:remove-user';
+      const reassigningUser = id === 'ticket:panel-modal:reassign';
       const raw =
         interaction.fields
           .getTextInputValue(
@@ -5365,6 +5365,87 @@ async function handlePanelModal(
         await interaction.editReply(
           '❌ Please provide a valid Discord user ID or mention.',
         );
+        return;
+      }
+
+      if (reassigningUser) {
+        if (state.status === 'pending') {
+          await interaction.editReply('❌ Resume this ticket before reassigning it.');
+          return;
+        }
+        if (!['open', 'claimed', 'reopened'].includes(state.status)) {
+          await interaction.editReply('❌ Only an open or claimed ticket can be reassigned.');
+          return;
+        }
+
+        const staffRoleId = getField(state.topic, 'staff');
+        if (!staffRoleId || staffRoleId === 'none') {
+          await interaction.editReply('❌ This ticket has no configured department staff role, so reassignment cannot be validated safely.');
+          return;
+        }
+        const targetMember = await guild.members.fetch(userId).catch(() => null);
+        if (!targetMember) {
+          await interaction.editReply('❌ That user could not be found in this server.');
+          return;
+        }
+        if (!targetMember.roles.cache.has(staffRoleId)) {
+          await interaction.editReply('❌ That user is not part of this ticket department’s staff role.');
+          return;
+        }
+        const currentAssignees = (getField(state.topic, 'claimed_by') ?? '').split(',').map((value) => value.trim()).filter(Boolean);
+        if (currentAssignees.length === 1 && currentAssignees[0] === userId) {
+          await interaction.editReply('ℹ️ This ticket is already assigned to that staff member.');
+          return;
+        }
+
+        const now = new Date().toISOString();
+        let reassignedTopic = setField(setField(setField(state.topic, 'status', 'claimed'), 'claimed_by', userId), 'claimed_at', now);
+        reassignedTopic = setField(reassignedTopic, 'assigned_at', now);
+        reassignedTopic = setField(reassignedTopic, 'updated_at', now);
+        if (currentAssignees.length) {
+          reassignedTopic = setField(reassignedTopic, 'previous_assignee', currentAssignees.join(','));
+        } else {
+          reassignedTopic = removeField(reassignedTopic, 'previous_assignee');
+        }
+        reassignedTopic = removeField(reassignedTopic, 'pending_since');
+
+        await transitionPersistedTicket(
+          channel.id,
+          'claimed',
+          {
+            claimedByIds: [userId],
+            metadata: { lastActivityAt: now, lastStaffActivityAt: now },
+          },
+          interactionActor(interaction),
+          now,
+        );
+        try {
+          await applyTicketVisibilityMode(channel, reassignedTopic, 'claimed', userId, { topic: reassignedTopic });
+        } catch (error) {
+          console.warn('Ticket reassignment was saved durably, but Discord permissions/topic synchronization is pending:', error);
+        }
+        channel.topic = reassignedTopic;
+        updateRuntimeTicketState(channel, reassignedTopic, 'claimed');
+        await updateMainMessage(channel, getField(reassignedTopic, 'message'), 'claimed', reassignedTopic);
+
+        const reason = interaction.fields.getTextInputValue('reason').trim();
+        const before = currentAssignees.length ? currentAssignees.map((id) => '<@' + id + '>').join(', ') : 'unassigned';
+        await channel.send('🔄 Ticket #' + (getField(reassignedTopic, 'number') ?? 'unknown') +
+          ' was reassigned from ' + before + ' to <@' + userId + '> by ' + interaction.user.tag +
+          (reason ? '\nReason: ' + reason : ''));
+
+        const config = await getGuildConfig(guild.id);
+        if (config.supportCategoryId) {
+          await logTicketEvent(guild, config.supportCategoryId, {
+            ticketNumber: getField(reassignedTopic, 'number') ?? 'unknown',
+            event: 'ticket_reassigned',
+            actor: interaction.user.tag,
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Reassigned ticket to <@' + userId + '>.' + (reason ? ' Reason: ' + reason : ''),
+          });
+        }
+        await interaction.editReply('✅ Ticket was reassigned to <@' + userId + '>.');
         return;
       }
 
