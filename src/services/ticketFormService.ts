@@ -708,6 +708,110 @@ export async function listTicketForms(guildId: string): Promise<TicketFormVersio
   return result.rows.map((row) => mapVersion(row, Number(row.version), row.schema, row.snapshot));
 }
 
+export interface TicketFormTemplate {
+  id: string;
+  guildId: string;
+  name: string;
+  fields: TicketFormField[];
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface TicketFormTemplateRow extends QueryResultRow {
+  id: string;
+  guild_id: string;
+  name: string;
+  schema: unknown;
+  created_by: string;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
+function rowToTemplate(row: TicketFormTemplateRow): TicketFormTemplate {
+  const schema = readSchema(row.schema);
+  return {
+    id: row.id,
+    guildId: row.guild_id,
+    name: row.name,
+    fields: schema.fields,
+    createdBy: row.created_by,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  };
+}
+
+export async function createTicketFormTemplate(args: {
+  guildId: string;
+  name: string;
+  fields: TicketFormField[];
+  actorId: string;
+}): Promise<TicketFormTemplate> {
+  const name = args.name.trim().replace(/\\s+/g, ' ');
+  if (!name || name.length > 80) throw new Error('A template name must contain 1–80 characters.');
+  const fields = parseTicketFormFields(args.fields);
+  const id = randomUUID();
+  try {
+    const result = await getPostgresPool().query<TicketFormTemplateRow>(
+      'INSERT INTO ticket_form_templates (id, guild_id, name, schema, created_by) ' +
+      'VALUES ($1,$2,$3,$4::jsonb,$5) RETURNING id,guild_id,name,schema,created_by,created_at,updated_at',
+      [id, args.guildId, name, JSON.stringify({ fields }), args.actorId],
+    );
+    return rowToTemplate(result.rows[0]);
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && (error as { code?: string }).code === '23505') {
+      throw new Error('A template with that name already exists in this server.');
+    }
+    throw error;
+  }
+}
+
+export async function listTicketFormTemplates(guildId: string): Promise<TicketFormTemplate[]> {
+  await initializePersistence();
+  const result = await getPostgresPool().query<TicketFormTemplateRow>(
+    'SELECT id,guild_id,name,schema,created_by,created_at,updated_at FROM ticket_form_templates ' +
+    'WHERE guild_id=$1 ORDER BY created_at DESC',
+    [guildId],
+  );
+  return result.rows.map(rowToTemplate);
+}
+
+export async function deleteTicketFormTemplate(guildId: string, templateId: string): Promise<void> {
+  await initializePersistence();
+  const result = await getPostgresPool().query(
+    'DELETE FROM ticket_form_templates WHERE guild_id=$1 AND id=$2 RETURNING id',
+    [guildId, templateId],
+  );
+  if ((result.rowCount ?? 0) !== 1) throw new Error('Ticket form template not found in this server.');
+}
+
+/** Apply a saved template by creating an independent, version-one form. */
+export async function applyTicketFormTemplate(args: {
+  guildId: string;
+  templateId: string;
+  name: string;
+  departmentId: string;
+  tagId: string | null;
+  actorId: string;
+}): Promise<TicketFormVersion> {
+  await initializePersistence();
+  const result = await getPostgresPool().query<TicketFormTemplateRow>(
+    'SELECT id,guild_id,name,schema,created_by,created_at,updated_at FROM ticket_form_templates ' +
+    'WHERE guild_id=$1 AND id=$2',
+    [args.guildId, args.templateId],
+  );
+  const template = result.rows[0];
+  if (!template) throw new Error('Ticket form template not found in this server.');
+  return createTicketForm({
+    guildId: args.guildId,
+    name: args.name,
+    departmentId: args.departmentId,
+    tagId: args.tagId,
+    fields: rowToTemplate(template).fields,
+    actorId: args.actorId,
+  });
+}
+
 export async function updateTicketFormFields(args: {
   guildId: string;
   formId: string;
