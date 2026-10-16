@@ -56,6 +56,7 @@ import { getField, getTicketStatus, isTicketTopic, setField } from '../services/
 import { setChannelPermissionOverwrite, setChannelTopic } from '../services/discordChannelService';
 import { getPersistedTicket, getPersistedTicketStatus, registerTicket } from '../services/ticketPersistenceService';
 import { performFactoryReset } from '../services/factoryResetService';
+import { addUseCasePreset, USE_CASE_PRESETS } from '../services/useCasePresetService';
 import { handleTicketFormSettingsInteraction } from './ticketFormSettingsInteractions';
 import {
   approveRetentionDeletion,
@@ -1300,41 +1301,6 @@ async function showAppearance(interaction: ButtonInteraction): Promise<void> {
   ]);
 }
 
-const USE_CASE_PRESETS: Record<string, { name: string; emoji: string; tags: string[] }> = {
-  'technical-support': {
-    name: 'Technical Support', emoji: '🛠️',
-    tags: ['Bug Report', 'Error Message', 'Performance Issue', 'Installation', 'Configuration', 'Integration', 'Feature Request', 'Compatibility'],
-  },
-  sales: {
-    name: 'Sales', emoji: '💼',
-    tags: ['Pricing', 'Plan Comparison', 'Quote Request', 'Product Demo', 'Enterprise Inquiry', 'Volume Discount', 'Purchase Assistance', 'Upgrade Inquiry'],
-  },
-  'account-access': {
-    name: 'Account & Access', emoji: '🔐',
-    tags: ['Login Issue', 'Password Reset', 'Email Change', 'Two-Factor Authentication', 'Account Verification', 'Account Recovery', 'Permission Issue', 'Account Deletion'],
-  },
-  partnerships: {
-    name: 'Partnerships', emoji: '🤝',
-    tags: ['Partnership Proposal', 'Affiliate Program', 'Integration Proposal', 'Reseller Inquiry', 'Co-Marketing', 'Sponsorship', 'API Collaboration', 'Business Development'],
-  },
-  'reports-abuse': {
-    name: 'Reports & Abuse', emoji: '🚩',
-    tags: ['Harassment', 'Spam', 'Scam Attempt', 'Impersonation', 'Malicious Content', 'Terms Violation', 'Privacy Concern', 'Appeal'],
-  },
-  'refunds-returns': {
-    name: 'Refunds & Returns', emoji: '↩️',
-    tags: ['Refund Request', 'Return Request', 'Duplicate Charge', 'Billing Error', 'Cancel Order', 'Missing Refund', 'Damaged Item', 'Exchange Request'],
-  },
-  'product-support': {
-    name: 'Product Support', emoji: '📦',
-    tags: ['Product Question', 'Setup Assistance', 'Feature Guidance', 'Product Defect', 'Compatibility', 'Warranty Claim', 'Replacement Request', 'Documentation'],
-  },
-  'vip-support': {
-    name: 'VIP Support', emoji: '⭐',
-    tags: ['Priority Escalation', 'Service Outage', 'Executive Request', 'Dedicated Assistance', 'SLA Concern', 'Critical Business Impact', 'Account Review', 'Renewal Assistance'],
-  },
-};
-
 async function showUseCases(interaction: ButtonInteraction): Promise<void> {
   const presets = Object.entries(USE_CASE_PRESETS);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
@@ -1934,50 +1900,23 @@ export async function handleSettingsInteraction(
 
     if (id.startsWith('sf:settings:usecases:add:')) {
       const key = id.slice('sf:settings:usecases:add:'.length);
-      const preset = USE_CASE_PRESETS[key];
-      if (!preset) {
-        await reject(interaction, '❌ Unknown support use case.');
-        return true;
+      try {
+        const added = await addUseCasePreset(guild.id, key);
+        await syncPanel(guild);
+        await refreshSettingsChannel(guild);
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle('✅ Use Case Added')
+              .setDescription('Added **' + added.name + '** with ' + added.tagNames.length + ' starter tags: ' + added.tagNames.join(', ') + '. Its Discord category will be created when the first ticket is opened in this department.'),
+          ],
+          components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+          flags: MessageFlags.Ephemeral,
+        });
+        await auditSettingsAction(guild, interaction, 'USE_CASE_ADDED', 'Added use case department ' + added.name + ' with ' + added.tagNames.length + ' starter tags. Its Discord category will be provisioned when the first ticket is created.');
+      } catch (error) {
+        await reject(interaction, '❌ ' + (error instanceof Error ? error.message : 'Could not add that use case.'));
       }
-      const { name, tags: starterTags } = preset;
-
-      const config = await getGuildConfig(guild.id);
-      if (Object.values(config.departments).some((department) => department.name.toLowerCase() === name.toLowerCase())) {
-        await reject(interaction, 'ℹ️ **' + name + '** is already configured.');
-        return true;
-      }
-
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const departmentId = newDepartmentId();
-      const now = new Date().toISOString();
-      const tags = Object.fromEntries(
-        starterTags.map((tagName) => {
-          const tagId = newTagId();
-          return [tagId, { id: tagId, name: tagName, createdAt: now }];
-        }),
-      );
-      await updateGuildConfig(guild.id, (current) => {
-        current.departments[departmentId] = {
-          id: departmentId,
-          name,
-          staffRoleId: null,
-          categoryId: null,
-          tags,
-          createdAt: now,
-        };
-      });
-
-      await syncPanel(guild);
-      await refreshSettingsChannel(guild);
-      await interaction.editReply({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle('✅ Use Case Added')
-            .setDescription('Added **' + name + '** with ' + starterTags.length + ' starter tags: ' + starterTags.join(', ') + '. Its Discord category will be created when the first ticket is opened in this department.'),
-        ],
-        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
-      });
-      await auditSettingsAction(guild, interaction, 'USE_CASE_ADDED', 'Added use case department ' + name + ' with ' + starterTags.length + ' starter tags. Its Discord category will be provisioned when the first ticket is created.');
       return true;
     }
 
