@@ -1293,7 +1293,7 @@ async function createTicket(
       formDraftRecorded = true;
     }
 
-    const topic = [
+    let topic = [
       TICKET_PREFIX,
       'v=2',
       'status=open',
@@ -1305,13 +1305,20 @@ async function createTicket(
       `tags=${tagId}`,
       'users=',
       'claimed_by=',
-      `subject=${encodeURIComponent(
-        cleanSubject,
-      )}`,
+      `subject=${encodeURIComponent(cleanSubject)}`,
       `number=${number}`,
       `opened_at=${now}`,
       `updated_at=${now}`,
     ].join(' ');
+
+    // Keep the durable form-submission key in channel metadata so recovery can
+    // reconstruct the ticket if Discord creates the channel but PostgreSQL
+    // temporarily fails before registerTicket commits.
+    if (selectedForm) {
+      topic = setField(topic, 'form_submission', interaction.id);
+      topic = setField(topic, 'form_id', selectedForm.id);
+      topic = setField(topic, 'form_version', String(selectedForm.version));
+    }
 
     const bot =
       guild.members.me;
@@ -1351,6 +1358,14 @@ async function createTicket(
             reason:
               `SupportForge ticket #${number}`,
           })) as TextChannel;
+
+      if (formDraftRecorded) {
+        await setTicketFormSubmissionChannel(interaction.id, ticketChannel.id).catch((error) => {
+          // Continue creating the ticket; its topic includes the submission ID,
+          // allowing the recovery worker to find the channel if this write fails.
+          console.warn('Could not associate the new ticket channel with its form draft yet:', error);
+        });
+      }
 
       const panel =
         await ticketChannel.send({
