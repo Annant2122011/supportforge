@@ -178,12 +178,13 @@ export function parseTicketFormFields(input: string | unknown): TicketFormField[
     }
   }
 
-  const candidate =
-    Array.isArray(raw)
-      ? raw
-      : raw && typeof raw === 'object' && Array.isArray((raw as Record<string, unknown>).fields)
-        ? (raw as Record<string, unknown>).fields
-        : null;
+  let candidate: unknown[] | null = null;
+  if (Array.isArray(raw)) {
+    candidate = raw;
+  } else if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const fields = (raw as Record<string, unknown>).fields;
+    if (Array.isArray(fields)) candidate = fields;
+  }
 
   if (!candidate) {
     throw new Error('Fields must be a JSON array, or an object containing a fields array.');
