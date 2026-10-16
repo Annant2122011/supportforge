@@ -499,8 +499,12 @@ export function validateTicketFormAnswers(
             typeof file.contentType !== 'string' || !file.contentType.trim()) {
           throw new Error('The uploaded file for "' + field.label + '" did not include verifiable file metadata.');
         }
-        if (file.size > (field.maxBytes ?? 8 * 1024 * 1024)) {
-          throw new Error('"' + field.label + '" must be no larger than ' + Math.floor((field.maxBytes ?? 8 * 1024 * 1024) / (1024 * 1024)) + ' MiB.');
+        const maxBytes = field.maxBytes ?? 8 * 1024 * 1024;
+        if (file.size > maxBytes) {
+          const humanLimit = maxBytes >= 1024 * 1024
+            ? (Math.round((maxBytes / (1024 * 1024)) * 10) / 10) + ' MiB'
+            : Math.max(1, Math.ceil(maxBytes / 1024)) + ' KiB';
+          throw new Error('"' + field.label + '" must be no larger than ' + humanLimit + '.');
         }
         if (!mimeTypeAllowed(file.contentType, field.allowedMimeTypes ?? ['image/*', 'application/pdf'])) {
           throw new Error('The file type for "' + field.label + '" is not allowed. Accepted types: ' + (field.allowedMimeTypes ?? ['image/*', 'application/pdf']).join(', ') + '.');
