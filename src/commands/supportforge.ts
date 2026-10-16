@@ -1197,6 +1197,21 @@ export const data =
         )
         .addSubcommand((subcommand) =>
           subcommand
+            .setName('retention-action')
+            .setDescription('Review eligible tickets or act on a pending retention approval')
+            .addStringOption((option) => option.setName('action').setDescription('Retention approval action').setRequired(true).addChoices(
+              { name: 'Review eligible tickets', value: 'review' },
+              { name: 'Approve pending deletion', value: 'approve' },
+              { name: 'Decline pending deletion', value: 'decline' },
+            ))
+            .addStringOption((option) => option.setName('scope').setDescription('Closed or archived tickets').setRequired(true).addChoices(
+              { name: 'Closed tickets', value: 'closed' },
+              { name: 'Archived tickets', value: 'archive' },
+            ))
+            .addBooleanOption((option) => option.setName('confirm-delete').setDescription('Required true to execute an approved deletion').setRequired(false)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
             .setName('appearance')
             .setDescription('View or update the public support panel appearance')
             .addStringOption((option) => option.setName('title').setDescription('Panel title').setMaxLength(256))
