@@ -282,6 +282,42 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+  {
+    id: 8,
+    name: 'create_conditional_ticket_form_sessions',
+    up: async (db) => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS ticket_form_sessions (
+          session_id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          submitted_by TEXT NOT NULL,
+          form_id TEXT NOT NULL,
+          form_version INTEGER NOT NULL,
+          tag_id TEXT NOT NULL,
+          form_snapshot JSONB NOT NULL,
+          answers JSONB NOT NULL DEFAULT '{}'::jsonb,
+          subject TEXT,
+          description TEXT,
+          next_step INTEGER NOT NULL DEFAULT 1 CHECK (next_step BETWEEN 1 AND 11),
+          status TEXT NOT NULL DEFAULT 'collecting'
+            CHECK (status IN ('collecting', 'submitting', 'completed', 'expired')),
+          expires_at TIMESTAMPTZ NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          FOREIGN KEY (form_id, form_version)
+            REFERENCES ticket_form_versions(form_id, version)
+            ON DELETE RESTRICT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ticket_form_sessions_expiry
+          ON ticket_form_sessions (expires_at)
+          WHERE status = 'collecting';
+
+        CREATE INDEX IF NOT EXISTS idx_ticket_form_sessions_user
+          ON ticket_form_sessions (guild_id, submitted_by, created_at DESC);
+      `);
+    },
+  },
 ];
 
 export async function runPostgresMigrations(
