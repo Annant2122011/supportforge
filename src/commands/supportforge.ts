@@ -29,6 +29,13 @@ import {
 
 import { executeTicketCommand } from '../interactions/ticketCommandTools';
 import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
+import {
+  createTicketForm,
+  listTicketForms,
+  parseTicketFormFields,
+  setTicketFormActive,
+  updateTicketFormFields,
+} from '../services/ticketFormService';
 
 import {
   getAdvancedSettings,
@@ -816,6 +823,49 @@ export const data =
     )
 
     // ─────────────────────────────────────────────
+    // REUSABLE VERSIONED TICKET FORMS
+    // ─────────────────────────────────────────────
+
+    .addSubcommandGroup((group) =>
+      group
+        .setName('form')
+        .setDescription('Create and manage versioned ticket forms')
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('list')
+            .setDescription('List forms and valid department/tag IDs'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('create')
+            .setDescription('Create an inactive ticket form from a JSON field schema')
+            .addStringOption((option) => option.setName('name').setDescription('Form name').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('department-id').setDescription('Existing department ID from form list').setRequired(true).setMaxLength(28))
+            .addStringOption((option) => option.setName('tag-id').setDescription('Existing tag ID, or * for every tag in this department').setRequired(true).setMaxLength(28))
+            .addStringOption((option) => option.setName('fields-json').setDescription('JSON array with 1–3 custom field definitions').setRequired(true).setMaxLength(6000)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('update')
+            .setDescription('Create a new immutable version of a form schema')
+            .addStringOption((option) => option.setName('id').setDescription('Form ID from form list').setRequired(true).setMaxLength(36))
+            .addStringOption((option) => option.setName('fields-json').setDescription('Replacement JSON field definitions; prior versions are retained').setRequired(true).setMaxLength(6000)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('activate')
+            .setDescription('Activate a form for its department/tag mapping')
+            .addStringOption((option) => option.setName('id').setDescription('Form ID from form list').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('deactivate')
+            .setDescription('Stop using a form for new tickets; keep historic versions and answers')
+            .addStringOption((option) => option.setName('id').setDescription('Form ID from form list').setRequired(true).setMaxLength(36)),
+        ),
+    )
+
+    // ─────────────────────────────────────────────
     // PREMIUM
     // ─────────────────────────────────────────────
 
@@ -1055,7 +1105,8 @@ export async function execute(
     (!group &&
       (subcommand === 'setup' || subcommand === 'restore')) ||
     group === 'category' ||
-    group === 'premium'
+    group === 'premium' ||
+    group === 'form'
   ) {
     if (!isAdminLike(interaction)) {
       await interaction.reply({
@@ -1561,6 +1612,107 @@ export async function execute(
         ).catch(() => undefined);
       }
 
+      return;
+    }
+
+    // ─────────────────────────────────────────────
+    // VERSIONED TICKET FORMS
+    // ─────────────────────────────────────────────
+
+    if (group === 'form') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const action = interaction.options.getSubcommand();
+      const actorId = interaction.user.id;
+      const config = await getGuildConfig(guild.id);
+
+      const writeFormAudit = (event: string, detail: string): void => {
+        if (!config.supportCategoryId) return;
+        void logSettingsEvent(guild, config.supportCategoryId, {
+          action: event,
+          actorId,
+          actorName: interaction.user.tag,
+          detail,
+        }).catch((error) => console.warn('Ticket form audit logging failed:', error));
+      };
+
+      if (action === 'list') {
+        const forms = await listTicketForms(guild.id);
+        const formLines = forms.map((form) =>
+          '• **' + form.name + '** · ID `' + form.id + '` · v' + form.version +
+          ' · ' + (form.active ? 'ACTIVE' : 'inactive') +
+          ' · department `' + form.departmentId + '` · tag `' + (form.tagId ?? '*') +
+          '` · ' + form.fields.length + ' field(s)',
+        );
+        const mappingLines = Object.values(config.departments).flatMap((department) => [
+          '**' + department.name + '** · department ID `' + department.id + '`',
+          ...Object.values(department.tags ?? {}).map((tag) =>
+            '  • ' + tag.name + ' · tag ID `' + tag.id + '`',
+          ),
+        ]);
+        const content = [
+          '**Ticket Forms**',
+          formLines.join('\n') || 'No forms configured yet.',
+          '',
+          '**Available routing IDs**',
+          mappingLines.join('\n') || 'No departments are configured. Create a department first.',
+        ].join('\n').slice(0, 1900);
+        await interaction.editReply(content);
+        return;
+      }
+
+      if (action === 'create') {
+        const name = interaction.options.getString('name', true);
+        const departmentId = interaction.options.getString('department-id', true);
+        const suppliedTagId = interaction.options.getString('tag-id', true).trim();
+        const tagId = suppliedTagId === '*' ? null : suppliedTagId;
+        const fields = parseTicketFormFields(interaction.options.getString('fields-json', true));
+        const form = await createTicketForm({
+          guildId: guild.id,
+          name,
+          departmentId,
+          tagId,
+          fields,
+          actorId,
+        });
+        await interaction.editReply(
+          '✅ Created inactive form **' + form.name + '**. ID: `' + form.id +
+          '`, version 1. Activate it with `/supportforge form activate id:' + form.id + '`. ' +
+          'The form applies only to the selected existing department/tag mapping.',
+        );
+        writeFormAudit('TICKET_FORM_CREATED', 'Created form ' + form.id + ' version 1 for department ' + departmentId + ' and tag ' + (tagId ?? '*') + '.');
+        return;
+      }
+
+      const formId = interaction.options.getString('id', true).trim();
+      if (action === 'update') {
+        const fields = parseTicketFormFields(interaction.options.getString('fields-json', true));
+        const form = await updateTicketFormFields({
+          guildId: guild.id,
+          formId,
+          fields,
+          actorId,
+        });
+        await interaction.editReply(
+          '✅ Updated **' + form.name + '** to version ' + form.version +
+          '. Earlier versions and submissions remain retained unchanged.',
+        );
+        writeFormAudit('TICKET_FORM_VERSION_CREATED', 'Created version ' + form.version + ' of form ' + form.id + '.');
+        return;
+      }
+
+      if (action === 'activate' || action === 'deactivate') {
+        const active = action === 'activate';
+        const form = await setTicketFormActive({ guildId: guild.id, formId, active });
+        await interaction.editReply(
+          (active ? '✅ Activated ' : '✅ Deactivated ') + '**' + form.name +
+          '** (' + form.id + ', version ' + form.currentVersion + '). ' +
+          (active ? 'New tickets routed to its mapping will use this form.' : 'Existing submissions and versions were preserved.'),
+        );
+        writeFormAudit(active ? 'TICKET_FORM_ACTIVATED' : 'TICKET_FORM_DEACTIVATED', (active ? 'Activated' : 'Deactivated') + ' form ' + form.id + ' version ' + form.currentVersion + '.');
+        return;
+      }
+
+      await interaction.editReply('❌ Unsupported form action.');
       return;
     }
 
