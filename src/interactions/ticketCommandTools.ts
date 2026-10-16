@@ -10,6 +10,7 @@ import {
   EmbedBuilder,
   MessageFlags,
   PermissionFlagsBits,
+  StringSelectMenuBuilder,
   type ChatInputCommandInteraction,
 } from 'discord.js';
 
@@ -39,6 +40,7 @@ import {
   getTicketChannelName,
   queueTicketChannelRename,
   refreshTicketPanel,
+  moveTicketPanelToBottom,
 } from '../services/ticketPanelService';
 import {
   endTicketVoiceMode,
@@ -483,6 +485,150 @@ export async function executeTicketCommand(
         '🔒 This feature is available in Premium/Pro demo mode. Run `/supportforge premium toggle-demo` as an administrator to preview it.',
       );
 
+      return;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Panel-only workflows exposed through slash commands               */
+    /* ------------------------------------------------------------------ */
+
+    if (subcommand === 'close' || subcommand === 'reopen') {
+      const expectedStatus = subcommand === 'close' ? 'closed' : 'open';
+      if (subcommand === 'close' && ['closed', 'archived'].includes(context.status)) {
+        await interaction.editReply('This ticket is already closed or archived.');
+        return;
+      }
+      if (subcommand === 'reopen' && context.status !== 'closed') {
+        await interaction.editReply('Only a closed ticket can be reopened. Archived tickets remain terminal.');
+        return;
+      }
+      const customId = subcommand === 'close' ? 'ticket:close' : 'ticket:reopen';
+      await interaction.editReply({
+        content: subcommand === 'close'
+          ? 'Use the button below to close the ticket through the normal transcript and lock workflow.'
+          : 'Use the button below to reopen this closed ticket.',
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId(customId).setLabel(subcommand === 'close' ? 'Close Ticket' : 'Reopen Ticket')
+            .setStyle(subcommand === 'close' ? ButtonStyle.Danger : ButtonStyle.Success),
+        )],
+      });
+      return;
+    }
+
+    if (subcommand === 'department') {
+      if (!['open', 'claimed', 'pending', 'reopened'].includes(context.status)) {
+        await interaction.editReply('Only an active ticket can be moved to another department.');
+        return;
+      }
+      const departments = Object.values(context.config.departments).sort((a, b) => a.name.localeCompare(b.name));
+      if (!departments.length) {
+        await interaction.editReply('No departments are configured. Add a department in Settings first.');
+        return;
+      }
+      const pageSize = 25;
+      const pages = Math.max(1, Math.ceil(departments.length / pageSize));
+      const visible = departments.slice(0, pageSize);
+      const currentDepartment = getField(context.topic, 'department');
+      const menu = new StringSelectMenuBuilder()
+        .setCustomId('ticket:department:select')
+        .setPlaceholder('Choose a department')
+        .setMinValues(1)
+        .setMaxValues(1)
+        .addOptions(visible.map((department) => ({
+          label: department.name.slice(0, 100),
+          value: department.id,
+          description: Object.keys(department.tags ?? {}).length + ' tag(s)',
+          default: department.id === currentDepartment,
+        })));
+      const rows = [
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId('ticket:department:page:0').setLabel('Previous').setStyle(ButtonStyle.Secondary).setDisabled(true),
+          new ButtonBuilder().setCustomId('ticket:department:page:1').setLabel('Next').setStyle(ButtonStyle.Secondary).setDisabled(pages <= 1),
+          new ButtonBuilder().setCustomId('ticket:department:cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+        ),
+      ];
+      await interaction.editReply({
+        content: 'Choose a new department. The existing ticket will retain its history; routing changes are written to the database.',
+        components: rows,
+      });
+      return;
+    }
+
+    if (subcommand === 'tag') {
+      if (!['open', 'claimed', 'pending', 'reopened'].includes(context.status)) {
+        await interaction.editReply('Only an active ticket can be assigned a different tag.');
+        return;
+      }
+      const departmentId = getField(context.topic, 'department') ?? '';
+      const department = context.config.departments[departmentId];
+      const tags = Object.values(department?.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
+      if (!department || !tags.length) {
+        await interaction.editReply('This ticket department has no configured tags.');
+        return;
+      }
+      const currentTag = getField(context.topic, 'tags') ?? getField(context.topic, 'tag');
+      const menu = new StringSelectMenuBuilder()
+        .setCustomId('ticket:routing-tag:select:' + department.id)
+        .setPlaceholder('Choose a tag')
+        .setMinValues(1)
+        .setMaxValues(1)
+        .addOptions(tags.slice(0, 25).map((tag) => ({
+          label: tag.name.slice(0, 100),
+          value: tag.id,
+          description: 'Subcategory of ' + department.name,
+          default: tag.id === currentTag,
+        })));
+      await interaction.editReply({
+        content: 'Choose a tag for **' + department.name + '**. Tags are subcategories and do not move the ticket category.',
+        components: [
+          new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
+          new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId('ticket:routing-tag:page:0:' + department.id).setLabel('Previous').setStyle(ButtonStyle.Secondary).setDisabled(true),
+            new ButtonBuilder().setCustomId('ticket:routing-tag:page:1:' + department.id).setLabel('Next').setStyle(ButtonStyle.Secondary).setDisabled(tags.length <= 25),
+            new ButtonBuilder().setCustomId('ticket:routing-tag:cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+          ),
+        ],
+      });
+      return;
+    }
+
+    if (subcommand === 'voice') {
+      const voiceAction = interaction.options.getString('action', true);
+      const customId = voiceAction === 'start'
+        ? 'ticket:panel:voice:start'
+        : voiceAction === 'end'
+          ? 'ticket:panel:voice:end'
+          : 'ticket:panel:voice:join';
+      if (voiceAction !== 'join' && context.status !== 'claimed') {
+        await interaction.editReply('Private voice mode can only be started or ended on a claimed ticket.');
+        return;
+      }
+      await interaction.editReply({
+        content: 'Use the button below to perform the voice action. The ticket handler revalidates ownership, assignment, and current voice-session state.',
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId(customId)
+            .setLabel(voiceAction === 'start' ? 'Start Voice Mode' : voiceAction === 'end' ? 'End Voice Mode' : 'Join Private Voice')
+            .setStyle(voiceAction === 'end' ? ButtonStyle.Danger : ButtonStyle.Primary),
+        )],
+      });
+      return;
+    }
+
+    if (subcommand === 'report') {
+      await interaction.editReply({
+        content: 'Start the standard report workflow below. Target selection, categories, evidence, and staff review use the same validation as the ticket panel.',
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId('ticket:panel:report').setLabel('Report User').setEmoji('🛡️').setStyle(ButtonStyle.Primary),
+        )],
+      });
+      return;
+    }
+
+    if (subcommand === 'move-panel') {
+      await moveTicketPanelToBottom(context.channel);
+      await interaction.editReply('Ticket controls have been moved to the bottom of this channel.');
+      await audit(interaction, context, 'Ticket panel moved', 'Moved ticket controls to the bottom through slash command.');
       return;
     }
 
