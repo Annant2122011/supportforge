@@ -30,7 +30,11 @@ import {
 import { executeTicketCommand } from '../interactions/ticketCommandTools';
 import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
 import {
+  applyTicketFormTemplate,
   createTicketForm,
+  createTicketFormTemplate,
+  deleteTicketFormTemplate,
+  listTicketFormTemplates,
   listTicketForms,
   parseTicketFormFields,
   setTicketFormActive,
@@ -870,6 +874,34 @@ export const data =
             .setName('deactivate')
             .setDescription('Stop using a form for new tickets; keep historic versions and answers')
             .addStringOption((option) => option.setName('id').setDescription('Form ID from form list').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('template-save')
+            .setDescription('Save a reusable ticket form template')
+            .addStringOption((option) => option.setName('name').setDescription('Template name').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('fields-json').setDescription('JSON array with 1–3 custom field definitions').setRequired(true).setMaxLength(6000)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('template-list')
+            .setDescription('List reusable form templates')
+            .addIntegerOption((option) => option.setName('page').setDescription('Page number').setRequired(false).setMinValue(1).setMaxValue(999)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('template-apply')
+            .setDescription('Create an inactive form using a saved template')
+            .addStringOption((option) => option.setName('template-id').setDescription('Template ID from template-list').setRequired(true).setMaxLength(36))
+            .addStringOption((option) => option.setName('name').setDescription('Name for the new form').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('department-id').setDescription('Existing department ID').setRequired(true).setMaxLength(28))
+            .addStringOption((option) => option.setName('tag-id').setDescription('Existing tag ID or * for every tag').setRequired(true).setMaxLength(28)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('template-delete')
+            .setDescription('Delete a saved template; created forms remain unchanged')
+            .addStringOption((option) => option.setName('template-id').setDescription('Template ID from template-list').setRequired(true).setMaxLength(36)),
         ),
     )
 
@@ -1707,6 +1739,80 @@ export async function execute(
           'The form applies only to the selected existing department/tag mapping.',
         );
         writeFormAudit('TICKET_FORM_CREATED', 'Created form ' + form.id + ' version 1 for department ' + departmentId + ' and tag ' + (tagId ?? '*') + '.');
+        return;
+      }
+
+      if (action === 'template-save') {
+        const template = await createTicketFormTemplate({
+          guildId: guild.id,
+          name: interaction.options.getString('name', true),
+          fields: parseTicketFormFields(interaction.options.getString('fields-json', true)),
+          actorId,
+        });
+        await interaction.editReply(
+          '✅ Saved template **' + template.name + '**. ID: `' + template.id +
+          '`, with ' + template.fields.length + ' custom field(s). Use `/supportforge form template-apply` to create a form from it.',
+        );
+        writeFormAudit('TICKET_FORM_TEMPLATE_SAVED', 'Saved template ' + template.id + ' with ' + template.fields.length + ' field(s).');
+        return;
+      }
+
+      if (action === 'template-list') {
+        const templates = await listTicketFormTemplates(guild.id);
+        const lines = templates.map((template) =>
+          '• **' + template.name + '** · ID `' + template.id + '` · ' + template.fields.length + ' field(s)',
+        );
+        const pages: string[] = [];
+        let pageText = '';
+        for (const line of (lines.length ? lines : ['No form templates saved yet.'])) {
+          const next = pageText ? pageText + '\\n' + line : line;
+          if (next.length > 1_650 && pageText) {
+            pages.push(pageText);
+            pageText = line;
+          } else {
+            pageText = next;
+          }
+        }
+        if (pageText) pages.push(pageText);
+        const requestedPage = interaction.options.getInteger('page') ?? 1;
+        if (requestedPage > pages.length) {
+          await interaction.editReply('❌ Page ' + requestedPage + ' does not exist. This template list has ' + pages.length + ' page(s).');
+          return;
+        }
+        await interaction.editReply(
+          '**Form Templates • Page ' + requestedPage + ' / ' + pages.length + '**\\n\\n' + pages[requestedPage - 1],
+        );
+        return;
+      }
+
+      if (action === 'template-apply') {
+        const templateId = interaction.options.getString('template-id', true).trim();
+        const name = interaction.options.getString('name', true);
+        const departmentId = interaction.options.getString('department-id', true);
+        const suppliedTagId = interaction.options.getString('tag-id', true).trim();
+        const tagId = suppliedTagId === '*' ? null : suppliedTagId;
+        const form = await applyTicketFormTemplate({
+          guildId: guild.id,
+          templateId,
+          name,
+          departmentId,
+          tagId,
+          actorId,
+        });
+        await interaction.editReply(
+          '✅ Created inactive form **' + form.name + '** from template `' + templateId +
+          '`. New form ID: `' + form.id + '`, version ' + form.version +
+          '. Activate it when its routing is ready.',
+        );
+        writeFormAudit('TICKET_FORM_TEMPLATE_APPLIED', 'Applied template ' + templateId + ' to form ' + form.id + '.');
+        return;
+      }
+
+      if (action === 'template-delete') {
+        const templateId = interaction.options.getString('template-id', true).trim();
+        await deleteTicketFormTemplate(guild.id, templateId);
+        await interaction.editReply('✅ Deleted template `' + templateId + '`. Existing forms and historical submissions are unchanged.');
+        writeFormAudit('TICKET_FORM_TEMPLATE_DELETED', 'Deleted template ' + templateId + '.');
         return;
       }
 
