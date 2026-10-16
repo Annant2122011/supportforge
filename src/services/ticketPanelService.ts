@@ -192,6 +192,11 @@ export function buildTicketPanelComponents(
 
     const positioning = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
+        .setCustomId('ticket:panel:reassign')
+        .setLabel('Reassign')
+        .setEmoji('🔄')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
         .setCustomId('ticket:panel:note')
         .setLabel('Internal Note')
         .setEmoji('📝')
