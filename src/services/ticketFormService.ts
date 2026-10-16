@@ -8,7 +8,9 @@ import { getGuildConfig } from './configService';
 import { getPersistedTicket, registerTicket } from './ticketPersistenceService';
 import type { TicketPriority } from './advancedSettingsService';
 
-export const MAX_TICKET_FORM_FIELDS = 3;
+export const MAX_TICKET_FORM_FIELDS = 25;
+export const MAX_TICKET_FORM_FIELDS_PER_STEP = 3;
+export const MAX_TICKET_FORM_STEPS = 10;
 export const TICKET_FORM_MODAL_TTL_MS = 15 * 60_000;
 
 export const TICKET_FORM_FIELD_TYPES = [
@@ -29,6 +31,14 @@ export const TICKET_FORM_FIELD_TYPES = [
 
 export type TicketFormFieldType = (typeof TICKET_FORM_FIELD_TYPES)[number];
 
+export type TicketFormConditionOperator = 'equals' | 'not_equals' | 'contains' | 'not_contains';
+
+export interface TicketFormCondition {
+  fieldId: string;
+  operator: TicketFormConditionOperator;
+  value: string | number | boolean;
+}
+
 export interface TicketFormField {
   id: string;
   label: string;
@@ -43,6 +53,9 @@ export interface TicketFormField {
   pattern?: string;
   maxBytes?: number;
   allowedMimeTypes?: string[];
+  /** Step 1 includes Subject and Description; steps 2+ collect conditional answers. */
+  step: number;
+  condition?: TicketFormCondition;
 }
 
 export interface TicketFormSchema {
@@ -193,11 +206,11 @@ export function parseTicketFormFields(input: string | unknown): TicketFormField[
     throw new Error('Fields must be a JSON array, or an object containing a fields array.');
   }
   if (candidate.length < 1 || candidate.length > MAX_TICKET_FORM_FIELDS) {
-    throw new Error('A ticket form must contain between 1 and ' + MAX_TICKET_FORM_FIELDS + ' custom fields. Discord allows five modal inputs total, including Subject and Description.');
+    throw new Error('A ticket form must contain between 1 and ' + MAX_TICKET_FORM_FIELDS + ' custom fields across at most ' + MAX_TICKET_FORM_STEPS + ' steps.');
   }
 
   const seen = new Set<string>();
-  return candidate.map((entry, index): TicketFormField => {
+  const fields = candidate.map((entry, index): TicketFormField => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
       throw new Error('Field ' + (index + 1) + ' must be a JSON object.');
     }
@@ -219,6 +232,40 @@ export function parseTicketFormFields(input: string | unknown): TicketFormField[
     const required = value.required === undefined ? false : value.required;
     if (typeof required !== 'boolean') {
       throw new Error('Field ' + id + ' property "required" must be true or false.');
+    }
+    const step = value.step === undefined
+      ? Math.floor(index / MAX_TICKET_FORM_FIELDS_PER_STEP) + 1
+      : value.step;
+    if (!Number.isInteger(step) || (step as number) < 1 || (step as number) > MAX_TICKET_FORM_STEPS) {
+      throw new Error('Field ' + id + ' step must be an integer from 1 to ' + MAX_TICKET_FORM_STEPS + '.');
+    }
+
+    let condition: TicketFormCondition | undefined;
+    if (value.condition !== undefined) {
+      if (!value.condition || typeof value.condition !== 'object' || Array.isArray(value.condition)) {
+        throw new Error('Field ' + id + ' condition must be an object.');
+      }
+      const conditionRaw = value.condition as Record<string, unknown>;
+      const conditionFieldId = typeof conditionRaw.fieldId === 'string' ? conditionRaw.fieldId.trim() : '';
+      const operator = conditionRaw.operator;
+      const conditionValue = conditionRaw.value;
+      if (!/^[a-z][a-z0-9_]{0,27}$/.test(conditionFieldId)) {
+        throw new Error('Field ' + id + ' condition needs a valid fieldId.');
+      }
+      if (!['equals', 'not_equals', 'contains', 'not_contains'].includes(String(operator))) {
+        throw new Error('Field ' + id + ' has an unsupported condition operator.');
+      }
+      if (typeof conditionValue !== 'string' && typeof conditionValue !== 'number' && typeof conditionValue !== 'boolean') {
+        throw new Error('Field ' + id + ' condition value must be a string, number or boolean.');
+      }
+      if (typeof conditionValue === 'number' && !Number.isFinite(conditionValue)) {
+        throw new Error('Field ' + id + ' condition value must be finite.');
+      }
+      condition = {
+        fieldId: conditionFieldId,
+        operator: operator as TicketFormConditionOperator,
+        value: conditionValue,
+      };
     }
     if (value.placeholder !== undefined && typeof value.placeholder !== 'string') {
       throw new Error('Field ' + id + ' placeholder must be a string.');
@@ -326,8 +373,100 @@ export function parseTicketFormFields(input: string | unknown): TicketFormField[
       ...(pattern !== undefined ? { pattern: pattern as string } : {}),
       ...(maxBytes !== undefined ? { maxBytes } : {}),
       ...(allowedMimeTypes ? { allowedMimeTypes } : {}),
+      step: step as number,
+      ...(condition ? { condition } : {}),
     };
   });
+
+  const byId = new Map(fields.map((field) => [field.id, field]));
+  const fieldsPerStep = new Map<number, number>();
+  for (const field of fields) {
+    fieldsPerStep.set(field.step, (fieldsPerStep.get(field.step) ?? 0) + 1);
+    if (field.condition) {
+      const controller = byId.get(field.condition.fieldId);
+      if (!controller) throw new Error('Condition for field ' + field.id + ' references missing field ' + field.condition.fieldId + '.');
+      if (controller.id === field.id) throw new Error('Field ' + field.id + ' cannot depend on itself.');
+      if (controller.step >= field.step) {
+        throw new Error('Conditional field ' + field.id + ' must depend on a field in an earlier step.');
+      }
+      const { operator, value } = field.condition;
+      if (operator === 'contains' || operator === 'not_contains') {
+        if ((controller.type !== 'short_text' && controller.type !== 'long_text' && controller.type !== 'multi_select') ||
+            typeof value !== 'string') {
+          throw new Error('contains/not_contains conditions require a text or multi_select controller and a string value.');
+        }
+      } else {
+        const acceptsString = ['short_text', 'long_text', 'url', 'email', 'date', 'dropdown', 'multi_select', 'discord_user', 'discord_role'].includes(controller.type);
+        const acceptsNumber = controller.type === 'number' || controller.type === 'decimal';
+        const acceptsBoolean = controller.type === 'checkbox';
+        if ((typeof value === 'string' && !acceptsString) ||
+            (typeof value === 'number' && !acceptsNumber) ||
+            (typeof value === 'boolean' && !acceptsBoolean)) {
+          throw new Error('Condition value type does not match controller field ' + controller.id + '.');
+        }
+      }
+    }
+  }
+  for (const [step, count] of fieldsPerStep) {
+    if (count > MAX_TICKET_FORM_FIELDS_PER_STEP) {
+      throw new Error('Step ' + step + ' contains ' + count + ' fields; no step can contain more than ' + MAX_TICKET_FORM_FIELDS_PER_STEP + ' custom fields.');
+    }
+  }
+  return fields;
+}
+
+function normalizedConditionString(value: string): string {
+  return value.trim().toLocaleLowerCase('en-US');
+}
+
+function conditionMatches(condition: TicketFormCondition, answers: Record<string, unknown>): boolean {
+  const observed = answers[condition.fieldId];
+  // A missing/hidden controller can never make a conditional field visible,
+  // including for negative operators. This prevents skipped parent steps
+  // accidentally revealing downstream questions.
+  if (observed === undefined || observed === null || observed === '') return false;
+
+  const expected = condition.value;
+  const equal = (): boolean => {
+    if (Array.isArray(observed) && typeof expected === 'string') {
+      return observed.some((item) => typeof item === 'string' && normalizedConditionString(item) === normalizedConditionString(expected));
+    }
+    if (typeof observed === 'string' && typeof expected === 'string') {
+      return normalizedConditionString(observed) === normalizedConditionString(expected);
+    }
+    return canonicalJson(observed) === canonicalJson(expected);
+  };
+  const contains = (): boolean => {
+    if (typeof observed === 'string' && typeof expected === 'string') {
+      return normalizedConditionString(observed).includes(normalizedConditionString(expected));
+    }
+    if (Array.isArray(observed) && typeof expected === 'string') {
+      return observed.some((item) => typeof item === 'string' && normalizedConditionString(item) === normalizedConditionString(expected));
+    }
+    return false;
+  };
+
+  switch (condition.operator) {
+    case 'equals': return equal();
+    case 'not_equals': return !equal();
+    case 'contains': return contains();
+    case 'not_contains': return !contains();
+  }
+}
+
+/** Return only the questions visible in one step given answers already collected. */
+export function getVisibleTicketFormFields(
+  fields: TicketFormField[],
+  step: number,
+  answers: Record<string, unknown>,
+): TicketFormField[] {
+  return fields.filter((field) =>
+    field.step === step && (!field.condition || conditionMatches(field.condition, answers)),
+  );
+}
+
+export function getTicketFormStepCount(fields: TicketFormField[]): number {
+  return fields.reduce((max, field) => Math.max(max, field.step), 1);
 }
 
 function normalizedChoice(value: string, choices: string[]): string | undefined {
