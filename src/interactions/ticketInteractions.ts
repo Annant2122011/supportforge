@@ -3560,7 +3560,6 @@ function readTicketFormStepAnswers(
 
 async function validateTicketFormPrincipals(
   interaction: ModalSubmitInteraction,
-  form: TicketFormVersion,
   answers: Record<string, unknown>,
   fields: TicketFormVersion['fields'],
 ): Promise<void> {
@@ -3648,7 +3647,7 @@ async function handleTicketFormWizardModal(interaction: ModalSubmitInteraction):
     }
 
     const stepAnswers = readTicketFormStepAnswers(interaction, visibleFields);
-    await validateTicketFormPrincipals(interaction, cachedForm, stepAnswers, visibleFields);
+    await validateTicketFormPrincipals(interaction, stepAnswers, visibleFields);
     const answersForVisibility = { ...(priorSession?.answers ?? {}), ...stepAnswers };
 
     const maxStep = getTicketFormStepCount(cachedForm.fields);
@@ -5778,6 +5777,14 @@ export async function handleTicketInteraction(
         '❌ This SupportForge button is no longer available. Please refresh the panel.',
       );
 
+      return;
+    }
+
+    if (
+      interaction.isModalSubmit() &&
+      interaction.customId.startsWith('tf:')
+    ) {
+      await handleTicketFormWizardModal(interaction);
       return;
     }
 
