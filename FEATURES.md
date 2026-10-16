@@ -798,7 +798,7 @@ This becomes essential once the project moves into a real database.
 - Native Discord modal fields: short/long text, number/decimal, URL, email, date, dropdown, multi-select, checkbox, Discord user, Discord role, and attachment upload.
 - Server-side validation repeats every constraint instead of trusting the modal UI, including field lengths, safe regex restrictions, numeric ranges, choices, actual uploaded-file size and MIME type.
 - Active forms are cached and refreshed outside the interaction acknowledgement window. Stale, expired, disabled, or remapped modal submissions are rejected.
-- Form answers and the exact submitted form snapshot are durably written to Neon PostgreSQL before ticket-channel creation. Each response is associated with its Discord interaction, submitter, guild, form version, ticket and channel when available; an idempotent recovery worker reconnects pending records to persisted tickets.
+- Form answers and the exact submitted form snapshot are durably written to Neon PostgreSQL before ticket-channel creation. Each response is associated with its Discord interaction, submitter, guild, form version, ticket and channel when available; an idempotent recovery worker reconnects pending records to persisted tickets and can reconstruct a missing ticket row from a matching active Discord ticket channel.
 - The request summary includes the custom answers while suppressing mention parsing. Form answers are never copied into form-management audit details.
 - Slash commands: `/supportforge form list`, `create`, `update`, `activate`, `deactivate`. The list is paginated to preserve full identifiers.
 
@@ -824,7 +824,7 @@ Discord modals allow only five top-level labeled components. The current ticket 
 
 ### Validation
 
-Each field should be able to define:
+Each field supports:
 
 - required/optional
 - minimum length
