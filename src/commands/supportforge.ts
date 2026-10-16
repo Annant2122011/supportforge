@@ -854,7 +854,7 @@ export const data =
             .addStringOption((option) => option.setName('name').setDescription('Form name').setRequired(true).setMaxLength(80))
             .addStringOption((option) => option.setName('department-id').setDescription('Existing department ID from form list').setRequired(true).setMaxLength(28))
             .addStringOption((option) => option.setName('tag-id').setDescription('Existing tag ID, or * for every tag in this department').setRequired(true).setMaxLength(28))
-            .addStringOption((option) => option.setName('fields-json').setDescription('JSON array with 1–3 custom field definitions').setRequired(true).setMaxLength(6000)),
+            .addStringOption((option) => option.setName('fields-json').setDescription('JSON array with up to 25 custom fields across steps').setRequired(true).setMaxLength(6000)),
         )
         .addSubcommand((subcommand) =>
           subcommand
@@ -880,7 +880,7 @@ export const data =
             .setName('template-save')
             .setDescription('Save a reusable ticket form template')
             .addStringOption((option) => option.setName('name').setDescription('Template name').setRequired(true).setMaxLength(80))
-            .addStringOption((option) => option.setName('fields-json').setDescription('JSON array with 1–3 custom field definitions').setRequired(true).setMaxLength(6000)),
+            .addStringOption((option) => option.setName('fields-json').setDescription('JSON array with up to 25 custom fields across steps').setRequired(true).setMaxLength(6000)),
         )
         .addSubcommand((subcommand) =>
           subcommand
