@@ -426,7 +426,8 @@ async function submitModal(interaction: ModalSubmitInteraction): Promise<void> {
 
 export async function handleTicketFormSettingsInteraction(interaction: FormSettingsInteraction): Promise<boolean> {
   if (!interaction.customId.startsWith(PREFIX)) return false;
-  if (!interaction.guild) return true;
+  const guild = interaction.guild;
+  if (!guild) return true;
 
   try {
     const id = interaction.customId;
@@ -456,7 +457,7 @@ export async function handleTicketFormSettingsInteraction(interaction: FormSetti
     }
 
     await prepare(interaction);
-    const guildId = interaction.guild.id;
+    const guildId = guild.id;
 
     if (interaction.isStringSelectMenu()) {
       if (id === PREFIX + 'pick-form') {
@@ -501,7 +502,7 @@ export async function handleTicketFormSettingsInteraction(interaction: FormSetti
       const formId = parts.slice(1).join(':');
       if (action !== 'activate' && action !== 'deactivate') throw new Error('Unsupported form status action.');
       const form = await setTicketFormActive({ guildId, formId, active: action === 'activate' });
-      auditFormAction(interaction.guild, interaction.user.id, interaction.user.tag,
+      auditFormAction(guild, interaction.user.id, interaction.user.tag,
         action === 'activate' ? 'TICKET_FORM_ACTIVATED' : 'TICKET_FORM_DEACTIVATED',
         (action === 'activate' ? 'Activated' : 'Deactivated') + ' form ' + form.id + ' version ' + form.currentVersion + '.');
       await formDetail(interaction, guildId, form.id,
