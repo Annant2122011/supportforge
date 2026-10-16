@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -76,8 +77,15 @@ import {
 } from '../services/auditLogService';
 import {
   TICKET_FORM_MODAL_TTL_MS,
+  getCachedActiveTicketFormById,
   getCachedActiveTicketFormForRouting,
   getTicketFormForSubmission,
+  getTicketFormForWizard,
+  getTicketFormStepCount,
+  getTicketFormWizardSession,
+  getVisibleTicketFormFields,
+  markTicketFormWizardCompleted,
+  saveTicketFormWizardStep,
   validateTicketFormAnswers,
   recordTicketFormSubmissionDraft,
   setTicketFormSubmissionChannel,
