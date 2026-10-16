@@ -10,6 +10,7 @@ import {
   MessageFlags,
   PermissionFlagsBits,
   type ButtonInteraction,
+  type ChatInputCommandInteraction,
   type Guild,
   type GuildBasedChannel,
   type Role,
@@ -3061,6 +3062,180 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
   }
 
   return false;
+}
+
+export async function handleAuditSlashCommand(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  const guild = interaction.guild;
+  if (!guild) {
+    await interaction.reply({ content: 'This command can only be used in a server.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+  if (interaction.channel?.type !== ChannelType.GuildText ||
+      !(interaction.channel.topic ?? '').startsWith(AUDIT_TOPIC)) {
+    await interaction.reply({
+      content: 'Run audit slash commands inside SupportForge audit-log-general. The existing button controls require that audit channel context.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const action = interaction.options.getSubcommand();
+  const current = await load();
+  const store = getGuildStore(current, guild.id);
+  const config = await getGuildConfig(guild.id);
+  const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+  const staffRoleIds = new Set(
+    Object.values(config.departments).map((department) => department.staffRoleId).filter((id): id is string => Boolean(id)),
+  );
+  const developerRole = config.auditDeveloperRoleId
+    ? guild.roles.cache.get(config.auditDeveloperRoleId)
+    : [...guild.roles.cache.values()].find((role) => !role.managed && role.name === AUDIT_DEVELOPER_ROLE_NAME);
+  const isModerator = Boolean(
+    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ||
+    member?.roles.cache.some((role) => staffRoleIds.has(role.id)) ||
+    (member && developerRole && member.roles.cache.has(developerRole.id)) ||
+    store.developerViewers.includes(interaction.user.id),
+  );
+  if (!isModerator) {
+    await interaction.editReply('Developer and audit controls are restricted to SupportForge moderators.');
+    return;
+  }
+
+  if (action === 'summary') {
+    const includeInternalEvents = store.developerViewers.includes(interaction.user.id);
+    const embeds = await generateOverallAuditSummary(guild, includeInternalEvents);
+    if (!includeInternalEvents) {
+      store.overallSummary = JSON.stringify(embeds.map((embed) => embed.toJSON()));
+      await persist();
+    }
+    await interaction.editReply({ embeds });
+    return;
+  }
+
+  if (action === 'daily') {
+    const includeInternalEvents = store.developerViewers.includes(interaction.user.id);
+    const date = Object.keys(store.summaries).sort().pop();
+    if (!date) {
+      await interaction.editReply('No completed daily summary has been saved yet.');
+      return;
+    }
+    if (includeInternalEvents) {
+      const events = store.events.filter((event) => dateKey(event.timestamp) === date);
+      await interaction.editReply({
+        embeds: [events.length ? buildDailySummaryEmbed(guild, date, events) : buildNoActivityDailySummaryEmbed(guild, date)],
+      });
+      return;
+    }
+    const raw = store.summaries[date];
+    if (!raw) {
+      await interaction.editReply('No completed daily summary has been saved yet.');
+      return;
+    }
+    try {
+      await interaction.editReply({ embeds: [EmbedBuilder.from(JSON.parse(raw))] });
+    } catch {
+      await interaction.editReply('The saved daily summary could not be restored.');
+    }
+    return;
+  }
+
+  if (action === 'accumulation') {
+    const mode = interaction.options.getString('action', true);
+    const enabled = await getAuditAccumulation(guild.id);
+    const components = [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(enabled ? AUDIT_REVERT_CUSTOM_ID : AUDIT_ACCUMULATE_CONFIRM_CUSTOM_ID)
+          .setLabel(enabled ? 'Review Revert & Clear Raw Audits' : 'Confirm Enable Accumulation')
+          .setStyle(enabled ? ButtonStyle.Danger : ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(AUDIT_ACCUMULATE_CANCEL_CUSTOM_ID).setLabel('Cancel').setStyle(ButtonStyle.Secondary),
+      ),
+    ];
+    if (mode === 'status') {
+      await interaction.editReply({
+        content: enabled
+          ? 'Raw audit accumulation is **enabled**. Reverting clears retained individual events but keeps saved summaries.'
+          : 'Raw audit accumulation is **disabled**. Only summaries are retained.',
+        components,
+      });
+      return;
+    }
+    if (mode === 'enable' && !enabled) {
+      await interaction.editReply({
+        content: 'Confirm enabling raw audit accumulation. This retains individual events in addition to summaries.',
+        components,
+      });
+      return;
+    }
+    if (mode === 'disable' && enabled) {
+      await interaction.editReply({
+        content: 'Review the destructive action before clearing retained individual audit events. Saved summaries remain.',
+        components,
+      });
+      return;
+    }
+    await interaction.editReply('Audit accumulation is already ' + (enabled ? 'enabled' : 'disabled') + '.');
+    return;
+  }
+
+  if (action === 'developer') {
+    const mode = interaction.options.getString('action', true);
+    const enabled = store.developerViewers.includes(interaction.user.id);
+    let customId = AUDIT_DEVELOPER_CUSTOM_ID;
+    let label = 'Open Developer View Options';
+    let description = 'Developer View status: **' + (enabled ? 'enabled' : 'disabled') + '**.';
+    if (mode === 'enable') {
+      customId = AUDIT_DEVELOPER_ON_CUSTOM_ID;
+      label = 'Enable Developer View';
+      description = 'Enable your private developer audit view. The button handler checks role permissions and prepares the private developer channel.';
+    } else if (mode === 'disable') {
+      customId = AUDIT_DEVELOPER_OFF_CUSTOM_ID;
+      label = 'Disable Developer View';
+      description = 'Disable your private developer audit view.';
+    } else if (mode === 'page') {
+      if (!enabled) {
+        await interaction.editReply('Enable Developer View first, then request a page.');
+        return;
+      }
+      const requestedPage = interaction.options.getInteger('page') ?? 0;
+      customId = AUDIT_DEVELOPER_PAGE_PREFIX + requestedPage;
+      label = 'Open Developer Page ' + requestedPage;
+      description = 'Open the requested page from your private developer audit stream.';
+    }
+    await interaction.editReply({
+      content: description,
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(customId).setLabel(label).setEmoji('🛠️').setStyle(mode === 'disable' ? ButtonStyle.Danger : ButtonStyle.Primary),
+      )],
+    });
+    return;
+  }
+
+  if (action === 'panel') {
+    const mode = interaction.options.getString('action', true);
+    if (mode === 'refresh') {
+      await refreshAuditPanel(guild);
+      await interaction.editReply('✅ The SupportForge audit control panel was refreshed.');
+      return;
+    }
+    const customId = mode === 'move' ? AUDIT_COLLAPSE_CUSTOM_ID : AUDIT_RESTORE_CUSTOM_ID;
+    await interaction.editReply({
+      content: mode === 'move'
+        ? 'Move the persistent audit control panel to the bottom of audit-log-general.'
+        : 'Restore the persistent audit control panel at the current end of audit-log-general.',
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(customId).setLabel(mode === 'move' ? 'Move Audit Panel Down' : 'Restore Audit Panel')
+          .setEmoji(mode === 'move' ? '⬇️' : '↩️').setStyle(ButtonStyle.Primary),
+      )],
+    });
+    return;
+  }
+
+  await interaction.editReply('Unsupported audit command.');
 }
 
 export async function resetAuditLogState(): Promise<void> {
