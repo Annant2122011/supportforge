@@ -1483,7 +1483,7 @@ export async function handleSettingsInteraction(
     return await handleTicketFormSettingsInteraction(interaction);
   }
 
-  if (interaction.isStringSelectMenu() && interaction.customId.startsWith('sf:settings:reports:subcategory:pick:'));
+  if (interaction.isStringSelectMenu() && interaction.customId.startsWith('sf:settings:reports:subcategory:pick:')) {
     const categoryId = interaction.customId.slice('sf:settings:reports:subcategory:pick:'.length);
     const subcategoryId = interaction.values[0];
     const settings = await getAdvancedSettings(guild.id);
