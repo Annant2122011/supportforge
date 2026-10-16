@@ -964,9 +964,12 @@ async function recoverTicketRowFromDiscordTopic(
     const guildChannels = await guild.channels.fetch().catch(() => null);
     channel = guildChannels
       ? [...guildChannels.values()].find((candidate) => {
-          if (candidate.type !== ChannelType.GuildText) return false;
-          const topic = candidate.topic;
-          return typeof topic === 'string' &&
+          if (!candidate) return false;
+          const topic: unknown = 'topic' in candidate
+            ? (candidate as { topic?: unknown }).topic
+            : undefined;
+          return candidate.type === ChannelType.GuildText &&
+            typeof topic === 'string' &&
             topic.startsWith('supportforge:ticket') &&
             parseTicketTopic(topic).form_submission === submission.interaction_id;
         }) ?? null
