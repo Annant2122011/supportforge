@@ -1117,6 +1117,177 @@ export async function getTicketFormForSubmission(args: {
   return mapVersion(row, Number(row.version), row.schema, row.snapshot);
 }
 
+export interface TicketFormWizardSession {
+  sessionId: string;
+  guildId: string;
+  submittedBy: string;
+  formId: string;
+  formVersion: number;
+  tagId: string;
+  formSnapshot: unknown;
+  answers: Record<string, unknown>;
+  subject: string | null;
+  description: string | null;
+  nextStep: number;
+  status: 'collecting' | 'submitting' | 'completed' | 'expired';
+  expiresAt: string;
+}
+
+interface TicketFormWizardRow extends QueryResultRow {
+  session_id: string;
+  guild_id: string;
+  submitted_by: string;
+  form_id: string;
+  form_version: number;
+  tag_id: string;
+  form_snapshot: unknown;
+  answers: unknown;
+  subject: string | null;
+  description: string | null;
+  next_step: number;
+  status: TicketFormWizardSession['status'];
+  expires_at: Date | string;
+}
+
+function rowToWizard(row: TicketFormWizardRow): TicketFormWizardSession {
+  let answers = row.answers;
+  if (typeof answers === 'string') {
+    try { answers = JSON.parse(answers) as unknown; } catch { throw new Error('The saved form session answers are malformed.'); }
+  }
+  if (!answers || typeof answers !== 'object' || Array.isArray(answers)) {
+    throw new Error('The saved form session answers are malformed.');
+  }
+  return {
+    sessionId: row.session_id,
+    guildId: row.guild_id,
+    submittedBy: row.submitted_by,
+    formId: row.form_id,
+    formVersion: Number(row.form_version),
+    tagId: row.tag_id,
+    formSnapshot: row.form_snapshot,
+    answers: answers as Record<string, unknown>,
+    subject: row.subject,
+    description: row.description,
+    nextStep: Number(row.next_step),
+    status: row.status,
+    expiresAt: iso(row.expires_at),
+  };
+}
+
+export async function getTicketFormWizardSession(args: {
+  sessionId: string;
+  guildId: string;
+  submittedBy: string;
+  formId: string;
+  formVersion: number;
+  tagId: string;
+  step: number;
+}): Promise<TicketFormWizardSession> {
+  await initializePersistence();
+  const result = await getPostgresPool().query<TicketFormWizardRow>(
+    'SELECT session_id,guild_id,submitted_by,form_id,form_version,tag_id,form_snapshot,answers,subject,description,next_step,status,expires_at ' +
+    'FROM ticket_form_sessions WHERE session_id=$1 AND guild_id=$2 AND submitted_by=$3 AND form_id=$4 AND form_version=$5 AND tag_id=$6 ' +
+    'AND status=\'collecting\' AND expires_at>NOW() AND next_step=$7',
+    [args.sessionId, args.guildId, args.submittedBy, args.formId, args.formVersion, args.tagId, args.step],
+  );
+  const row = result.rows[0];
+  if (!row) {
+    throw new Error('This form session expired or was already used. Reopen the support panel to start again.');
+  }
+  return rowToWizard(row);
+}
+
+/** Save each wizard step with a transaction and an optimistic sequence check. */
+export async function saveTicketFormWizardStep(args: {
+  sessionId: string;
+  guildId: string;
+  submittedBy: string;
+  form: TicketFormVersion;
+  tagId: string;
+  step: number;
+  nextStep: number;
+  answerDelta: Record<string, unknown>;
+  subject?: string;
+  description?: string;
+  expiresAt: number;
+  finalStep: boolean;
+}): Promise<TicketFormWizardSession> {
+  return transaction(async (client) => {
+    const selected = await client.query<TicketFormWizardRow>(
+      'SELECT session_id,guild_id,submitted_by,form_id,form_version,tag_id,form_snapshot,answers,subject,description,next_step,status,expires_at ' +
+      'FROM ticket_form_sessions WHERE session_id=$1 FOR UPDATE',
+      [args.sessionId],
+    );
+    const existing = selected.rows[0];
+    let answers: Record<string, unknown>;
+    let subject: string | null;
+    let description: string | null;
+
+    if (!existing) {
+      if (args.step !== 1) throw new Error('This form session was not started. Reopen the support panel and start again.');
+      answers = {};
+      subject = null;
+      description = null;
+    } else {
+      const session = rowToWizard(existing);
+      if (session.guildId !== args.guildId || session.submittedBy !== args.submittedBy ||
+          session.formId !== args.form.id || session.formVersion !== args.form.version ||
+          session.tagId !== args.tagId) {
+        throw new Error('This form session belongs to a different request and cannot be reused.');
+      }
+      if (session.status !== 'collecting' || new Date(session.expiresAt).getTime() <= Date.now()) {
+        throw new Error('This form session expired or has already been submitted.');
+      }
+      if (session.nextStep !== args.step) {
+        throw new Error('This form step was already processed or is out of order. Reopen the support panel to start again.');
+      }
+      if (args.step === 1) throw new Error('This form session was already started. Reopen the support panel to start again.');
+      answers = session.answers;
+      subject = session.subject;
+      description = session.description;
+    }
+
+    answers = { ...answers, ...args.answerDelta };
+    if (args.step === 1) {
+      subject = args.subject ?? null;
+      description = args.description ?? null;
+    }
+
+    if (args.step === 1 && (!subject?.trim() || !description?.trim())) {
+      throw new Error('Subject and description are required before continuing.');
+    }
+
+    const status: TicketFormWizardSession['status'] = args.finalStep ? 'submitting' : 'collecting';
+    const expiresAt = new Date(args.expiresAt).toISOString();
+    if (!existing) {
+      const inserted = await client.query<TicketFormWizardRow>(
+        'INSERT INTO ticket_form_sessions (session_id,guild_id,submitted_by,form_id,form_version,tag_id,form_snapshot,answers,subject,description,next_step,status,expires_at) ' +
+        'VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13) ' +
+        'RETURNING session_id,guild_id,submitted_by,form_id,form_version,tag_id,form_snapshot,answers,subject,description,next_step,status,expires_at',
+        [args.sessionId,args.guildId,args.submittedBy,args.form.id,args.form.version,args.tagId,JSON.stringify(args.form.snapshot),JSON.stringify(answers),subject,description,args.nextStep,status,expiresAt],
+      );
+      return rowToWizard(inserted.rows[0]);
+    }
+
+    const updated = await client.query<TicketFormWizardRow>(
+      'UPDATE ticket_form_sessions SET answers=$2::jsonb,subject=$3,description=$4,next_step=$5,status=$6,updated_at=NOW() ' +
+      'WHERE session_id=$1 AND status=\'collecting\' AND next_step=$7 AND expires_at>NOW() ' +
+      'RETURNING session_id,guild_id,submitted_by,form_id,form_version,tag_id,form_snapshot,answers,subject,description,next_step,status,expires_at',
+      [args.sessionId,JSON.stringify(answers),subject,description,args.nextStep,status,args.step],
+    );
+    if (!updated.rows[0]) throw new Error('This form step was already processed or the form session expired.');
+    return rowToWizard(updated.rows[0]);
+  });
+}
+
+export async function markTicketFormWizardCompleted(sessionId: string): Promise<void> {
+  await initializePersistence();
+  await getPostgresPool().query(
+    'UPDATE ticket_form_sessions SET status=\'completed\',updated_at=NOW() WHERE session_id=$1 AND status=\'submitting\'',
+    [sessionId],
+  );
+}
+
 export async function recordTicketFormSubmissionDraft(args: {
   interactionId: string;
   guildId: string;
