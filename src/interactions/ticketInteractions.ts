@@ -3520,6 +3520,213 @@ async function showTicketCreationModal(
   }
 }
 
+function readTicketFormStepAnswers(
+  interaction: ModalSubmitInteraction,
+  fields: TicketFormVersion['fields'],
+): Record<string, unknown> {
+  const rawAnswers: Record<string, unknown> = {};
+  for (const field of fields) {
+    const customId = 'form_' + field.id;
+    switch (field.type) {
+      case 'dropdown':
+      case 'multi_select':
+        rawAnswers[field.id] = Array.from(interaction.fields.getStringSelectValues(customId));
+        break;
+      case 'checkbox':
+        rawAnswers[field.id] = Array.from(interaction.fields.getCheckboxGroup(customId));
+        break;
+      case 'discord_user':
+        rawAnswers[field.id] = Array.from(interaction.fields.getSelectedUsers(customId)?.keys() ?? []);
+        break;
+      case 'discord_role':
+        rawAnswers[field.id] = Array.from(interaction.fields.getSelectedRoles(customId)?.keys() ?? []);
+        break;
+      case 'attachment':
+        rawAnswers[field.id] = Array.from(interaction.fields.getUploadedFiles(customId)?.values() ?? []).map((file) => ({
+          id: file.id,
+          url: file.url,
+          name: file.name,
+          size: file.size,
+          contentType: file.contentType,
+        }));
+        break;
+      default:
+        rawAnswers[field.id] = interaction.fields.getTextInputValue(customId);
+        break;
+    }
+  }
+  return validateTicketFormAnswers(fields, rawAnswers);
+}
+
+async function validateTicketFormPrincipals(
+  interaction: ModalSubmitInteraction,
+  form: TicketFormVersion,
+  answers: Record<string, unknown>,
+  fields: TicketFormVersion['fields'],
+): Promise<void> {
+  if (!interaction.guild) throw new Error('This form must be submitted inside a server.');
+  for (const field of fields) {
+    const answer = answers[field.id];
+    if (typeof answer !== 'string') continue;
+    if (field.type === 'discord_user') {
+      const member = await interaction.guild.members.fetch(answer).catch(() => null);
+      if (!member) throw new Error('"' + field.label + '" must reference a member of this server.');
+    } else if (field.type === 'discord_role') {
+      const role = await interaction.guild.roles.fetch(answer).catch(() => null);
+      if (!role || role.managed) throw new Error('"' + field.label + '" must reference a normal role in this server.');
+    }
+  }
+}
+
+async function handleTicketFormWizardModal(interaction: ModalSubmitInteraction): Promise<void> {
+  if (!interaction.guild) {
+    await replyError(interaction, '❌ This action can only be used inside a server.');
+    return;
+  }
+
+  const route = parseTicketFormModalCustomId(interaction.customId);
+  if (!route) {
+    await replyError(interaction, '❌ This ticket form link is malformed. Reopen the support panel.');
+    return;
+  }
+  if (route.expiresAt <= Date.now()) {
+    await replyError(interaction, '⌛ This form expired. Reopen the support panel and submit the current form.');
+    return;
+  }
+
+  try {
+    const cached = getCachedActiveTicketFormById(
+      interaction.guild.id,
+      route.formId,
+      route.version,
+      route.tagId,
+    );
+    if (!cached.ready) {
+      await replyError(interaction, '⌛ Ticket forms are still loading. Please reopen the support panel in a moment.');
+      return;
+    }
+    if (!cached.form) {
+      await replyError(interaction, 'This form changed or was disabled. Reopen the support panel and start again.');
+      return;
+    }
+
+    let priorSession: Awaited<ReturnType<typeof getTicketFormWizardSession>> | undefined;
+    if (route.step > 1) {
+      priorSession = await getTicketFormWizardSession({
+        sessionId: route.sessionId,
+        guildId: interaction.guild.id,
+        submittedBy: interaction.user.id,
+        formId: route.formId,
+        formVersion: route.version,
+        tagId: route.tagId,
+        step: route.step,
+      });
+    }
+
+    // Use the last known-good schema for component extraction, then compare
+    // it to the current DB version before advancing or creating a ticket.
+    const cachedForm = cached.form;
+    const visibleFields = getVisibleTicketFormFields(
+      cachedForm.fields,
+      route.step,
+      priorSession?.answers ?? {},
+    );
+    if (visibleFields.length === 0) {
+      await replyError(interaction, 'This form step no longer has visible questions. Reopen the support panel and start again.');
+      return;
+    }
+
+    let subject = priorSession?.subject ?? null;
+    let description = priorSession?.description ?? null;
+    if (route.step === 1) {
+      subject = interaction.fields.getTextInputValue('subject').trim();
+      description = interaction.fields.getTextInputValue('description').trim();
+      if (!subject || subject.length > 100 || !description || description.length > 4000) {
+        await replyError(interaction, '❌ Enter a subject of 1–100 characters and a description of 1–4,000 characters.');
+        return;
+      }
+    }
+
+    const stepAnswers = readTicketFormStepAnswers(interaction, visibleFields);
+    await validateTicketFormPrincipals(interaction, cachedForm, stepAnswers, visibleFields);
+    const answersForVisibility = { ...(priorSession?.answers ?? {}), ...stepAnswers };
+
+    const maxStep = getTicketFormStepCount(cachedForm.fields);
+    let nextStep: number | undefined;
+    for (let candidateStep = route.step + 1; candidateStep <= maxStep; candidateStep += 1) {
+      if (getVisibleTicketFormFields(cachedForm.fields, candidateStep, answersForVisibility).length > 0) {
+        nextStep = candidateStep;
+        break;
+      }
+    }
+    const finalStep = nextStep === undefined;
+    if (finalStep && !(await safeDeferReply(interaction))) return;
+
+    const currentForm = await getTicketFormForWizard({
+      guildId: interaction.guild.id,
+      formId: route.formId,
+      version: route.version,
+      tagId: route.tagId,
+    });
+    if (currentForm.departmentId !== cachedForm.departmentId) {
+      await replyError(interaction, 'This form’s routing changed. Reopen the support panel and start again.');
+      return;
+    }
+
+    const session = await saveTicketFormWizardStep({
+      sessionId: route.sessionId,
+      guildId: interaction.guild.id,
+      submittedBy: interaction.user.id,
+      form: currentForm,
+      tagId: route.tagId,
+      step: route.step,
+      nextStep: nextStep ?? maxStep + 1,
+      answerDelta: stepAnswers,
+      ...(route.step === 1 ? { subject: subject ?? '', description: description ?? '' } : {}),
+      expiresAt: route.expiresAt,
+      finalStep,
+    });
+
+    if (!finalStep && nextStep !== undefined) {
+      await interaction.showModal(
+        buildTicketFormModal(
+          currentForm,
+          route.tagId,
+          route.expiresAt,
+          route.sessionId,
+          nextStep,
+          session.answers,
+        ),
+      );
+      return;
+    }
+
+    await createTicket(
+      interaction,
+      currentForm.departmentId,
+      route.tagId,
+      {
+        formId: currentForm.id,
+        version: currentForm.version,
+        expiresAt: route.expiresAt,
+        submissionId: route.sessionId,
+      },
+      {
+        form: currentForm,
+        answers: session.answers,
+        subject: session.subject ?? '',
+        description: session.description ?? '',
+      },
+      true,
+    );
+  } catch (error) {
+    await replyError(
+      interaction,
+      '❌ ' + (error instanceof Error ? error.message : 'The ticket form could not be processed. Please try again.'),
+    );
+  }
+}
+
 function isTicketParticipant(topic: string, userId: string, reporterId?: string): boolean {
   if (!userId || (reporterId && userId === reporterId)) return false;
 
