@@ -76,7 +76,7 @@ import {
 } from '../services/auditLogService';
 import {
   TICKET_FORM_MODAL_TTL_MS,
-  getActiveTicketFormForRouting,
+  getCachedActiveTicketFormForRouting,
   getTicketFormForSubmission,
   validateTicketFormAnswers,
   recordTicketFormSubmissionDraft,
@@ -3102,11 +3102,19 @@ async function showTicketCreationModal(
      * active form version is embedded in the modal ID; submission validates
      * that version again so a stale modal can never silently use edited rules.
      */
-    const form = await getActiveTicketFormForRouting(
+    const cachedForm = getCachedActiveTicketFormForRouting(
       interaction.guild.id,
       departmentId,
       tagId,
     );
+    if (!cachedForm.ready) {
+      await replyError(
+        interaction,
+        '⌛ Ticket forms are still loading. Please try again in a moment.',
+      );
+      return;
+    }
+    const form = cachedForm.form;
     const expiresAt = Date.now() + TICKET_FORM_MODAL_TTL_MS;
     const customId = form
       ? `ticket:modal:${departmentId}:${tagId}:${form.id}:${form.version}:${expiresAt}`
