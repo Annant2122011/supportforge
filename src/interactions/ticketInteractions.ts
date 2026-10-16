@@ -1867,7 +1867,6 @@ async function transition(
   ticketActionLocks.add(
     lockKey,
   );
-  let closeSyncRunningInBackground = false;
 
   try {
     /*
@@ -2569,6 +2568,7 @@ async function closeTicket(
   ticketActionLocks.add(
     lockKey,
   );
+  let closeSyncRunningInBackground = false;
 
   try {
     /*
