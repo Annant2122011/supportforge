@@ -183,6 +183,82 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       );
     },
   },
+  {
+    id: 6,
+    name: 'create_versioned_ticket_forms_and_creation_leases',
+    up: async (db) => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS ticket_forms (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          name TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 80),
+          department_id TEXT NOT NULL,
+          tag_id TEXT,
+          current_version INTEGER NOT NULL CHECK (current_version >= 1),
+          active BOOLEAN NOT NULL DEFAULT FALSE,
+          created_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ticket_forms_guild_department
+          ON ticket_forms (guild_id, department_id, active);
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_ticket_forms_active_mapping
+          ON ticket_forms (guild_id, department_id, COALESCE(tag_id, ''))
+          WHERE active = TRUE;
+
+        CREATE TABLE IF NOT EXISTS ticket_form_versions (
+          form_id TEXT NOT NULL REFERENCES ticket_forms(id) ON DELETE RESTRICT,
+          version INTEGER NOT NULL CHECK (version >= 1),
+          schema JSONB NOT NULL,
+          snapshot JSONB NOT NULL,
+          created_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (form_id, version)
+        );
+
+        CREATE TABLE IF NOT EXISTS ticket_form_submissions (
+          interaction_id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          form_id TEXT NOT NULL,
+          form_version INTEGER NOT NULL,
+          ticket_id TEXT UNIQUE REFERENCES tickets(id) ON DELETE SET NULL,
+          channel_id TEXT,
+          submitted_by TEXT NOT NULL,
+          form_snapshot JSONB NOT NULL,
+          answers JSONB NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending', 'attached', 'failed')),
+          submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          attached_at TIMESTAMPTZ,
+          last_error TEXT,
+          FOREIGN KEY (form_id, form_version)
+            REFERENCES ticket_form_versions(form_id, version)
+            ON DELETE RESTRICT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ticket_form_submissions_recovery
+          ON ticket_form_submissions (status, submitted_at)
+          WHERE status IN ('pending', 'failed');
+
+        CREATE INDEX IF NOT EXISTS idx_ticket_form_submissions_guild
+          ON ticket_form_submissions (guild_id, submitted_at);
+
+        CREATE TABLE IF NOT EXISTS ticket_creation_locks (
+          guild_id TEXT NOT NULL,
+          owner_id TEXT NOT NULL,
+          department_id TEXT NOT NULL,
+          token TEXT NOT NULL UNIQUE,
+          expires_at TIMESTAMPTZ NOT NULL,
+          PRIMARY KEY (guild_id, owner_id, department_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ticket_creation_locks_expiry
+          ON ticket_creation_locks (expires_at);
+      `);
+    },
+  },
 ];
 
 export async function runPostgresMigrations(
