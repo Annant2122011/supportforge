@@ -578,7 +578,111 @@ async function transaction<T>(run: (client: PoolClient) => Promise<T>): Promise<
   }
 }
 
+
 const FORM_COLUMNS = 'id, guild_id, name, department_id, tag_id, current_version, active, created_by, created_at, updated_at';
+
+const activeTicketFormCache = new Map<string, TicketFormVersion>();
+let activeTicketFormCacheReady = false;
+let cacheRefreshTimer: ReturnType<typeof setInterval> | undefined;
+let cacheRefreshRunning = false;
+
+function formCacheKey(guildId: string, departmentId: string, tagId: string | null): string {
+  return guildId + ':' + departmentId + ':' + (tagId ?? '*');
+}
+
+export function getCachedActiveTicketFormForRouting(
+  guildId: string,
+  departmentId: string,
+  tagId: string,
+): { ready: boolean; form?: TicketFormVersion } {
+  if (!activeTicketFormCacheReady) return { ready: false };
+  const exact = activeTicketFormCache.get(formCacheKey(guildId, departmentId, tagId));
+  const fallback = activeTicketFormCache.get(formCacheKey(guildId, departmentId, null));
+  const selected = exact ?? fallback;
+  return selected ? {
+    ready: true,
+    form: {
+      ...selected,
+      fields: selected.fields.map((field) => ({ ...field, ...(field.choices ? { choices: [...field.choices] } : {}) })),
+      snapshot: {
+        ...selected.snapshot,
+        fields: selected.snapshot.fields.map((field) => ({ ...field, ...(field.choices ? { choices: [...field.choices] } : {}) })),
+      },
+    },
+  } : { ready: true };
+}
+
+/**
+ * Refresh the active routing cache away from Discord's 3-second component
+ * acknowledgement window. Failed reads preserve the last known-good cache.
+ */
+async function refreshActiveTicketFormCacheForGuild(guildId: string): Promise<void> {
+  try {
+    await refreshActiveTicketFormCache(guildId);
+  } catch (error) {
+    // The durable change has already committed. Keep the previous cache and
+    // let the periodic refresh retry instead of reporting a false rollback.
+    console.warn('Ticket form routing cache refresh for guild ' + guildId + ' is pending:', error instanceof Error ? error.message : 'database error');
+  }
+}
+
+/**
+ * Refresh the active routing cache away from Discord's 3-second component
+ * acknowledgement window. Failed reads preserve the last known-good cache.
+ */
+export async function refreshActiveTicketFormCache(guildId?: string): Promise<void> {
+  await initializePersistence();
+  const result = guildId
+    ? await getPostgresPool().query<TicketFormRow>(
+        'SELECT f.id, f.guild_id, f.name, f.department_id, f.tag_id, f.current_version, f.active, f.created_by, f.created_at, f.updated_at, v.version, v.schema, v.snapshot ' +
+        'FROM ticket_forms f JOIN ticket_form_versions v ON v.form_id=f.id AND v.version=f.current_version ' +
+        'WHERE f.active=TRUE AND f.guild_id=$1',
+        [guildId],
+      )
+    : await getPostgresPool().query<TicketFormRow>(
+        'SELECT f.id, f.guild_id, f.name, f.department_id, f.tag_id, f.current_version, f.active, f.created_by, f.created_at, f.updated_at, v.version, v.schema, v.snapshot ' +
+        'FROM ticket_forms f JOIN ticket_form_versions v ON v.form_id=f.id AND v.version=f.current_version ' +
+        'WHERE f.active=TRUE',
+      );
+
+  const replacement = new Map<string, TicketFormVersion>();
+  if (guildId) {
+    for (const [key, value] of activeTicketFormCache) {
+      if (!key.startsWith(guildId + ':')) replacement.set(key, value);
+    }
+  }
+
+  for (const row of result.rows) {
+    try {
+      const form = mapVersion(row, Number(row.version), row.schema, row.snapshot);
+      replacement.set(formCacheKey(form.guildId, form.departmentId, form.tagId), form);
+    } catch (error) {
+      console.warn('Skipped invalid active ticket form ' + row.id + ' while refreshing the form cache:', error instanceof Error ? error.message : 'unknown schema error');
+    }
+  }
+
+  activeTicketFormCache.clear();
+  for (const [key, form] of replacement) activeTicketFormCache.set(key, form);
+  activeTicketFormCacheReady = true;
+}
+
+export function startTicketFormCacheRefresh(intervalMs = 30_000): () => void {
+  if (cacheRefreshTimer) return () => undefined;
+  const tick = (): void => {
+    if (cacheRefreshRunning) return;
+    cacheRefreshRunning = true;
+    void refreshActiveTicketFormCache()
+      .catch((error) => console.warn('Active ticket form cache refresh failed; retaining the last known-good cache:', error instanceof Error ? error.message : 'database error'))
+      .finally(() => { cacheRefreshRunning = false; });
+  };
+  tick();
+  cacheRefreshTimer = setInterval(tick, Math.max(10_000, intervalMs));
+  return () => {
+    if (cacheRefreshTimer) clearInterval(cacheRefreshTimer);
+    cacheRefreshTimer = undefined;
+  };
+}
+
 
 export async function createTicketForm(args: {
   guildId: string;
@@ -655,7 +759,9 @@ export async function updateTicketFormFields(args: {
       [row.id, version, args.guildId],
     );
     await client.query('COMMIT');
-    return mapVersion({ ...row, current_version: version, updated_at: new Date() }, version, { fields }, snapshot);
+    const updated = mapVersion({ ...row, current_version: version, updated_at: new Date() }, version, { fields }, snapshot);
+    await refreshActiveTicketFormCacheForGuild(args.guildId);
+    return updated;
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);
     throw error;
@@ -676,6 +782,7 @@ export async function setTicketFormActive(args: {
       [args.guildId, args.formId, args.active],
     );
     if (!result.rows[0]) throw new Error('Ticket form not found in this server.');
+    await refreshActiveTicketFormCacheForGuild(args.guildId);
     return rowToForm(result.rows[0]);
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && (error as { code?: string }).code === '23505') {
