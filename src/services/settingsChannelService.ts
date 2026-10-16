@@ -58,6 +58,9 @@ export function buildSettingsDashboardComponents(): ActionRowBuilder<ButtonBuild
       settingsButton('sf:settings:refresh', 'Refresh', ButtonStyle.Secondary, '🔄'),
       settingsButton('sf:settings:reset', 'Delete Everything', ButtonStyle.Danger, '🚨'),
     ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      settingsButton('sf:settings:premium', 'Premium & Demo', ButtonStyle.Secondary, '💎'),
+    ),
   ];
 }
 
