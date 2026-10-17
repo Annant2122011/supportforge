@@ -1771,25 +1771,40 @@ export async function execute(
       const departments = Object.values(config.departments).sort((a, b) =>
         a.name.localeCompare(b.name),
       );
-      const pageSize = 12;
-      const pageCount = Math.max(1, Math.ceil(departments.length / pageSize));
+      const lines = departments.flatMap((department) => {
+        const header = '• **' + department.name + '** · ID: ' + department.id +
+          ' · staff: ' + (department.staffRoleId ? '<@&' + department.staffRoleId + '>' : 'Administrators only');
+        const tags = Object.values(department.tags ?? {}).map((tag) => tag.name);
+        const tagLines: string[] = [];
+        for (let index = 0; index < tags.length; index += 12) {
+          tagLines.push('  Tags: ' + tags.slice(index, index + 12).join(', '));
+        }
+        return [header, ...(tagLines.length ? tagLines : ['  Tags: none'])];
+      });
+      const pages: string[] = [];
+      let currentPage = '';
+      for (const line of lines) {
+        const candidate = currentPage ? currentPage + '\n' + line : line;
+        if (currentPage && candidate.length > 1650) {
+          pages.push(currentPage);
+          currentPage = line;
+        } else {
+          currentPage = candidate;
+        }
+      }
+      if (currentPage) pages.push(currentPage);
+      if (!pages.length) pages.push('No departments configured.');
       const requestedPage = interaction.options.getInteger('page') ?? 1;
-      if (requestedPage > pageCount) {
+      if (requestedPage > pages.length) {
         await interaction.editReply(
-          '❌ Page ' + requestedPage + ' does not exist. This server has ' + pageCount +
+          '❌ Page ' + requestedPage + ' does not exist. This server has ' + pages.length +
           ' department page(s). Use /supportforge category list page:1 to start.',
         );
         return;
       }
-      const pageItems = departments.slice((requestedPage - 1) * pageSize, requestedPage * pageSize);
-      const lines = pageItems.map((department) =>
-        '• **' + department.name + '** · ID: ' + department.id +
-        ' · staff: ' + (department.staffRoleId ? '<@&' + department.staffRoleId + '>' : 'Administrators only') +
-        ' · tags: ' + Object.values(department.tags ?? {}).map((tag) => tag.name).join(', '),
-      );
       await interaction.editReply(
-        '**SupportForge Departments · Page ' + requestedPage + ' / ' + pageCount + '**\n\n' +
-        (lines.length ? lines.join('\n') : 'No departments configured.'),
+        '**SupportForge Departments · Page ' + requestedPage + ' / ' + pages.length + '**\n\n' +
+        pages[requestedPage - 1],
       );
       return;
     }
