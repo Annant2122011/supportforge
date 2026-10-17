@@ -4261,10 +4261,23 @@ export async function executeTicketReportCommand(interaction: ChatInputCommandIn
     return;
   }
   const target = interaction.options.getUser('target', true);
-  const categoryId = interaction.options.getString('category-id', true).trim();
-  const subcategoryId = interaction.options.getString('subcategory-id', true).trim();
+  const categoryInput = interaction.options.getString('category-id', true).trim();
+  const subcategoryInput = interaction.options.getString('subcategory-id', true).trim();
   const description = interaction.options.getString('description') ?? '';
   const flagged = interaction.options.getBoolean('flag', true);
+  const reportSettings = await getAdvancedSettings(interaction.guild.id);
+  const selectedCategory = Object.values(reportSettings.reports.categories).find((item) =>
+    item.id.toLowerCase() === categoryInput.toLowerCase() || item.name.toLowerCase() === categoryInput.toLowerCase());
+  const selectedSubcategory = selectedCategory
+    ? Object.values(selectedCategory.subcategories).find((item) =>
+        item.id.toLowerCase() === subcategoryInput.toLowerCase() || item.name.toLowerCase() === subcategoryInput.toLowerCase())
+    : undefined;
+  if (!selectedCategory || !selectedSubcategory) {
+    await replyError(interaction, 'Report category/subcategory not found. Enter the configured name or ID shown in Settings → Reports.');
+    return;
+  }
+  const categoryId = selectedCategory.id;
+  const subcategoryId = selectedSubcategory.id;
   const participants = new Set([
     getField(topic, 'owner'),
     ...(getField(topic, 'users') ?? '').split(',').filter(Boolean),
