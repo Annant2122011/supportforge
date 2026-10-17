@@ -4238,6 +4238,49 @@ async function renderDepartmentSelector(interaction: ButtonInteraction | StringS
   if (interaction.replied || interaction.deferred) await interaction.editReply(payload); else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
 }
 
+export async function executeTicketRoutingCommand(
+  interaction: ChatInputCommandInteraction,
+  mode: 'department' | 'tag',
+): Promise<void> {
+  if (!(await safeDeferReply(interaction))) return;
+  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
+    await replyError(interaction, 'This command must be used inside a SupportForge ticket channel.');
+    return;
+  }
+  const channel = interaction.channel as TextChannel;
+  const topic = await getEffectiveTicketTopic(channel, channel.topic ?? '');
+  const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
+  if (!isTicketTopic(topic) || !isActiveTicketStatus(status)) {
+    await replyError(interaction, 'Only active SupportForge tickets can be rerouted.');
+    return;
+  }
+  const staff = getStaffContext(interaction, topic);
+  if (!staff.authorized) {
+    await replyError(interaction, 'Only configured staff or administrators can change ticket routing.');
+    return;
+  }
+  const config = await getGuildConfig(interaction.guild.id);
+  const requestedDepartmentId = interaction.options.getString('department-id');
+  const requestedTagId = interaction.options.getString('tag-id');
+  const currentDepartmentId = getField(topic, 'department');
+  const departmentId = mode === 'department' ? requestedDepartmentId : currentDepartmentId;
+  const department = departmentId ? config.departments[departmentId] : undefined;
+  if (!department) {
+    await replyError(interaction, mode === 'department'
+      ? 'Department ID not found. Use /supportforge form list to view department IDs.'
+      : 'The current ticket department could not be resolved.');
+    return;
+  }
+  const tagId = mode === 'tag'
+    ? requestedTagId
+    : requestedTagId ?? (department.tags[getField(topic, 'tags') ?? ''] ? getField(topic, 'tags')! : Object.keys(department.tags)[0]);
+  if (!tagId || !department.tags[tagId]) {
+    await replyError(interaction, 'Tag ID is not valid for that department. Use /supportforge form list to view department and tag IDs.');
+    return;
+  }
+  await applyTicketRouting(interaction, department, tagId, status, topic);
+}
+
 async function changeTicketDepartment(interaction: StringSelectMenuInteraction): Promise<void> {
   /*
    * Department changes can trigger category creation, permission mutations
@@ -4292,7 +4335,7 @@ async function renderRoutingTagSelector(interaction: ButtonInteraction | StringS
   if (interaction.replied || interaction.deferred) await interaction.editReply(payload); else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
 }
 
-async function applyTicketRouting(interaction: StringSelectMenuInteraction, department: DepartmentConfig, tagId: string, status: TicketStatus, topic: string): Promise<void> {
+async function applyTicketRouting(interaction: StringSelectMenuInteraction | ChatInputCommandInteraction, department: DepartmentConfig, tagId: string, status: TicketStatus, topic: string): Promise<void> {
   const channel = interaction.channel as TextChannel;
   const config = await getGuildConfig(interaction.guild!.id);
   const oldDepartmentId = getField(topic, 'department');
