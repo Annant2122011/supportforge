@@ -3260,11 +3260,6 @@ export async function handleAuditSlashCommand(
       await interaction.editReply('✅ The SupportForge audit control panel was refreshed.');
       return;
     }
-    if (mode === 'refresh') {
-      await refreshAuditPanel(guild);
-      await interaction.editReply('✅ The SupportForge audit control panel was refreshed.');
-      return;
-    }
     await executeAuditPanelCommand(guild, mode);
     await interaction.editReply(mode === 'move'
       ? '✅ The audit control panel was moved to the bottom of audit-log-general.'
