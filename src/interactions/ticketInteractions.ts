@@ -1928,7 +1928,7 @@ async function transition(
     }
 
     if (
-      !(newStatus === 'claimed' && interaction.customId === 'ticket:claim' && oldStatus === 'claimed')
+      !(newStatus === 'claimed' && 'customId' in interaction && interaction.customId === 'ticket:claim' && oldStatus === 'claimed')
     ) {
       assertTicketStatusTransition(oldStatus, newStatus);
     }
