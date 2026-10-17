@@ -434,7 +434,10 @@ export async function handleSettingsSlashCommand(
       const savedId = settings.priorityRoles[priority];
       const existing = savedId ? guild.roles.cache.get(savedId) : undefined;
       if (mode === 'create') {
-        if (existing) throw new Error('A SupportForge-managed role is already configured: ' + existing.name + '.');
+        if (existing) {
+          await interaction.editReply('The ' + priority + ' priority role already exists: ' + existing.toString());
+          return;
+        }
         const bot = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
         if (!bot?.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('SupportForge needs Manage Roles to create priority roles.');
         const roleMeta: Record<TicketPriority, { label: string; color: number }> = {
@@ -457,13 +460,23 @@ export async function handleSettingsSlashCommand(
         audit('PRIORITY_ROLE_CREATED', 'Created ' + role.name + ' for ' + priority + ' priority.');
         await interaction.editReply('Created ' + role.toString() + ' for **' + priority + '** priority.');
       } else if (mode === 'delete') {
-        if (!savedId) throw new Error('No SupportForge-managed role is configured for that priority.');
-        if (existing) await existing.delete('SupportForge priority role removed through slash command');
+        if (!existing) {
+          await updateAdvancedSettings(guild.id, (current) => { delete current.priorityRoles[priority]; });
+          await refreshSettingsChannel(guild);
+          audit('PRIORITY_ROLE_CLEANED', 'Cleared stale or missing ' + priority + ' priority role configuration.');
+          await interaction.editReply('No ' + priority + ' priority role exists. Stale configuration was cleared.');
+          return;
+        }
+        const bot = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
+        if (!existing.editable || existing.managed || !bot?.permissions.has(PermissionFlagsBits.ManageRoles)) {
+          throw new Error('Discord will not let SupportForge delete that role. Move the bot role above it and ensure Manage Roles is granted.');
+        }
+        await existing.delete('SupportForge priority role removed through slash command');
         await updateAdvancedSettings(guild.id, (current) => { delete current.priorityRoles[priority]; });
         await enforcePriorityRoleHierarchy(guild);
         await refreshSettingsChannel(guild);
-        audit('PRIORITY_ROLE_DELETED', 'Cleared the managed ' + priority + ' priority role.');
-        await interaction.editReply('Cleared the managed role for **' + priority + '** priority.');
+        audit('PRIORITY_ROLE_DELETED', 'Deleted ' + existing.name + ' for ' + priority + ' priority.');
+        await interaction.editReply('Deleted the ' + priority + ' priority role.');
       } else {
         throw new Error('Unsupported priority-role action.');
       }
