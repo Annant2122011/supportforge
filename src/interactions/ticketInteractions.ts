@@ -19,6 +19,7 @@ import {
   TextInputBuilder,
   TextInputStyle,
   type ButtonInteraction,
+  type ChatInputCommandInteraction,
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
   type TextChannel,
@@ -358,6 +359,7 @@ function clearRuntimeTicketState(
 function isAdmin(
   interaction:
     | ButtonInteraction
+    | ChatInputCommandInteraction
     | StringSelectMenuInteraction
     | ModalSubmitInteraction,
 ): boolean {
@@ -372,7 +374,7 @@ function isAdmin(
 }
 
 function interactionActor(
-  interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
+  interaction: ButtonInteraction | ChatInputCommandInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
 ): {
   id: string;
   attribution: 'actorKnown';
@@ -1827,7 +1829,7 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
 /* -------------------------------------------------------------------------- */
 
 async function transition(
-  interaction: ButtonInteraction,
+  interaction: ButtonInteraction | ChatInputCommandInteraction,
   newStatus: TicketStatus,
 ): Promise<void> {
   if (!(await safeDeferReply(interaction))) {
@@ -2529,7 +2531,7 @@ async function transition(
 /* -------------------------------------------------------------------------- */
 
 async function closeTicket(
-  interaction: ButtonInteraction,
+  interaction: ButtonInteraction | ChatInputCommandInteraction,
 ): Promise<void> {
   if (!(await safeDeferReply(interaction))) {
     return;
@@ -5665,6 +5667,19 @@ function capitalize(
 /* -------------------------------------------------------------------------- */
 /* Main interaction router                                                    */
 /* -------------------------------------------------------------------------- */
+
+export async function executeTicketLifecycleCommand(
+  interaction: ChatInputCommandInteraction,
+  action: 'close' | 'reopen',
+): Promise<void> {
+  // Slash commands execute the lifecycle transition directly. They must not
+  // depend on a second interaction with a panel button to finish the action.
+  if (action === 'close') {
+    await closeTicket(interaction);
+    return;
+  }
+  await transition(interaction, 'reopened');
+}
 
 export async function handleTicketInteraction(
   interaction:
