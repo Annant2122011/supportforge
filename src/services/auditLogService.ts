@@ -3184,39 +3184,28 @@ export async function handleAuditSlashCommand(
   if (action === 'accumulation') {
     const mode = interaction.options.getString('action', true);
     const enabled = await getAuditAccumulation(guild.id);
-    const components = [
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId(enabled ? AUDIT_REVERT_CUSTOM_ID : AUDIT_ACCUMULATE_CONFIRM_CUSTOM_ID)
-          .setLabel(enabled ? 'Review Revert & Clear Raw Audits' : 'Confirm Enable Accumulation')
-          .setStyle(enabled ? ButtonStyle.Danger : ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(AUDIT_ACCUMULATE_CANCEL_CUSTOM_ID).setLabel('Cancel').setStyle(ButtonStyle.Secondary),
-      ),
-    ];
     if (mode === 'status') {
-      await interaction.editReply({
-        content: enabled
-          ? 'Raw audit accumulation is **enabled**. Reverting clears retained individual events but keeps saved summaries.'
-          : 'Raw audit accumulation is **disabled**. Only summaries are retained.',
-        components,
-      });
+      await interaction.editReply(enabled
+        ? 'Raw audit accumulation is **enabled**. Individual events and summaries are retained.'
+        : 'Raw audit accumulation is **disabled**. Individual events are not retained; saved summaries remain.');
       return;
     }
-    if (mode === 'enable' && !enabled) {
-      await interaction.editReply({
-        content: 'Confirm enabling raw audit accumulation. This retains individual events in addition to summaries.',
-        components,
-      });
+    if (mode === 'enable') {
+      if (!enabled) {
+        await setAuditAccumulation(guild.id, true);
+        await refreshAuditPanel(guild);
+      }
+      await interaction.editReply('✅ Raw audit accumulation is now **enabled**.');
       return;
     }
-    if (mode === 'disable' && enabled) {
-      await interaction.editReply({
-        content: 'Review the destructive action before clearing retained individual audit events. Saved summaries remain.',
-        components,
-      });
+    const confirmed = interaction.options.getBoolean('confirm-delete') ?? false;
+    if (!confirmed) {
+      await interaction.editReply('This action clears retained individual audit events while preserving saved summaries. Re-run /supportforge audit accumulation with action disable and confirm-delete true to confirm.');
       return;
     }
-    await interaction.editReply('Audit accumulation is already ' + (enabled ? 'enabled' : 'disabled') + '.');
+    await setAuditAccumulation(guild.id, false);
+    await refreshAuditPanel(guild);
+    await interaction.editReply('✅ Raw audit accumulation is now **disabled**. Retained individual events were cleared; saved summaries remain.');
     return;
   }
 
