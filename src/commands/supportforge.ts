@@ -1340,14 +1340,14 @@ export const data =
           subcommand
             .setName('priority-role')
             .setDescription('Create or delete a SupportForge-managed priority role')
-            .addStringOption((option) => option.setName('priority').setDescription('Priority (required for create/delete)').setRequired(false).addChoices(
-              { name: 'Low', value: 'low' }, { name: 'Normal', value: 'normal' },
-              { name: 'High', value: 'high' }, { name: 'Urgent', value: 'urgent' }, { name: 'Critical', value: 'critical' },
-            ))
             .addStringOption((option) => option.setName('action').setDescription('Role action').setRequired(true).addChoices(
               { name: 'Show current roles', value: 'status' },
               { name: 'Create role', value: 'create' },
               { name: 'Delete managed role', value: 'delete' },
+            ))
+            .addStringOption((option) => option.setName('priority').setDescription('Priority (required for create/delete)').setRequired(false).addChoices(
+              { name: 'Low', value: 'low' }, { name: 'Normal', value: 'normal' },
+              { name: 'High', value: 'high' }, { name: 'Urgent', value: 'urgent' }, { name: 'Critical', value: 'critical' },
             )),
         )
         .addSubcommand((subcommand) =>
