@@ -811,9 +811,8 @@ export const data =
         .addSubcommand((subcommand) =>
           subcommand
             .setName('list')
-            .setDescription(
-              'List configured ticket departments',
-            ),
+            .setDescription('List configured ticket departments')
+            .addIntegerOption((option) => option.setName('page').setDescription('Page number').setRequired(false).setMinValue(1).setMaxValue(999)),
         )
 
         .addSubcommand((subcommand) =>
@@ -1346,8 +1345,16 @@ export const data =
               { name: 'High', value: 'high' }, { name: 'Urgent', value: 'urgent' }, { name: 'Critical', value: 'critical' },
             ))
             .addStringOption((option) => option.setName('action').setDescription('Role action').setRequired(true).addChoices(
-              { name: 'Create role', value: 'create' }, { name: 'Delete managed role', value: 'delete' },
+              { name: 'Show current roles', value: 'status' },
+              { name: 'Create role', value: 'create' },
+              { name: 'Delete managed role', value: 'delete' },
             )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('report-categories')
+            .setDescription('List report categories and inspect their subcategories')
+            .addStringOption((option) => option.setName('category-id').setDescription('Optional category ID to inspect').setRequired(false).setMaxLength(80)),
         )
         .addSubcommand((subcommand) =>
           subcommand
