@@ -52,12 +52,13 @@ import {
 } from '../services/departmentCategoryService';
 
 import { logSettingsEvent } from '../services/auditLogService';
-import { getField, getTicketStatus, isTicketTopic, setField } from '../services/ticketStateService';
+import { getField, getTicketStatus, setField } from '../services/ticketStateService';
 import { migrateDepartmentStaffRole } from '../services/departmentStaffRoleService';
-import { getPersistedTicket, getPersistedTicketStatus, registerTicket } from '../services/ticketPersistenceService';
+import { getPersistedTicket, getPersistedTicketStatus } from '../services/ticketPersistenceService';
 import { performFactoryReset } from '../services/factoryResetService';
 import { addUseCasePreset, USE_CASE_PRESETS } from '../services/useCasePresetService';
 import { enforcePriorityRoleHierarchy } from '../services/priorityRoleService';
+import { recoverMissingTicketRecords } from '../services/ticketRecoveryService';
 import { handleTicketFormSettingsInteraction } from './ticketFormSettingsInteractions';
 import {
   approveRetentionDeletion,
@@ -2598,77 +2599,7 @@ async function normalRepair(guild: Guild): Promise<number> {
   await ensurePanelChannel(guild, supportCategory.id);
   await ensureSettingsChannel(guild, supportCategory.id);
 
-  /*
-   * PostgreSQL is the source of truth when a ticket record exists. If a
-   * partial creation or manual DB repair left a SupportForge channel without
-   * a row, use its validated legacy topic only to reconstruct the missing
-   * record. Never overwrite an existing durable row from a Discord topic.
-   */
-  let recoveredTickets = 0;
-  for (const channel of guild.channels.cache.values()) {
-    if (channel.type !== ChannelType.GuildText || !isTicketTopic(channel.topic ?? '')) continue;
-    const topic = channel.topic ?? '';
-    const persisted = await getPersistedTicket(channel.id);
-    if (persisted) continue;
-
-    const ownerId = getField(topic, 'owner');
-    const departmentId = getField(topic, 'department');
-    const ticketNumber = getField(topic, 'number');
-    if (!ownerId || !departmentId || !ticketNumber || !/^\d{1,12}$/.test(ticketNumber)) {
-      console.warn('Skipping durable ticket recovery for malformed SupportForge topic on channel ' + channel.id + '.');
-      continue;
-    }
-
-    const priorityValue = getField(topic, 'priority');
-    const priority: TicketPriority =
-      priorityValue === 'low' || priorityValue === 'normal' || priorityValue === 'high' ||
-      priorityValue === 'urgent' || priorityValue === 'critical'
-        ? priorityValue
-        : 'normal';
-    const parseIds = (key: string): string[] =>
-      (getField(topic, key) ?? '').split(',').map((value) => value.trim()).filter((value) => /^\d{17,20}$/.test(value));
-    const claimedByIds = parseIds('claimed_by');
-    const participantIds = Array.from(new Set([ownerId, ...parseIds('users'), ...claimedByIds]));
-    const rawCreatedAt = getField(topic, 'opened_at');
-    const parsedCreatedAt = rawCreatedAt ? new Date(rawCreatedAt) : new Date(channel.createdTimestamp);
-    const createdAt = Number.isNaN(parsedCreatedAt.getTime())
-      ? new Date(channel.createdTimestamp).toISOString()
-      : parsedCreatedAt.toISOString();
-    const rawUpdatedAt = getField(topic, 'updated_at');
-    const parsedUpdatedAt = rawUpdatedAt ? new Date(rawUpdatedAt) : parsedCreatedAt;
-    const lastActivityAt = Number.isNaN(parsedUpdatedAt.getTime())
-      ? createdAt
-      : parsedUpdatedAt.toISOString();
-
-    await registerTicket(
-      channel.id,
-      {
-        guildId: guild.id,
-        status: getTicketStatus(topic),
-        ticketNumber,
-        departmentId,
-        tagId: getField(topic, 'tag') ?? getField(topic, 'tags') ?? '',
-        ownerId,
-        priority,
-        createdAt,
-        claimedByIds,
-        participantIds,
-        metadata: {
-          lastActivityAt,
-          recoveredFromChannelTopic: true,
-          panelMessageId: getField(topic, 'message') ?? null,
-          formSubmissionInteractionId: getField(topic, 'form_submission') ?? null,
-        },
-      },
-      {
-        id: 'system',
-        attribution: 'actorUnknown',
-        confidence: 'none',
-      },
-    );
-    recoveredTickets += 1;
-  }
-
+  const recoveredTickets = await recoverMissingTicketRecords(guild);
   await ensureAllDepartmentCategories(guild);
   await syncPanel(guild);
   return recoveredTickets;
