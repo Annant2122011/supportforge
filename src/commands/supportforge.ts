@@ -1740,58 +1740,33 @@ export async function execute(
         flags: MessageFlags.Ephemeral,
       });
 
-      const config =
-        await getGuildConfig(
-          guild.id,
-        );
-
-      const departments =
-        Object.values(
-          config.departments,
-        ).sort((a, b) =>
-          a.name.localeCompare(
-            b.name,
-          ),
-        );
-
-      const lines = departments.length
-        ? departments
-            .map(
-              (department) =>
-                `• **${department.name}** — staff: ${department.staffRoleId ? `<@&${department.staffRoleId}>` : 'Administrators only'}`,
-            )
-            .join('\n')
-        : 'No departments configured.';
-
-      let visible = lines;
-      if (lines.length > 1_700) {
-        const entries: string[] = [];
-        let length = 0;
-
-        for (const department of departments) {
-          const line =
-            `• **${department.name}** — staff: ${department.staffRoleId ? `<@&${department.staffRoleId}>` : 'Administrators only'}`;
-          const nextLength = length + line.length + (entries.length ? 1 : 0);
-          if (nextLength > 1_700) break;
-          entries.push(line);
-          length = nextLength;
-        }
-
-        visible =
-          entries.join('\n') +
-          '\n\n…and ' +
-          Math.max(0, departments.length - entries.length) +
-          ' more department(s).';
-      }
-
-      await interaction.editReply(
-        `📂 **SupportForge departments**\n\n${visible}`,
+      const config = await getGuildConfig(guild.id);
+      const departments = Object.values(config.departments).sort((a, b) =>
+        a.name.localeCompare(b.name),
       );
-
+      const pageSize = 12;
+      const pageCount = Math.max(1, Math.ceil(departments.length / pageSize));
+      const requestedPage = interaction.options.getInteger('page') ?? 1;
+      if (requestedPage > pageCount) {
+        await interaction.editReply(
+          '❌ Page ' + requestedPage + ' does not exist. This server has ' + pageCount +
+          ' department page(s). Use /supportforge category list page:1 to start.',
+        );
+        return;
+      }
+      const pageItems = departments.slice((requestedPage - 1) * pageSize, requestedPage * pageSize);
+      const lines = pageItems.map((department) =>
+        '• **' + department.name + '** · ID: ' + department.id +
+        ' · staff: ' + (department.staffRoleId ? '<@&' + department.staffRoleId + '>' : 'Administrators only') +
+        ' · tags: ' + Object.values(department.tags ?? {}).map((tag) => tag.name).join(', '),
+      );
+      await interaction.editReply(
+        '**SupportForge Departments · Page ' + requestedPage + ' / ' + pageCount + '**\n\n' +
+        (lines.length ? lines.join('\n') : 'No departments configured.'),
+      );
       return;
     }
 
-    // ─────────────────────────────────────────────
     // CATEGORY REMOVE
     // ─────────────────────────────────────────────
 
