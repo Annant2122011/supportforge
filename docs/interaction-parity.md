@@ -21,7 +21,7 @@ SupportForge exposes two independent entry points for each major feature: slash 
 | Settings and panel behavior | `/supportforge settings overview/panel/defaults/team/retention/appearance` | Settings dashboard controls |
 | Report intake and categories | `/supportforge settings reports/report-categories/report-rules/report-subcategory-add/report-subcategory-edit/report-subcategory-remove` | Settings → Reports controls |
 | Retention review and action | `/supportforge settings retention-action` | Settings → Retention review/approval controls |
-| Storage and infrastructure repair | `/supportforge settings storage (status/add/repair)/repair/refresh` | Settings → Repair System and Storage controls |
+| Storage and infrastructure repair | `/supportforge settings storage action:status/claimed/pending/repair`, `/supportforge settings repair/refresh` | Settings → Repair System and Storage controls |
 | Manual and factory reset | `/supportforge settings manual/reset` | Settings → Manual and multi-step Reset controls |
 | Premium demo | `/supportforge premium status/toggle-demo` | Settings → Premium controls |
 | Audit summaries and controls | `/supportforge audit summary/daily/accumulation/developer/panel` | Audit panel summary, accumulation, Developer View, and move/restore controls |
