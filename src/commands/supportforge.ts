@@ -949,7 +949,7 @@ export const data =
       group
         .setName('ticket')
         .setDescription(
-          'Tools for the current ticket',
+          'Create tickets and manage ticket workflows',
         )
 
         // PRIORITY
