@@ -4629,7 +4629,8 @@ async function applyTicketPriority(
 
 async function handleTicketVoiceStart(interaction: ButtonInteraction | ChatInputCommandInteraction): Promise<void> {
   if (!interaction.replied && !interaction.deferred) {
-    await interaction.deferUpdate();
+    if ('deferUpdate' in interaction) await interaction.deferUpdate();
+    else await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   }
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
     await replyError(interaction, '❌ Voice mode is only available inside a ticket.');
@@ -4692,7 +4693,8 @@ async function handleTicketVoiceStart(interaction: ButtonInteraction | ChatInput
 
 async function handleTicketVoiceEnd(interaction: ButtonInteraction | ChatInputCommandInteraction): Promise<void> {
   if (!interaction.replied && !interaction.deferred) {
-    await interaction.deferUpdate();
+    if ('deferUpdate' in interaction) await interaction.deferUpdate();
+    else await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   }
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
     await replyError(interaction, '❌ Voice mode is only available inside a ticket.');
@@ -4741,7 +4743,10 @@ async function handleTicketVoiceEnd(interaction: ButtonInteraction | ChatInputCo
 }
 
 async function handleTicketVoiceJoin(interaction: ButtonInteraction | ChatInputCommandInteraction): Promise<void> {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  if (!interaction.replied && !interaction.deferred) {
+    if ('deferUpdate' in interaction) await interaction.deferUpdate();
+    else await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  }
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
     await interaction.editReply('❌ Voice mode is only available inside a ticket.');
     return;
