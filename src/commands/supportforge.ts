@@ -1340,7 +1340,7 @@ export const data =
           subcommand
             .setName('priority-role')
             .setDescription('Create or delete a SupportForge-managed priority role')
-            .addStringOption((option) => option.setName('priority').setDescription('Priority').setRequired(true).addChoices(
+            .addStringOption((option) => option.setName('priority').setDescription('Priority (required for create/delete)').setRequired(false).addChoices(
               { name: 'Low', value: 'low' }, { name: 'Normal', value: 'normal' },
               { name: 'High', value: 'high' }, { name: 'Urgent', value: 'urgent' }, { name: 'Critical', value: 'critical' },
             ))
@@ -1354,7 +1354,8 @@ export const data =
           subcommand
             .setName('report-categories')
             .setDescription('List report categories and inspect their subcategories')
-            .addStringOption((option) => option.setName('category-id').setDescription('Optional category ID to inspect').setRequired(false).setMaxLength(80)),
+            .addStringOption((option) => option.setName('category-id').setDescription('Optional category ID to inspect').setRequired(false).setMaxLength(80))
+            .addIntegerOption((option) => option.setName('page').setDescription('Page number for the category list').setRequired(false).setMinValue(1).setMaxValue(999)),
         )
         .addSubcommand((subcommand) =>
           subcommand
