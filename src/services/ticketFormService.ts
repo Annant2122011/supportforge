@@ -416,6 +416,50 @@ export function parseTicketFormFields(input: string | unknown): TicketFormField[
   return fields;
 }
 
+/**
+ * Create a simple text-question schema without forcing administrators to write
+ * JSON. Advanced forms can still use the full schema editor.
+ */
+export function buildQuickTicketFormFields(questionLabels: string[]): TicketFormField[] {
+  const labels = questionLabels
+    .map((label) => typeof label === 'string' ? label.trim().replace(/\s+/g, ' ') : '')
+    .filter(Boolean);
+
+  if (labels.length < 1 || labels.length > 3) {
+    throw new Error('The guided builder needs one to three question labels.');
+  }
+
+  const usedIds = new Set<string>();
+  const fields = labels.map((label, index): TicketFormField => {
+    if (label.length > 45) throw new Error('Question labels must be 45 characters or fewer.');
+    let baseId = label.normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 28);
+    if (!baseId || !/^[a-z]/.test(baseId)) baseId = ('question_' + baseId).slice(0, 28);
+
+    let id = baseId;
+    let suffixNumber = index + 1;
+    while (usedIds.has(id)) {
+      const suffix = '_' + suffixNumber++;
+      id = baseId.slice(0, 28 - suffix.length) + suffix;
+    }
+    usedIds.add(id);
+
+    return {
+      id,
+      label,
+      type: 'short_text',
+      required: true,
+      placeholder: ('Enter ' + label).slice(0, 100),
+      step: 1,
+    };
+  });
+  return parseTicketFormFields(fields);
+}
+
 function normalizedConditionString(value: string): string {
   return value.trim().toLocaleLowerCase('en-US');
 }

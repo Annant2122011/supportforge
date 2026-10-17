@@ -29,8 +29,11 @@ import {
 
 import { executeTicketCommand } from '../interactions/ticketCommandTools';
 import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
+import { UI_THEMES, getThemeColor } from '../services/uiThemeService';
+import { handleSettingsSlashCommand } from '../interactions/settingsCommandTools';
 import {
   applyTicketFormTemplate,
+  buildQuickTicketFormFields,
   createTicketForm,
   createTicketFormTemplate,
   deleteTicketFormTemplate,
@@ -43,22 +46,30 @@ import {
 
 import {
   getAdvancedSettings,
+  updateAdvancedSettings,
+  type TicketPriority,
 } from '../services/advancedSettingsService';
 
 import {
   ensureArchiveCategory,
   ensureClosedCategory,
   ensureOpenCategory,
+  ensureOptionalStatusCategory,
 } from '../services/ticketStorageService';
 
 import {
   ensureAllDepartmentCategories,
 } from '../services/departmentCategoryService';
 
-import { getOrCreateAuditChannel, logSettingsEvent, logSystemEvent } from '../services/auditLogService';
+import { getOrCreateAuditChannel, logSettingsEvent, logSystemEvent, handleAuditSlashCommand } from '../services/auditLogService';
+import { performFactoryReset } from '../services/factoryResetService';
+import { recoverMissingTicketRecords } from '../services/ticketRecoveryService';
+import { addUseCasePreset } from '../services/useCasePresetService';
+import { moveTicketPanelToBottom } from '../services/ticketPanelService';
 
 import {
   ensureSettingsChannel,
+  refreshSettingsChannel,
 } from '../services/settingsChannelService';
 import {
   ensureChannelPurposeMessage,
@@ -258,6 +269,7 @@ export async function buildPanelEmbed(
   page = 0,
 ): Promise<EmbedBuilder> {
   const settings = await getAdvancedSettings(guild.id);
+  const config = await getGuildConfig(guild.id);
   const departmentsPerPage = departments.length > 20 ? 20 : 25;
   const pageCount = Math.max(1, Math.ceil(departments.length / departmentsPerPage));
   const safePage = Math.min(Math.max(page, 0), pageCount - 1);
@@ -274,6 +286,7 @@ export async function buildPanelEmbed(
     : 'No ticket departments configured.';
 
   return new EmbedBuilder()
+    .setColor(getThemeColor(config.theme))
     .setTitle(settings.appearance.panelTitle)
     .setDescription(
       `Welcome to **${guild.name}** support.\n\n` +
@@ -803,9 +816,8 @@ export const data =
         .addSubcommand((subcommand) =>
           subcommand
             .setName('list')
-            .setDescription(
-              'List configured ticket departments',
-            ),
+            .setDescription('List configured ticket departments')
+            .addIntegerOption((option) => option.setName('page').setDescription('Page number').setRequired(false).setMinValue(1).setMaxValue(999)),
         )
 
         .addSubcommand((subcommand) =>
@@ -849,6 +861,34 @@ export const data =
         )
         .addSubcommand((subcommand) =>
           subcommand
+            .setName('show')
+            .setDescription('Show a form and its configured fields')
+            .addStringOption((option) => option.setName('id').setDescription('Form ID from form list').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('guide')
+            .setDescription('Show the supported ticket form field schema guide'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('schema')
+            .setDescription('View a ticket form schema as paginated JSON')
+            .addStringOption((option) => option.setName('id').setDescription('Form ID from form list').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('page').setDescription('Schema page number').setRequired(false).setMinValue(1).setMaxValue(999)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('quick-create')
+            .setDescription('Create a simple form using guided questions instead of JSON')
+            .addStringOption((option) => option.setName('name').setDescription('Form name').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('department-id').setDescription('Existing department ID from form list').setRequired(true).setMaxLength(28))
+            .addStringOption((option) => option.setName('tag-id').setDescription('Existing tag ID, or * for every tag in this department').setRequired(true).setMaxLength(28))
+            .addStringOption((option) => option.setName('question-one').setDescription('First short-text question (1–45 characters)').setRequired(true).setMaxLength(45))
+            .addStringOption((option) => option.setName('question-two').setDescription('Second short-text question (optional)').setRequired(false).setMaxLength(45)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
             .setName('create')
             .setDescription('Create an inactive ticket form from a JSON field schema')
             .addStringOption((option) => option.setName('name').setDescription('Form name').setRequired(true).setMaxLength(80))
@@ -887,6 +927,12 @@ export const data =
             .setName('template-list')
             .setDescription('List reusable form templates')
             .addIntegerOption((option) => option.setName('page').setDescription('Page number').setRequired(false).setMinValue(1).setMaxValue(999)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('template-show')
+            .setDescription('Show a saved template and its fields')
+            .addStringOption((option) => option.setName('template-id').setDescription('Template ID from template-list').setRequired(true).setMaxLength(36)),
         )
         .addSubcommand((subcommand) =>
           subcommand
@@ -941,10 +987,17 @@ export const data =
       group
         .setName('ticket')
         .setDescription(
-          'Tools for the current ticket',
+          'Create tickets and manage ticket workflows',
         )
 
         // PRIORITY
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('create')
+            .setDescription('Create a ticket without using the support panel button')
+            .addStringOption((option) => option.setName('department-id').setDescription('Department ID from Settings → Departments').setRequired(true).setMaxLength(28))
+            .addStringOption((option) => option.setName('tag-id').setDescription('Tag ID belonging to the selected department').setRequired(true).setMaxLength(28)),
+        )
         .addSubcommand((subcommand) =>
           subcommand
             .setName('priority')
@@ -1113,11 +1166,398 @@ export const data =
         .addSubcommand((subcommand) =>
           subcommand
             .setName('resume')
-            .setDescription(
-              'Move a pending ticket back to open',
-            ),
+            .setDescription('Move a pending ticket back to open'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('close').setDescription('Start the ticket close workflow'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('reopen').setDescription('Reopen this closed ticket'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('department')
+            .setDescription('Move this ticket to a department directly')
+            .addStringOption((option) => option.setName('department-id').setDescription('Department ID from /supportforge form list').setRequired(true).setMaxLength(28))
+            .addStringOption((option) => option.setName('tag-id').setDescription('Optional tag ID for the destination department').setRequired(false).setMaxLength(28)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('tag')
+            .setDescription('Set this ticket tag directly')
+            .addStringOption((option) => option.setName('tag-id').setDescription('Tag ID from /supportforge form list').setRequired(true).setMaxLength(28)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('voice')
+            .setDescription('Open private ticket voice controls')
+            .addStringOption((option) => option.setName('action').setDescription('Voice action').setRequired(true).addChoices(
+              { name: 'Start voice mode', value: 'start' },
+              { name: 'End voice mode', value: 'end' },
+              { name: 'Join private voice', value: 'join' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('report')
+            .setDescription('Submit a report about a participant in this ticket')
+            .addUserOption((option) => option.setName('target').setDescription('Ticket participant being reported').setRequired(true))
+            .addStringOption((option) => option.setName('category-id').setDescription('Configured report category name or ID').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('subcategory-id').setDescription('Configured subcategory name or ID').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('description').setDescription('Evidence or context (optional)').setRequired(false).setMaxLength(500))
+            .addBooleanOption((option) => option.setName('flag').setDescription('Flag violation (true) or record only (false)').setRequired(true)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('move-panel').setDescription('Move the ticket controls to the bottom'),
+        ),
+    )
+    .addSubcommandGroup((group) =>
+      group
+        .setName('settings')
+        .setDescription('Manage SupportForge settings from slash commands')
+        .addSubcommand((subcommand) =>
+          subcommand.setName('overview').setDescription('Show a Settings overview and current configuration'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('theme')
+            .setDescription('View or change this server’s SupportForge color theme')
+            .addStringOption((option) => option.setName('action').setDescription('Show the current theme or set a new one').setRequired(true).addChoices(
+              { name: 'Show current theme', value: 'show' },
+              { name: 'Set server theme', value: 'set' },
+            ))
+            .addStringOption((option) => option.setName('theme').setDescription('Theme palette to apply to this server').addChoices(
+              ...UI_THEMES.map((theme) => ({ name: theme.label, value: theme.id })),
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('panel')
+            .setDescription('View or update ticket panel automation')
+            .addStringOption((option) => option.setName('action').setDescription('Automation action').setRequired(true).addChoices(
+              { name: 'Show settings', value: 'show' },
+              { name: 'Toggle', value: 'toggle' },
+              { name: 'Enable', value: 'enable' },
+              { name: 'Disable', value: 'disable' },
+            ))
+            .addIntegerOption((option) => option.setName('visual-lines').setDescription('Visual line budget (6-40)').setMinValue(6).setMaxValue(40))
+            .addIntegerOption((option) => option.setName('message-cap').setDescription('Message safety cap (5-30)').setMinValue(5).setMaxValue(30))
+            .addIntegerOption((option) => option.setName('minimum-messages').setDescription('Minimum messages before moving (3-20)').setMinValue(3).setMaxValue(20)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('defaults')
+            .setDescription('View or change default priority for new tickets')
+            .addStringOption((option) => option.setName('priority').setDescription('Default priority').addChoices(
+              { name: 'Low', value: 'low' }, { name: 'Normal', value: 'normal' },
+              { name: 'High', value: 'high' }, { name: 'Urgent', value: 'urgent' }, { name: 'Critical', value: 'critical' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('team')
+            .setDescription('View or change the simultaneous moderator limit')
+            .addIntegerOption((option) => option.setName('max-moderators').setDescription('Moderator limit (1-3)').setMinValue(1).setMaxValue(3)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('retention')
+            .setDescription('View or change ticket retention settings')
+            .addIntegerOption((option) => option.setName('closed-days').setDescription('Closed-ticket retention days (0-365)').setMinValue(0).setMaxValue(365))
+            .addIntegerOption((option) => option.setName('archive-days').setDescription('Archived-ticket retention days (0-365)').setMinValue(0).setMaxValue(365)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('retention-action')
+            .setDescription('Review eligible tickets or act on a pending retention approval')
+            .addStringOption((option) => option.setName('action').setDescription('Retention approval action').setRequired(true).addChoices(
+              { name: 'Review eligible tickets', value: 'review' },
+              { name: 'Approve pending deletion', value: 'approve' },
+              { name: 'Decline pending deletion', value: 'decline' },
+            ))
+            .addStringOption((option) => option.setName('scope').setDescription('Closed or archived tickets').setRequired(true).addChoices(
+              { name: 'Closed tickets', value: 'closed' },
+              { name: 'Archived tickets', value: 'archive' },
+            ))
+            .addBooleanOption((option) => option.setName('confirm-delete').setDescription('Required true to execute an approved deletion').setRequired(false)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('appearance')
+            .setDescription('View or update the public support panel appearance')
+            .addStringOption((option) => option.setName('title').setDescription('Panel title').setMaxLength(256))
+            .addStringOption((option) => option.setName('description').setDescription('Panel description').setMaxLength(1500))
+            .addStringOption((option) => option.setName('footer').setDescription('Panel footer').setMaxLength(2048)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('reports')
+            .setDescription('View or change report intake')
+            .addStringOption((option) => option.setName('action').setDescription('Report intake action').setRequired(true).addChoices(
+              { name: 'Show status', value: 'show' }, { name: 'Toggle', value: 'toggle' },
+              { name: 'Enable', value: 'enable' }, { name: 'Disable', value: 'disable' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('report-rules')
+            .setDescription('View or update report flag thresholds')
+            .addIntegerOption((option) => option.setName('ticket-threshold').setDescription('Ticket restrictions; 0 disables').setMinValue(0).setMaxValue(1000))
+            .addIntegerOption((option) => option.setName('server-threshold').setDescription('Server action threshold; 0 disables').setMinValue(0).setMaxValue(1000))
+            .addIntegerOption((option) => option.setName('channel-threshold').setDescription('Channel action threshold; 0 disables').setMinValue(0).setMaxValue(1000))
+            .addChannelOption((option) => option.setName('channel').setDescription('Channel for channel-restriction rule').addChannelTypes(ChannelType.GuildText)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('department-edit')
+            .setDescription('Rename a department or change its staff role')
+            .addStringOption((option) => option.setName('department-name').setDescription('Current department name').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('new-name').setDescription('New department name').setRequired(true).setMaxLength(80))
+            .addRoleOption((option) => option.setName('staff-role').setDescription('New staff role (optional)'))
+            .addBooleanOption((option) => option.setName('clear-staff-role').setDescription('Remove current staff role')),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('tag-add')
+            .setDescription('Add a ticket tag to a department')
+            .addStringOption((option) => option.setName('department-name').setDescription('Department name').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('name').setDescription('Tag name').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('tag-rename')
+            .setDescription('Rename a ticket tag')
+            .addStringOption((option) => option.setName('department-name').setDescription('Department name').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('current-name').setDescription('Current tag name').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('new-name').setDescription('New tag name').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('tag-remove')
+            .setDescription('Remove a ticket tag')
+            .addStringOption((option) => option.setName('department-name').setDescription('Department name').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('tag-name').setDescription('Tag name to remove').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('usecase-add')
+            .setDescription('Add a department preset with eight starter tags')
+            .addStringOption((option) => option.setName('preset').setDescription('Preset to add').setRequired(true).addChoices(
+              { name: 'Technical Support', value: 'technical-support' },
+              { name: 'Sales', value: 'sales' },
+              { name: 'Account & Access', value: 'account-access' },
+              { name: 'Partnerships', value: 'partnerships' },
+              { name: 'Reports & Abuse', value: 'reports-abuse' },
+              { name: 'Refunds & Returns', value: 'refunds-returns' },
+              { name: 'Product Support', value: 'product-support' },
+              { name: 'VIP Support', value: 'vip-support' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('storage')
+            .setDescription('Add an optional status category or repair storage')
+            .addStringOption((option) => option.setName('action').setDescription('Storage action').setRequired(true).addChoices(
+              { name: 'Show current storage categories', value: 'status' },
+              { name: 'Add Claimed category', value: 'claimed' },
+              { name: 'Add Pending category', value: 'pending' },
+              { name: 'Repair Closed/Archive storage', value: 'repair' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('priority-role')
+            .setDescription('Create or delete a SupportForge-managed priority role')
+            .addStringOption((option) => option.setName('action').setDescription('Role action').setRequired(true).addChoices(
+              { name: 'Show current roles', value: 'status' },
+              { name: 'Create role', value: 'create' },
+              { name: 'Delete managed role', value: 'delete' },
+            ))
+            .addStringOption((option) => option.setName('priority').setDescription('Priority (required for create/delete)').setRequired(false).addChoices(
+              { name: 'Low', value: 'low' }, { name: 'Normal', value: 'normal' },
+              { name: 'High', value: 'high' }, { name: 'Urgent', value: 'urgent' }, { name: 'Critical', value: 'critical' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('report-categories')
+            .setDescription('List report categories and inspect their subcategories')
+            .addStringOption((option) => option.setName('category-id').setDescription('Optional category ID to inspect').setRequired(false).setMaxLength(80))
+            .addIntegerOption((option) => option.setName('page').setDescription('Page number for the category list').setRequired(false).setMinValue(1).setMaxValue(999)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('report-subcategory-add')
+            .setDescription('Add a report subcategory')
+            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('name').setDescription('Subcategory name').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('report-subcategory-edit')
+            .setDescription('Rename a report subcategory')
+            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('subcategory-id').setDescription('Subcategory ID').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('name').setDescription('New subcategory name').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('report-subcategory-remove')
+            .setDescription('Remove a report subcategory')
+            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('subcategory-id').setDescription('Subcategory ID').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('repair')
+            .setDescription('Repair SupportForge infrastructure')
+            .addStringOption((option) => option.setName('mode').setDescription('Repair mode').setRequired(true).addChoices(
+              { name: 'Normal infrastructure repair', value: 'normal' },
+              { name: 'Closed/Archive storage repair', value: 'storage' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('refresh').setDescription('Refresh the Settings dashboard and support panel'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('manual')
+            .setDescription('Display the quick or detailed staff manual summary')
+            .addStringOption((option) => option.setName('version').setDescription('Manual version').setRequired(true).addChoices(
+              { name: 'Quick overview', value: 'quick' }, { name: 'Detailed manual', value: 'detailed' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('reset')
+            .setDescription('Factory-reset SupportForge after typed confirmation')
+            .addStringOption((option) => option.setName('confirmation').setDescription('Type DELETE SUPPORT FORGE exactly').setRequired(true).setMinLength(20).setMaxLength(20))
+            .addBooleanOption((option) => option.setName('accumulate-audit').setDescription('Keep individual audit events for future summaries').setRequired(true)),
+        ),
+    )
+    .addSubcommandGroup((group) =>
+      group
+        .setName('audit')
+        .setDescription('Review audit summaries and manage audit controls')
+        .addSubcommand((subcommand) =>
+          subcommand.setName('summary').setDescription('Show the overall audit summary'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('daily').setDescription('Show the latest saved daily audit summary'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('accumulation')
+            .setDescription('View or manage raw audit-event retention')
+            .addStringOption((option) => option.setName('action').setDescription('Audit retention action').setRequired(true).addChoices(
+              { name: 'Show current status', value: 'status' },
+              { name: 'Enable raw-event accumulation', value: 'enable' },
+              { name: 'Disable and clear raw events', value: 'disable' },
+            ))
+            .addBooleanOption((option) => option.setName('confirm-delete').setDescription('Required true to clear retained raw events').setRequired(false)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('developer')
+            .setDescription('Open developer audit view controls')
+            .addStringOption((option) => option.setName('action').setDescription('Developer view action').setRequired(true).addChoices(
+              { name: 'Show options', value: 'options' },
+              { name: 'Enable Developer View', value: 'enable' },
+              { name: 'Disable Developer View', value: 'disable' },
+              { name: 'Open a Developer View page', value: 'page' },
+            ))
+            .addIntegerOption((option) => option.setName('page').setDescription('Developer audit page (only for page action)').setMinValue(0).setMaxValue(999)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('panel')
+            .setDescription('Move or refresh the audit control panel')
+            .addStringOption((option) => option.setName('action').setDescription('Audit panel action').setRequired(true).addChoices(
+              { name: 'Move panel down', value: 'move' },
+              { name: 'Restore audit panel', value: 'restore' },
+              { name: 'Refresh panel', value: 'refresh' },
+            )),
         ),
     );
+
+export async function runSupportForgeSetup(
+  guild: Guild,
+  restoreMode = false,
+): Promise<{ supportCategoryId: string; departmentCount: number; legacyOpenCategoryId: string | null }> {
+  const supportCategory = await ensureContainer(guild);
+  await getOrCreateAuditChannel(guild, supportCategory.id);
+  await ensureTranscriptChannel(guild, supportCategory.id);
+  await ensurePanelChannel(guild, supportCategory.id);
+  await ensureOpenCategory(guild);
+  await ensureClosedCategory(guild);
+  await ensureArchiveCategory(guild);
+  await ensureSettingsChannel(guild, supportCategory.id);
+  await ensureAllDepartmentCategories(guild);
+  await ensureSupportForgeCategoryPurposeMessages(guild, supportCategory.id);
+
+  let config = await getGuildConfig(guild.id);
+  if (Object.keys(config.departments).length === 0) {
+    const departmentId = newDepartmentId();
+    await updateGuildConfig(guild.id, (current) => {
+      const now = new Date().toISOString();
+      const tagId = newTagId();
+      current.departments[departmentId] = {
+        id: departmentId,
+        name: 'General Support',
+        staffRoleId: null,
+        tags: { [tagId]: { id: tagId, name: 'General', createdAt: now } },
+        createdAt: now,
+      };
+    });
+    config = await getGuildConfig(guild.id);
+  }
+
+  await syncPanel(guild);
+  const legacyOpenCategory = config.openCategoryId
+    ? guild.channels.cache.get(config.openCategoryId)
+    : undefined;
+  await logSystemEvent(
+    guild,
+    supportCategory.id,
+    restoreMode ? 'SUPPORTFORGE_RESTORED' : 'SETUP_COMPLETED',
+    (restoreMode ? 'SupportForge restore completed.' : 'SupportForge setup/repair completed.') +
+      ' Support Forge=' + supportCategory.id +
+      '; Open=' + (legacyOpenCategory?.id ?? 'not-created') +
+      '; departments=' + Object.keys(config.departments).length + '.',
+  );
+  await refreshSettingsChannel(guild);
+  return {
+    supportCategoryId: supportCategory.id,
+    departmentCount: Object.keys(config.departments).length,
+    legacyOpenCategoryId: legacyOpenCategory?.id ?? null,
+  };
+}
+
+export async function runSupportForgeRepair(
+  guild: Guild,
+): Promise<{ supportCategoryId: string; recoveredTickets: number }> {
+  const supportCategory = await ensureContainer(guild);
+  await getOrCreateAuditChannel(guild, supportCategory.id);
+  await ensureTranscriptChannel(guild, supportCategory.id);
+  await ensurePanelChannel(guild, supportCategory.id);
+  await ensureOpenCategory(guild);
+  await ensureClosedCategory(guild);
+  await ensureArchiveCategory(guild);
+  await ensureSettingsChannel(guild, supportCategory.id);
+  await ensureAllDepartmentCategories(guild);
+  await ensureSupportForgeCategoryPurposeMessages(guild, supportCategory.id);
+
+  const recoveredTickets = await recoverMissingTicketRecords(guild);
+  await syncPanel(guild);
+  await refreshSettingsChannel(guild);
+  await logSystemEvent(
+    guild,
+    supportCategory.id,
+    'SYSTEM_REPAIR_COMPLETED',
+    'Normal Repair completed; recovered ' + recoveredTickets + ' missing durable ticket record(s).',
+  );
+  return { supportCategoryId: supportCategory.id, recoveredTickets };
+}
 
 export async function execute(
   interaction: ChatInputCommandInteraction,
@@ -1140,6 +1580,35 @@ export async function execute(
   const group =
     interaction.options.getSubcommandGroup(false);
 
+  // Settings buttons require Manage Server or Administrator. Enforce the
+  // same gate on slash commands; the Staff Manual is the sole exception and
+  // remains available to configured department staff as in the button UI.
+  if (group === 'settings' && !isAdminLike(interaction)) {
+    let allowedDepartmentStaff = false;
+    if (subcommand === 'manual') {
+      const config = await getGuildConfig(guild.id);
+      const staffRoleIds = new Set(
+        Object.values(config.departments)
+          .map((department) => department.staffRoleId)
+          .filter((id): id is string => Boolean(id)),
+      );
+      const member = interaction.member;
+      if (member) {
+        const memberRoleIds = Array.isArray(member.roles)
+          ? member.roles
+          : member.roles.cache.map((role) => role.id);
+        allowedDepartmentStaff = memberRoleIds.some((roleId) => staffRoleIds.has(roleId));
+      }
+    }
+    if (!allowedDepartmentStaff) {
+      await interaction.reply({
+        content: '❌ You need **Manage Server** or **Administrator** to use SupportForge settings. The Staff Manual is also available to configured department staff.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+  }
+
   // Administrative commands
   if (
     (!group &&
@@ -1160,126 +1629,54 @@ export async function execute(
   }
 
   try {
-    // ─────────────────────────────────────────────
-    // SETUP
-    // ─────────────────────────────────────────────
+    if (group === 'audit') {
+      await handleAuditSlashCommand(interaction);
+      return;
+    }
 
-    if (
-      !group &&
-      (subcommand === 'setup' || subcommand === 'restore')
-    ) {
-      await interaction.deferReply({
-        flags: MessageFlags.Ephemeral,
+    if (group === 'settings') {
+      await handleSettingsSlashCommand(interaction, {
+        syncPanel,
+        repair: async (targetGuild, mode) => {
+          if (mode === 'storage') {
+            await ensureClosedCategory(targetGuild);
+            await ensureArchiveCategory(targetGuild);
+            await refreshSettingsChannel(targetGuild);
+            return 'Storage repair complete. Closed and Archive categories are ready.';
+          }
+          const result = await runSupportForgeRepair(targetGuild);
+          return 'Normal infrastructure repair complete. Core channels and department categories have been checked. Recovered ' + result.recoveredTickets + ' missing durable ticket record(s).';
+        },
+        refresh: async (targetGuild) => {
+          const supportCategory = await ensureContainer(targetGuild);
+          await ensureSettingsChannel(targetGuild, supportCategory.id);
+          await syncPanel(targetGuild);
+          await refreshSettingsChannel(targetGuild);
+        },
       });
-
-      const supportCategory =
-        await ensureContainer(guild);
-
-      // The audit channel is core SupportForge infrastructure. Create/repair
-      // it during setup instead of waiting for a later ticket event.
-      await getOrCreateAuditChannel(
-        guild,
-        supportCategory.id,
-      );
-
-      await ensureTranscriptChannel(
-        guild,
-        supportCategory.id,
-      );
-
-      await ensurePanelChannel(
-        guild,
-        supportCategory.id,
-      );
-
-      await ensureOpenCategory(guild);
-      await ensureClosedCategory(guild);
-      await ensureArchiveCategory(guild);
-      await ensureSettingsChannel(guild, supportCategory.id);
-      await ensureAllDepartmentCategories(guild);
-      await ensureSupportForgeCategoryPurposeMessages(
-        guild,
-        supportCategory.id,
-      );
-
-      let config =
-        await getGuildConfig(guild.id);
-
-      if (
-        Object.keys(
-          config.departments,
-        ).length === 0
-      ) {
-        const id =
-          newDepartmentId();
-
-        await updateGuildConfig(
-          guild.id,
-          (current) => {
-            const now = new Date().toISOString();
-            const tagId = newTagId();
-            current.departments[id] = {
-              id,
-              name: 'General Support',
-              staffRoleId: null,
-              tags: {
-                [tagId]: {
-                  id: tagId,
-                  name: 'General',
-                  createdAt: now,
-                },
-              },
-              createdAt: now,
-            };
-          },
-        );
-
-        config =
-          await getGuildConfig(
-            guild.id,
-          );
-      }
-
-          await syncPanel(guild);
-
-      const restoreMode = subcommand === 'restore';
-      const legacyOpenCategory = config.openCategoryId
-        ? guild.channels.cache.get(config.openCategoryId)
-        : undefined;
-
-      await logSystemEvent(
-        guild,
-        supportCategory.id,
-        restoreMode ? 'SUPPORTFORGE_RESTORED' : 'SETUP_COMPLETED',
-        (restoreMode
-          ? 'SupportForge restore completed.'
-          : 'SupportForge setup/repair completed.') +
-          ' Support Forge=' +
-          supportCategory.id +
-          '; Open=' +
-          (legacyOpenCategory?.id ?? 'not-created') +
-          '; departments=' +
-          Object.keys(config.departments).length +
-          '.',
-      );
-
-      await interaction.editReply(
-        (restoreMode
-          ? `✅ **SupportForge restored successfully.**`
-          : `✅ **SupportForge setup complete.**`) +
-          `\n\n📁 Container: ${supportCategory}\n` +
-          `📂 Department categories: **${Object.keys(config.departments).length}**\n` +
-          (legacyOpenCategory ? `🟢 Legacy Open bucket: ${legacyOpenCategory}\n` : '') +
-          `📋 Departments: **${Object.keys(
-            config.departments,
-          ).length}**\n` +
-          `🎫 Panel has been created/repaired and is ready.`,
-      );
-
       return;
     }
 
     // ─────────────────────────────────────────────
+    // SETUP
+    // ─────────────────────────────────────────────
+
+    if (!group && (subcommand === 'setup' || subcommand === 'restore')) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const restoreMode = subcommand === 'restore';
+      const result = await runSupportForgeSetup(guild, restoreMode);
+      await interaction.editReply(
+        (restoreMode ? '✅ **SupportForge restored successfully.**' : '✅ **SupportForge setup complete.**') +
+        '\n\n📁 Container: <#' + result.supportCategoryId + '>\n' +
+        '📂 Department categories: **' + result.departmentCount + '**\n' +
+        (result.legacyOpenCategoryId ? '🟢 Legacy Open bucket: <#' + result.legacyOpenCategoryId + '>\n' : '') +
+        '📋 Departments: **' + result.departmentCount + '**\n' +
+        '🎫 Panel has been created/repaired and is ready.'
+      );
+      return;
+    }
+
+        // ─────────────────────────────────────────────
     // CATEGORY ADD
     // ─────────────────────────────────────────────
 
@@ -1415,58 +1812,48 @@ export async function execute(
         flags: MessageFlags.Ephemeral,
       });
 
-      const config =
-        await getGuildConfig(
-          guild.id,
-        );
-
-      const departments =
-        Object.values(
-          config.departments,
-        ).sort((a, b) =>
-          a.name.localeCompare(
-            b.name,
-          ),
-        );
-
-      const lines = departments.length
-        ? departments
-            .map(
-              (department) =>
-                `• **${department.name}** — staff: ${department.staffRoleId ? `<@&${department.staffRoleId}>` : 'Administrators only'}`,
-            )
-            .join('\n')
-        : 'No departments configured.';
-
-      let visible = lines;
-      if (lines.length > 1_700) {
-        const entries: string[] = [];
-        let length = 0;
-
-        for (const department of departments) {
-          const line =
-            `• **${department.name}** — staff: ${department.staffRoleId ? `<@&${department.staffRoleId}>` : 'Administrators only'}`;
-          const nextLength = length + line.length + (entries.length ? 1 : 0);
-          if (nextLength > 1_700) break;
-          entries.push(line);
-          length = nextLength;
-        }
-
-        visible =
-          entries.join('\n') +
-          '\n\n…and ' +
-          Math.max(0, departments.length - entries.length) +
-          ' more department(s).';
-      }
-
-      await interaction.editReply(
-        `📂 **SupportForge departments**\n\n${visible}`,
+      const config = await getGuildConfig(guild.id);
+      const departments = Object.values(config.departments).sort((a, b) =>
+        a.name.localeCompare(b.name),
       );
-
+      const lines = departments.flatMap((department) => {
+        const header = '• **' + department.name + '** · ID: ' + department.id +
+          ' · staff: ' + (department.staffRoleId ? '<@&' + department.staffRoleId + '>' : 'Administrators only');
+        const tags = Object.values(department.tags ?? {}).map((tag) => tag.name);
+        const tagLines: string[] = [];
+        for (let index = 0; index < tags.length; index += 12) {
+          tagLines.push('  Tags: ' + tags.slice(index, index + 12).join(', '));
+        }
+        return [header, ...(tagLines.length ? tagLines : ['  Tags: none'])];
+      });
+      const pages: string[] = [];
+      let currentPage = '';
+      for (const line of lines) {
+        const candidate = currentPage ? currentPage + '\n' + line : line;
+        if (currentPage && candidate.length > 1650) {
+          pages.push(currentPage);
+          currentPage = line;
+        } else {
+          currentPage = candidate;
+        }
+      }
+      if (currentPage) pages.push(currentPage);
+      if (!pages.length) pages.push('No departments configured.');
+      const requestedPage = interaction.options.getInteger('page') ?? 1;
+      if (requestedPage > pages.length) {
+        await interaction.editReply(
+          '❌ Page ' + requestedPage + ' does not exist. This server has ' + pages.length +
+          ' department page(s). Use /supportforge category list page:1 to start.',
+        );
+        return;
+      }
+      await interaction.editReply(
+        '**SupportForge Departments · Page ' + requestedPage + ' / ' + pages.length + '**\n\n' +
+        pages[requestedPage - 1],
+      );
       return;
     }
 
-    // ─────────────────────────────────────────────
     // CATEGORY REMOVE
     // ─────────────────────────────────────────────
 
@@ -1716,6 +2103,108 @@ export async function execute(
           return;
         }
         await interaction.editReply('**Ticket Form List • Page ' + requestedPage + ' / ' + pages.length + '**\n\n' + pages[requestedPage - 1]);
+        return;
+      }
+
+      if (action === 'guide') {
+        await interaction.editReply(
+          '**Ticket Form Field Schema Guide**\n\n' +
+          'Every field needs a unique lowercase id, a label, a supported type, and required set to true or false. Each step can contain at most three custom fields.\n\n' +
+          'JSON example:\n{\n  "fields": [\n    {\n      "id": "order_id",\n      "label": "Order ID",\n      "type": "short_text",\n      "required": true,\n      "placeholder": "Enter your order ID"\n    }\n  ]\n}\n\n' +
+          '**Supported types:** short_text, long_text, number, decimal, url, email, date, dropdown, multi_select, checkbox, discord_user, discord_role, attachment.\n\n' +
+          'Choice-based fields can include a choices string array. The service validates field IDs, types, choices, limits, conditions, and routing mappings before saving.'
+        );
+        return;
+      }
+
+      if (action === 'show') {
+        const formId = interaction.options.getString('id', true).trim();
+        const form = (await listTicketForms(guild.id)).find((item) => item.id === formId);
+        if (!form) {
+          await interaction.editReply('Ticket form not found in this server. Use /supportforge form list to find its ID.');
+          return;
+        }
+        const fields = form.fields.slice(0, 12).map((field, index) =>
+          (index + 1) + '. **' + field.label + '** · ' + field.id + ' · ' + field.type + ' · ' +
+          (field.required ? 'required' : 'optional') + ' · step ' + field.step
+        );
+        if (form.fields.length > 12) fields.push('…and ' + (form.fields.length - 12) + ' more field(s).');
+        await interaction.editReply(
+          '**' + form.name + '**\n' +
+          'ID: ' + form.id + '\nVersion: **' + form.version + '** · Status: **' + (form.active ? 'ACTIVE' : 'Inactive') + '**\n' +
+          'Department ID: ' + form.departmentId + ' · Tag ID: ' + (form.tagId ?? '*') + '\n\n' +
+          '**Current fields (' + form.fields.length + '):**\n' + (fields.length ? fields.join('\n') : 'No fields configured.') +
+          '\n\nUse /supportforge form schema to inspect the complete JSON schema.'
+        );
+        return;
+      }
+
+      if (action === 'schema') {
+        const formId = interaction.options.getString('id', true).trim();
+        const form = (await listTicketForms(guild.id)).find((item) => item.id === formId);
+        if (!form) {
+          await interaction.editReply('Ticket form not found in this server. Use /supportforge form list to find its ID.');
+          return;
+        }
+        const schema = JSON.stringify({ fields: form.fields }, null, 2);
+        const pageLength = 1450;
+        const pageCount = Math.max(1, Math.ceil(schema.length / pageLength));
+        const requestedPage = interaction.options.getInteger('page') ?? 1;
+        if (requestedPage > pageCount) {
+          await interaction.editReply('Schema page ' + requestedPage + ' does not exist. This schema has ' + pageCount + ' page(s). Use /supportforge form schema id:' + formId + ' page:1 to start.');
+          return;
+        }
+        const chunk = schema.slice((requestedPage - 1) * pageLength, requestedPage * pageLength);
+        await interaction.editReply(
+          '**Schema for ' + form.name + ' · Page ' + requestedPage + ' / ' + pageCount + '**\n' +
+          'Form ID: ' + form.id + ' · Version: **' + form.version + '** · Status: **' + (form.active ? 'ACTIVE' : 'Inactive') + '**\n' +
+          'Copy the JSON chunks from each page in order to reconstruct the complete schema.\n\n' + chunk
+        );
+        return;
+      }
+
+      if (action === 'template-show') {
+        const templateId = interaction.options.getString('template-id', true).trim();
+        const template = (await listTicketFormTemplates(guild.id)).find((item) => item.id === templateId);
+        if (!template) {
+          await interaction.editReply('Template not found in this server. Use /supportforge form template-list to find its ID.');
+          return;
+        }
+        const fields = template.fields.slice(0, 12).map((field, index) =>
+          (index + 1) + '. **' + field.label + '** · ' + field.id + ' · ' + field.type
+        );
+        if (template.fields.length > 12) fields.push('…and ' + (template.fields.length - 12) + ' more field(s).');
+        await interaction.editReply(
+          '**Template: ' + template.name + '**\nID: ' + template.id + '\nFields: **' + template.fields.length + '**\n\n' +
+          (fields.length ? fields.join('\n') : 'No fields in this template.') +
+          '\n\nUse /supportforge form template-apply to create a form from this template. Deleting the template will not alter forms already created.'
+        );
+        return;
+      }
+
+      if (action === 'quick-create') {
+        const name = interaction.options.getString('name', true).trim();
+        const departmentId = interaction.options.getString('department-id', true).trim();
+        const suppliedTagId = interaction.options.getString('tag-id', true).trim();
+        const tagId = suppliedTagId === '*' ? null : suppliedTagId;
+        const questions = [
+          interaction.options.getString('question-one', true),
+          interaction.options.getString('question-two') ?? '',
+        ];
+        const form = await createTicketForm({
+          guildId: guild.id,
+          name,
+          departmentId,
+          tagId,
+          fields: buildQuickTicketFormFields(questions),
+          actorId,
+        });
+        await interaction.editReply(
+          '✅ Created inactive guided form **' + form.name + '** with ' + form.fields.length +
+          ' question(s). ID: `' + form.id + '`, version ' + form.version +
+          '. Activate it when the department/tag mapping is ready. Use the advanced builder for dropdowns, attachments, conditions, and custom validation.',
+        );
+        writeFormAudit('TICKET_FORM_CREATED', 'Created guided form ' + form.id + ' version 1 for department ' + departmentId + ' and tag ' + (tagId ?? '*') + '.');
         return;
       }
 

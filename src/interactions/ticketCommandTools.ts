@@ -10,6 +10,7 @@ import {
   EmbedBuilder,
   MessageFlags,
   PermissionFlagsBits,
+  StringSelectMenuBuilder,
   type ChatInputCommandInteraction,
 } from 'discord.js';
 
@@ -21,6 +22,7 @@ import {
 
 import { getAdvancedSettings, type TicketPriority } from '../services/advancedSettingsService';
 import { projectDurableTicketTopic } from '../services/ticketTopicProjectionService';
+import { getThemeColor } from '../services/uiThemeService';
 
 import {
   getOrCreateAuditChannel,
@@ -39,6 +41,7 @@ import {
   getTicketChannelName,
   queueTicketChannelRename,
   refreshTicketPanel,
+  moveTicketPanelToBottom,
 } from '../services/ticketPanelService';
 import {
   endTicketVoiceMode,
@@ -55,6 +58,13 @@ import {
 } from '../services/ticketPersistenceService';
 
 import { setChannelPermissionOverwrite, setChannelTopic, setChannelProperties, type ChannelPermissionOverwrite } from '../services/discordChannelService';
+import {
+  executeTicketLifecycleCommand,
+  executeTicketRoutingCommand,
+  executeTicketVoiceCommand,
+  executeTicketReportCommand,
+  showTicketCreationModalFromCommand,
+} from './ticketInteractions';
 
 import {
   ensureArchiveCategory,
@@ -429,6 +439,13 @@ async function saveTopic(
 export async function executeTicketCommand(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
+  // Ticket creation opens its own modal before deferring the interaction.
+  // The modal submit then uses the same durable creation pipeline as the panel button.
+  if (interaction.options.getSubcommand() === 'create') {
+    await showTicketCreationModalFromCommand(interaction);
+    return;
+  }
+
   /*
    * A slash-command interaction must be acknowledged
    * immediately. Do not perform configuration/database
@@ -460,7 +477,7 @@ export async function executeTicketCommand(
      * Only configured department staff or
      * administrators can manage tickets.
      */
-    if (!context.isAuthorized) {
+    if (!context.isAuthorized && !(subcommand === 'close' && context.ownerId === interaction.user.id)) {
       await interaction.editReply(
         '❌ Only the configured department staff or an administrator can use ticket management commands.',
       );
@@ -483,6 +500,40 @@ export async function executeTicketCommand(
         '🔒 This feature is available in Premium/Pro demo mode. Run `/supportforge premium toggle-demo` as an administrator to preview it.',
       );
 
+      return;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Panel-only workflows exposed through slash commands               */
+    /* ------------------------------------------------------------------ */
+
+    if (subcommand === 'close' || subcommand === 'reopen') {
+      // Execute the same lifecycle service used by the panel button directly.
+      // A slash command must remain a real fallback, not just display another button.
+      await executeTicketLifecycleCommand(interaction, subcommand);
+      return;
+    }
+
+    if (subcommand === 'department' || subcommand === 'tag') {
+      await executeTicketRoutingCommand(interaction, subcommand);
+      return;
+    }
+
+    if (subcommand === 'voice') {
+      const voiceAction = interaction.options.getString('action', true) as 'start' | 'end' | 'join';
+      await executeTicketVoiceCommand(interaction, voiceAction);
+      return;
+    }
+
+    if (subcommand === 'report') {
+      await executeTicketReportCommand(interaction);
+      return;
+    }
+
+    if (subcommand === 'move-panel') {
+      await moveTicketPanelToBottom(context.channel);
+      await interaction.editReply('Ticket controls have been moved to the bottom of this channel.');
+      await audit(interaction, context, 'Ticket panel moved', 'Moved ticket controls to the bottom through slash command.');
       return;
     }
 
@@ -1200,6 +1251,7 @@ export async function executeTicketCommand(
       await auditChannel.send({
         embeds: [
           new EmbedBuilder()
+            .setColor(getThemeColor(context.config.theme))
             .setTitle(
               `🔒 Internal note • Ticket #${context.ticketNumber}`,
             )

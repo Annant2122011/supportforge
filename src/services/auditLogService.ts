@@ -10,6 +10,7 @@ import {
   MessageFlags,
   PermissionFlagsBits,
   type ButtonInteraction,
+  type ChatInputCommandInteraction,
   type Guild,
   type GuildBasedChannel,
   type Role,
@@ -18,6 +19,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { getJsonDocument, setJsonDocument } from './jsonDocumentPersistenceService';
 import { getGuildConfig, updateGuildConfig } from './configService';
+import { getThemeColor } from './uiThemeService';
 import { getAdvancedSettings } from './advancedSettingsService';
 import { ensureChannelPurposeMessage } from './channelPurposeService';
 import {
@@ -1264,9 +1266,11 @@ async function sendAuditEntry(
     .filter(Boolean)
     .join('\n');
 
+  const auditThemeColor = getThemeColor((await getGuildConfig(channel.guild.id)).theme);
   await channel.send({
     embeds: [
       new EmbedBuilder()
+        .setColor(auditThemeColor)
         .setTitle(`SupportForge Audit • ${actionLabel(event.action)}`)
         .setDescription(description)
         .setFooter({
@@ -1329,8 +1333,10 @@ function auditRestoreComponents(): ActionRowBuilder<ButtonBuilder>[] {
   return [];
 }
 
-function buildAuditPanelEmbed(guild: Guild): EmbedBuilder {
+async function buildAuditPanelEmbed(guild: Guild): Promise<EmbedBuilder> {
+  const config = await getGuildConfig(guild.id);
   return new EmbedBuilder()
+    .setColor(getThemeColor(config.theme))
     .setTitle(AUDIT_PANEL_TITLE)
     .setDescription(
       'This channel is the central SupportForge audit record. It keeps a durable history of ticket lifecycle actions and important configuration changes, including responsible users and timestamps.\n\n' +
@@ -1441,7 +1447,7 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
     const panel = channel.messages.cache.get(store.panelMessageId);
     if (panel?.embeds.some((embed) => embed.title === AUDIT_PANEL_TITLE)) {
       await panel.edit({
-        embeds: [buildAuditPanelEmbed(guild)],
+        embeds: [await buildAuditPanelEmbed(guild)],
         components: auditPanelComponents(),
       }).catch(() => undefined);
       return;
@@ -1479,7 +1485,7 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
       store.panelMessageId = existingPanel.id;
       await existingPanel
         .edit({
-          embeds: [buildAuditPanelEmbed(guild)],
+          embeds: [await buildAuditPanelEmbed(guild)],
           components: auditPanelComponents(),
         })
         .catch(() => undefined);
@@ -1489,7 +1495,7 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
   }
 
   const panel = await channel.send({
-    embeds: [buildAuditPanelEmbed(guild)],
+    embeds: [await buildAuditPanelEmbed(guild)],
     components: auditPanelComponents(),
   });
 
@@ -1497,6 +1503,12 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
   store.restoreMessageId = null;
   store.panelEventCheckpoint = store.events.length;
   await persist();
+}
+
+export async function refreshAuditPanelTheme(guild: Guild): Promise<void> {
+  const channel = await findAuditChannel(guild);
+  if (!channel) return;
+  await ensureAuditPanel(guild, channel);
 }
 
 function currentStatusCounts(tickets: Awaited<ReturnType<typeof collectLiveTickets>>): Map<TicketStatus, number> {
@@ -1565,6 +1577,7 @@ async function buildPrivateDeveloperAuditPage(
 }> {
   const current = await load();
   const store = getGuildStore(current, guild.id);
+  const config = await getGuildConfig(guild.id);
   /*
    * Developer audit is one continuous stream. Every moderator who enables
    * Developer View sees the retained historical audit records plus new records
@@ -1694,6 +1707,8 @@ async function buildPrivateDeveloperAuditPage(
       );
     }
   }
+
+  for (const embed of embeds) embed.setColor(getThemeColor(config.theme));
 
   return {
     embeds,
@@ -1971,6 +1986,7 @@ async function generateOverallAuditSummary(
 
   for (let index = 0; index < detailSections; index += 1) {
     const embed = new EmbedBuilder()
+      .setColor(getThemeColor(config.theme))
       .setTitle(
         '📋 Audit Details' +
           (detailSections > 1 ? ' • Page ' + (index + 1) + '/' + detailSections : ''),
@@ -2038,6 +2054,7 @@ async function generateOverallAuditSummary(
     });
 
   const first = new EmbedBuilder()
+    .setColor(getThemeColor(config.theme))
     .setTitle('📊 SupportForge Overall Audit Summary • ' + guild.name)
     .setDescription(summaryLines.join('\n'))
     .addFields(
@@ -2391,9 +2408,10 @@ async function publishDailySummary(
   const reportableEvents = events.filter(isReportableAuditEvent);
   const channel = await getOrCreateAuditChannel(guild, config.supportCategoryId);
 
-  const dailyEmbed = reportableEvents.length
+  const dailyEmbed = (reportableEvents.length
     ? buildDailySummaryEmbed(guild, date, reportableEvents)
-    : buildNoActivityDailySummaryEmbed(guild, date);
+    : buildNoActivityDailySummaryEmbed(guild, date))
+    .setColor(getThemeColor(config.theme));
 
   await channel.send({ embeds: [dailyEmbed] });
   store.summaries[date] = JSON.stringify(dailyEmbed.toJSON());
@@ -2584,7 +2602,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       );
 
     const panel = await interaction.channel.send({
-      embeds: [buildAuditPanelEmbed(interaction.guild)],
+      embeds: [await buildAuditPanelEmbed(interaction.guild)],
       components: auditPanelComponents(),
     });
     if (restore) await restore.delete().catch(() => undefined);
@@ -2620,7 +2638,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
     }
 
     const movedPanel = await interaction.channel.send({
-      embeds: [buildAuditPanelEmbed(interaction.guild)],
+      embeds: [await buildAuditPanelEmbed(interaction.guild)],
       components: auditPanelComponents(),
     });
 
@@ -3061,6 +3079,232 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
   }
 
   return false;
+}
+
+export async function executeAuditPanelCommand(guild: Guild, mode: 'move' | 'restore'): Promise<void> {
+  const channel = await findAuditChannel(guild);
+  if (!channel) throw new Error('SupportForge audit-log-general could not be found. Run /supportforge setup first.');
+  const current = await load();
+  const store = getGuildStore(current, guild.id);
+  if (mode === 'restore') {
+    const restore = store.restoreMessageId
+      ? channel.messages.cache.get(store.restoreMessageId) ?? await channel.messages.fetch(store.restoreMessageId).catch(() => null)
+      : (await channel.messages.fetch({ limit: 100 })).find((message) =>
+          message.author.id === channel.client.user?.id && message.components.some((row) =>
+            row.type === ComponentType.ActionRow && row.components.some((component) =>
+              'customId' in component && component.customId === AUDIT_RESTORE_CUSTOM_ID)));
+    const panel = await channel.send({ embeds: [await buildAuditPanelEmbed(guild)], components: auditPanelComponents() });
+    if (restore) await restore.delete().catch(() => undefined);
+    store.panelMessageId = panel.id;
+    store.restoreMessageId = null;
+    store.panelEventCheckpoint = store.events.length;
+    await persist();
+    return;
+  }
+  if (!store.panelMessageId) {
+    await ensureAuditPanel(guild, channel);
+    return;
+  }
+  const oldPanel = channel.messages.cache.get(store.panelMessageId) ??
+    await channel.messages.fetch(store.panelMessageId).catch(() => null);
+  if (!oldPanel) {
+    store.panelMessageId = null;
+    await persist();
+    return;
+  }
+  const movedPanel = await channel.send({ embeds: [await buildAuditPanelEmbed(guild)], components: auditPanelComponents() });
+  await oldPanel.delete().catch(() => undefined);
+  store.panelMessageId = movedPanel.id;
+  store.panelEventCheckpoint = store.events.length;
+  await persist();
+}
+
+export async function handleAuditSlashCommand(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  const guild = interaction.guild;
+  if (!guild) {
+    await interaction.reply({ content: 'This command can only be used in a server.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+  if (interaction.channel?.type !== ChannelType.GuildText ||
+      !(interaction.channel.topic ?? '').startsWith(AUDIT_TOPIC)) {
+    await interaction.reply({
+      content: 'Run audit slash commands inside SupportForge audit-log-general. The existing button controls require that audit channel context.',
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const action = interaction.options.getSubcommand();
+  const current = await load();
+  const store = getGuildStore(current, guild.id);
+  const config = await getGuildConfig(guild.id);
+  const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+  const staffRoleIds = new Set(
+    Object.values(config.departments).map((department) => department.staffRoleId).filter((id): id is string => Boolean(id)),
+  );
+  const developerRole = config.auditDeveloperRoleId
+    ? guild.roles.cache.get(config.auditDeveloperRoleId)
+    : [...guild.roles.cache.values()].find((role) => !role.managed && role.name === AUDIT_DEVELOPER_ROLE_NAME);
+  const isModerator = Boolean(
+    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ||
+    member?.roles.cache.some((role) => staffRoleIds.has(role.id)) ||
+    (member && developerRole && member.roles.cache.has(developerRole.id)) ||
+    store.developerViewers.includes(interaction.user.id),
+  );
+  if (!isModerator) {
+    await interaction.editReply('Developer and audit controls are restricted to SupportForge moderators.');
+    return;
+  }
+
+  if (action === 'summary') {
+    const includeInternalEvents = store.developerViewers.includes(interaction.user.id);
+    const embeds = await generateOverallAuditSummary(guild, includeInternalEvents);
+    if (!includeInternalEvents) {
+      store.overallSummary = JSON.stringify(embeds.map((embed) => embed.toJSON()));
+      await persist();
+    }
+    await interaction.editReply({ embeds });
+    return;
+  }
+
+  if (action === 'daily') {
+    const includeInternalEvents = store.developerViewers.includes(interaction.user.id);
+    const date = Object.keys(store.summaries).sort().pop();
+    if (!date) {
+      await interaction.editReply('No completed daily summary has been saved yet.');
+      return;
+    }
+    if (includeInternalEvents) {
+      const events = store.events.filter((event) => dateKey(event.timestamp) === date);
+      await interaction.editReply({
+        embeds: [events.length ? buildDailySummaryEmbed(guild, date, events) : buildNoActivityDailySummaryEmbed(guild, date)],
+      });
+      return;
+    }
+    const raw = store.summaries[date];
+    if (!raw) {
+      await interaction.editReply('No completed daily summary has been saved yet.');
+      return;
+    }
+    try {
+      await interaction.editReply({ embeds: [EmbedBuilder.from(JSON.parse(raw))] });
+    } catch {
+      await interaction.editReply('The saved daily summary could not be restored.');
+    }
+    return;
+  }
+
+  if (action === 'accumulation') {
+    const mode = interaction.options.getString('action', true);
+    const enabled = await getAuditAccumulation(guild.id);
+    if (mode === 'status') {
+      await interaction.editReply(enabled
+        ? 'Raw audit accumulation is **enabled**. Individual events and summaries are retained.'
+        : 'Raw audit accumulation is **disabled**. Individual events are not retained; saved summaries remain.');
+      return;
+    }
+    if (mode === 'enable') {
+      if (!enabled) {
+        await setAuditAccumulation(guild.id, true);
+        await refreshAuditPanel(guild);
+      }
+      await interaction.editReply('✅ Raw audit accumulation is now **enabled**.');
+      return;
+    }
+    const confirmed = interaction.options.getBoolean('confirm-delete') ?? false;
+    if (!confirmed) {
+      await interaction.editReply('This action clears retained individual audit events while preserving saved summaries. Re-run /supportforge audit accumulation with action disable and confirm-delete true to confirm.');
+      return;
+    }
+    await setAuditAccumulation(guild.id, false);
+    await refreshAuditPanel(guild);
+    await interaction.editReply('✅ Raw audit accumulation is now **disabled**. Retained individual events were cleared; saved summaries remain.');
+    return;
+  }
+
+  if (action === 'developer') {
+    const mode = interaction.options.getString('action', true);
+    const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+    if (!member) {
+      await interaction.editReply('Your server member record could not be resolved.');
+      return;
+    }
+    const current = await load();
+    const store = getGuildStore(current, guild.id);
+    const enabled = store.developerViewers.includes(interaction.user.id);
+    if (mode === 'options') {
+      await interaction.editReply('Developer View is **' + (enabled ? 'enabled' : 'disabled') + '** for you. Use /supportforge audit developer action enable or disable to change it, or action page with a page number to read the retained audit stream.');
+      return;
+    }
+    if (mode === 'disable') {
+      const config = await getGuildConfig(guild.id);
+      const developerRole = config.auditDeveloperRoleId
+        ? guild.roles.cache.get(config.auditDeveloperRoleId)
+        : [...guild.roles.cache.values()].find((role) => !role.managed && role.name === AUDIT_DEVELOPER_ROLE_NAME);
+      if (developerRole) await member.roles.remove(developerRole, 'SupportForge Developer Audit Mode disabled').catch(() => undefined);
+      store.developerViewers = store.developerViewers.filter((id) => id !== interaction.user.id);
+      delete store.developerViewModes[interaction.user.id];
+      delete store.developerViewStartedAt[interaction.user.id];
+      await persist();
+      await interaction.editReply('Developer View disabled for you. The durable audit database continues recording events normally.');
+      return;
+    }
+    if (mode === 'enable') {
+      const config = await getGuildConfig(guild.id);
+      if (!config.supportCategoryId) {
+        await interaction.editReply('Run /supportforge setup before enabling Developer View.');
+        return;
+      }
+      const infrastructure = await ensureAuditDeveloperInfrastructure(guild, config.supportCategoryId);
+      if (!infrastructure.role) {
+        await interaction.editReply('The developer audit role could not be provisioned. Check the bot permissions and try again.');
+        return;
+      }
+      if (!store.developerViewers.includes(interaction.user.id)) store.developerViewers.push(interaction.user.id);
+      if (!member.roles.cache.has(infrastructure.role.id)) {
+        await member.roles.add(infrastructure.role, 'SupportForge Developer Audit Mode enabled');
+      }
+      await persist();
+      const page = await buildPrivateDeveloperAuditPage(guild, interaction.user.id, 0);
+      await interaction.editReply({
+        content: 'Developer View enabled for you only. The private audit stream contains retained history and new developer events.',
+        embeds: page.embeds,
+      });
+      return;
+    }
+    if (mode === 'page') {
+      if (!enabled) {
+        await interaction.editReply('Enable Developer View first, then request a page.');
+        return;
+      }
+      const requestedPage = interaction.options.getInteger('page') ?? 0;
+      const page = await buildPrivateDeveloperAuditPage(guild, interaction.user.id, requestedPage);
+      await interaction.editReply({ content: 'Developer audit stream · page ' + requestedPage, embeds: page.embeds });
+      return;
+    }
+    await interaction.editReply('Unsupported Developer View action.');
+    return;
+  }
+
+  if (action === 'panel') {
+    const mode = interaction.options.getString('action', true);
+    if (mode === 'refresh') {
+      await refreshAuditPanel(guild);
+      await interaction.editReply('✅ The SupportForge audit control panel was refreshed.');
+      return;
+    }
+    await executeAuditPanelCommand(guild, mode as 'move' | 'restore');
+    await interaction.editReply(mode === 'move'
+      ? '✅ The audit control panel was moved to the bottom of audit-log-general.'
+      : '✅ The audit control panel was restored at the end of audit-log-general.');
+    return;
+  }
+
+  await interaction.editReply('Unsupported audit command.');
 }
 
 export async function resetAuditLogState(): Promise<void> {

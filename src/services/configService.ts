@@ -3,6 +3,8 @@ import { getJsonDocument, setJsonDocument } from './jsonDocumentPersistenceServi
 
 export type SupportForgeTier = 'free' | 'premium-demo' | 'pro-demo';
 
+export type GuildTheme = 'midnight' | 'cyber-neon' | 'ocean' | 'aurora' | 'ember' | 'forest';
+
 export interface TagConfig {
   id: string;
   name: string;
@@ -27,6 +29,7 @@ export interface GuildConfig {
   auditChannelId: string | null;
   auditDevChannelId: string | null;
   auditDeveloperRoleId: string | null;
+  theme: GuildTheme;
   tier: SupportForgeTier;
   nextTicketNumber: number;
   departments: Record<string, DepartmentConfig>;
@@ -48,6 +51,7 @@ const DEFAULT_CONFIG: GuildConfig = {
   auditChannelId: null,
   auditDevChannelId: null,
   auditDeveloperRoleId: null,
+  theme: 'midnight',
   tier: 'free',
   nextTicketNumber: 1000,
   departments: {},
@@ -112,6 +116,11 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
   current.guilds[guildId] ??= cloneDefaultConfig();
 
   let migrated = false;
+  const savedTheme: unknown = (current.guilds[guildId] as { theme?: unknown }).theme;
+  if (savedTheme !== 'midnight' && savedTheme !== 'cyber-neon' && savedTheme !== 'ocean' && savedTheme !== 'aurora' && savedTheme !== 'ember' && savedTheme !== 'forest') {
+    current.guilds[guildId].theme = 'midnight';
+    migrated = true;
+  }
   if (!Array.isArray(current.guilds[guildId].retiredCategoryIds)) {
     current.guilds[guildId].retiredCategoryIds = [];
     migrated = true;

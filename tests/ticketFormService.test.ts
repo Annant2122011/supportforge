@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  buildQuickTicketFormFields,
   getTicketFormStepCount,
   getVisibleTicketFormFields,
   parseTicketFormFields,
@@ -197,4 +198,14 @@ test('validates real uploaded attachment size, MIME type and source host', () =>
   assert.throws(() => validateTicketFormAnswers(fields, { evidence: [{ ...file, size: 2048 }] }), /no larger than 1 KiB/);
   assert.throws(() => validateTicketFormAnswers(fields, { evidence: [{ ...file, contentType: 'application/x-msdownload' }] }), /file type .* is not allowed/);
   assert.throws(() => validateTicketFormAnswers(fields, { evidence: [{ ...file, url: 'https://example.com/evidence.png' }] }), /trusted Discord attachment host/);
+});
+
+
+test('guided form builder creates valid readable text questions without JSON authoring', () => {
+  const fields = buildQuickTicketFormFields([' Order ID ', 'What happened?', 'Order ID']);
+  assert.deepEqual(fields.map((field) => field.label), ['Order ID', 'What happened?', 'Order ID']);
+  assert.deepEqual(fields.map((field) => field.id), ['order_id', 'what_happened', 'order_id_3']);
+  assert.ok(fields.every((field) => field.type === 'short_text' && field.required && field.step === 1));
+  assert.throws(() => buildQuickTicketFormFields(['']), /one to three/);
+  assert.throws(() => buildQuickTicketFormFields(['x'.repeat(46)]), /45 characters or fewer/);
 });

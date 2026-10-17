@@ -18,6 +18,9 @@ import {
 
 import {
   getGuildConfig,
+  getTier,
+  setTier,
+  tierLabel,
   newDepartmentId,
   newTagId,
   updateGuildConfig,
@@ -48,11 +51,15 @@ import {
   ensureAllDepartmentCategories,
 } from '../services/departmentCategoryService';
 
-import { logSettingsEvent } from '../services/auditLogService';
-import { getField, getTicketStatus, isTicketTopic, setField } from '../services/ticketStateService';
-import { setChannelPermissionOverwrite, setChannelTopic } from '../services/discordChannelService';
-import { getPersistedTicket, getPersistedTicketStatus, registerTicket } from '../services/ticketPersistenceService';
+import { logSettingsEvent, refreshAuditPanelTheme } from '../services/auditLogService';
+import { getField, getTicketStatus, setField } from '../services/ticketStateService';
+import { migrateDepartmentStaffRole } from '../services/departmentStaffRoleService';
+import { getPersistedTicket, getPersistedTicketStatus } from '../services/ticketPersistenceService';
 import { performFactoryReset } from '../services/factoryResetService';
+import { addUseCasePreset, USE_CASE_PRESETS } from '../services/useCasePresetService';
+import { enforcePriorityRoleHierarchy } from '../services/priorityRoleService';
+import { UI_THEMES, getThemeColor, getThemeDefinition, isGuildTheme } from '../services/uiThemeService';
+import { handleTicketFormSettingsInteraction } from './ticketFormSettingsInteractions';
 import {
   approveRetentionDeletion,
   declineRetentionDeletion,
@@ -65,6 +72,8 @@ import {
   ensurePanelChannel,
   ensureTranscriptChannel,
   syncPanel,
+  runSupportForgeSetup,
+  runSupportForgeRepair,
 } from '../commands/supportforge';
 
 const SETTINGS_TOPIC_PREFIX = 'supportforge:settings';
@@ -98,103 +107,6 @@ async function isDepartmentStaff(interaction: ButtonInteraction | StringSelectMe
   const member = await guild.members.fetch(interaction.user.id).catch(() => null);
   return Boolean(member?.roles.cache.some((role) => roleIds.has(role.id)));
 };
-
-async function migrateDepartmentStaffRole(
-  guild: Guild,
-  departmentId: string,
-  oldRoleId: string | null,
-  newRoleId: string | null,
-): Promise<void> {
-  if (oldRoleId === newRoleId) return;
-
-  const config = await getGuildConfig(guild.id);
-  const department = config.departments[departmentId];
-  const category = department?.categoryId
-    ? guild.channels.cache.get(department.categoryId)
-    : null;
-
-  if (category?.type === ChannelType.GuildCategory) {
-    if (oldRoleId) {
-      await setChannelPermissionOverwrite(
-        category.id,
-        oldRoleId,
-        [],
-        [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
-        0,
-        'SupportForge remove previous department staff role access',
-      ).catch((error) => console.warn('⚠️ Could not remove previous department role from category:', error));
-    }
-    if (newRoleId) {
-      await setChannelPermissionOverwrite(
-        category.id,
-        newRoleId,
-        [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
-        [],
-        0,
-        'SupportForge grant new department staff role access',
-      ).catch((error) => console.warn('⚠️ Could not grant new department role to category:', error));
-    }
-  }
-
-  for (const channel of guild.channels.cache.values()) {
-    if (
-      channel.type !== ChannelType.GuildText ||
-      !channel.topic?.startsWith('supportforge:ticket') ||
-      getField(channel.topic, 'department') !== departmentId
-    ) {
-      continue;
-    }
-
-    const topic = channel.topic;
-    const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
-    const nextTopic = setField(topic, 'staff', newRoleId ?? 'none');
-
-    if (oldRoleId && oldRoleId !== newRoleId) {
-      await setChannelPermissionOverwrite(
-        channel.id,
-        oldRoleId,
-        [],
-        [],
-        0,
-        'SupportForge clear previous department staff ticket override',
-      ).catch((error) => console.warn('⚠️ Could not clear old department role on ticket ' + channel.id + ':', error));
-    }
-
-    if (newRoleId) {
-      const claimed = status === 'claimed';
-      await setChannelPermissionOverwrite(
-        channel.id,
-        newRoleId,
-        claimed
-          ? []
-          : [
-              PermissionFlagsBits.ViewChannel,
-              PermissionFlagsBits.SendMessages,
-              PermissionFlagsBits.ReadMessageHistory,
-            ],
-        claimed
-          ? [
-              PermissionFlagsBits.ViewChannel,
-              PermissionFlagsBits.SendMessages,
-              PermissionFlagsBits.ReadMessageHistory,
-            ]
-          : [],
-        0,
-        claimed
-          ? 'SupportForge hide claimed ticket from new department staff role'
-          : 'SupportForge grant new department staff ticket access',
-      ).catch((error) => console.warn('⚠️ Could not synchronize new department staff access on ticket ' + channel.id + ':', error));
-    }
-
-    await setChannelTopic(
-      channel.id,
-      nextTopic,
-      'SupportForge migrate department staff role metadata',
-    ).catch((error) => console.warn('⚠️ Could not update staff metadata on ticket ' + channel.id + ':', error));
-
-    channel.topic = nextTopic;
-  }
-}
 
 function manualQuickEmbed(): EmbedBuilder {
   return new EmbedBuilder()
@@ -265,98 +177,19 @@ function priorityRoleLabel(priority: TicketPriority): string {
   return PRIORITY_ROLE_DEFINITIONS[priority].label;
 }
 
-const pendingResetAuditChoice = new Map<string, boolean>();
-
-const PRIORITY_ROLE_ORDER: TicketPriority[] = [
-  'critical',
-  'urgent',
-  'high',
-  'normal',
-  'low',
-];
-
-/**
- * Keep SupportForge priority roles together at the top of the role hierarchy
- * that the bot can manage. Higher priority always receives the higher Discord
- * role position, regardless of the order in which roles were created.
- */
-async function enforcePriorityRoleHierarchy(guild: Guild): Promise<void> {
-  const settings = await getAdvancedSettings(guild.id);
-  const configured = PRIORITY_ROLE_ORDER.flatMap((priority) => {
-    const roleId = settings.priorityRoles[priority];
-    const role = roleId ? guild.roles.cache.get(roleId) : undefined;
-
-    return roleId && role && !role.managed
-      ? [{ priority, role }]
-      : [];
-  });
-
-  if (configured.length === 0) return;
-
-  const botMember =
-    guild.members.me ??
-    await guild.members.fetchMe().catch(() => null);
-
-  const botHighestRole = botMember?.roles.highest;
-  if (!botHighestRole) {
-    console.warn('⚠️ SupportForge could not determine its highest role; priority role ordering was skipped.');
-    return;
-  }
-
-  /*
-   * Discord only lets a bot manage roles below its highest role. A hierarchy
-   * preference must never make the underlying priority-rule creation fail.
-   * Skip roles the bot cannot edit and treat a Discord 50013 as a warning.
-   */
-  const manageable = configured.filter(
-    (entry) =>
-      entry.role.editable &&
-      entry.role.position < botHighestRole.position,
-  );
-
-  if (manageable.length === 0) return;
-
-  const highestTargetPosition = botHighestRole.position - 1;
-  const lowestTargetPosition =
-    highestTargetPosition - manageable.length + 1;
-
-  if (lowestTargetPosition < 1) {
-    console.warn(
-      '⚠️ Not enough manageable role positions below the SupportForge bot role; priority role ordering was skipped.',
-    );
-    return;
-  }
-
-  const positions = manageable.map((entry, index) => ({
-    role: entry.role.id,
-    position: highestTargetPosition - index,
-  }));
-
-  try {
-    await guild.roles.setPositions(positions);
-    await guild.roles.fetch();
-  } catch (error) {
-    console.warn(
-      '⚠️ Could not reorder SupportForge priority roles. Role creation/deletion will continue normally:',
-      error,
-    );
-  }
-}
-
 function findPriorityRole(
   guild: Guild,
   _priority: TicketPriority,
   configuredRoleId?: string,
 ) {
-  /*
-   * A role name is not ownership proof. Only a persisted role ID identifies a
-   * SupportForge-managed priority role, so an unrelated role with a matching
-   * display name can never be deleted or treated as configured infrastructure.
-   */
+  // A matching display name is not ownership proof. Only the saved role ID
+  // identifies a SupportForge-managed priority role.
   if (!configuredRoleId) return undefined;
   const configured = guild.roles.cache.get(configuredRoleId);
   return configured && !configured.managed ? configured : undefined;
 }
+
+const pendingResetAuditChoice = new Map<string, boolean>();
 
 async function showManual(interaction: SettingsViewInteraction): Promise<void> {
   await renderSettingsView(interaction, [
@@ -694,7 +527,9 @@ async function renderSettingsView(
   embeds: EmbedBuilder[],
   components: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>>,
 ): Promise<void> {
-  const payload = { embeds, components };
+  const config = await getGuildConfig(interaction.guild!.id);
+  const themedEmbeds = embeds.map((embed) => embed.setColor(getThemeColor(config.theme)));
+  const payload = { embeds: themedEmbeds, components };
 
   if (interaction.replied || interaction.deferred) {
     await interaction.editReply(payload);
@@ -746,10 +581,34 @@ async function showHome(interaction: SettingsViewInteraction): Promise<void> {
           (total, department) => total + Object.keys(department.tags ?? {}).length,
           0,
         ),
+        config.theme,
       ),
     ],
     buildSettingsDashboardComponents(),
   );
+}
+
+async function showPremiumSettings(interaction: SettingsViewInteraction, notice = ''): Promise<void> {
+  const tier = await getTier(interaction.guild!.id);
+  const next = tier === 'free' ? 'premium-demo' : tier === 'premium-demo' ? 'pro-demo' : 'free';
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('💎 Premium & Feature Demo')
+      .setDescription(
+        (notice ? notice + '\\n\\n' : '') +
+        'Current tier: **' + tierLabel(tier) + '**. Premium and Pro are demo entitlements for preview only, not real billing. ' +
+        'This control cycles Free → Premium Demo → Pro Demo → Free.',
+      ),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId('sf:settings:premium:toggle')
+        .setLabel('Switch to ' + tierLabel(next))
+        .setEmoji('🔁')
+        .setStyle(ButtonStyle.Primary),
+      backButton(),
+    ),
+  ]);
 }
 
 async function showPanelSettings(interaction: ButtonInteraction): Promise<void> {
@@ -1273,40 +1132,38 @@ async function showAppearance(interaction: ButtonInteraction): Promise<void> {
   ]);
 }
 
-const USE_CASE_PRESETS: Record<string, { name: string; emoji: string; tags: string[] }> = {
-  'technical-support': {
-    name: 'Technical Support', emoji: '🛠️',
-    tags: ['Bug Report', 'Error Message', 'Performance Issue', 'Installation', 'Configuration', 'Integration', 'Feature Request', 'Compatibility'],
-  },
-  sales: {
-    name: 'Sales', emoji: '💼',
-    tags: ['Pricing', 'Plan Comparison', 'Quote Request', 'Product Demo', 'Enterprise Inquiry', 'Volume Discount', 'Purchase Assistance', 'Upgrade Inquiry'],
-  },
-  'account-access': {
-    name: 'Account & Access', emoji: '🔐',
-    tags: ['Login Issue', 'Password Reset', 'Email Change', 'Two-Factor Authentication', 'Account Verification', 'Account Recovery', 'Permission Issue', 'Account Deletion'],
-  },
-  partnerships: {
-    name: 'Partnerships', emoji: '🤝',
-    tags: ['Partnership Proposal', 'Affiliate Program', 'Integration Proposal', 'Reseller Inquiry', 'Co-Marketing', 'Sponsorship', 'API Collaboration', 'Business Development'],
-  },
-  'reports-abuse': {
-    name: 'Reports & Abuse', emoji: '🚩',
-    tags: ['Harassment', 'Spam', 'Scam Attempt', 'Impersonation', 'Malicious Content', 'Terms Violation', 'Privacy Concern', 'Appeal'],
-  },
-  'refunds-returns': {
-    name: 'Refunds & Returns', emoji: '↩️',
-    tags: ['Refund Request', 'Return Request', 'Duplicate Charge', 'Billing Error', 'Cancel Order', 'Missing Refund', 'Damaged Item', 'Exchange Request'],
-  },
-  'product-support': {
-    name: 'Product Support', emoji: '📦',
-    tags: ['Product Question', 'Setup Assistance', 'Feature Guidance', 'Product Defect', 'Compatibility', 'Warranty Claim', 'Replacement Request', 'Documentation'],
-  },
-  'vip-support': {
-    name: 'VIP Support', emoji: '⭐',
-    tags: ['Priority Escalation', 'Service Outage', 'Executive Request', 'Dedicated Assistance', 'SLA Concern', 'Critical Business Impact', 'Account Review', 'Renewal Assistance'],
-  },
-};
+async function showThemeSettings(
+  interaction: SettingsViewInteraction,
+  notice = '',
+): Promise<void> {
+  const config = await getGuildConfig(interaction.guild!.id);
+  const active = getThemeDefinition(config.theme);
+  const chooser = new StringSelectMenuBuilder()
+    .setCustomId('sf:settings:theme:select')
+    .setPlaceholder('Choose a visual theme for this server')
+    .addOptions(UI_THEMES.map((theme) => ({
+      label: theme.label,
+      value: theme.id,
+      description: theme.description,
+      default: theme.id === config.theme,
+    })));
+
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('🌈 Server Theme')
+      .setDescription(
+        (notice ? notice + '\n\n' : '') +
+        'Give this server its own visual identity. The selected palette is saved in this server’s configuration and does not affect other servers. It accents the public support panel, Settings dashboard, and Ticket Forms screens. Discord’s native controls retain their built-in style.'
+      )
+      .addFields(
+        { name: 'Active palette', value: '**' + active.label + '**\n' + active.description, inline: true },
+        { name: 'Preview', value: active.preview, inline: true },
+      ),
+  ], [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(chooser),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()),
+  ]);
+}
 
 async function showUseCases(interaction: ButtonInteraction): Promise<void> {
   const presets = Object.entries(USE_CASE_PRESETS);
@@ -1478,6 +1335,40 @@ export async function handleSettingsInteraction(
 
   const guild = interaction.guild;
 
+  if (interaction.customId.startsWith('sf:settings:forms:')) {
+    return await handleTicketFormSettingsInteraction(interaction);
+  }
+
+  if (interaction.isStringSelectMenu() && interaction.customId === 'sf:settings:theme:select') {
+    const selectedTheme = interaction.values[0];
+    if (!isGuildTheme(selectedTheme)) {
+      await reject(interaction, '❌ That theme selection is not supported.');
+      return true;
+    }
+
+    const before = (await getGuildConfig(guild.id)).theme;
+    if (before !== selectedTheme) {
+      await updateGuildConfig(guild.id, (current) => {
+        current.theme = selectedTheme;
+      });
+      await syncPanel(guild);
+      await refreshSettingsChannel(guild);
+      await refreshAuditPanelTheme(guild);
+      await auditSettingsAction(
+        guild,
+        interaction,
+        'SERVER_THEME_CHANGED',
+        'Changed the server UI theme from ' + getThemeDefinition(before).label + ' to ' + getThemeDefinition(selectedTheme).label + '.',
+      );
+    }
+
+    await showThemeSettings(
+      interaction,
+      '✅ Theme set to **' + getThemeDefinition(selectedTheme).label + '** for this server.',
+    );
+    return true;
+  }
+
   if (interaction.isStringSelectMenu() && interaction.customId.startsWith('sf:settings:reports:subcategory:pick:')) {
     const categoryId = interaction.customId.slice('sf:settings:reports:subcategory:pick:'.length);
     const subcategoryId = interaction.values[0];
@@ -1575,6 +1466,21 @@ export async function handleSettingsInteraction(
         'SETTINGS_REFRESH',
         'Settings dashboard refreshed and the current dashboard message was replaced with the latest persisted configuration.',
       );
+      return true;
+    }
+
+    if (id === 'sf:settings:premium') {
+      await showPremiumSettings(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:premium:toggle') {
+      const current = await getTier(guild.id);
+      const next = current === 'free' ? 'premium-demo' : current === 'premium-demo' ? 'pro-demo' : 'free';
+      await setTier(guild.id, next);
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'TIER_CHANGED', 'Tier changed from ' + tierLabel(current) + ' to ' + tierLabel(next) + '.');
+      await showPremiumSettings(interaction, '✅ Tier changed: **' + tierLabel(current) + '** → **' + tierLabel(next) + '**.');
       return true;
     }
 
@@ -1871,6 +1777,11 @@ export async function handleSettingsInteraction(
       return true;
     }
 
+    if (id === 'sf:settings:theme') {
+      await showThemeSettings(interaction);
+      return true;
+    }
+
     if (id === 'sf:settings:appearance:edit') {
       const settings = await getAdvancedSettings(guild.id);
       await openModal(interaction, 'sf:settings:modal:appearance', 'Panel Appearance', [
@@ -1888,50 +1799,23 @@ export async function handleSettingsInteraction(
 
     if (id.startsWith('sf:settings:usecases:add:')) {
       const key = id.slice('sf:settings:usecases:add:'.length);
-      const preset = USE_CASE_PRESETS[key];
-      if (!preset) {
-        await reject(interaction, '❌ Unknown support use case.');
-        return true;
-      }
-      const { name, tags: starterTags } = preset;
-
-      const config = await getGuildConfig(guild.id);
-      if (Object.values(config.departments).some((department) => department.name.toLowerCase() === name.toLowerCase())) {
-        await reject(interaction, 'ℹ️ **' + name + '** is already configured.');
-        return true;
-      }
-
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const departmentId = newDepartmentId();
-      const now = new Date().toISOString();
-      const tags = Object.fromEntries(
-        starterTags.map((tagName) => {
-          const tagId = newTagId();
-          return [tagId, { id: tagId, name: tagName, createdAt: now }];
-        }),
-      );
-      await updateGuildConfig(guild.id, (current) => {
-        current.departments[departmentId] = {
-          id: departmentId,
-          name,
-          staffRoleId: null,
-          categoryId: null,
-          tags,
-          createdAt: now,
-        };
-      });
-
-      await syncPanel(guild);
-      await refreshSettingsChannel(guild);
-      await interaction.editReply({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle('✅ Use Case Added')
-            .setDescription('Added **' + name + '** with ' + starterTags.length + ' starter tags: ' + starterTags.join(', ') + '. Its Discord category will be created when the first ticket is opened in this department.'),
-        ],
-        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
-      });
-      await auditSettingsAction(guild, interaction, 'USE_CASE_ADDED', 'Added use case department ' + name + ' with ' + starterTags.length + ' starter tags. Its Discord category will be provisioned when the first ticket is created.');
+      try {
+        const added = await addUseCasePreset(guild.id, key);
+        await syncPanel(guild);
+        await refreshSettingsChannel(guild);
+        await interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle('✅ Use Case Added')
+              .setDescription('Added **' + added.name + '** with ' + added.tagNames.length + ' starter tags: ' + added.tagNames.join(', ') + '. Its Discord category will be created when the first ticket is opened in this department.'),
+          ],
+          components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+        });
+        await auditSettingsAction(guild, interaction, 'USE_CASE_ADDED', 'Added use case department ' + added.name + ' with ' + added.tagNames.length + ' starter tags. Its Discord category will be provisioned when the first ticket is created.');
+      } catch (error) {
+        await interaction.editReply('❌ ' + (error instanceof Error ? error.message : 'Could not add that use case.')).catch(() => undefined);
+      }
       return true;
     }
 
@@ -2117,6 +2001,24 @@ export async function handleSettingsInteraction(
 
     if (id === 'sf:settings:repair') {
       await showRepairSystem(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:setup' || id === 'sf:settings:restore' || id === 'sf:settings:setup-restore') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        const restoreMode = id !== 'sf:settings:setup';
+        const result = await runSupportForgeSetup(guild, restoreMode);
+        await interaction.editReply(
+          '✅ **SupportForge ' + (restoreMode ? 'restored' : 'setup/repair completed') + ' successfully.**\n\n' +
+          'Container: <#' + result.supportCategoryId + '>\n' +
+          'Department categories: **' + result.departmentCount + '**\n' +
+          (result.legacyOpenCategoryId ? 'Legacy Open bucket: <#' + result.legacyOpenCategoryId + '>\n' : '') +
+          'The support panel, audit channel, Settings, transcripts, and department categories were checked and repaired.'
+        );
+      } catch (error) {
+        await interaction.editReply('❌ SupportForge could not complete setup/restore: ' + (error instanceof Error ? error.message : 'Unknown error.'));
+      }
       return true;
     }
 
@@ -2759,6 +2661,16 @@ async function showRepairSystem(interaction: ButtonInteraction): Promise<void> {
           .setLabel('Storage Repair')
           .setEmoji('🗄️')
           .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId('sf:settings:setup')
+          .setLabel('Setup')
+          .setEmoji('🧭')
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId('sf:settings:restore')
+          .setLabel('Restore')
+          .setEmoji('♻️')
+          .setStyle(ButtonStyle.Secondary),
         backButton(),
       ),
     ],
@@ -2766,85 +2678,8 @@ async function showRepairSystem(interaction: ButtonInteraction): Promise<void> {
 }
 
 async function normalRepair(guild: Guild): Promise<number> {
-  const supportCategory = await ensureContainer(guild);
-  await ensureTranscriptChannel(guild, supportCategory.id);
-  await ensurePanelChannel(guild, supportCategory.id);
-  await ensureSettingsChannel(guild, supportCategory.id);
-
-  /*
-   * PostgreSQL is the source of truth when a ticket record exists. If a
-   * partial creation or manual DB repair left a SupportForge channel without
-   * a row, use its validated legacy topic only to reconstruct the missing
-   * record. Never overwrite an existing durable row from a Discord topic.
-   */
-  let recoveredTickets = 0;
-  for (const channel of guild.channels.cache.values()) {
-    if (channel.type !== ChannelType.GuildText || !isTicketTopic(channel.topic ?? '')) continue;
-    const topic = channel.topic ?? '';
-    const persisted = await getPersistedTicket(channel.id);
-    if (persisted) continue;
-
-    const ownerId = getField(topic, 'owner');
-    const departmentId = getField(topic, 'department');
-    const ticketNumber = getField(topic, 'number');
-    if (!ownerId || !departmentId || !ticketNumber || !/^\d{1,12}$/.test(ticketNumber)) {
-      console.warn('Skipping durable ticket recovery for malformed SupportForge topic on channel ' + channel.id + '.');
-      continue;
-    }
-
-    const priorityValue = getField(topic, 'priority');
-    const priority: TicketPriority =
-      priorityValue === 'low' || priorityValue === 'normal' || priorityValue === 'high' ||
-      priorityValue === 'urgent' || priorityValue === 'critical'
-        ? priorityValue
-        : 'normal';
-    const parseIds = (key: string): string[] =>
-      (getField(topic, key) ?? '').split(',').map((value) => value.trim()).filter((value) => /^\d{17,20}$/.test(value));
-    const claimedByIds = parseIds('claimed_by');
-    const participantIds = Array.from(new Set([ownerId, ...parseIds('users'), ...claimedByIds]));
-    const rawCreatedAt = getField(topic, 'opened_at');
-    const parsedCreatedAt = rawCreatedAt ? new Date(rawCreatedAt) : new Date(channel.createdTimestamp);
-    const createdAt = Number.isNaN(parsedCreatedAt.getTime())
-      ? new Date(channel.createdTimestamp).toISOString()
-      : parsedCreatedAt.toISOString();
-    const rawUpdatedAt = getField(topic, 'updated_at');
-    const parsedUpdatedAt = rawUpdatedAt ? new Date(rawUpdatedAt) : parsedCreatedAt;
-    const lastActivityAt = Number.isNaN(parsedUpdatedAt.getTime())
-      ? createdAt
-      : parsedUpdatedAt.toISOString();
-
-    await registerTicket(
-      channel.id,
-      {
-        guildId: guild.id,
-        status: getTicketStatus(topic),
-        ticketNumber,
-        departmentId,
-        tagId: getField(topic, 'tag') ?? getField(topic, 'tags') ?? '',
-        ownerId,
-        priority,
-        createdAt,
-        claimedByIds,
-        participantIds,
-        metadata: {
-          lastActivityAt,
-          recoveredFromChannelTopic: true,
-          panelMessageId: getField(topic, 'message') ?? null,
-          formSubmissionInteractionId: getField(topic, 'form_submission') ?? null,
-        },
-      },
-      {
-        id: 'system',
-        attribution: 'actorUnknown',
-        confidence: 'none',
-      },
-    );
-    recoveredTickets += 1;
-  }
-
-  await ensureAllDepartmentCategories(guild);
-  await syncPanel(guild);
-  return recoveredTickets;
+  const result = await runSupportForgeRepair(guild);
+  return result.recoveredTickets;
 }
 
 async function storageRepair(guild: Guild): Promise<void> {
