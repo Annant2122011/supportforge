@@ -409,11 +409,8 @@ export async function handleSettingsSlashCommand(
     }
 
     if (action === 'priority-role') {
-      const priority = interaction.options.getString('priority', true) as TicketPriority;
       const mode = interaction.options.getString('action', true);
       const settings = await getAdvancedSettings(guild.id);
-      const savedId = settings.priorityRoles[priority];
-      const existing = savedId ? guild.roles.cache.get(savedId) : undefined;
       if (mode === 'status') {
         const priorities: TicketPriority[] = ['critical', 'urgent', 'high', 'normal', 'low'];
         const lines = priorities.map((item) => {
@@ -424,9 +421,10 @@ export async function handleSettingsSlashCommand(
         await interaction.editReply('**Priority Rules & Roles**\n\n' + lines.join('\n') + '\n\nUse /supportforge settings priority-role to create or delete a managed role.');
         return;
       }
-      const priority = interaction.options.getString('priority', true) as TicketPriority;
-      const mode = interaction.options.getString('action', true);
-      const settings = await getAdvancedSettings(guild.id);
+
+      const priorityValue = interaction.options.getString('priority');
+      if (!priorityValue) throw new Error('Choose a priority when creating or deleting a managed role.');
+      const priority = priorityValue as TicketPriority;
       const savedId = settings.priorityRoles[priority];
       const existing = savedId ? guild.roles.cache.get(savedId) : undefined;
       if (mode === 'create') {
@@ -451,13 +449,15 @@ export async function handleSettingsSlashCommand(
         await refreshSettingsChannel(guild);
         audit('PRIORITY_ROLE_CREATED', 'Created ' + role.name + ' for ' + priority + ' priority.');
         await interaction.editReply('Created ' + role.toString() + ' for **' + priority + '** priority.');
-      } else {
+      } else if (mode === 'delete') {
         if (!savedId) throw new Error('No SupportForge-managed role is configured for that priority.');
         if (existing) await existing.delete('SupportForge priority role removed through slash command');
         await updateAdvancedSettings(guild.id, (current) => { delete current.priorityRoles[priority]; });
         await refreshSettingsChannel(guild);
         audit('PRIORITY_ROLE_DELETED', 'Cleared the managed ' + priority + ' priority role.');
         await interaction.editReply('Cleared the managed role for **' + priority + '** priority.');
+      } else {
+        throw new Error('Unsupported priority-role action.');
       }
       return;
     }
