@@ -3225,10 +3225,10 @@ export async function handleAuditSlashCommand(
     }
     if (mode === 'disable') {
       const config = await getGuildConfig(guild.id);
-      const infrastructure = config.supportCategoryId
-        ? await ensureAuditDeveloperInfrastructure(guild, config.supportCategoryId).catch(() => null)
-        : null;
-      if (infrastructure) await member.roles.remove(infrastructure.role, 'SupportForge Developer Audit Mode disabled').catch(() => undefined);
+      const developerRole = config.auditDeveloperRoleId
+        ? guild.roles.cache.get(config.auditDeveloperRoleId)
+        : [...guild.roles.cache.values()].find((role) => !role.managed && role.name === AUDIT_DEVELOPER_ROLE_NAME);
+      if (developerRole) await member.roles.remove(developerRole, 'SupportForge Developer Audit Mode disabled').catch(() => undefined);
       store.developerViewers = store.developerViewers.filter((id) => id !== interaction.user.id);
       delete store.developerViewModes[interaction.user.id];
       delete store.developerViewStartedAt[interaction.user.id];
