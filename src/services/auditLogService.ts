@@ -3211,34 +3211,61 @@ export async function handleAuditSlashCommand(
 
   if (action === 'developer') {
     const mode = interaction.options.getString('action', true);
+    const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+    if (!member) {
+      await interaction.editReply('Your server member record could not be resolved.');
+      return;
+    }
+    const current = await load();
+    const store = getGuildStore(current, guild.id);
     const enabled = store.developerViewers.includes(interaction.user.id);
-    let customId = AUDIT_DEVELOPER_CUSTOM_ID;
-    let label = 'Open Developer View Options';
-    let description = 'Developer View status: **' + (enabled ? 'enabled' : 'disabled') + '**.';
+    if (mode === 'options') {
+      await interaction.editReply('Developer View is **' + (enabled ? 'enabled' : 'disabled') + '** for you. Use /supportforge audit developer action enable or disable to change it, or action page with a page number to read the retained audit stream.');
+      return;
+    }
+    if (mode === 'disable') {
+      const config = await getGuildConfig(guild.id);
+      const infrastructure = config.supportCategoryId
+        ? await ensureAuditDeveloperInfrastructure(guild, config.supportCategoryId).catch(() => null)
+        : null;
+      if (infrastructure) await member.roles.remove(infrastructure.role, 'SupportForge Developer Audit Mode disabled').catch(() => undefined);
+      store.developerViewers = store.developerViewers.filter((id) => id !== interaction.user.id);
+      delete store.developerViewModes[interaction.user.id];
+      delete store.developerViewStartedAt[interaction.user.id];
+      await persist();
+      await interaction.editReply('Developer View disabled for you. The durable audit database continues recording events normally.');
+      return;
+    }
     if (mode === 'enable') {
-      customId = AUDIT_DEVELOPER_ON_CUSTOM_ID;
-      label = 'Enable Developer View';
-      description = 'Enable your private developer audit view. The button handler checks role permissions and prepares the private developer channel.';
-    } else if (mode === 'disable') {
-      customId = AUDIT_DEVELOPER_OFF_CUSTOM_ID;
-      label = 'Disable Developer View';
-      description = 'Disable your private developer audit view.';
-    } else if (mode === 'page') {
+      const config = await getGuildConfig(guild.id);
+      if (!config.supportCategoryId) {
+        await interaction.editReply('Run /supportforge setup before enabling Developer View.');
+        return;
+      }
+      const infrastructure = await ensureAuditDeveloperInfrastructure(guild, config.supportCategoryId);
+      if (!store.developerViewers.includes(interaction.user.id)) store.developerViewers.push(interaction.user.id);
+      if (!member.roles.cache.has(infrastructure.role.id)) {
+        await member.roles.add(infrastructure.role, 'SupportForge Developer Audit Mode enabled');
+      }
+      await persist();
+      const page = await buildPrivateDeveloperAuditPage(guild, interaction.user.id, 0);
+      await interaction.editReply({
+        content: 'Developer View enabled for you only. The private audit stream contains retained history and new developer events.',
+        embeds: page.embeds,
+      });
+      return;
+    }
+    if (mode === 'page') {
       if (!enabled) {
         await interaction.editReply('Enable Developer View first, then request a page.');
         return;
       }
       const requestedPage = interaction.options.getInteger('page') ?? 0;
-      customId = AUDIT_DEVELOPER_PAGE_PREFIX + requestedPage;
-      label = 'Open Developer Page ' + requestedPage;
-      description = 'Open the requested page from your private developer audit stream.';
+      const page = await buildPrivateDeveloperAuditPage(guild, interaction.user.id, requestedPage);
+      await interaction.editReply({ content: 'Developer audit stream · page ' + requestedPage, embeds: page.embeds });
+      return;
     }
-    await interaction.editReply({
-      content: description,
-      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(customId).setLabel(label).setEmoji('🛠️').setStyle(mode === 'disable' ? ButtonStyle.Danger : ButtonStyle.Primary),
-      )],
-    });
+    await interaction.editReply('Unsupported Developer View action.');
     return;
   }
 
