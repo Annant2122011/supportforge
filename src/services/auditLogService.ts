@@ -3243,6 +3243,10 @@ export async function handleAuditSlashCommand(
         return;
       }
       const infrastructure = await ensureAuditDeveloperInfrastructure(guild, config.supportCategoryId);
+      if (!infrastructure.role) {
+        await interaction.editReply('The developer audit role could not be provisioned. Check the bot permissions and try again.');
+        return;
+      }
       if (!store.developerViewers.includes(interaction.user.id)) store.developerViewers.push(interaction.user.id);
       if (!member.roles.cache.has(infrastructure.role.id)) {
         await member.roles.add(infrastructure.role, 'SupportForge Developer Audit Mode enabled');
@@ -3276,7 +3280,7 @@ export async function handleAuditSlashCommand(
       await interaction.editReply('✅ The SupportForge audit control panel was refreshed.');
       return;
     }
-    await executeAuditPanelCommand(guild, mode);
+    await executeAuditPanelCommand(guild, mode as 'move' | 'restore');
     await interaction.editReply(mode === 'move'
       ? '✅ The audit control panel was moved to the bottom of audit-log-general.'
       : '✅ The audit control panel was restored at the end of audit-log-general.');
