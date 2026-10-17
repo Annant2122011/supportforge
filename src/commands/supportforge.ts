@@ -61,6 +61,7 @@ import {
 
 import { getOrCreateAuditChannel, logSettingsEvent, logSystemEvent, handleAuditSlashCommand } from '../services/auditLogService';
 import { performFactoryReset } from '../services/factoryResetService';
+import { recoverMissingTicketRecords } from '../services/ticketRecoveryService';
 import { addUseCasePreset } from '../services/useCasePresetService';
 import { moveTicketPanelToBottom } from '../services/ticketPanelService';
 
@@ -1598,11 +1599,12 @@ export async function execute(
           await ensureClosedCategory(targetGuild);
           await ensureArchiveCategory(targetGuild);
           await ensureSettingsChannel(targetGuild, supportCategory.id);
+          const recoveredTickets = await recoverMissingTicketRecords(targetGuild);
           await ensureAllDepartmentCategories(targetGuild);
           await ensureSupportForgeCategoryPurposeMessages(targetGuild, supportCategory.id);
           await syncPanel(targetGuild);
           await refreshSettingsChannel(targetGuild);
-          return 'Normal infrastructure repair complete. Core channels and department categories have been checked.';
+          return 'Normal infrastructure repair complete. Core channels and department categories have been checked. Recovered ' + recoveredTickets + ' missing durable ticket record(s).';
         },
         refresh: async (targetGuild) => {
           const supportCategory = await ensureContainer(targetGuild);
