@@ -857,6 +857,13 @@ export const data =
         )
         .addSubcommand((subcommand) =>
           subcommand
+            .setName('schema')
+            .setDescription('View a ticket form schema as paginated JSON')
+            .addStringOption((option) => option.setName('id').setDescription('Form ID from form list').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('page').setDescription('Schema page number').setRequired(false).setMinValue(1).setMaxValue(999)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
             .setName('create')
             .setDescription('Create an inactive ticket form from a JSON field schema')
             .addStringOption((option) => option.setName('name').setDescription('Form name').setRequired(true).setMaxLength(80))
@@ -2009,6 +2016,30 @@ export async function execute(
           return;
         }
         await interaction.editReply('**Ticket Form List • Page ' + requestedPage + ' / ' + pages.length + '**\n\n' + pages[requestedPage - 1]);
+        return;
+      }
+
+      if (action === 'schema') {
+        const formId = interaction.options.getString('id', true).trim();
+        const form = (await listTicketForms(guild.id)).find((item) => item.id === formId);
+        if (!form) {
+          await interaction.editReply('❌ Ticket form not found in this server. Use /supportforge form list to find its ID.');
+          return;
+        }
+        const schema = JSON.stringify({ fields: form.fields }, null, 2);
+        const pageLength = 1450;
+        const pageCount = Math.max(1, Math.ceil(schema.length / pageLength));
+        const requestedPage = interaction.options.getInteger('page') ?? 1;
+        if (requestedPage > pageCount) {
+          await interaction.editReply('❌ Schema page ' + requestedPage + ' does not exist. This schema has ' + pageCount + ' page(s). Use /supportforge form schema id:' + formId + ' page:1 to start.');
+          return;
+        }
+        const chunk = schema.slice((requestedPage - 1) * pageLength, requestedPage * pageLength);
+        await interaction.editReply(
+          '**Schema for ' + form.name + ' · Page ' + requestedPage + ' / ' + pageCount + '**\\n' +
+          'Form ID: `' + form.id + '` · Version: **' + form.version + '** · Status: **' + (form.active ? 'ACTIVE' : 'Inactive') + '**\\n' +
+          'Copy the JSON chunks from each page in order to reconstruct the complete schema.\\n\\n```json\\n' + chunk + '\\n```'
+        );
         return;
       }
 
