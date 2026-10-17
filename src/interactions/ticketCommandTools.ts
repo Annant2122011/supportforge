@@ -58,6 +58,7 @@ import {
 
 import { setChannelPermissionOverwrite, setChannelTopic, setChannelProperties, type ChannelPermissionOverwrite } from '../services/discordChannelService';
 import { executeTicketLifecycleCommand, executeTicketRoutingCommand, executeTicketVoiceCommand, executeTicketReportCommand } from './ticketInteractions';
+import { showTicketCreationModalFromCommand } from './ticketInteractions';
 
 import {
   ensureArchiveCategory,
@@ -432,6 +433,13 @@ async function saveTopic(
 export async function executeTicketCommand(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
+  // Ticket creation opens its own modal before deferring the interaction.
+  // The modal submit then uses the same durable creation pipeline as the panel button.
+  if (interaction.options.getSubcommand() === 'create') {
+    await showTicketCreationModalFromCommand(interaction);
+    return;
+  }
+
   /*
    * A slash-command interaction must be acknowledged
    * immediately. Do not perform configuration/database
