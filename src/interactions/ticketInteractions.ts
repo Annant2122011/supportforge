@@ -3027,6 +3027,70 @@ async function closeTicket(
 /* Ticket creation modal                                                      */
 /* -------------------------------------------------------------------------- */
 
+export async function showTicketCreationModalFromCommand(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  // A slash command can open a modal directly only before it is deferred.
+  // This gives ticket creation a real slash-command entry point while reusing
+  // the same versioned-form and modal-submit pipeline as the panel button.
+  if (!interaction.guild) {
+    await interaction.reply({ content: 'Ticket creation must be used inside a server.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const guild = interaction.guild;
+  const departmentId = interaction.options.getString('department-id', true).trim();
+  const tagId = interaction.options.getString('tag-id', true).trim();
+
+  try {
+    const config = await getGuildConfig(guild.id);
+    const department = config.departments[departmentId];
+    if (!department || !department.tags?.[tagId]) {
+      await interaction.reply({ content: 'The department or tag ID is invalid. Check the IDs in Settings → Departments, then try again.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    const cachedForm = getCachedActiveTicketFormForRouting(guild.id, departmentId, tagId);
+    if (!cachedForm.ready) {
+      await interaction.reply({ content: 'Ticket forms are still loading. Please try again in a moment.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    if (cachedForm.form) {
+      const expiresAt = Date.now() + TICKET_FORM_MODAL_TTL_MS;
+      const sessionId = randomBytes(10).toString('base64url');
+      await interaction.showModal(buildTicketFormModal(cachedForm.form, tagId, expiresAt, sessionId, 1, {}));
+      return;
+    }
+
+    const modal = new ModalBuilder()
+      .setCustomId('ticket:modal:' + departmentId + ':' + tagId)
+      .setTitle('Support Request');
+    const subjectInput = new TextInputBuilder()
+      .setCustomId('subject')
+      .setPlaceholder('Briefly describe your issue')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true)
+      .setMaxLength(100);
+    const descriptionInput = new TextInputBuilder()
+      .setCustomId('description')
+      .setPlaceholder('Keep paragraphs and bullet points as written.')
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(true)
+      .setMaxLength(4000);
+    modal.addLabelComponents(
+      new LabelBuilder().setLabel('What do you need help with?').setTextInputComponent(subjectInput),
+      new LabelBuilder().setLabel('Describe your issue').setDescription('Up to 4,000 characters').setTextInputComponent(descriptionInput),
+    );
+    await interaction.showModal(modal);
+  } catch (error) {
+    console.error('Failed to open ticket creation modal from slash command:', error);
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.reply({ content: 'SupportForge could not open the ticket form. Please try again.', flags: MessageFlags.Ephemeral }).catch(() => undefined);
+    }
+  }
+}
+
 async function showTicketTagSelector(
   interaction: ButtonInteraction,
   departmentId: string,
