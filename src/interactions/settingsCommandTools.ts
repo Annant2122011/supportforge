@@ -421,7 +421,8 @@ export async function handleSettingsSlashCommand(
         const priorities: TicketPriority[] = ['critical', 'urgent', 'high', 'normal', 'low'];
         const lines = priorities.map((item) => {
           const roleId = settings.priorityRoles[item];
-          const role = roleId ? guild.roles.cache.get(roleId) : undefined;
+          const candidate = roleId ? guild.roles.cache.get(roleId) : undefined;
+          const role = candidate && !candidate.managed ? candidate : undefined;
           return '**' + item.toUpperCase() + '** · ' + (role ? role.toString() : 'No managed role configured');
         });
         await interaction.editReply('**Priority Rules & Roles**\n\n' + lines.join('\n') + '\n\nUse /supportforge settings priority-role to create or delete a managed role.');
@@ -432,7 +433,8 @@ export async function handleSettingsSlashCommand(
       if (!priorityValue) throw new Error('Choose a priority when creating or deleting a managed role.');
       const priority = priorityValue as TicketPriority;
       const savedId = settings.priorityRoles[priority];
-      const existing = savedId ? guild.roles.cache.get(savedId) : undefined;
+      const candidate = savedId ? guild.roles.cache.get(savedId) : undefined;
+      const existing = candidate && !candidate.managed ? candidate : undefined;
       if (mode === 'create') {
         if (existing) {
           await interaction.editReply('The ' + priority + ' priority role already exists: ' + existing.toString());
