@@ -4239,6 +4239,74 @@ async function renderDepartmentSelector(interaction: ButtonInteraction | StringS
   if (interaction.replied || interaction.deferred) await interaction.editReply(payload); else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
 }
 
+export async function executeTicketReportCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (!(await safeDeferReply(interaction))) return;
+  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
+    await replyError(interaction, 'Reporting must be run inside an active SupportForge ticket.');
+    return;
+  }
+  const channel = interaction.channel as TextChannel;
+  const topic = await getEffectiveTicketTopic(channel, channel.topic ?? '');
+  const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
+  if (!isTicketTopic(topic) || !isActiveTicketStatus(status)) {
+    await replyError(interaction, 'Reporting is only available inside an active SupportForge ticket.');
+    return;
+  }
+  const staff = getStaffContext(interaction, topic);
+  if (!staff.authorized) {
+    await replyError(interaction, 'Only configured staff or administrators can submit a report.');
+    return;
+  }
+  const target = interaction.options.getUser('target', true);
+  const categoryId = interaction.options.getString('category-id', true).trim();
+  const subcategoryId = interaction.options.getString('subcategory-id', true).trim();
+  const description = interaction.options.getString('description') ?? '';
+  const flagged = interaction.options.getBoolean('flag', true);
+  const participants = new Set([
+    getField(topic, 'owner'),
+    ...(getField(topic, 'users') ?? '').split(',').filter(Boolean),
+    ...(getField(topic, 'claimed_by') ?? '').split(',').filter(Boolean),
+  ].filter((id): id is string => Boolean(id)));
+  if (!participants.has(target.id)) {
+    await replyError(interaction, 'The target must be a participant in this ticket.');
+    return;
+  }
+  if (target.id === interaction.user.id) {
+    await replyError(interaction, 'You cannot report yourself.');
+    return;
+  }
+  try {
+    const result = await recordReport(interaction.guild, {
+      targetUserId: target.id,
+      reporterUserId: interaction.user.id,
+      reporterName: interaction.user.tag,
+      categoryId,
+      subcategoryId,
+      description,
+      flagged,
+      channelId: channel.id,
+      ticketNumber: getField(topic, 'number') ?? 'unknown',
+    });
+    const config = await getGuildConfig(interaction.guild.id);
+    if (config.supportCategoryId) {
+      await logTicketEvent(interaction.guild, config.supportCategoryId, {
+        ticketNumber: getField(topic, 'number') ?? 'unknown',
+        event: 'ticket_report_submitted',
+        actor: interaction.user.tag,
+        actorId: interaction.user.id,
+        actorName: interaction.user.tag,
+        detail: 'Report ' + result.report.id + ' submitted for <@' + target.id + '>; category=' + result.report.categoryName + '; subcategory=' + result.report.subcategoryName + '; ' + (flagged ? 'flagged' : 'record-only') + '.',
+      }).catch(() => undefined);
+    }
+    await interaction.editReply(
+      'Report **' + result.report.id + '** recorded for <@' + target.id + '>. Category: **' + result.report.categoryName + ' → ' + result.report.subcategoryName + '**. Mode: **' + (flagged ? 'Flag violation' : 'Record only') + '**. Current flag count: **' + result.flagCount + '**.' +
+      (result.appliedRules.length ? '\\nAutomatic rules reached: ' + result.appliedRules.map((rule) => rule.action).join(', ') + '.' : ''),
+    );
+  } catch (error) {
+    await replyError(interaction, error instanceof Error ? error.message : 'The report could not be recorded.');
+  }
+}
+
 export async function executeTicketVoiceCommand(
   interaction: ChatInputCommandInteraction,
   action: 'start' | 'end' | 'join',
