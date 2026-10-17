@@ -1385,8 +1385,9 @@ export const data =
             .addStringOption((option) => option.setName('action').setDescription('Audit retention action').setRequired(true).addChoices(
               { name: 'Show current status', value: 'status' },
               { name: 'Enable raw-event accumulation', value: 'enable' },
-              { name: 'Revert raw-event accumulation', value: 'disable' },
-            )),
+              { name: 'Disable and clear raw events', value: 'disable' },
+            ))
+            .addBooleanOption((option) => option.setName('confirm-delete').setDescription('Required true to clear retained raw events').setRequired(false)),
         )
         .addSubcommand((subcommand) =>
           subcommand
