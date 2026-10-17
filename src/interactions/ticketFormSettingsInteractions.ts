@@ -128,8 +128,8 @@ async function home(interaction: FormSettingsInteraction): Promise<void> {
   await render(interaction,
     '**🧾 Ticket Forms & Templates**\n\n' +
     'Manage the same versioned forms available through /supportforge form commands. Both the slash commands and this Settings panel use the same validation and Neon PostgreSQL records.\n\n' +
-    '**Forms:** list, create, create a new immutable schema version, activate, and deactivate.\n' +
-    '**Templates:** save reusable schemas, list them, create forms from them, and delete templates without changing forms already created.\n\n' +
+    '**Forms:** list, inspect details, view paginated schema JSON, read the field guide, create, version, activate, and deactivate.\n' +
+    '**Templates:** save reusable schemas, list and inspect them, create forms from them, and delete templates without changing forms already created.\n\n' +
     'The Settings modal accepts up to 4,000 characters of field JSON. Use the slash command for longer schemas.',
     [
       buttonRow(
