@@ -7,7 +7,7 @@ SupportForge exposes two independent entry points for each major feature: slash 
 | Feature area | Slash-command entry point | Button entry point |
 | --- | --- | --- |
 | Initial setup and recovery | `/supportforge setup`, `/supportforge restore` | Settings → Repair System → Setup / Restore |
-| Department management | `/supportforge category add/list/remove`, `/supportforge settings department-edit` | Settings → Departments |
+| Department management | `/supportforge category add/list (paginated)/remove`, `/supportforge settings department-edit` | Settings → Departments |
 | Department tags | `/supportforge settings tag-add/tag-rename/tag-remove` | Settings → Departments → Manage Tags |
 | Department presets | `/supportforge settings usecase-add` | Settings → Use Cases |
 | Ticket forms and templates | `/supportforge form list/show/schema/guide/create/update/activate/deactivate/template-save/template-list/template-show/template-apply/template-delete` | Settings → Ticket Forms (form detail, schema JSON, field guide, template detail, activation, templates, and routing IDs) |
@@ -19,7 +19,7 @@ SupportForge exposes two independent entry points for each major feature: slash 
 | Ticket reports | `/supportforge ticket report` | Ticket panel Report workflow |
 | Ticket panel position | `/supportforge ticket panel/move-panel` | Ticket panel move/restore controls |
 | Settings and panel behavior | `/supportforge settings overview/panel/defaults/team/retention/appearance` | Settings dashboard controls |
-| Report intake and categories | `/supportforge settings reports/report-rules/report-subcategory-add/report-subcategory-edit/report-subcategory-remove` | Settings → Reports controls |
+| Report intake and categories | `/supportforge settings reports/report-categories/report-rules/report-subcategory-add/report-subcategory-edit/report-subcategory-remove` | Settings → Reports controls |
 | Retention review and action | `/supportforge settings retention-action` | Settings → Retention review/approval controls |
 | Storage and infrastructure repair | `/supportforge settings storage/repair/refresh` | Settings → Repair System and Storage controls |
 | Manual and factory reset | `/supportforge settings manual/reset` | Settings → Manual and multi-step Reset controls |
@@ -56,9 +56,9 @@ The table above groups the surface by feature area. This operation checklist is 
 | Retention | `/supportforge settings retention/retention-action` | Settings → Retention / Review / Approval | Both routes review eligibility and require explicit approval before deletion. |
 | Appearance | `/supportforge settings appearance` | Settings → Appearance → Edit | Both routes update and resync the public support panel. |
 | Report intake and safety rules | `/supportforge settings reports/report-rules` | Settings → Reports → Toggle/Flag Rules | Both routes change report intake and thresholds. |
-| Report subcategories | `/supportforge settings report-subcategory-add/report-subcategory-edit/report-subcategory-remove` | Settings → Reports → Category → Add/Edit/Remove | Both routes mutate the same category/subcategory records. |
+| Report subcategories | `/supportforge settings report-categories/report-subcategory-add/report-subcategory-edit/report-subcategory-remove` | Settings → Reports → Category → Add/Edit/Remove | Both routes mutate the same category/subcategory records. |
 | Storage categories | `/supportforge settings storage` | Settings → Storage → Add Claimed/Add Pending/Storage Repair | Both routes provision or repair the same storage categories. |
-| Priority roles | `/supportforge settings priority-role` | Settings → Priority Rules & Roles → Create/Delete | Both routes enforce Administrator and Manage Roles requirements. |
+| Priority roles | `/supportforge settings priority-role` (status/create/delete) | Settings → Priority Rules & Roles → Create/Delete | Both routes enforce Administrator and Manage Roles requirements. |
 | Manuals | `/supportforge settings manual` | Settings → Quick/Detailed Manual | Both routes display the same help content. |
 | Factory reset | `/supportforge settings reset` | Settings → Reset confirmation flow | Both routes require explicit confirmation and preserve the audit-retention choice. |
 | Audit summaries | `/supportforge audit summary/daily` | Audit panel → Quick/Overall/Daily Summary | Both routes apply the same internal-event visibility rules. |
