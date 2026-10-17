@@ -1332,6 +1332,7 @@ export const data =
             .setName('storage')
             .setDescription('Add an optional status category or repair storage')
             .addStringOption((option) => option.setName('action').setDescription('Storage action').setRequired(true).addChoices(
+              { name: 'Show current storage categories', value: 'status' },
               { name: 'Add Claimed category', value: 'claimed' },
               { name: 'Add Pending category', value: 'pending' },
               { name: 'Repair Closed/Archive storage', value: 'repair' },
