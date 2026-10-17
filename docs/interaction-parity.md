@@ -10,7 +10,7 @@ SupportForge exposes two independent entry points for each major feature: slash 
 | Department management | `/supportforge category add/list/remove`, `/supportforge settings department-edit` | Settings → Departments |
 | Department tags | `/supportforge settings tag-add/tag-rename/tag-remove` | Settings → Departments → Manage Tags |
 | Department presets | `/supportforge settings usecase-add` | Settings → Use Cases |
-| Ticket forms and templates | `/supportforge form list/create/update/activate/deactivate/template-save/template-list/template-apply/template-delete` | Settings → Ticket Forms |
+| Ticket forms and templates | `/supportforge form list/show/schema/guide/create/update/activate/deactivate/template-save/template-list/template-show/template-apply/template-delete` | Settings → Ticket Forms (form detail, schema JSON, field guide, template detail, activation, templates, and routing IDs) |
 | Ticket creation and lifecycle | `/supportforge ticket create` (department/tag IDs, then the same validated form modal), plus `claim/unclaim/pending/resume/close/reopen/archive` | Department ticket-creation buttons and ticket panel lifecycle controls |
 | Ticket priority and notes | `/supportforge ticket priority/note` | Ticket panel Priority and Note controls |
 | Ticket history and participants | `/supportforge ticket history/add-user/remove-user/reassign` | Ticket panel History, Add User, Remove User, and Reassign controls |
