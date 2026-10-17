@@ -485,7 +485,7 @@ function isUnknownMessageError(error: unknown): boolean {
 }
 
 async function editReplyOrFollowUp(
-  interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
+  interaction: ButtonInteraction | ChatInputCommandInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
   content: string,
 ): Promise<void> {
   try {
