@@ -4218,7 +4218,8 @@ async function showTicketHistory(
 
 async function renderDepartmentSelector(interaction: ButtonInteraction | StringSelectMenuInteraction, page = 0): Promise<void> {
   if (!interaction.replied && !interaction.deferred) {
-    await interaction.deferUpdate();
+    if ('deferUpdate' in interaction) await interaction.deferUpdate();
+    else await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   }
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) { await replyError(interaction, '❌ This action can only be used inside a ticket.'); return; }
   const channel = interaction.channel as TextChannel;
