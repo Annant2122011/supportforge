@@ -4238,6 +4238,16 @@ async function renderDepartmentSelector(interaction: ButtonInteraction | StringS
   if (interaction.replied || interaction.deferred) await interaction.editReply(payload); else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
 }
 
+export async function executeTicketVoiceCommand(
+  interaction: ChatInputCommandInteraction,
+  action: 'start' | 'end' | 'join',
+): Promise<void> {
+  if (!(await safeDeferReply(interaction))) return;
+  if (action === 'start') return handleTicketVoiceStart(interaction);
+  if (action === 'end') return handleTicketVoiceEnd(interaction);
+  return handleTicketVoiceJoin(interaction);
+}
+
 export async function executeTicketRoutingCommand(
   interaction: ChatInputCommandInteraction,
   mode: 'department' | 'tag',
@@ -4616,7 +4626,7 @@ async function applyTicketPriority(
 }
 
 
-async function handleTicketVoiceStart(interaction: ButtonInteraction): Promise<void> {
+async function handleTicketVoiceStart(interaction: ButtonInteraction | ChatInputCommandInteraction): Promise<void> {
   if (!interaction.replied && !interaction.deferred) {
     await interaction.deferUpdate();
   }
@@ -4679,7 +4689,7 @@ async function handleTicketVoiceStart(interaction: ButtonInteraction): Promise<v
   }
 }
 
-async function handleTicketVoiceEnd(interaction: ButtonInteraction): Promise<void> {
+async function handleTicketVoiceEnd(interaction: ButtonInteraction | ChatInputCommandInteraction): Promise<void> {
   if (!interaction.replied && !interaction.deferred) {
     await interaction.deferUpdate();
   }
@@ -4729,7 +4739,7 @@ async function handleTicketVoiceEnd(interaction: ButtonInteraction): Promise<voi
   }
 }
 
-async function handleTicketVoiceJoin(interaction: ButtonInteraction): Promise<void> {
+async function handleTicketVoiceJoin(interaction: ButtonInteraction | ChatInputCommandInteraction): Promise<void> {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
     await interaction.editReply('❌ Voice mode is only available inside a ticket.');
