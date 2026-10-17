@@ -14,6 +14,7 @@ import { addUseCasePreset } from '../services/useCasePresetService';
 import { performFactoryReset } from '../services/factoryResetService';
 import { logSettingsEvent } from '../services/auditLogService';
 import { approveRetentionDeletion, declineRetentionDeletion, getEligibleRetentionTickets } from '../services/ticketRetentionService';
+import { migrateDepartmentStaffRole } from '../services/departmentStaffRoleService';
 
 export interface SettingsSlashHooks {
   syncPanel(guild: Guild): Promise<void>;
@@ -330,6 +331,7 @@ export async function handleSettingsSlashCommand(
         const item = current.departments[department.id];
         if (item) { item.name = newName; item.staffRoleId = staffRoleId; }
       });
+      await migrateDepartmentStaffRole(guild, department.id, department.staffRoleId, staffRoleId);
       await hooks.syncPanel(guild);
       await refreshSettingsChannel(guild);
       audit('DEPARTMENT_CHANGED', 'Renamed department ' + department.name + ' to ' + newName + '.');
