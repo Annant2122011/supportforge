@@ -239,6 +239,35 @@ export async function handleSettingsSlashCommand(
       return;
     }
 
+    if (action === 'report-categories') {
+      const settings = await getAdvancedSettings(guild.id);
+      const requestedCategoryId = interaction.options.getString('category-id')?.trim();
+      const categories = Object.values(settings.reports.categories);
+      const selected = requestedCategoryId
+        ? settings.reports.categories[requestedCategoryId]
+        : undefined;
+      if (requestedCategoryId && !selected) {
+        throw new Error('Report category not found. Run /supportforge settings report-categories without a category ID to list valid IDs.');
+      }
+      const lines = (selected ? [selected] : categories).map((category) => {
+        const subs = Object.values(category.subcategories);
+        return category.emoji + ' **' + category.name + '** · ID: ' + category.id + '\n' +
+          (subs.length ? subs.map((sub) => '  • ' + sub.name + ' · ID: ' + sub.id).join('\n') : '  No subcategories configured.');
+      });
+      const content = lines.join('\n\n') || 'No report categories are configured.';
+      const chunks: string[] = [];
+      for (const line of content.split('\n')) {
+        const current = chunks[chunks.length - 1];
+        if (current && (current.length + line.length + 1) > 1700) chunks.push(line);
+        else if (current) chunks[chunks.length - 1] = current + '\n' + line;
+        else chunks.push(line);
+      }
+      const requestedPage = interaction.options.getInteger('page') ?? 1;
+      if (requestedPage > chunks.length) throw new Error('Page ' + requestedPage + ' does not exist. This result has ' + chunks.length + ' page(s).');
+      await interaction.editReply('**Report Categories' + (selected ? ' · ' + selected.name : '') + ' · Page ' + requestedPage + ' / ' + chunks.length + '**\n\n' + chunks[requestedPage - 1]);
+      return;
+    }
+
     if (action === 'report-rules') {
       const settings = await getAdvancedSettings(guild.id);
       const ticketRule = Object.values(settings.reports.flagRules).find((rule) => rule.action === 'tickets');
@@ -380,6 +409,21 @@ export async function handleSettingsSlashCommand(
     }
 
     if (action === 'priority-role') {
+      const priority = interaction.options.getString('priority', true) as TicketPriority;
+      const mode = interaction.options.getString('action', true);
+      const settings = await getAdvancedSettings(guild.id);
+      const savedId = settings.priorityRoles[priority];
+      const existing = savedId ? guild.roles.cache.get(savedId) : undefined;
+      if (mode === 'status') {
+        const priorities: TicketPriority[] = ['critical', 'urgent', 'high', 'normal', 'low'];
+        const lines = priorities.map((item) => {
+          const roleId = settings.priorityRoles[item];
+          const role = roleId ? guild.roles.cache.get(roleId) : undefined;
+          return '**' + item.toUpperCase() + '** · ' + (role ? role.toString() : 'No managed role configured');
+        });
+        await interaction.editReply('**Priority Rules & Roles**\n\n' + lines.join('\n') + '\n\nUse /supportforge settings priority-role to create or delete a managed role.');
+        return;
+      }
       const priority = interaction.options.getString('priority', true) as TicketPriority;
       const mode = interaction.options.getString('action', true);
       const settings = await getAdvancedSettings(guild.id);
