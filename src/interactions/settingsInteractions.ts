@@ -176,6 +176,18 @@ function priorityRoleLabel(priority: TicketPriority): string {
   return PRIORITY_ROLE_DEFINITIONS[priority].label;
 }
 
+function findPriorityRole(
+  guild: Guild,
+  _priority: TicketPriority,
+  configuredRoleId?: string,
+) {
+  // A matching display name is not ownership proof. Only the saved role ID
+  // identifies a SupportForge-managed priority role.
+  if (!configuredRoleId) return undefined;
+  const configured = guild.roles.cache.get(configuredRoleId);
+  return configured && !configured.managed ? configured : undefined;
+}
+
 const pendingResetAuditChoice = new Map<string, boolean>();
 
 async function showManual(interaction: SettingsViewInteraction): Promise<void> {
