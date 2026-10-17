@@ -58,6 +58,7 @@ import { getPersistedTicket, getPersistedTicketStatus } from '../services/ticket
 import { performFactoryReset } from '../services/factoryResetService';
 import { addUseCasePreset, USE_CASE_PRESETS } from '../services/useCasePresetService';
 import { enforcePriorityRoleHierarchy } from '../services/priorityRoleService';
+import { UI_THEMES, getThemeColor, getThemeDefinition, isGuildTheme } from '../services/uiThemeService';
 import { handleTicketFormSettingsInteraction } from './ticketFormSettingsInteractions';
 import {
   approveRetentionDeletion,
@@ -526,7 +527,9 @@ async function renderSettingsView(
   embeds: EmbedBuilder[],
   components: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>>,
 ): Promise<void> {
-  const payload = { embeds, components };
+  const config = await getGuildConfig(interaction.guild!.id);
+  const themedEmbeds = embeds.map((embed) => embed.setColor(getThemeColor(config.theme)));
+  const payload = { embeds: themedEmbeds, components };
 
   if (interaction.replied || interaction.deferred) {
     await interaction.editReply(payload);
@@ -578,6 +581,7 @@ async function showHome(interaction: SettingsViewInteraction): Promise<void> {
           (total, department) => total + Object.keys(department.tags ?? {}).length,
           0,
         ),
+        config.theme,
       ),
     ],
     buildSettingsDashboardComponents(),
@@ -1128,6 +1132,39 @@ async function showAppearance(interaction: ButtonInteraction): Promise<void> {
   ]);
 }
 
+async function showThemeSettings(
+  interaction: SettingsViewInteraction,
+  notice = '',
+): Promise<void> {
+  const config = await getGuildConfig(interaction.guild!.id);
+  const active = getThemeDefinition(config.theme);
+  const chooser = new StringSelectMenuBuilder()
+    .setCustomId('sf:settings:theme:select')
+    .setPlaceholder('Choose a visual theme for this server')
+    .addOptions(UI_THEMES.map((theme) => ({
+      label: theme.label,
+      value: theme.id,
+      description: theme.description,
+      default: theme.id === config.theme,
+    })));
+
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('🌈 Server Theme')
+      .setDescription(
+        (notice ? notice + '\\n\\n' : '') +
+        'Give this server its own visual identity. The selected palette is saved in this server’s configuration and does not affect other servers. It accents the public support panel, Settings dashboard, and Ticket Forms screens. Discord’s native controls retain their built-in style.'
+      )
+      .addFields(
+        { name: 'Active palette', value: '**' + active.label + '**\\n' + active.description, inline: true },
+        { name: 'Preview', value: active.preview, inline: true },
+      ),
+  ], [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(chooser),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()),
+  ]);
+}
+
 async function showUseCases(interaction: ButtonInteraction): Promise<void> {
   const presets = Object.entries(USE_CASE_PRESETS);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
@@ -1300,6 +1337,35 @@ export async function handleSettingsInteraction(
 
   if (interaction.customId.startsWith('sf:settings:forms:')) {
     return await handleTicketFormSettingsInteraction(interaction);
+  }
+
+  if (interaction.isStringSelectMenu() && interaction.customId === 'sf:settings:theme:select') {
+    const selectedTheme = interaction.values[0];
+    if (!isGuildTheme(selectedTheme)) {
+      await reject(interaction, '❌ That theme selection is not supported.');
+      return true;
+    }
+
+    const before = (await getGuildConfig(guild.id)).theme;
+    if (before !== selectedTheme) {
+      await updateGuildConfig(guild.id, (current) => {
+        current.theme = selectedTheme;
+      });
+      await syncPanel(guild);
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(
+        guild,
+        interaction,
+        'SERVER_THEME_CHANGED',
+        'Changed the server UI theme from ' + getThemeDefinition(before).label + ' to ' + getThemeDefinition(selectedTheme).label + '.',
+      );
+    }
+
+    await showThemeSettings(
+      interaction,
+      '✅ Theme set to **' + getThemeDefinition(selectedTheme).label + '** for this server.',
+    );
+    return true;
   }
 
   if (interaction.isStringSelectMenu() && interaction.customId.startsWith('sf:settings:reports:subcategory:pick:')) {
@@ -1707,6 +1773,11 @@ export async function handleSettingsInteraction(
 
     if (id === 'sf:settings:appearance') {
       await showAppearance(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:theme') {
+      await showThemeSettings(interaction);
       return true;
     }
 
