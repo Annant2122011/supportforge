@@ -4700,7 +4700,7 @@ async function applyTicketPriority(
 
 async function handleTicketVoiceStart(interaction: ButtonInteraction | ChatInputCommandInteraction): Promise<void> {
   if (!interaction.replied && !interaction.deferred) {
-    if ('deferUpdate' in interaction) await interaction.deferUpdate();
+    if (interaction.isButton()) await interaction.deferUpdate();
     else await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   }
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
@@ -4764,7 +4764,7 @@ async function handleTicketVoiceStart(interaction: ButtonInteraction | ChatInput
 
 async function handleTicketVoiceEnd(interaction: ButtonInteraction | ChatInputCommandInteraction): Promise<void> {
   if (!interaction.replied && !interaction.deferred) {
-    if ('deferUpdate' in interaction) await interaction.deferUpdate();
+    if (interaction.isButton()) await interaction.deferUpdate();
     else await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   }
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
@@ -4815,7 +4815,7 @@ async function handleTicketVoiceEnd(interaction: ButtonInteraction | ChatInputCo
 
 async function handleTicketVoiceJoin(interaction: ButtonInteraction | ChatInputCommandInteraction): Promise<void> {
   if (!interaction.replied && !interaction.deferred) {
-    if ('deferUpdate' in interaction) await interaction.deferUpdate();
+    if (interaction.isButton()) await interaction.deferUpdate();
     else await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   }
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
