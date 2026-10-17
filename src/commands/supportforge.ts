@@ -1130,10 +1130,17 @@ export const data =
           subcommand.setName('reopen').setDescription('Reopen this closed ticket'),
         )
         .addSubcommand((subcommand) =>
-          subcommand.setName('department').setDescription('Choose a new department for this ticket'),
+          subcommand
+            .setName('department')
+            .setDescription('Move this ticket to a department directly')
+            .addStringOption((option) => option.setName('department-id').setDescription('Department ID from /supportforge form list').setRequired(true).setMaxLength(28))
+            .addStringOption((option) => option.setName('tag-id').setDescription('Optional tag ID for the destination department').setRequired(false).setMaxLength(28)),
         )
         .addSubcommand((subcommand) =>
-          subcommand.setName('tag').setDescription('Choose a tag for this ticket'),
+          subcommand
+            .setName('tag')
+            .setDescription('Set this ticket tag directly')
+            .addStringOption((option) => option.setName('tag-id').setDescription('Tag ID from /supportforge form list').setRequired(true).setMaxLength(28)),
         )
         .addSubcommand((subcommand) =>
           subcommand
