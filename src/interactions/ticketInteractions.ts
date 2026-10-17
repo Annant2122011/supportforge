@@ -1919,7 +1919,7 @@ async function transition(
      */
     if (
       oldStatus === newStatus &&
-      !(newStatus === 'claimed' && interaction.customId === 'ticket:claim')
+      !(newStatus === 'claimed' && 'customId' in interaction && interaction.customId === 'ticket:claim')
     ) {
       await interaction.editReply(
         `ℹ️ This ticket is already **${capitalize(newStatus)}**.`,
@@ -4221,7 +4221,7 @@ async function showTicketHistory(
 
 async function renderDepartmentSelector(interaction: ButtonInteraction | StringSelectMenuInteraction, page = 0): Promise<void> {
   if (!interaction.replied && !interaction.deferred) {
-    if ('deferUpdate' in interaction) await interaction.deferUpdate();
+    if (interaction.isButton()) await interaction.deferUpdate();
     else await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   }
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) { await replyError(interaction, '❌ This action can only be used inside a ticket.'); return; }
