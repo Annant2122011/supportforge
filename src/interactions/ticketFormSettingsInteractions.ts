@@ -2,6 +2,7 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  EmbedBuilder,
   MessageFlags,
   ModalBuilder,
   StringSelectMenuBuilder,
@@ -14,9 +15,11 @@ import {
 } from 'discord.js';
 
 import { getGuildConfig } from '../services/configService';
+import { getGuildTheme } from '../services/uiThemeService';
 import { logSettingsEvent } from '../services/auditLogService';
 import {
   applyTicketFormTemplate,
+  buildQuickTicketFormFields,
   createTicketForm,
   createTicketFormTemplate,
   deleteTicketFormTemplate,
@@ -58,19 +61,39 @@ async function prepare(interaction: FormSettingsInteraction): Promise<void> {
 }
 
 async function render(interaction: FormSettingsInteraction, content: string, components: ViewComponents = []): Promise<void> {
-  await interaction.editReply({ content, embeds: [], components });
+  const theme = interaction.guild
+    ? await getGuildTheme(interaction.guild.id)
+    : { label: 'Midnight Indigo', color: 0x5865f2 };
+  const heading = content.match(/^\\*\\*(.{1,240}?)\\*\\*/m);
+  const title = heading?.[1]?.slice(0, 256) ?? 'Ticket Forms & Templates';
+  const description = heading ? content.replace(heading[0], '').trim() : content;
+  const embed = new EmbedBuilder()
+    .setColor(theme.color)
+    .setAuthor({ name: 'SupportForge • Forms & Templates' })
+    .setTitle(title)
+    .setDescription((description || 'Use the controls below to continue.').slice(0, 4096))
+    .setFooter({ text: theme.label + ' theme • Guided setup and advanced schema tools' });
+  await interaction.editReply({ content: '', embeds: [embed], components });
 }
 
 async function showFailure(interaction: FormSettingsInteraction, error: unknown): Promise<void> {
   const detail = error instanceof Error ? error.message : 'Unknown error.';
+  const theme = interaction.guild
+    ? await getGuildTheme(interaction.guild.id)
+    : { label: 'Midnight Indigo', color: 0x5865f2 };
+  const embed = new EmbedBuilder()
+    .setColor(theme.color)
+    .setTitle('Could not complete that action')
+    .setDescription(detail.slice(0, 4096))
+    .setFooter({ text: theme.label + ' theme • Ticket Forms' });
   const components = [buttonRow(
     button(PREFIX + 'home', 'Ticket Forms Home', ButtonStyle.Primary, '🧾'),
     button('sf:settings:home', 'Return to Settings', ButtonStyle.Secondary, '↩️'),
   )];
   if (interaction.deferred || interaction.replied) {
-    await interaction.editReply({ content: '❌ ' + detail, embeds: [], components }).catch(() => undefined);
+    await interaction.editReply({ content: '', embeds: [embed], components }).catch(() => undefined);
   } else {
-    await interaction.reply({ content: '❌ ' + detail, components, flags: MessageFlags.Ephemeral }).catch(() => undefined);
+    await interaction.reply({ embeds: [embed], components, flags: MessageFlags.Ephemeral }).catch(() => undefined);
   }
 }
 
@@ -78,9 +101,9 @@ function textInput(
   id: string,
   label: string,
   style: TextInputStyle,
-  options: { placeholder?: string; maxLength?: number; value?: string } = {},
+  options: { placeholder?: string; maxLength?: number; value?: string; required?: boolean } = {},
 ): ActionRowBuilder<TextInputBuilder> {
-  const input = new TextInputBuilder().setCustomId(id).setLabel(label).setStyle(style).setRequired(true);
+  const input = new TextInputBuilder().setCustomId(id).setLabel(label).setStyle(style).setRequired(options.required ?? true);
   if (options.placeholder) input.setPlaceholder(options.placeholder);
   if (options.maxLength !== undefined) input.setMaxLength(options.maxLength);
   if (options.value !== undefined) input.setValue(options.value);
@@ -124,6 +147,50 @@ async function openApplyTemplateModal(interaction: ButtonInteraction, templateId
   ));
 }
 
+async function quickBuilderDepartmentPicker(interaction: FormSettingsInteraction): Promise<void> {
+  const guild = interaction.guild;
+  if (!guild) throw new Error('This form builder can only be used inside a server.');
+  const departments = Object.values((await getGuildConfig(guild.id)).departments).sort((a, b) => a.name.localeCompare(b.name));
+  const components: ViewComponents = [];
+  if (departments.length) {
+    components.push(selectRow(new StringSelectMenuBuilder().setCustomId(PREFIX + 'quick:department').setPlaceholder('Choose the department that receives these tickets').addOptions(departments.slice(0, 25).map((department) => ({ label: department.name.slice(0, 100), value: department.id, description: Object.keys(department.tags ?? {}).length + ' tag(s) available' })))));
+  }
+  components.push(buttonRow(button(PREFIX + 'home', 'Ticket Forms Home', ButtonStyle.Secondary, '↩️'), button('sf:settings:home', 'Settings', ButtonStyle.Secondary, '⚙️')));
+  await render(interaction, '**Guided Form Builder · 1 of 3**\n\nStart with the department for this form. You will then choose a tag and add one or two questions. No JSON required.\n\n' + (departments.length ? 'Choose a department below.' : 'No departments are configured yet. Create one in Settings → Departments, then return here.') + (departments.length > 25 ? '\n\nOnly the first 25 departments are shown here. Use the advanced command for larger setups.' : ''), components);
+}
+
+async function quickBuilderTagPicker(interaction: FormSettingsInteraction, guildId: string, departmentId: string): Promise<void> {
+  const config = await getGuildConfig(guildId);
+  const department = config.departments[departmentId];
+  if (!department) throw new Error('That department no longer exists. Start the guided builder again.');
+  const tags = Object.values(department.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
+  const options = [{ label: 'All tags in ' + department.name, value: '*', description: 'Use this form for every tag in the department.' }, ...tags.slice(0, 24).map((tag) => ({ label: tag.name.slice(0, 100), value: tag.id, description: 'Use this form only for this tag.' }))];
+  await render(interaction, '**Guided Form Builder · 2 of 3**\n\nDepartment: **' + department.name + '**\nChoose whether this form applies to all tags or one tag.\n\nThe guided builder creates simple text questions. Use Advanced Schema for dropdowns, attachments, conditional questions, and custom validation.', [selectRow(new StringSelectMenuBuilder().setCustomId(PREFIX + 'quick:tag:' + departmentId).setPlaceholder('Choose a tag or all tags').addOptions(options)), buttonRow(button(PREFIX + 'quick-builder', 'Change Department', ButtonStyle.Secondary, '↩️'), button(PREFIX + 'home', 'Cancel', ButtonStyle.Secondary, '✖️'))]);
+}
+
+async function quickBuilderConfirm(interaction: FormSettingsInteraction, guildId: string, departmentId: string, tagId: string): Promise<void> {
+  const config = await getGuildConfig(guildId);
+  const department = config.departments[departmentId];
+  if (!department) throw new Error('That department no longer exists. Start the guided builder again.');
+  const tag = tagId === '*' ? null : department.tags[tagId];
+  if (tagId !== '*' && !tag) throw new Error('That tag no longer exists. Start the guided builder again.');
+  await render(interaction, '**Guided Form Builder · 3 of 3**\n\nDestination: **' + department.name + '**\nTag: **' + (tag?.name ?? 'All tags') + '**\n\nAdd a form name and up to two questions. Subject and description are collected automatically. The new form starts inactive so you can review it before routing live tickets.', [buttonRow(button(PREFIX + 'quick:open:' + departmentId + ':' + tagId, 'Continue to Form Details', ButtonStyle.Primary, '✨'), button(PREFIX + 'quick-builder', 'Start Over', ButtonStyle.Secondary, '↩️')), buttonRow(button(PREFIX + 'home', 'Ticket Forms Home', ButtonStyle.Secondary, '🧾'))]);
+}
+
+async function openQuickFormModal(interaction: ButtonInteraction, departmentId: string, tagId: string): Promise<void> {
+  if (!interaction.guild) throw new Error('This form builder can only be used inside a server.');
+  const department = (await getGuildConfig(interaction.guild.id)).departments[departmentId];
+  if (!department || (tagId !== '*' && !department.tags[tagId])) {
+    await showFailure(interaction, new Error('The selected department or tag changed. Restart the guided builder.'));
+    return;
+  }
+  await interaction.showModal(new ModalBuilder().setCustomId(PREFIX + 'modal:quick-create:' + departmentId + ':' + tagId).setTitle('Build a Support Form').addComponents(
+    textInput('name', 'Form name', TextInputStyle.Short, { maxLength: 80, placeholder: 'Order Support' }),
+    textInput('question-one', 'First question', TextInputStyle.Short, { maxLength: 45, placeholder: 'What is your order ID?' }),
+    textInput('question-two', 'Second question (optional)', TextInputStyle.Short, { maxLength: 45, placeholder: 'Which product is affected?', required: false }),
+  ));
+}
+
 async function home(interaction: FormSettingsInteraction): Promise<void> {
   await render(interaction,
     '**🧾 Ticket Forms & Templates**\n\n' +
@@ -139,7 +206,7 @@ async function home(interaction: FormSettingsInteraction): Promise<void> {
         button(PREFIX + 'routing:page:1', 'Routing IDs', ButtonStyle.Secondary, '🪪'),
         button('sf:settings:home', 'Settings', ButtonStyle.Secondary, '↩️'),
       ),
-      buttonRow(button(PREFIX + 'guide', 'Field Schema Guide', ButtonStyle.Secondary, '📘')),
+      buttonRow(button(PREFIX + 'quick-builder', 'Guided Form Builder', ButtonStyle.Success, '✨'), button(PREFIX + 'guide', 'Advanced Schema Guide', ButtonStyle.Secondary, '📘')),
     ],
   );
 }
@@ -184,8 +251,9 @@ async function formsPage(interaction: FormSettingsInteraction, guildId: string, 
     (form.tagId ?? '*') + ' · ' + form.fields.length + ' field(s)',
   );
   components.push(buttonRow(
-    button(PREFIX + 'modal:create', 'Create Form', ButtonStyle.Success, '➕'),
-    button(PREFIX + 'templates:page:1', 'Templates', ButtonStyle.Secondary, '🧩'),
+    button(PREFIX + 'modal:create', 'Advanced Schema', ButtonStyle.Secondary, '🧩'),
+    button(PREFIX + 'quick-builder', 'Guided Builder', ButtonStyle.Success, '✨'),
+    button(PREFIX + 'templates:page:1', 'Templates', ButtonStyle.Secondary, '📚'),
     button(PREFIX + 'routing:page:1', 'Routing IDs', ButtonStyle.Secondary, '🪪'),
     button('sf:settings:home', 'Settings', ButtonStyle.Secondary, '↩️'),
   ));
@@ -364,6 +432,18 @@ async function submitModal(interaction: ModalSubmitInteraction): Promise<void> {
   const actorName = interaction.user.tag;
   const id = interaction.customId;
 
+  if (id.startsWith(PREFIX + 'modal:quick-create:')) {
+    const [departmentId, suppliedTagId] = id.slice((PREFIX + 'modal:quick-create:').length).split(':');
+    if (!departmentId || !suppliedTagId) throw new Error('The guided form route is invalid. Start the builder again.');
+    const name = interaction.fields.getTextInputValue('name').trim();
+    const questions = [interaction.fields.getTextInputValue('question-one').trim(), interaction.fields.getTextInputValue('question-two').trim()];
+    const tagId = suppliedTagId === '*' ? null : suppliedTagId;
+    const form = await createTicketForm({ guildId: guild.id, name, departmentId, tagId, fields: buildQuickTicketFormFields(questions), actorId });
+    auditFormAction(guild, actorId, actorName, 'TICKET_FORM_CREATED', 'Created guided form ' + form.id + ' version 1 for department ' + departmentId + ' and tag ' + (tagId ?? '*') + '.');
+    await formsPage(interaction, guild.id, 1, '✅ Created inactive guided form ' + form.name + ' with ' + form.fields.length + ' question(s) · ID ' + form.id + '.');
+    return;
+  }
+
   if (id === PREFIX + 'modal:create') {
     const name = interaction.fields.getTextInputValue('name').trim();
     const departmentId = interaction.fields.getTextInputValue('department-id').trim();
@@ -433,6 +513,12 @@ export async function handleTicketFormSettingsInteraction(interaction: FormSetti
     const id = interaction.customId;
 
     // A modal must be opened before acknowledging its button interaction.
+    if (interaction.isButton() && id.startsWith(PREFIX + 'quick:open:')) {
+      const [departmentId, tagId] = id.slice((PREFIX + 'quick:open:').length).split(':');
+      if (!departmentId || !tagId) throw new Error('The guided builder route is invalid. Start again.');
+      await openQuickFormModal(interaction, departmentId, tagId);
+      return true;
+    }
     if (interaction.isButton() && id === PREFIX + 'modal:create') {
       await openCreateModal(interaction);
       return true;
@@ -460,6 +546,15 @@ export async function handleTicketFormSettingsInteraction(interaction: FormSetti
     const guildId = guild.id;
 
     if (interaction.isStringSelectMenu()) {
+      if (id === PREFIX + 'quick:department') {
+        await quickBuilderTagPicker(interaction, guildId, interaction.values[0]);
+        return true;
+      }
+      if (id.startsWith(PREFIX + 'quick:tag:')) {
+        const departmentId = id.slice((PREFIX + 'quick:tag:').length);
+        await quickBuilderConfirm(interaction, guildId, departmentId, interaction.values[0]);
+        return true;
+      }
       if (id === PREFIX + 'pick-form') {
         await formDetail(interaction, guildId, interaction.values[0]);
         return true;
@@ -475,6 +570,10 @@ export async function handleTicketFormSettingsInteraction(interaction: FormSetti
 
     if (id === PREFIX + 'home') {
       await home(interaction);
+      return true;
+    }
+    if (id === PREFIX + 'quick-builder') {
+      await quickBuilderDepartmentPicker(interaction);
       return true;
     }
     if (id === PREFIX + 'guide') {
