@@ -8,7 +8,7 @@ import {
 
 import { getGuildConfig, newTagId, updateGuildConfig } from '../services/configService';
 import { getAdvancedSettings, updateAdvancedSettings, type TicketPriority } from '../services/advancedSettingsService';
-import { ensureArchiveCategory, ensureClosedCategory, ensureOptionalStatusCategory } from '../services/ticketStorageService';
+import { ensureArchiveCategory, ensureClosedCategory, ensureOptionalStatusCategory, getOptionalStatusCategory } from '../services/ticketStorageService';
 import { refreshSettingsChannel } from '../services/settingsChannelService';
 import { addUseCasePreset } from '../services/useCasePresetService';
 import { performFactoryReset } from '../services/factoryResetService';
@@ -396,6 +396,21 @@ export async function handleSettingsSlashCommand(
 
     if (action === 'storage') {
       const mode = interaction.options.getString('action', true);
+      if (mode === 'status') {
+        const settings = await getAdvancedSettings(guild.id);
+        const claimed = await getOptionalStatusCategory(guild, 'claimed');
+        const pending = await getOptionalStatusCategory(guild, 'pending');
+        const categoryName = (id: string | null): string =>
+          id ? (guild.channels.cache.get(id)?.name ?? 'Configured category') : 'Not provisioned';
+        await interaction.editReply(
+          '**Storage & Categories**\n' +
+          'Closed tickets: **' + categoryName(settings.closedCategoryId) + '**\n' +
+          'Archive tickets: **' + categoryName(settings.archiveCategoryId) + '**\n' +
+          'Claimed tickets: **' + (claimed?.name ?? 'Not added') + '**\n' +
+          'Pending tickets: **' + (pending?.name ?? 'Not added') + '**'
+        );
+        return;
+      }
       if (mode === 'claimed' || mode === 'pending') {
         const category = await ensureOptionalStatusCategory(guild, mode);
         await refreshSettingsChannel(guild);
