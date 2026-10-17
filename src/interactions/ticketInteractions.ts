@@ -56,6 +56,7 @@ import {
 
 import { resetPanelActivity } from '../services/panelActivityService';
 import { getAdvancedSettings, type TicketPriority } from '../services/advancedSettingsService';
+import { getThemeColor } from '../services/uiThemeService';
 import { ensureDepartmentCategory } from '../services/departmentCategoryService';
 import { endTicketVoiceMode, startTicketVoiceMode, syncTicketVoiceParticipants } from '../services/voiceModeService';
 import { getUserFlagCount, isTicketCreationRestricted, recordReport } from '../services/reportService';
@@ -1478,6 +1479,7 @@ async function createTicket(
       );
 
       const requestEmbed = new EmbedBuilder()
+        .setColor(getThemeColor(config.theme))
         .setTitle('📨 Support Request')
         .setDescription(cleanDescription)
         .addFields(
@@ -1533,6 +1535,7 @@ async function createTicket(
             allowedMentions: { parse: [] },
             embeds: [
               new EmbedBuilder()
+                .setColor(getThemeColor(config.theme))
                 .setTitle('📋 Ticket Form Answers' + (pageCount > 1 ? ' • ' + (page + 1) + '/' + pageCount : ''))
                 .setDescription('Form **' + selectedForm.name.slice(0, 80) + '** • version ' + selectedForm.version)
                 .addFields(pageFields),
@@ -1645,9 +1648,11 @@ async function createTicket(
           error,
         );
 
+        const recoveryThemeColor = getThemeColor((await getGuildConfig(guild.id)).theme);
         await ticketChannel.send({
           embeds: [
             new EmbedBuilder()
+              .setColor(recoveryThemeColor)
               .setTitle('⚠️ SupportForge Ticket Recovery')
               .setDescription(
                 'The ticket channel was created successfully, but one initialization step did not complete. The ticket has **not** been deleted. An administrator can use **Repair System** or refresh the ticket panel to complete recovery.',
@@ -4226,9 +4231,15 @@ async function showTicketHistory(
     const recent = events.slice(-20).reverse();
 
     if (!recent.length) {
-      await interaction.editReply(
-        '📜 **Ticket #' + ticketNumber + ' History**\n\nNo audit events have been recorded for this ticket yet.',
-      );
+      const historyThemeColor = getThemeColor((await getGuildConfig(interaction.guild.id)).theme);
+      await interaction.editReply({
+        content: '',
+        embeds: [new EmbedBuilder()
+          .setColor(historyThemeColor)
+          .setTitle('📜 Ticket #' + ticketNumber + ' History')
+          .setDescription('No audit events have been recorded for this ticket yet.')
+          .setFooter({ text: 'Ticket activity will appear here as events are recorded.' })],
+      });
       return;
     }
 
@@ -4264,8 +4275,10 @@ async function showTicketHistory(
     }
     if (current) chunks.push(current);
 
+    const historyThemeColor = getThemeColor((await getGuildConfig(interaction.guild.id)).theme);
     const embeds = chunks.slice(0, 2).map((chunk, index) =>
       new EmbedBuilder()
+        .setColor(historyThemeColor)
         .setTitle(
           index === 0
             ? '📜 Ticket #' + ticketNumber + ' History'
@@ -4805,9 +4818,11 @@ async function handleTicketVoiceStart(interaction: ButtonInteraction | ChatInput
     channel.topic = result.topic;
     const ticketNumber = getField(result.topic, 'number') ?? 'unknown';
     await updateMainMessage(channel, getField(result.topic, 'message'), status, result.topic);
+    const voiceThemeColor = getThemeColor((await getGuildConfig(interaction.guild.id)).theme);
     await channel.send({
       embeds: [
         new EmbedBuilder()
+          .setColor(voiceThemeColor)
           .setTitle('🎙️ Private Voice Mode Active')
           .setDescription('A private voice room has been created for this ticket. Only the ticket owner and assigned moderators can connect. The room capacity is sized for the configured moderator limit plus the customer, and screen sharing is enabled.')
           .addFields({ name: 'Voice channel', value: result.voiceChannel.toString() })
@@ -4864,9 +4879,11 @@ async function handleTicketVoiceEnd(interaction: ButtonInteraction | ChatInputCo
     const newTopic = await endTicketVoiceMode(interaction.guild, channel, topic, status, 'SupportForge voice mode ended');
     channel.topic = newTopic;
     await updateMainMessage(channel, getField(newTopic, 'message'), status, newTopic);
+    const voiceEndThemeColor = getThemeColor((await getGuildConfig(interaction.guild.id)).theme);
     await channel.send({
       embeds: [
         new EmbedBuilder()
+          .setColor(voiceEndThemeColor)
           .setTitle('🔚 Private Voice Mode Ended')
           .setDescription('The temporary private voice room has been removed. This ticket is back to normal text mode.')
           .setTimestamp(),
@@ -5026,6 +5043,9 @@ async function handlePanelButton(
             : '')
         : 'No ticket departments configured.';
 
+      pageEmbed.setColor(getThemeColor((await getGuildConfig(interaction.guild.id)).theme));
+      pageEmbed.setTitle(pageSettings.appearance.panelTitle);
+      pageEmbed.setFooter({ text: pageSettings.appearance.panelFooter });
       pageEmbed.setDescription(
         `Welcome to **${interaction.guild.name}** support.\n\n` +
           pageSettings.appearance.panelDescription + '\n\n' +
@@ -5781,9 +5801,11 @@ async function handlePanelModal(
         return;
       }
 
+      const noteThemeColor = getThemeColor((await getGuildConfig(channel.guild.id)).theme);
       await channel.send({
           embeds: [
             new EmbedBuilder()
+              .setColor(noteThemeColor)
               .setTitle(
                 '📝 Internal Note',
               )
