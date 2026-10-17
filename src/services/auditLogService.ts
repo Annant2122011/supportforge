@@ -3064,6 +3064,44 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
   return false;
 }
 
+export async function executeAuditPanelCommand(guild: Guild, mode: 'move' | 'restore'): Promise<void> {
+  const channel = await findAuditChannel(guild);
+  if (!channel) throw new Error('SupportForge audit-log-general could not be found. Run /supportforge setup first.');
+  const current = await load();
+  const store = getGuildStore(current, guild.id);
+  if (mode === 'restore') {
+    const restore = store.restoreMessageId
+      ? channel.messages.cache.get(store.restoreMessageId) ?? await channel.messages.fetch(store.restoreMessageId).catch(() => null)
+      : (await channel.messages.fetch({ limit: 100 })).find((message) =>
+          message.author.id === channel.client.user?.id && message.components.some((row) =>
+            row.type === ComponentType.ActionRow && row.components.some((component) =>
+              'customId' in component && component.customId === AUDIT_RESTORE_CUSTOM_ID)));
+    const panel = await channel.send({ embeds: [buildAuditPanelEmbed(guild)], components: auditPanelComponents() });
+    if (restore) await restore.delete().catch(() => undefined);
+    store.panelMessageId = panel.id;
+    store.restoreMessageId = null;
+    store.panelEventCheckpoint = store.events.length;
+    await persist();
+    return;
+  }
+  if (!store.panelMessageId) {
+    await ensureAuditPanel(guild, channel);
+    return;
+  }
+  const oldPanel = channel.messages.cache.get(store.panelMessageId) ??
+    await channel.messages.fetch(store.panelMessageId).catch(() => null);
+  if (!oldPanel) {
+    store.panelMessageId = null;
+    await persist();
+    return;
+  }
+  const movedPanel = await channel.send({ embeds: [buildAuditPanelEmbed(guild)], components: auditPanelComponents() });
+  await oldPanel.delete().catch(() => undefined);
+  store.panelMessageId = movedPanel.id;
+  store.panelEventCheckpoint = store.events.length;
+  await persist();
+}
+
 export async function handleAuditSlashCommand(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
@@ -3222,16 +3260,15 @@ export async function handleAuditSlashCommand(
       await interaction.editReply('✅ The SupportForge audit control panel was refreshed.');
       return;
     }
-    const customId = mode === 'move' ? AUDIT_COLLAPSE_CUSTOM_ID : AUDIT_RESTORE_CUSTOM_ID;
-    await interaction.editReply({
-      content: mode === 'move'
-        ? 'Move the persistent audit control panel to the bottom of audit-log-general.'
-        : 'Restore the persistent audit control panel at the current end of audit-log-general.',
-      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(customId).setLabel(mode === 'move' ? 'Move Audit Panel Down' : 'Restore Audit Panel')
-          .setEmoji(mode === 'move' ? '⬇️' : '↩️').setStyle(ButtonStyle.Primary),
-      )],
-    });
+    if (mode === 'refresh') {
+      await refreshAuditPanel(guild);
+      await interaction.editReply('✅ The SupportForge audit control panel was refreshed.');
+      return;
+    }
+    await executeAuditPanelCommand(guild, mode);
+    await interaction.editReply(mode === 'move'
+      ? '✅ The audit control panel was moved to the bottom of audit-log-general.'
+      : '✅ The audit control panel was restored at the end of audit-log-general.');
     return;
   }
 
