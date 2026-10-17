@@ -1152,11 +1152,11 @@ async function showThemeSettings(
     new EmbedBuilder()
       .setTitle('🌈 Server Theme')
       .setDescription(
-        (notice ? notice + '\\n\\n' : '') +
+        (notice ? notice + '\n\n' : '') +
         'Give this server its own visual identity. The selected palette is saved in this server’s configuration and does not affect other servers. It accents the public support panel, Settings dashboard, and Ticket Forms screens. Discord’s native controls retain their built-in style.'
       )
       .addFields(
-        { name: 'Active palette', value: '**' + active.label + '**\\n' + active.description, inline: true },
+        { name: 'Active palette', value: '**' + active.label + '**\n' + active.description, inline: true },
         { name: 'Preview', value: active.preview, inline: true },
       ),
   ], [

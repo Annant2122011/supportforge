@@ -64,7 +64,7 @@ async function render(interaction: FormSettingsInteraction, content: string, com
   const theme = interaction.guild
     ? await getGuildTheme(interaction.guild.id)
     : { label: 'Midnight Indigo', color: 0x5865f2 };
-  const heading = content.match(/^\\*\\*(.{1,240}?)\\*\\*/m);
+  const heading = content.match(/^\*\*(.{1,240}?)\*\*/m);
   const title = heading?.[1]?.slice(0, 256) ?? 'Ticket Forms & Templates';
   const description = heading ? content.replace(heading[0], '').trim() : content;
   const embed = new EmbedBuilder()
