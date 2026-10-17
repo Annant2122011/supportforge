@@ -57,7 +57,7 @@ import {
 } from '../services/ticketPersistenceService';
 
 import { setChannelPermissionOverwrite, setChannelTopic, setChannelProperties, type ChannelPermissionOverwrite } from '../services/discordChannelService';
-import { executeTicketLifecycleCommand, executeTicketRoutingCommand } from './ticketInteractions';
+import { executeTicketLifecycleCommand, executeTicketRoutingCommand, executeTicketVoiceCommand } from './ticketInteractions';
 
 import {
   ensureArchiveCategory,
@@ -506,24 +506,8 @@ export async function executeTicketCommand(
     }
 
     if (subcommand === 'voice') {
-      const voiceAction = interaction.options.getString('action', true);
-      const customId = voiceAction === 'start'
-        ? 'ticket:panel:voice:start'
-        : voiceAction === 'end'
-          ? 'ticket:panel:voice:end'
-          : 'ticket:panel:voice:join';
-      if (voiceAction !== 'join' && context.status !== 'claimed') {
-        await interaction.editReply('Private voice mode can only be started or ended on a claimed ticket.');
-        return;
-      }
-      await interaction.editReply({
-        content: 'Use the button below to perform the voice action. The ticket handler revalidates ownership, assignment, and current voice-session state.',
-        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder().setCustomId(customId)
-            .setLabel(voiceAction === 'start' ? 'Start Voice Mode' : voiceAction === 'end' ? 'End Voice Mode' : 'Join Private Voice')
-            .setStyle(voiceAction === 'end' ? ButtonStyle.Danger : ButtonStyle.Primary),
-        )],
-      });
+      const voiceAction = interaction.options.getString('action', true) as 'start' | 'end' | 'join';
+      await executeTicketVoiceCommand(interaction, voiceAction);
       return;
     }
 
