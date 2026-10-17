@@ -57,6 +57,7 @@ import { migrateDepartmentStaffRole } from '../services/departmentStaffRoleServi
 import { getPersistedTicket, getPersistedTicketStatus, registerTicket } from '../services/ticketPersistenceService';
 import { performFactoryReset } from '../services/factoryResetService';
 import { addUseCasePreset, USE_CASE_PRESETS } from '../services/useCasePresetService';
+import { enforcePriorityRoleHierarchy } from '../services/priorityRoleService';
 import { handleTicketFormSettingsInteraction } from './ticketFormSettingsInteractions';
 import {
   approveRetentionDeletion,
@@ -175,97 +176,6 @@ function priorityRoleLabel(priority: TicketPriority): string {
 }
 
 const pendingResetAuditChoice = new Map<string, boolean>();
-
-const PRIORITY_ROLE_ORDER: TicketPriority[] = [
-  'critical',
-  'urgent',
-  'high',
-  'normal',
-  'low',
-];
-
-/**
- * Keep SupportForge priority roles together at the top of the role hierarchy
- * that the bot can manage. Higher priority always receives the higher Discord
- * role position, regardless of the order in which roles were created.
- */
-async function enforcePriorityRoleHierarchy(guild: Guild): Promise<void> {
-  const settings = await getAdvancedSettings(guild.id);
-  const configured = PRIORITY_ROLE_ORDER.flatMap((priority) => {
-    const roleId = settings.priorityRoles[priority];
-    const role = roleId ? guild.roles.cache.get(roleId) : undefined;
-
-    return roleId && role && !role.managed
-      ? [{ priority, role }]
-      : [];
-  });
-
-  if (configured.length === 0) return;
-
-  const botMember =
-    guild.members.me ??
-    await guild.members.fetchMe().catch(() => null);
-
-  const botHighestRole = botMember?.roles.highest;
-  if (!botHighestRole) {
-    console.warn('⚠️ SupportForge could not determine its highest role; priority role ordering was skipped.');
-    return;
-  }
-
-  /*
-   * Discord only lets a bot manage roles below its highest role. A hierarchy
-   * preference must never make the underlying priority-rule creation fail.
-   * Skip roles the bot cannot edit and treat a Discord 50013 as a warning.
-   */
-  const manageable = configured.filter(
-    (entry) =>
-      entry.role.editable &&
-      entry.role.position < botHighestRole.position,
-  );
-
-  if (manageable.length === 0) return;
-
-  const highestTargetPosition = botHighestRole.position - 1;
-  const lowestTargetPosition =
-    highestTargetPosition - manageable.length + 1;
-
-  if (lowestTargetPosition < 1) {
-    console.warn(
-      '⚠️ Not enough manageable role positions below the SupportForge bot role; priority role ordering was skipped.',
-    );
-    return;
-  }
-
-  const positions = manageable.map((entry, index) => ({
-    role: entry.role.id,
-    position: highestTargetPosition - index,
-  }));
-
-  try {
-    await guild.roles.setPositions(positions);
-    await guild.roles.fetch();
-  } catch (error) {
-    console.warn(
-      '⚠️ Could not reorder SupportForge priority roles. Role creation/deletion will continue normally:',
-      error,
-    );
-  }
-}
-
-function findPriorityRole(
-  guild: Guild,
-  _priority: TicketPriority,
-  configuredRoleId?: string,
-) {
-  /*
-   * A role name is not ownership proof. Only a persisted role ID identifies a
-   * SupportForge-managed priority role, so an unrelated role with a matching
-   * display name can never be deleted or treated as configured infrastructure.
-   */
-  if (!configuredRoleId) return undefined;
-  const configured = guild.roles.cache.get(configuredRoleId);
-  return configured && !configured.managed ? configured : undefined;
-}
 
 async function showManual(interaction: SettingsViewInteraction): Promise<void> {
   await renderSettingsView(interaction, [
