@@ -2106,12 +2106,13 @@ export async function handleSettingsInteraction(
       return true;
     }
 
-    if (id === 'sf:settings:setup-restore') {
+    if (id === 'sf:settings:setup' || id === 'sf:settings:restore' || id === 'sf:settings:setup-restore') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
-        const result = await runSupportForgeSetup(guild, true);
+        const restoreMode = id !== 'sf:settings:setup';
+        const result = await runSupportForgeSetup(guild, restoreMode);
         await interaction.editReply(
-          '✅ **SupportForge restored successfully.**\n\n' +
+          '✅ **SupportForge ' + (restoreMode ? 'restored' : 'setup/repair completed') + ' successfully.**\n\n' +
           'Container: <#' + result.supportCategoryId + '>\n' +
           'Department categories: **' + result.departmentCount + '**\n' +
           (result.legacyOpenCategoryId ? 'Legacy Open bucket: <#' + result.legacyOpenCategoryId + '>\n' : '') +
@@ -2763,9 +2764,14 @@ async function showRepairSystem(interaction: ButtonInteraction): Promise<void> {
           .setEmoji('🗄️')
           .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
-          .setCustomId('sf:settings:setup-restore')
-          .setLabel('Setup / Restore')
+          .setCustomId('sf:settings:setup')
+          .setLabel('Setup')
           .setEmoji('🧭')
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId('sf:settings:restore')
+          .setLabel('Restore')
+          .setEmoji('♻️')
           .setStyle(ButtonStyle.Secondary),
         backButton(),
       ),
