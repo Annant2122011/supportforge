@@ -1506,6 +1506,32 @@ export async function runSupportForgeSetup(
   };
 }
 
+export async function runSupportForgeRepair(
+  guild: Guild,
+): Promise<{ supportCategoryId: string; recoveredTickets: number }> {
+  const supportCategory = await ensureContainer(guild);
+  await getOrCreateAuditChannel(guild, supportCategory.id);
+  await ensureTranscriptChannel(guild, supportCategory.id);
+  await ensurePanelChannel(guild, supportCategory.id);
+  await ensureOpenCategory(guild);
+  await ensureClosedCategory(guild);
+  await ensureArchiveCategory(guild);
+  await ensureSettingsChannel(guild, supportCategory.id);
+  await ensureAllDepartmentCategories(guild);
+  await ensureSupportForgeCategoryPurposeMessages(guild, supportCategory.id);
+
+  const recoveredTickets = await recoverMissingTicketRecords(guild);
+  await syncPanel(guild);
+  await refreshSettingsChannel(guild);
+  await logSystemEvent(
+    guild,
+    supportCategory.id,
+    'SYSTEM_REPAIR_COMPLETED',
+    'Normal Repair completed; recovered ' + recoveredTickets + ' missing durable ticket record(s).',
+  );
+  return { supportCategoryId: supportCategory.id, recoveredTickets };
+}
+
 export async function execute(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
@@ -1591,20 +1617,8 @@ export async function execute(
             await refreshSettingsChannel(targetGuild);
             return 'Storage repair complete. Closed and Archive categories are ready.';
           }
-          const supportCategory = await ensureContainer(targetGuild);
-          await getOrCreateAuditChannel(targetGuild, supportCategory.id);
-          await ensureTranscriptChannel(targetGuild, supportCategory.id);
-          await ensurePanelChannel(targetGuild, supportCategory.id);
-          await ensureOpenCategory(targetGuild);
-          await ensureClosedCategory(targetGuild);
-          await ensureArchiveCategory(targetGuild);
-          await ensureSettingsChannel(targetGuild, supportCategory.id);
-          const recoveredTickets = await recoverMissingTicketRecords(targetGuild);
-          await ensureAllDepartmentCategories(targetGuild);
-          await ensureSupportForgeCategoryPurposeMessages(targetGuild, supportCategory.id);
-          await syncPanel(targetGuild);
-          await refreshSettingsChannel(targetGuild);
-          return 'Normal infrastructure repair complete. Core channels and department categories have been checked. Recovered ' + recoveredTickets + ' missing durable ticket record(s).';
+          const result = await runSupportForgeRepair(targetGuild);
+          return 'Normal infrastructure repair complete. Core channels and department categories have been checked. Recovered ' + result.recoveredTickets + ' missing durable ticket record(s).';
         },
         refresh: async (targetGuild) => {
           const supportCategory = await ensureContainer(targetGuild);
