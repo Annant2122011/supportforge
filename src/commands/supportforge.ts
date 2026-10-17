@@ -955,6 +955,13 @@ export const data =
         // PRIORITY
         .addSubcommand((subcommand) =>
           subcommand
+            .setName('create')
+            .setDescription('Create a ticket without using the support panel button')
+            .addStringOption((option) => option.setName('department-id').setDescription('Department ID from Settings → Departments').setRequired(true).setMaxLength(28))
+            .addStringOption((option) => option.setName('tag-id').setDescription('Tag ID belonging to the selected department').setRequired(true).setMaxLength(28)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
             .setName('priority')
             .setDescription(
               'Set ticket priority',
