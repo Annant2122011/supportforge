@@ -57,7 +57,7 @@ import {
 } from '../services/ticketPersistenceService';
 
 import { setChannelPermissionOverwrite, setChannelTopic, setChannelProperties, type ChannelPermissionOverwrite } from '../services/discordChannelService';
-import { executeTicketLifecycleCommand, executeTicketRoutingCommand, executeTicketVoiceCommand } from './ticketInteractions';
+import { executeTicketLifecycleCommand, executeTicketRoutingCommand, executeTicketVoiceCommand, executeTicketReportCommand } from './ticketInteractions';
 
 import {
   ensureArchiveCategory,
@@ -512,12 +512,7 @@ export async function executeTicketCommand(
     }
 
     if (subcommand === 'report') {
-      await interaction.editReply({
-        content: 'Start the standard report workflow below. Target selection, categories, evidence, and staff review use the same validation as the ticket panel.',
-        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder().setCustomId('ticket:panel:report').setLabel('Report User').setEmoji('🛡️').setStyle(ButtonStyle.Primary),
-        )],
-      });
+      await executeTicketReportCommand(interaction);
       return;
     }
 
