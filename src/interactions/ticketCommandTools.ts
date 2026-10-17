@@ -57,6 +57,7 @@ import {
 } from '../services/ticketPersistenceService';
 
 import { setChannelPermissionOverwrite, setChannelTopic, setChannelProperties, type ChannelPermissionOverwrite } from '../services/discordChannelService';
+import { executeTicketLifecycleCommand } from './ticketInteractions';
 
 import {
   ensureArchiveCategory,
@@ -462,7 +463,7 @@ export async function executeTicketCommand(
      * Only configured department staff or
      * administrators can manage tickets.
      */
-    if (!context.isAuthorized) {
+    if (!context.isAuthorized && !(subcommand === 'close' && context.ownerId === interaction.user.id)) {
       await interaction.editReply(
         '❌ Only the configured department staff or an administrator can use ticket management commands.',
       );
@@ -493,25 +494,9 @@ export async function executeTicketCommand(
     /* ------------------------------------------------------------------ */
 
     if (subcommand === 'close' || subcommand === 'reopen') {
-      const expectedStatus = subcommand === 'close' ? 'closed' : 'open';
-      if (subcommand === 'close' && ['closed', 'archived'].includes(context.status)) {
-        await interaction.editReply('This ticket is already closed or archived.');
-        return;
-      }
-      if (subcommand === 'reopen' && context.status !== 'closed') {
-        await interaction.editReply('Only a closed ticket can be reopened. Archived tickets remain terminal.');
-        return;
-      }
-      const customId = subcommand === 'close' ? 'ticket:close' : 'ticket:reopen';
-      await interaction.editReply({
-        content: subcommand === 'close'
-          ? 'Use the button below to close the ticket through the normal transcript and lock workflow.'
-          : 'Use the button below to reopen this closed ticket.',
-        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder().setCustomId(customId).setLabel(subcommand === 'close' ? 'Close Ticket' : 'Reopen Ticket')
-            .setStyle(subcommand === 'close' ? ButtonStyle.Danger : ButtonStyle.Success),
-        )],
-      });
+      // Execute the same lifecycle service used by the panel button directly.
+      // A slash command must remain a real fallback, not just display another button.
+      await executeTicketLifecycleCommand(interaction, subcommand);
       return;
     }
 
