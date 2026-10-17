@@ -22,6 +22,7 @@ import {
 
 import { getAdvancedSettings, type TicketPriority } from '../services/advancedSettingsService';
 import { projectDurableTicketTopic } from '../services/ticketTopicProjectionService';
+import { getThemeColor } from '../services/uiThemeService';
 
 import {
   getOrCreateAuditChannel,
@@ -1250,6 +1251,7 @@ export async function executeTicketCommand(
       await auditChannel.send({
         embeds: [
           new EmbedBuilder()
+            .setColor(getThemeColor(context.config.theme))
             .setTitle(
               `🔒 Internal note • Ticket #${context.ticketNumber}`,
             )

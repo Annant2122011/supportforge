@@ -51,7 +51,7 @@ import {
   ensureAllDepartmentCategories,
 } from '../services/departmentCategoryService';
 
-import { logSettingsEvent } from '../services/auditLogService';
+import { logSettingsEvent, refreshAuditPanelTheme } from '../services/auditLogService';
 import { getField, getTicketStatus, setField } from '../services/ticketStateService';
 import { migrateDepartmentStaffRole } from '../services/departmentStaffRoleService';
 import { getPersistedTicket, getPersistedTicketStatus } from '../services/ticketPersistenceService';
@@ -1353,6 +1353,7 @@ export async function handleSettingsInteraction(
       });
       await syncPanel(guild);
       await refreshSettingsChannel(guild);
+      await refreshAuditPanelTheme(guild);
       await auditSettingsAction(
         guild,
         interaction,

@@ -15,7 +15,7 @@ Available themes:
 
 Administrators can choose the theme from Settings → Server Theme or use /supportforge settings theme with action:set and a palette. Use action:show to report the active palette. Updating a theme refreshes that server's public support panel and settings dashboard; other guilds retain their own selection.
 
-The theme accent applies to the public support panel, Settings dashboard, Settings subviews, and Ticket Forms management views. Ticket detail panels retain priority-specific accents because priority color is an operational signal. Discord's native modal and button colors cannot be customized with HTML/CSS, so those controls stay native and accessible.
+The theme accent applies to the public support panel (including department pagination), Settings dashboard and subviews, Ticket Forms screens and answer summaries, ticket history and voice notices, internal-note messages, and the audit control panel, audit entries, daily/overall summaries, and private developer view. Changing a server theme refreshes its existing support, settings, and audit panels. Ticket detail panels retain priority-specific accents because priority color is an operational signal. Discord's native modal and button colors cannot be customized with HTML/CSS, so those controls stay native and accessible.
 
 ## Guided form builder
 

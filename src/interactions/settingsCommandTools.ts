@@ -13,7 +13,7 @@ import { ensureArchiveCategory, ensureClosedCategory, ensureOptionalStatusCatego
 import { refreshSettingsChannel } from '../services/settingsChannelService';
 import { addUseCasePreset } from '../services/useCasePresetService';
 import { performFactoryReset } from '../services/factoryResetService';
-import { logSettingsEvent } from '../services/auditLogService';
+import { logSettingsEvent, refreshAuditPanelTheme } from '../services/auditLogService';
 import { approveRetentionDeletion, declineRetentionDeletion, getEligibleRetentionTickets } from '../services/ticketRetentionService';
 import { migrateDepartmentStaffRole } from '../services/departmentStaffRoleService';
 import { enforcePriorityRoleHierarchy } from '../services/priorityRoleService';
@@ -78,6 +78,7 @@ export async function handleSettingsSlashCommand(
         if (previousTheme !== requestedTheme) {
           await hooks.syncPanel(guild);
           await refreshSettingsChannel(guild);
+          await refreshAuditPanelTheme(guild);
           audit('SERVER_THEME_CHANGED', 'Changed the server UI theme from ' + getThemeDefinition(previousTheme).label + ' to ' + getThemeDefinition(requestedTheme).label + ' through slash command.');
         }
       }
