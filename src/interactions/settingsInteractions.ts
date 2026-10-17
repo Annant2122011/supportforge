@@ -58,7 +58,6 @@ import { getPersistedTicket, getPersistedTicketStatus } from '../services/ticket
 import { performFactoryReset } from '../services/factoryResetService';
 import { addUseCasePreset, USE_CASE_PRESETS } from '../services/useCasePresetService';
 import { enforcePriorityRoleHierarchy } from '../services/priorityRoleService';
-import { recoverMissingTicketRecords } from '../services/ticketRecoveryService';
 import { handleTicketFormSettingsInteraction } from './ticketFormSettingsInteractions';
 import {
   approveRetentionDeletion,
@@ -73,6 +72,7 @@ import {
   ensureTranscriptChannel,
   syncPanel,
   runSupportForgeSetup,
+  runSupportForgeRepair,
 } from '../commands/supportforge';
 
 const SETTINGS_TOPIC_PREFIX = 'supportforge:settings';
@@ -2606,15 +2606,8 @@ async function showRepairSystem(interaction: ButtonInteraction): Promise<void> {
 }
 
 async function normalRepair(guild: Guild): Promise<number> {
-  const supportCategory = await ensureContainer(guild);
-  await ensureTranscriptChannel(guild, supportCategory.id);
-  await ensurePanelChannel(guild, supportCategory.id);
-  await ensureSettingsChannel(guild, supportCategory.id);
-
-  const recoveredTickets = await recoverMissingTicketRecords(guild);
-  await ensureAllDepartmentCategories(guild);
-  await syncPanel(guild);
-  return recoveredTickets;
+  const result = await runSupportForgeRepair(guild);
+  return result.recoveredTickets;
 }
 
 async function storageRepair(guild: Guild): Promise<void> {
