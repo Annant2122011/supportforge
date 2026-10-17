@@ -1,5 +1,6 @@
 import {
   ChannelType,
+  EmbedBuilder,
   MessageFlags,
   PermissionFlagsBits,
   type ChatInputCommandInteraction,
@@ -16,6 +17,7 @@ import { logSettingsEvent } from '../services/auditLogService';
 import { approveRetentionDeletion, declineRetentionDeletion, getEligibleRetentionTickets } from '../services/ticketRetentionService';
 import { migrateDepartmentStaffRole } from '../services/departmentStaffRoleService';
 import { enforcePriorityRoleHierarchy } from '../services/priorityRoleService';
+import { getThemeColor, getThemeDefinition, isGuildTheme } from '../services/uiThemeService';
 
 export interface SettingsSlashHooks {
   syncPanel(guild: Guild): Promise<void>;
@@ -63,6 +65,35 @@ export async function handleSettingsSlashCommand(
         'Closed retention: **' + settings.retention.closedDays + ' days** · Archive retention: **' + settings.retention.archiveDays + ' days**\n\n' +
         'Button controls remain in the Settings channel. These commands operate on the same settings data.'
       );
+      return;
+    }
+
+    if (action === 'theme') {
+      const mode = interaction.options.getString('action', true);
+      const requestedTheme = interaction.options.getString('theme');
+      if (mode === 'set') {
+        if (!isGuildTheme(requestedTheme)) throw new Error('Choose a supported theme when using action:set.');
+        const previousTheme = (await getGuildConfig(guild.id)).theme;
+        await updateGuildConfig(guild.id, (current) => { current.theme = requestedTheme; });
+        if (previousTheme !== requestedTheme) {
+          await hooks.syncPanel(guild);
+          await refreshSettingsChannel(guild);
+          audit('SERVER_THEME_CHANGED', 'Changed the server UI theme from ' + getThemeDefinition(previousTheme).label + ' to ' + getThemeDefinition(requestedTheme).label + ' through slash command.');
+        }
+      }
+      const currentConfig = await getGuildConfig(guild.id);
+      const activeTheme = getThemeDefinition(currentConfig.theme);
+      await interaction.editReply({
+        embeds: [new EmbedBuilder()
+          .setColor(getThemeColor(currentConfig.theme))
+          .setTitle('🌈 Server Theme')
+          .setDescription('Each server stores its own theme. Changing this palette does not affect other servers. It accents the public support panel, Settings dashboard and Ticket Forms screens.')
+          .addFields(
+            { name: 'Current theme', value: '**' + activeTheme.label + '**\n' + activeTheme.description, inline: true },
+            { name: 'Change it', value: 'Use /supportforge settings theme with action:set and choose a palette.', inline: true },
+          )
+          .setFooter({ text: 'SupportForge • Server-specific appearance' })],
+      });
       return;
     }
 

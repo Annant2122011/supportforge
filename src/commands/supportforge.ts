@@ -29,9 +29,11 @@ import {
 
 import { executeTicketCommand } from '../interactions/ticketCommandTools';
 import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
+import { UI_THEMES, getThemeColor } from '../services/uiThemeService';
 import { handleSettingsSlashCommand } from '../interactions/settingsCommandTools';
 import {
   applyTicketFormTemplate,
+  buildQuickTicketFormFields,
   createTicketForm,
   createTicketFormTemplate,
   deleteTicketFormTemplate,
@@ -267,6 +269,7 @@ export async function buildPanelEmbed(
   page = 0,
 ): Promise<EmbedBuilder> {
   const settings = await getAdvancedSettings(guild.id);
+  const config = await getGuildConfig(guild.id);
   const departmentsPerPage = departments.length > 20 ? 20 : 25;
   const pageCount = Math.max(1, Math.ceil(departments.length / departmentsPerPage));
   const safePage = Math.min(Math.max(page, 0), pageCount - 1);
@@ -283,6 +286,7 @@ export async function buildPanelEmbed(
     : 'No ticket departments configured.';
 
   return new EmbedBuilder()
+    .setColor(getThemeColor(config.theme))
     .setTitle(settings.appearance.panelTitle)
     .setDescription(
       `Welcome to **${guild.name}** support.\n\n` +
@@ -875,6 +879,16 @@ export const data =
         )
         .addSubcommand((subcommand) =>
           subcommand
+            .setName('quick-create')
+            .setDescription('Create a simple form using guided questions instead of JSON')
+            .addStringOption((option) => option.setName('name').setDescription('Form name').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('department-id').setDescription('Existing department ID from form list').setRequired(true).setMaxLength(28))
+            .addStringOption((option) => option.setName('tag-id').setDescription('Existing tag ID, or * for every tag in this department').setRequired(true).setMaxLength(28))
+            .addStringOption((option) => option.setName('question-one').setDescription('First short-text question (1–45 characters)').setRequired(true).setMaxLength(45))
+            .addStringOption((option) => option.setName('question-two').setDescription('Second short-text question (optional)').setRequired(false).setMaxLength(45)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
             .setName('create')
             .setDescription('Create an inactive ticket form from a JSON field schema')
             .addStringOption((option) => option.setName('name').setDescription('Form name').setRequired(true).setMaxLength(80))
@@ -1203,6 +1217,18 @@ export const data =
         .setDescription('Manage SupportForge settings from slash commands')
         .addSubcommand((subcommand) =>
           subcommand.setName('overview').setDescription('Show a Settings overview and current configuration'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('theme')
+            .setDescription('View or change this server’s SupportForge color theme')
+            .addStringOption((option) => option.setName('action').setDescription('Show the current theme or set a new one').setRequired(true).addChoices(
+              { name: 'Show current theme', value: 'show' },
+              { name: 'Set server theme', value: 'set' },
+            ))
+            .addStringOption((option) => option.setName('theme').setDescription('Theme palette to apply to this server').addChoices(
+              ...UI_THEMES.map((theme) => ({ name: theme.label, value: theme.id })),
+            )),
         )
         .addSubcommand((subcommand) =>
           subcommand

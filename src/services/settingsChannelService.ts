@@ -9,7 +9,8 @@ import {
   type TextChannel,
 } from 'discord.js';
 
-import { getGuildConfig } from './configService';
+import { getGuildConfig, type GuildTheme } from './configService';
+import { getThemeColor, getThemeDefinition } from './uiThemeService';
 import {
   getAdvancedSettings,
 } from './advancedSettingsService';
@@ -59,6 +60,7 @@ export function buildSettingsDashboardComponents(): ActionRowBuilder<ButtonBuild
       settingsButton('sf:settings:reset', 'Delete Everything', ButtonStyle.Danger, '🚨'),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
+      settingsButton('sf:settings:theme', 'Server Theme', ButtonStyle.Primary, '🌈'),
       settingsButton('sf:settings:premium', 'Premium & Demo', ButtonStyle.Secondary, '💎'),
     ),
   ];
@@ -220,8 +222,10 @@ export function buildSettingsDashboardEmbed(
   settings: Awaited<ReturnType<typeof getAdvancedSettings>>,
   departmentCount: number,
   tagCount: number,
+  theme: GuildTheme = 'midnight',
 ): EmbedBuilder {
   const priorityRoleCount = Object.keys(settings.priorityRoles).length;
+  const themeInfo = getThemeDefinition(theme);
 
   const closed =
     settings.retention.closedDays === 0
@@ -241,6 +245,7 @@ export function buildSettingsDashboardEmbed(
 
   return new EmbedBuilder()
     .setTitle(SETTINGS_TITLE)
+    .setColor(getThemeColor(theme))
     .setDescription(
       'Administrative control center for SupportForge.\n' +
         'Button-driven configuration • saved actions are audited with administrator + timestamp.\n' +
@@ -286,7 +291,12 @@ export function buildSettingsDashboardEmbed(
       {
         name: '🎨 Appearance',
         value: 'Panel title: **' + settings.appearance.panelTitle.slice(0, 80) + '**',
-        inline: false,
+        inline: true,
+      },
+      {
+        name: '🌈 Server theme',
+        value: '**' + themeInfo.label + '**\n' + themeInfo.description,
+        inline: true,
       },
       {
         name: '📋 Configuration snapshot',
@@ -321,7 +331,7 @@ export function buildSettingsDashboardEmbed(
       },
     )
     .setFooter({
-      text: 'SupportForge • Advanced Ticket Configuration',
+      text: 'SupportForge • Advanced Ticket Configuration • ' + themeInfo.label + ' theme',
     })
     .setTimestamp();
 }
@@ -412,6 +422,7 @@ async function refreshSettingsDashboard(
     resolvedSettings,
     departmentCount,
     tagCount,
+    config.theme,
   );
 
   const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
