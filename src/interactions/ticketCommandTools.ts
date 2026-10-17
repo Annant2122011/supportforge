@@ -57,7 +57,7 @@ import {
 } from '../services/ticketPersistenceService';
 
 import { setChannelPermissionOverwrite, setChannelTopic, setChannelProperties, type ChannelPermissionOverwrite } from '../services/discordChannelService';
-import { executeTicketLifecycleCommand } from './ticketInteractions';
+import { executeTicketLifecycleCommand, executeTicketRoutingCommand } from './ticketInteractions';
 
 import {
   ensureArchiveCategory,
@@ -500,81 +500,8 @@ export async function executeTicketCommand(
       return;
     }
 
-    if (subcommand === 'department') {
-      if (!['open', 'claimed', 'pending', 'reopened'].includes(context.status)) {
-        await interaction.editReply('Only an active ticket can be moved to another department.');
-        return;
-      }
-      const departments = Object.values(context.config.departments).sort((a, b) => a.name.localeCompare(b.name));
-      if (!departments.length) {
-        await interaction.editReply('No departments are configured. Add a department in Settings first.');
-        return;
-      }
-      const pageSize = 25;
-      const pages = Math.max(1, Math.ceil(departments.length / pageSize));
-      const visible = departments.slice(0, pageSize);
-      const currentDepartment = getField(context.topic, 'department');
-      const menu = new StringSelectMenuBuilder()
-        .setCustomId('ticket:department:select')
-        .setPlaceholder('Choose a department')
-        .setMinValues(1)
-        .setMaxValues(1)
-        .addOptions(visible.map((department) => ({
-          label: department.name.slice(0, 100),
-          value: department.id,
-          description: Object.keys(department.tags ?? {}).length + ' tag(s)',
-          default: department.id === currentDepartment,
-        })));
-      const rows = [
-        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
-        new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder().setCustomId('ticket:department:page:0').setLabel('Previous').setStyle(ButtonStyle.Secondary).setDisabled(true),
-          new ButtonBuilder().setCustomId('ticket:department:page:1').setLabel('Next').setStyle(ButtonStyle.Secondary).setDisabled(pages <= 1),
-          new ButtonBuilder().setCustomId('ticket:department:cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
-        ),
-      ];
-      await interaction.editReply({
-        content: 'Choose a new department. The existing ticket will retain its history; routing changes are written to the database.',
-        components: rows,
-      });
-      return;
-    }
-
-    if (subcommand === 'tag') {
-      if (!['open', 'claimed', 'pending', 'reopened'].includes(context.status)) {
-        await interaction.editReply('Only an active ticket can be assigned a different tag.');
-        return;
-      }
-      const departmentId = getField(context.topic, 'department') ?? '';
-      const department = context.config.departments[departmentId];
-      const tags = Object.values(department?.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
-      if (!department || !tags.length) {
-        await interaction.editReply('This ticket department has no configured tags.');
-        return;
-      }
-      const currentTag = getField(context.topic, 'tags') ?? getField(context.topic, 'tag');
-      const menu = new StringSelectMenuBuilder()
-        .setCustomId('ticket:routing-tag:select:' + department.id)
-        .setPlaceholder('Choose a tag')
-        .setMinValues(1)
-        .setMaxValues(1)
-        .addOptions(tags.slice(0, 25).map((tag) => ({
-          label: tag.name.slice(0, 100),
-          value: tag.id,
-          description: 'Subcategory of ' + department.name,
-          default: tag.id === currentTag,
-        })));
-      await interaction.editReply({
-        content: 'Choose a tag for **' + department.name + '**. Tags are subcategories and do not move the ticket category.',
-        components: [
-          new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
-          new ActionRowBuilder<ButtonBuilder>().addComponents(
-            new ButtonBuilder().setCustomId('ticket:routing-tag:page:0:' + department.id).setLabel('Previous').setStyle(ButtonStyle.Secondary).setDisabled(true),
-            new ButtonBuilder().setCustomId('ticket:routing-tag:page:1:' + department.id).setLabel('Next').setStyle(ButtonStyle.Secondary).setDisabled(tags.length <= 25),
-            new ButtonBuilder().setCustomId('ticket:routing-tag:cancel').setLabel('Cancel').setStyle(ButtonStyle.Secondary),
-          ),
-        ],
-      });
+    if (subcommand === 'department' || subcommand === 'tag') {
+      await executeTicketRoutingCommand(interaction, subcommand);
       return;
     }
 
