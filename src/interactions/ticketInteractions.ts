@@ -3043,13 +3043,9 @@ export async function showTicketCreationModalFromCommand(
   const tagId = interaction.options.getString('tag-id', true).trim();
 
   try {
-    const config = await getGuildConfig(guild.id);
-    const department = config.departments[departmentId];
-    if (!department || !department.tags?.[tagId]) {
-      await interaction.reply({ content: 'The department or tag ID is invalid. Check the IDs in Settings → Departments, then try again.', flags: MessageFlags.Ephemeral });
-      return;
-    }
-
+    // Do not perform database/network work before showModal(): Discord's
+    // initial interaction acknowledgement window is short. The modal-submit
+    // handler revalidates the department and tag before creating anything.
     const cachedForm = getCachedActiveTicketFormForRouting(guild.id, departmentId, tagId);
     if (!cachedForm.ready) {
       await interaction.reply({ content: 'Ticket forms are still loading. Please try again in a moment.', flags: MessageFlags.Ephemeral });
