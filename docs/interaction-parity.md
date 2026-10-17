@@ -70,6 +70,8 @@ The table above groups the surface by feature area. This operation checklist is 
 
 - Slash commands that change ticket state, routing, voice state, or submit a report execute the operation directly after revalidating permissions and persisted state.
 - Button handlers continue to use the same domain services and validations; they do not depend on a slash command having been run first.
+- Settings slash commands enforce the same Manage Server/Administrator gate as the Settings controls; the Staff Manual remains available to configured department staff.
+- Department staff-role migration, priority-role hierarchy, and missing durable ticket-record recovery use shared services so the button and slash routes apply the same side effects.
 - Destructive operations retain explicit confirmation. In particular, clearing raw audit events requires `confirm-delete: true` through the slash command or the existing confirmation button flow.
 - Complex forms can use modals and select menus to collect the required inputs. The slash command itself must not require a follow-up button merely to execute an action it already identifies.
 - Neon PostgreSQL remains the persistence provider. Interaction parity must not introduce a separate SQLite persistence path.
