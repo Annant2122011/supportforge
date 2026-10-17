@@ -15,6 +15,7 @@ import { performFactoryReset } from '../services/factoryResetService';
 import { logSettingsEvent } from '../services/auditLogService';
 import { approveRetentionDeletion, declineRetentionDeletion, getEligibleRetentionTickets } from '../services/ticketRetentionService';
 import { migrateDepartmentStaffRole } from '../services/departmentStaffRoleService';
+import { enforcePriorityRoleHierarchy } from '../services/priorityRoleService';
 
 export interface SettingsSlashHooks {
   syncPanel(guild: Guild): Promise<void>;
@@ -451,6 +452,7 @@ export async function handleSettingsSlashCommand(
           reason: 'SupportForge priority role created through slash command',
         });
         await updateAdvancedSettings(guild.id, (current) => { current.priorityRoles[priority] = role.id; });
+        await enforcePriorityRoleHierarchy(guild);
         await refreshSettingsChannel(guild);
         audit('PRIORITY_ROLE_CREATED', 'Created ' + role.name + ' for ' + priority + ' priority.');
         await interaction.editReply('Created ' + role.toString() + ' for **' + priority + '** priority.');
@@ -458,6 +460,7 @@ export async function handleSettingsSlashCommand(
         if (!savedId) throw new Error('No SupportForge-managed role is configured for that priority.');
         if (existing) await existing.delete('SupportForge priority role removed through slash command');
         await updateAdvancedSettings(guild.id, (current) => { delete current.priorityRoles[priority]; });
+        await enforcePriorityRoleHierarchy(guild);
         await refreshSettingsChannel(guild);
         audit('PRIORITY_ROLE_DELETED', 'Cleared the managed ' + priority + ' priority role.');
         await interaction.editReply('Cleared the managed role for **' + priority + '** priority.');
