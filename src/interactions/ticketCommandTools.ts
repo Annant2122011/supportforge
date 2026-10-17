@@ -57,8 +57,13 @@ import {
 } from '../services/ticketPersistenceService';
 
 import { setChannelPermissionOverwrite, setChannelTopic, setChannelProperties, type ChannelPermissionOverwrite } from '../services/discordChannelService';
-import { executeTicketLifecycleCommand, executeTicketRoutingCommand, executeTicketVoiceCommand, executeTicketReportCommand } from './ticketInteractions';
-import { showTicketCreationModalFromCommand } from './ticketInteractions';
+import {
+  executeTicketLifecycleCommand,
+  executeTicketRoutingCommand,
+  executeTicketVoiceCommand,
+  executeTicketReportCommand,
+  showTicketCreationModalFromCommand,
+} from './ticketInteractions';
 
 import {
   ensureArchiveCategory,
