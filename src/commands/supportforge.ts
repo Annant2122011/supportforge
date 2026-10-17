@@ -1526,6 +1526,33 @@ export async function execute(
   const group =
     interaction.options.getSubcommandGroup(false);
 
+  // Settings buttons require Manage Server or Administrator. Enforce the
+  // same gate on slash commands; the Staff Manual is the sole exception and
+  // remains available to configured department staff as in the button UI.
+  if (group === 'settings' && !isAdminLike(interaction)) {
+    let allowedDepartmentStaff = false;
+    if (subcommand === 'manual') {
+      const config = await getGuildConfig(guild.id);
+      const staffRoleIds = new Set(
+        Object.values(config.departments)
+          .map((department) => department.staffRoleId)
+          .filter((id): id is string => Boolean(id)),
+      );
+      const member = interaction.member;
+      const memberRoleIds = Array.isArray(member.roles)
+        ? member.roles
+        : member.roles.cache.map((role) => role.id);
+      allowedDepartmentStaff = memberRoleIds.some((roleId) => staffRoleIds.has(roleId));
+    }
+    if (!allowedDepartmentStaff) {
+      await interaction.reply({
+        content: '❌ You need **Manage Server** or **Administrator** to use SupportForge settings. The Staff Manual is also available to configured department staff.',
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+  }
+
   // Administrative commands
   if (
     (!group &&
