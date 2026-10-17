@@ -401,6 +401,7 @@ async function getEffectiveTicketTopic(
 function getStaffContext(
   interaction:
     | ButtonInteraction
+    | ChatInputCommandInteraction
     | StringSelectMenuInteraction
     | ModalSubmitInteraction,
   topic: string,
@@ -511,6 +512,7 @@ async function editReplyOrFollowUp(
 async function replyError(
   interaction:
     | ButtonInteraction
+    | ChatInputCommandInteraction
     | StringSelectMenuInteraction
     | ModalSubmitInteraction,
   content: string,
@@ -555,6 +557,7 @@ async function replyError(
 async function safeDeferReply(
   interaction:
     | ButtonInteraction
+    | ChatInputCommandInteraction
     | StringSelectMenuInteraction
     | ModalSubmitInteraction,
 ): Promise<boolean> {
