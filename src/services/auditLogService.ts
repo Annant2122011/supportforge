@@ -19,6 +19,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { getJsonDocument, setJsonDocument } from './jsonDocumentPersistenceService';
 import { getGuildConfig, updateGuildConfig } from './configService';
+import { getThemeColor } from './uiThemeService';
 import { getAdvancedSettings } from './advancedSettingsService';
 import { ensureChannelPurposeMessage } from './channelPurposeService';
 import {
@@ -1265,9 +1266,11 @@ async function sendAuditEntry(
     .filter(Boolean)
     .join('\n');
 
+  const auditThemeColor = getThemeColor((await getGuildConfig(channel.guild.id)).theme);
   await channel.send({
     embeds: [
       new EmbedBuilder()
+        .setColor(auditThemeColor)
         .setTitle(`SupportForge Audit • ${actionLabel(event.action)}`)
         .setDescription(description)
         .setFooter({
@@ -1330,8 +1333,10 @@ function auditRestoreComponents(): ActionRowBuilder<ButtonBuilder>[] {
   return [];
 }
 
-function buildAuditPanelEmbed(guild: Guild): EmbedBuilder {
+async function buildAuditPanelEmbed(guild: Guild): Promise<EmbedBuilder> {
+  const config = await getGuildConfig(guild.id);
   return new EmbedBuilder()
+    .setColor(getThemeColor(config.theme))
     .setTitle(AUDIT_PANEL_TITLE)
     .setDescription(
       'This channel is the central SupportForge audit record. It keeps a durable history of ticket lifecycle actions and important configuration changes, including responsible users and timestamps.\n\n' +
@@ -1442,7 +1447,7 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
     const panel = channel.messages.cache.get(store.panelMessageId);
     if (panel?.embeds.some((embed) => embed.title === AUDIT_PANEL_TITLE)) {
       await panel.edit({
-        embeds: [buildAuditPanelEmbed(guild)],
+        embeds: [await buildAuditPanelEmbed(guild)],
         components: auditPanelComponents(),
       }).catch(() => undefined);
       return;
@@ -1480,7 +1485,7 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
       store.panelMessageId = existingPanel.id;
       await existingPanel
         .edit({
-          embeds: [buildAuditPanelEmbed(guild)],
+          embeds: [await buildAuditPanelEmbed(guild)],
           components: auditPanelComponents(),
         })
         .catch(() => undefined);
@@ -1490,7 +1495,7 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
   }
 
   const panel = await channel.send({
-    embeds: [buildAuditPanelEmbed(guild)],
+    embeds: [await buildAuditPanelEmbed(guild)],
     components: auditPanelComponents(),
   });
 
@@ -1498,6 +1503,12 @@ async function ensureAuditPanel(guild: Guild, channel: TextChannel): Promise<voi
   store.restoreMessageId = null;
   store.panelEventCheckpoint = store.events.length;
   await persist();
+}
+
+export async function refreshAuditPanelTheme(guild: Guild): Promise<void> {
+  const channel = await findAuditChannel(guild);
+  if (!channel) return;
+  await ensureAuditPanel(guild, channel);
 }
 
 function currentStatusCounts(tickets: Awaited<ReturnType<typeof collectLiveTickets>>): Map<TicketStatus, number> {
@@ -1566,6 +1577,7 @@ async function buildPrivateDeveloperAuditPage(
 }> {
   const current = await load();
   const store = getGuildStore(current, guild.id);
+  const config = await getGuildConfig(guild.id);
   /*
    * Developer audit is one continuous stream. Every moderator who enables
    * Developer View sees the retained historical audit records plus new records
@@ -1695,6 +1707,8 @@ async function buildPrivateDeveloperAuditPage(
       );
     }
   }
+
+  for (const embed of embeds) embed.setColor(getThemeColor(config.theme));
 
   return {
     embeds,
@@ -1972,6 +1986,7 @@ async function generateOverallAuditSummary(
 
   for (let index = 0; index < detailSections; index += 1) {
     const embed = new EmbedBuilder()
+      .setColor(getThemeColor(config.theme))
       .setTitle(
         '📋 Audit Details' +
           (detailSections > 1 ? ' • Page ' + (index + 1) + '/' + detailSections : ''),
@@ -2039,6 +2054,7 @@ async function generateOverallAuditSummary(
     });
 
   const first = new EmbedBuilder()
+    .setColor(getThemeColor(config.theme))
     .setTitle('📊 SupportForge Overall Audit Summary • ' + guild.name)
     .setDescription(summaryLines.join('\n'))
     .addFields(
@@ -2392,9 +2408,10 @@ async function publishDailySummary(
   const reportableEvents = events.filter(isReportableAuditEvent);
   const channel = await getOrCreateAuditChannel(guild, config.supportCategoryId);
 
-  const dailyEmbed = reportableEvents.length
+  const dailyEmbed = (reportableEvents.length
     ? buildDailySummaryEmbed(guild, date, reportableEvents)
-    : buildNoActivityDailySummaryEmbed(guild, date);
+    : buildNoActivityDailySummaryEmbed(guild, date))
+    .setColor(getThemeColor(config.theme));
 
   await channel.send({ embeds: [dailyEmbed] });
   store.summaries[date] = JSON.stringify(dailyEmbed.toJSON());
@@ -2585,7 +2602,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       );
 
     const panel = await interaction.channel.send({
-      embeds: [buildAuditPanelEmbed(interaction.guild)],
+      embeds: [await buildAuditPanelEmbed(interaction.guild)],
       components: auditPanelComponents(),
     });
     if (restore) await restore.delete().catch(() => undefined);
@@ -2621,7 +2638,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
     }
 
     const movedPanel = await interaction.channel.send({
-      embeds: [buildAuditPanelEmbed(interaction.guild)],
+      embeds: [await buildAuditPanelEmbed(interaction.guild)],
       components: auditPanelComponents(),
     });
 
@@ -3076,7 +3093,7 @@ export async function executeAuditPanelCommand(guild: Guild, mode: 'move' | 'res
           message.author.id === channel.client.user?.id && message.components.some((row) =>
             row.type === ComponentType.ActionRow && row.components.some((component) =>
               'customId' in component && component.customId === AUDIT_RESTORE_CUSTOM_ID)));
-    const panel = await channel.send({ embeds: [buildAuditPanelEmbed(guild)], components: auditPanelComponents() });
+    const panel = await channel.send({ embeds: [await buildAuditPanelEmbed(guild)], components: auditPanelComponents() });
     if (restore) await restore.delete().catch(() => undefined);
     store.panelMessageId = panel.id;
     store.restoreMessageId = null;
@@ -3095,7 +3112,7 @@ export async function executeAuditPanelCommand(guild: Guild, mode: 'move' | 'res
     await persist();
     return;
   }
-  const movedPanel = await channel.send({ embeds: [buildAuditPanelEmbed(guild)], components: auditPanelComponents() });
+  const movedPanel = await channel.send({ embeds: [await buildAuditPanelEmbed(guild)], components: auditPanelComponents() });
   await oldPanel.delete().catch(() => undefined);
   store.panelMessageId = movedPanel.id;
   store.panelEventCheckpoint = store.events.length;
