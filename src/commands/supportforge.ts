@@ -857,6 +857,17 @@ export const data =
         )
         .addSubcommand((subcommand) =>
           subcommand
+            .setName('show')
+            .setDescription('Show a form and its configured fields')
+            .addStringOption((option) => option.setName('id').setDescription('Form ID from form list').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('guide')
+            .setDescription('Show the supported ticket form field schema guide'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
             .setName('schema')
             .setDescription('View a ticket form schema as paginated JSON')
             .addStringOption((option) => option.setName('id').setDescription('Form ID from form list').setRequired(true).setMaxLength(36))
@@ -902,6 +913,12 @@ export const data =
             .setName('template-list')
             .setDescription('List reusable form templates')
             .addIntegerOption((option) => option.setName('page').setDescription('Page number').setRequired(false).setMinValue(1).setMaxValue(999)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('template-show')
+            .setDescription('Show a saved template and its fields')
+            .addStringOption((option) => option.setName('template-id').setDescription('Template ID from template-list').setRequired(true).setMaxLength(36)),
         )
         .addSubcommand((subcommand) =>
           subcommand
@@ -2019,11 +2036,44 @@ export async function execute(
         return;
       }
 
+      if (action === 'guide') {
+        await interaction.editReply(
+          '**Ticket Form Field Schema Guide**\n\n' +
+          'Every field needs a unique lowercase id, a label, a supported type, and required set to true or false. Each step can contain at most three custom fields.\n\n' +
+          'JSON example:\n{\n  "fields": [\n    {\n      "id": "order_id",\n      "label": "Order ID",\n      "type": "short_text",\n      "required": true,\n      "placeholder": "Enter your order ID"\n    }\n  ]\n}\n\n' +
+          '**Supported types:** short_text, long_text, number, decimal, url, email, date, dropdown, multi_select, checkbox, discord_user, discord_role, attachment.\n\n' +
+          'Choice-based fields can include a choices string array. The service validates field IDs, types, choices, limits, conditions, and routing mappings before saving.'
+        );
+        return;
+      }
+
+      if (action === 'show') {
+        const formId = interaction.options.getString('id', true).trim();
+        const form = (await listTicketForms(guild.id)).find((item) => item.id === formId);
+        if (!form) {
+          await interaction.editReply('Ticket form not found in this server. Use /supportforge form list to find its ID.');
+          return;
+        }
+        const fields = form.fields.slice(0, 12).map((field, index) =>
+          (index + 1) + '. **' + field.label + '** · ' + field.id + ' · ' + field.type + ' · ' +
+          (field.required ? 'required' : 'optional') + ' · step ' + field.step
+        );
+        if (form.fields.length > 12) fields.push('…and ' + (form.fields.length - 12) + ' more field(s).');
+        await interaction.editReply(
+          '**' + form.name + '**\n' +
+          'ID: ' + form.id + '\nVersion: **' + form.version + '** · Status: **' + (form.active ? 'ACTIVE' : 'Inactive') + '**\n' +
+          'Department ID: ' + form.departmentId + ' · Tag ID: ' + (form.tagId ?? '*') + '\n\n' +
+          '**Current fields (' + form.fields.length + '):**\n' + (fields.length ? fields.join('\n') : 'No fields configured.') +
+          '\n\nUse /supportforge form schema to inspect the complete JSON schema.'
+        );
+        return;
+      }
+
       if (action === 'schema') {
         const formId = interaction.options.getString('id', true).trim();
         const form = (await listTicketForms(guild.id)).find((item) => item.id === formId);
         if (!form) {
-          await interaction.editReply('❌ Ticket form not found in this server. Use /supportforge form list to find its ID.');
+          await interaction.editReply('Ticket form not found in this server. Use /supportforge form list to find its ID.');
           return;
         }
         const schema = JSON.stringify({ fields: form.fields }, null, 2);
@@ -2031,14 +2081,33 @@ export async function execute(
         const pageCount = Math.max(1, Math.ceil(schema.length / pageLength));
         const requestedPage = interaction.options.getInteger('page') ?? 1;
         if (requestedPage > pageCount) {
-          await interaction.editReply('❌ Schema page ' + requestedPage + ' does not exist. This schema has ' + pageCount + ' page(s). Use /supportforge form schema id:' + formId + ' page:1 to start.');
+          await interaction.editReply('Schema page ' + requestedPage + ' does not exist. This schema has ' + pageCount + ' page(s). Use /supportforge form schema id:' + formId + ' page:1 to start.');
           return;
         }
         const chunk = schema.slice((requestedPage - 1) * pageLength, requestedPage * pageLength);
         await interaction.editReply(
-          '**Schema for ' + form.name + ' · Page ' + requestedPage + ' / ' + pageCount + '**\\n' +
-          'Form ID: `' + form.id + '` · Version: **' + form.version + '** · Status: **' + (form.active ? 'ACTIVE' : 'Inactive') + '**\\n' +
-          'Copy the JSON chunks from each page in order to reconstruct the complete schema.\\n\\n```json\\n' + chunk + '\\n```'
+          '**Schema for ' + form.name + ' · Page ' + requestedPage + ' / ' + pageCount + '**\n' +
+          'Form ID: ' + form.id + ' · Version: **' + form.version + '** · Status: **' + (form.active ? 'ACTIVE' : 'Inactive') + '**\n' +
+          'Copy the JSON chunks from each page in order to reconstruct the complete schema.\n\n' + chunk
+        );
+        return;
+      }
+
+      if (action === 'template-show') {
+        const templateId = interaction.options.getString('template-id', true).trim();
+        const template = (await listTicketFormTemplates(guild.id)).find((item) => item.id === templateId);
+        if (!template) {
+          await interaction.editReply('Template not found in this server. Use /supportforge form template-list to find its ID.');
+          return;
+        }
+        const fields = template.fields.slice(0, 12).map((field, index) =>
+          (index + 1) + '. **' + field.label + '** · ' + field.id + ' · ' + field.type
+        );
+        if (template.fields.length > 12) fields.push('…and ' + (template.fields.length - 12) + ' more field(s).');
+        await interaction.editReply(
+          '**Template: ' + template.name + '**\nID: ' + template.id + '\nFields: **' + template.fields.length + '**\n\n' +
+          (fields.length ? fields.join('\n') : 'No fields in this template.') +
+          '\n\nUse /supportforge form template-apply to create a form from this template. Deleting the template will not alter forms already created.'
         );
         return;
       }
