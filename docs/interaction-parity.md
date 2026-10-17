@@ -10,7 +10,7 @@ SupportForge exposes two independent entry points for each major feature: slash 
 | Department management | `/supportforge category add/list (paginated)/remove`, `/supportforge settings department-edit` | Settings → Departments |
 | Department tags | `/supportforge settings tag-add/tag-rename/tag-remove` | Settings → Departments → Manage Tags |
 | Department presets | `/supportforge settings usecase-add` | Settings → Use Cases |
-| Ticket forms and templates | `/supportforge form list/show/schema/guide/create/update/activate/deactivate/template-save/template-list/template-show/template-apply/template-delete` | Settings → Ticket Forms (form detail, schema JSON, field guide, template detail, activation, templates, and routing IDs) |
+| Ticket forms and templates | `/supportforge form list/show/schema/guide/quick-create/create/update/activate/deactivate/template-save/template-list/template-show/template-apply/template-delete` | Settings → Ticket Forms (guided builder, advanced schema, form detail, schema JSON, field guide, templates, activation, and routing IDs) |
 | Ticket creation and lifecycle | `/supportforge ticket create` (department/tag IDs, then the same validated form modal), plus `claim/unclaim/pending/resume/close/reopen/archive` | Department ticket-creation buttons and ticket panel lifecycle controls |
 | Ticket priority and notes | `/supportforge ticket priority/note` | Ticket panel Priority and Note controls |
 | Ticket history and participants | `/supportforge ticket history/add-user/remove-user/reassign` | Ticket panel History, Add User, Remove User, and Reassign controls |
@@ -18,7 +18,7 @@ SupportForge exposes two independent entry points for each major feature: slash 
 | Ticket voice | `/supportforge ticket voice` | Ticket panel voice controls |
 | Ticket reports | `/supportforge ticket report` | Ticket panel Report workflow |
 | Ticket panel position | `/supportforge ticket panel/move-panel` | Ticket panel move/restore controls |
-| Settings and panel behavior | `/supportforge settings overview/panel/defaults/team/retention/appearance` | Settings dashboard controls |
+| Settings and panel behavior | `/supportforge settings overview/theme/panel/defaults/team/retention/appearance` | Settings dashboard controls, including the per-server Theme picker |
 | Report intake and categories | `/supportforge settings reports/report-categories/report-rules/report-subcategory-add/report-subcategory-edit/report-subcategory-remove` | Settings → Reports controls |
 | Retention review and action | `/supportforge settings retention-action` | Settings → Retention review/approval controls |
 | Storage and infrastructure repair | `/supportforge settings storage action:status/claimed/pending/repair`, `/supportforge settings repair/refresh` | Settings → Repair System and Storage controls |

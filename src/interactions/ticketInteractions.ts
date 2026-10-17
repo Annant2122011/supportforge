@@ -3293,6 +3293,7 @@ function buildTicketFormModal(
     labels.push(
       new LabelBuilder()
         .setLabel('What do you need help with?')
+        .setDescription('A short title helps the support team scan your request.')
         .setTextInputComponent(
           new TextInputBuilder()
             .setCustomId('subject')
@@ -3303,7 +3304,7 @@ function buildTicketFormModal(
         ),
       new LabelBuilder()
         .setLabel('Describe your issue')
-        .setDescription('Up to 4,000 characters')
+        .setDescription('Required • Up to 4,000 characters')
         .setTextInputComponent(
           new TextInputBuilder()
             .setCustomId('description')
@@ -3318,7 +3319,8 @@ function buildTicketFormModal(
   for (const field of getVisibleTicketFormFields(form.fields, step, priorAnswers)) {
     const customId = 'form_' + field.id;
     const label = new LabelBuilder().setLabel(field.label.slice(0, 45));
-    if (field.placeholder) label.setDescription(field.placeholder.slice(0, 100));
+    const fieldGuidance = [field.required ? 'Required' : 'Optional', field.placeholder].filter(Boolean).join(' • ');
+    if (fieldGuidance) label.setDescription(fieldGuidance.slice(0, 100));
 
     switch (field.type) {
       case 'dropdown': {
@@ -3482,10 +3484,11 @@ async function showTicketCreationModal(
     const labels: LabelBuilder[] = [
       new LabelBuilder()
         .setLabel('What do you need help with?')
+        .setDescription('A short title helps the support team scan your request.')
         .setTextInputComponent(subjectInput),
       new LabelBuilder()
         .setLabel('Describe your issue')
-        .setDescription('Up to 4,000 characters')
+        .setDescription('Required • Up to 4,000 characters')
         .setTextInputComponent(descriptionInput),
     ];
 

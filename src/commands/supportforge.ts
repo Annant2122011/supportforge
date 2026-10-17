@@ -2182,6 +2182,32 @@ export async function execute(
         return;
       }
 
+      if (action === 'quick-create') {
+        const name = interaction.options.getString('name', true).trim();
+        const departmentId = interaction.options.getString('department-id', true).trim();
+        const suppliedTagId = interaction.options.getString('tag-id', true).trim();
+        const tagId = suppliedTagId === '*' ? null : suppliedTagId;
+        const questions = [
+          interaction.options.getString('question-one', true),
+          interaction.options.getString('question-two') ?? '',
+        ];
+        const form = await createTicketForm({
+          guildId: guild.id,
+          name,
+          departmentId,
+          tagId,
+          fields: buildQuickTicketFormFields(questions),
+          actorId,
+        });
+        await interaction.editReply(
+          '✅ Created inactive guided form **' + form.name + '** with ' + form.fields.length +
+          ' question(s). ID: `' + form.id + '`, version ' + form.version +
+          '. Activate it when the department/tag mapping is ready. Use the advanced builder for dropdowns, attachments, conditions, and custom validation.',
+        );
+        writeFormAudit('TICKET_FORM_CREATED', 'Created guided form ' + form.id + ' version 1 for department ' + departmentId + ' and tag ' + (tagId ?? '*') + '.');
+        return;
+      }
+
       if (action === 'create') {
         const name = interaction.options.getString('name', true);
         const departmentId = interaction.options.getString('department-id', true);
