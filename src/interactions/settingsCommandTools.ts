@@ -410,6 +410,9 @@ export async function handleSettingsSlashCommand(
 
     if (action === 'priority-role') {
       const mode = interaction.options.getString('action', true);
+      if (mode !== 'status' && !interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+        throw new Error('Creating or deleting SupportForge priority roles requires the Administrator permission.');
+      }
       const settings = await getAdvancedSettings(guild.id);
       if (mode === 'status') {
         const priorities: TicketPriority[] = ['critical', 'urgent', 'high', 'normal', 'low'];
