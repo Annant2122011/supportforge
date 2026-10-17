@@ -1539,10 +1539,12 @@ export async function execute(
           .filter((id): id is string => Boolean(id)),
       );
       const member = interaction.member;
-      const memberRoleIds = Array.isArray(member.roles)
-        ? member.roles
-        : member.roles.cache.map((role) => role.id);
-      allowedDepartmentStaff = memberRoleIds.some((roleId) => staffRoleIds.has(roleId));
+      if (member) {
+        const memberRoleIds = Array.isArray(member.roles)
+          ? member.roles
+          : member.roles.cache.map((role) => role.id);
+        allowedDepartmentStaff = memberRoleIds.some((roleId) => staffRoleIds.has(roleId));
+      }
     }
     if (!allowedDepartmentStaff) {
       await interaction.reply({
