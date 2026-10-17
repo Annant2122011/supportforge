@@ -21,7 +21,7 @@ SupportForge exposes two independent entry points for each major feature: slash 
 | Settings and panel behavior | `/supportforge settings overview/panel/defaults/team/retention/appearance` | Settings dashboard controls |
 | Report intake and categories | `/supportforge settings reports/report-categories/report-rules/report-subcategory-add/report-subcategory-edit/report-subcategory-remove` | Settings → Reports controls |
 | Retention review and action | `/supportforge settings retention-action` | Settings → Retention review/approval controls |
-| Storage and infrastructure repair | `/supportforge settings storage/repair/refresh` | Settings → Repair System and Storage controls |
+| Storage and infrastructure repair | `/supportforge settings storage (status/add/repair)/repair/refresh` | Settings → Repair System and Storage controls |
 | Manual and factory reset | `/supportforge settings manual/reset` | Settings → Manual and multi-step Reset controls |
 | Premium demo | `/supportforge premium status/toggle-demo` | Settings → Premium controls |
 | Audit summaries and controls | `/supportforge audit summary/daily/accumulation/developer/panel` | Audit panel summary, accumulation, Developer View, and move/restore controls |
@@ -57,7 +57,7 @@ The table above groups the surface by feature area. This operation checklist is 
 | Appearance | `/supportforge settings appearance` | Settings → Appearance → Edit | Both routes update and resync the public support panel. |
 | Report intake and safety rules | `/supportforge settings reports/report-rules` | Settings → Reports → Toggle/Flag Rules | Both routes change report intake and thresholds. |
 | Report subcategories | `/supportforge settings report-categories/report-subcategory-add/report-subcategory-edit/report-subcategory-remove` | Settings → Reports → Category → Add/Edit/Remove | Both routes mutate the same category/subcategory records. |
-| Storage categories | `/supportforge settings storage` | Settings → Storage → Add Claimed/Add Pending/Storage Repair | Both routes provision or repair the same storage categories. |
+| Storage categories | `/supportforge settings storage action:status/claimed/pending/repair` | Settings → Storage → View/Add Claimed/Add Pending/Storage Repair | Both routes provision or repair the same storage categories. |
 | Priority roles | `/supportforge settings priority-role` (status/create/delete) | Settings → Priority Rules & Roles → Create/Delete | Both routes enforce Administrator and Manage Roles requirements. |
 | Manuals | `/supportforge settings manual` | Settings → Quick/Detailed Manual | Both routes display the same help content. |
 | Factory reset | `/supportforge settings reset` | Settings → Reset confirmation flow | Both routes require explicit confirmation and preserve the audit-retention choice. |
