@@ -725,7 +725,7 @@ async function permissionOverwritePayload(
   return Array.from(map.values());
 }
 
-async function replayArchivedMessages(channel: TextChannel, ticketId: string): Promise<{ restored: number; failed: number }> {
+async function replayArchivedMessages(channel: TextChannel, ticketId: string, recoveryEventId: string): Promise<{ restored: number; failed: number }> {
   const pool = getPostgresPool();
   let restored = 0;
   let failed = 0;
@@ -749,6 +749,15 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string): P
     if (pageRows.length === 0) break;
 
     for (const archived of pageRows) {
+    const replayed = await pool.query(
+      'SELECT 1 FROM ticket_recovery_replay_items WHERE recovery_event_id=$1 AND original_message_id=$2 LIMIT 1',
+      [recoveryEventId, archived.message_id],
+    );
+    if (replayed.rows.length) {
+      restored += 1;
+      continue;
+    }
+
     const archivedEmbeds = parseJsonArray(archived.embeds);
     const archivedComponents = parseJsonArray(archived.components) as Array<Record<string, unknown>>;
     const isPanel = archived.is_bot && archivedComponents.some((row) => {
@@ -865,6 +874,11 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string): P
           });
         }
       }
+      await pool.query(
+        'INSERT INTO ticket_recovery_replay_items (recovery_event_id, original_message_id, status, replayed_at) ' +
+          'VALUES ($1,$2,$3,NOW()) ON CONFLICT (recovery_event_id, original_message_id) DO NOTHING',
+        [recoveryEventId, archived.message_id, 'completed'],
+      );
       restored += 1;
     } catch (error) {
       failed += 1;
@@ -890,16 +904,19 @@ export async function restoreArchivedTicket(
   const pool = getPostgresPool();
   const ticket = await getPersistedTicketById(ticketId);
   if (!ticket || ticket.guildId !== guild.id) throw new Error('Ticket was not found in this server.');
-  const events = await pool.query<QueryResultRow & { id: string; original_channel_id: string; status: string; accidental_answer: string | null }>(
-    'SELECT id,original_channel_id,status,accidental_answer FROM ticket_recovery_events WHERE ticket_id=$1 AND guild_id=$2 AND source=$3 ORDER BY created_at DESC LIMIT 1',
+  const events = await pool.query<QueryResultRow & { id: string; original_channel_id: string; replacement_channel_id: string | null; status: string; accidental_answer: string | null }>(
+    'SELECT id,original_channel_id,replacement_channel_id,status,accidental_answer FROM ticket_recovery_events WHERE ticket_id=$1 AND guild_id=$2 AND source=$3 ORDER BY created_at DESC LIMIT 1',
     [ticketId, guild.id, source],
   );
   const recoveryEvent = events.rows[0];
   if (!recoveryEvent) throw new Error('No recovery record exists for this ticket and deletion path.');
-  if (source === 'ticket_button' && !(recoveryEvent.status === 'reviewed' && recoveryEvent.accidental_answer === 'yes')) {
+  if (source === 'ticket_button' && !(
+    (recoveryEvent.status === 'reviewed' || recoveryEvent.status === 'restoring' || recoveryEvent.status === 'failed') &&
+    recoveryEvent.accidental_answer === 'yes'
+  )) {
     throw new Error('Ticket-button deletions can only be restored after the Settings review marks the deletion as accidental.');
   }
-  if (source === 'discord_native' && !['deleted', 'failed'].includes(recoveryEvent.status)) {
+  if (source === 'discord_native' && !['deleted', 'failed', 'restoring'].includes(recoveryEvent.status)) {
     throw new Error('This native channel deletion has already been restored or is not eligible for recovery.');
   }
 
@@ -938,17 +955,32 @@ export async function restoreArchivedTicket(
   topic = setField(topic, 'restored_from', recoveryEvent.original_channel_id);
   topic = setField(topic, 'status', ticket.status);
 
-  const channel = await guild.channels.create({
-    name: channelName,
-    type: ChannelType.GuildText,
-    ...(parentId ? { parent: parentId } : {}),
-    topic: topic.slice(0, 1024),
-    permissionOverwrites: permissions,
-    position: snapshot?.position,
-    nsfw: snapshot?.nsfw ?? false,
-    rateLimitPerUser: snapshot?.rate_limit_per_user ?? 0,
-    reason: 'ResolveX ticket recovery; original channel ID ' + recoveryEvent.original_channel_id,
-  });
+  let channel: TextChannel;
+  const existingReplacement = recoveryEvent.replacement_channel_id
+    ? await guild.channels.fetch(recoveryEvent.replacement_channel_id).catch(() => null)
+    : null;
+  if (existingReplacement) {
+    if (existingReplacement.type !== ChannelType.GuildText) {
+      throw new Error('The saved recovery channel ID exists but is not a text channel; refusing to create a duplicate.');
+    }
+    channel = existingReplacement;
+  } else {
+    channel = await guild.channels.create({
+      name: channelName,
+      type: ChannelType.GuildText,
+      ...(parentId ? { parent: parentId } : {}),
+      topic: topic.slice(0, 1024),
+      permissionOverwrites: permissions,
+      position: snapshot?.position,
+      nsfw: snapshot?.nsfw ?? false,
+      rateLimitPerUser: snapshot?.rate_limit_per_user ?? 0,
+      reason: 'ResolveX ticket recovery; original channel ID ' + recoveryEvent.original_channel_id,
+    });
+    await pool.query(
+      "UPDATE ticket_recovery_events SET status='restoring', replacement_channel_id=$2, updated_at=NOW(), resolved_at=NULL WHERE id=$1",
+      [recoveryEvent.id, channel.id],
+    );
+  }
 
   const restoredAt = new Date().toISOString();
   await pool.query(
@@ -967,12 +999,22 @@ export async function restoreArchivedTicket(
     ],
   );
   await pool.query(
-    'UPDATE ticket_recovery_events SET status=$2, replacement_channel_id=$3, updated_at=NOW(), resolved_at=NOW() WHERE id=$1',
-    [recoveryEvent.id, 'restored', channel.id],
+    "UPDATE ticket_recovery_events SET status='restoring', replacement_channel_id=$2, updated_at=NOW(), resolved_at=NULL WHERE id=$1",
+    [recoveryEvent.id, channel.id],
   );
 
   await refreshTicketPanel(channel, topic);
-  const replay = await replayArchivedMessages(channel, ticketId);
+  const replay = await replayArchivedMessages(channel, ticketId, recoveryEvent.id);
+  await pool.query(
+    'UPDATE ticket_recovery_events SET status=$2, replacement_channel_id=$3, updated_at=NOW(), resolved_at=NOW(), ' +
+      "metadata=metadata || $4::jsonb WHERE id=$1",
+    [
+      recoveryEvent.id,
+      replay.failedMessages === 0 ? 'restored' : 'failed',
+      channel.id,
+      JSON.stringify({ replayRestoredMessages: replay.restored, replayFailedMessages: replay.failed, replayAttemptedAt: new Date().toISOString() }),
+    ],
+  );
   await archiveTicketChannelSnapshot(channel).catch((error) => {
     console.warn('Could not refresh the restored ticket channel snapshot:', error instanceof Error ? error.message : 'unknown error');
   });
