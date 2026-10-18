@@ -953,12 +953,21 @@ export async function restoreArchivedTicket(
   topic = removeField(topic, 'message');
   topic = setField(topic, 'original_channel_id', recoveryEvent.original_channel_id);
   topic = setField(topic, 'restored_from', recoveryEvent.original_channel_id);
+  topic = setField(topic, 'recovery_event', recoveryEvent.id);
   topic = setField(topic, 'status', ticket.status);
 
   let channel: TextChannel;
-  const existingReplacement = recoveryEvent.replacement_channel_id
+  const replacementBySavedId = recoveryEvent.replacement_channel_id
     ? await guild.channels.fetch(recoveryEvent.replacement_channel_id).catch(() => null)
     : null;
+  // If the process crashed after Discord created the replacement channel but
+  // before Neon saved its ID, find the channel by the durable recovery-event
+  // marker written into its topic during channel creation.
+  const replacementByTopic = replacementBySavedId ?? Array.from(guild.channels.cache.values()).find((candidate) =>
+    candidate.type === ChannelType.GuildText &&
+    getField(candidate.topic ?? '', 'recovery_event') === recoveryEvent.id
+  ) ?? null;
+  const existingReplacement = replacementByTopic;
   if (existingReplacement) {
     if (existingReplacement.type !== ChannelType.GuildText) {
       throw new Error('The saved recovery channel ID exists but is not a text channel; refusing to create a duplicate.');
