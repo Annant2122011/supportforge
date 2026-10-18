@@ -68,17 +68,19 @@ The previous single-panel-only model was not sufficient for the roadmap. This br
 - Stable reuse of `ticket:create:<departmentId>`, so all custom panel buttons enter the same validated ticket-creation flow as the standard panel.
 - Persisted published channel/message IDs; republishing edits the existing message when possible and attempts to remove the previous message after moving a panel.
 - Explicit deletion confirmation. Deleting a panel removes its definition and known panel message, but never deletes the tickets created from it.
+- The Settings-panel preview limits visible preview controls to 20 when a draft has 21–25 buttons, reserving a row for navigation within Discord's five-row message limit. Publishing includes all configured buttons.
+- Deleting a panel definition remains possible if the panel's Discord channel was deleted beforehand; the cleanup treats a missing channel/message as already removed and still removes the definition.
 
 Remaining F-002 scope: arbitrary named workflows (rather than department-only targets), panel-level permission rules, optional workflow confirmation messages, a custom icon, richer ordering controls beyond supplying the ordered JSON list, and live Discord acceptance. Publishing to another channel is an external Discord/database sequence, not an atomic transaction. If message publication succeeds but Neon persistence fails, an orphaned message may need manual cleanup.
 
 ## Automated verification
 
-The custom-panel code and tests passed both GitHub workflows on commit `72f493f898c363a068152283438fab1ddfa9a2ad`:
+The final custom-panel code and tests passed both GitHub workflows on commit `201f615df3216183f6e0f1698e25c50183ceabf9`:
 
-- [Build workflow run 39150854350](https://github.com/Annant2122011/supportforge/actions/runs/39150854350)
-- [SupportForge CI run 39150854316](https://github.com/Annant2122011/supportforge/actions/runs/39150854316)
+- [Build workflow run 39151203369](https://github.com/Annant2122011/supportforge/actions/runs/39151203369)
+- [SupportForge CI run 39151203413](https://github.com/Annant2122011/supportforge/actions/runs/39151203413)
 
-The Build job completed the TypeScript build and automated tests. SupportForge CI completed build, tests, and database verification. Later changes while preparing this audit update the feature registry and documentation; those documentation-only commits are separate from the code-tested commit above.
+The Build job completed the TypeScript build and automated tests. SupportForge CI completed build, tests, and database verification. The verified code includes the Stage E settings-button branding editor, the 25-button/five-row regression test, safe cleanup when a published panel's channel has already been deleted, and the custom panel manager. Later commits that update this audit and feature status are documentation-only.
 
 ## Required live acceptance checklist
 
