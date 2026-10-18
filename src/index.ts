@@ -471,7 +471,12 @@ client.on('channelDelete', async (channel) => {
     guildChannel.type === ChannelType.GuildText
       ? guildChannel.topic ?? ''
       : '';
-  const deletedIsTicket = guildChannel.type === ChannelType.GuildText && isTicketTopic(deletedTicketTopic);
+  const persistedTicketBeforeDelete = guildChannel.type === ChannelType.GuildText
+    ? await getPersistedTicket(guildChannel.id).catch(() => undefined)
+    : undefined;
+  const deletedIsTicket =
+    (guildChannel.type === ChannelType.GuildText && isTicketTopic(deletedTicketTopic)) ||
+    Boolean(persistedTicketBeforeDelete && persistedTicketBeforeDelete.guildId === guildChannel.guild.id);
   const managed = await isSupportForgeManagedChannel(
     guildChannel.guild,
     guildChannel,
