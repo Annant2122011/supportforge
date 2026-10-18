@@ -16,6 +16,7 @@ import type { QueryResultRow } from 'pg';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
 import { getGuildConfig } from './configService';
+import { getThemeColor } from './uiThemeService';
 import {
   getPersistedTicket,
   getPersistedTicketById,
@@ -735,9 +736,7 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string): P
         ' • Original message ID: ' + archived.message_id +
         ' • Original timestamp (UTC): ' + originalCreatedAt + ']';
       const config = await getGuildConfig(channel.guild.id).catch(() => null);
-      const color = config
-        ? (({ midnight: 0x5865f2, 'cyber-neon': 0x00f5ff, ocean: 0x0077b6, aurora: 0x8e44ad, ember: 0xe67e22, forest: 0x27ae60 } as Record<string, number>)[config.theme] ?? 0x5865f2)
-        : 0x5865f2;
+      const color = getThemeColor(config?.theme ?? 'midnight');
 
       const header = new EmbedBuilder()
         .setColor(color)
