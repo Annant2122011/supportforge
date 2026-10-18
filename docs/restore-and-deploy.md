@@ -40,3 +40,46 @@ After this workflow is merged into `main` and the secrets are set:
 - Discord does not provide an undelete API for deleted channels, categories, or messages. SupportForge can create replacement managed infrastructure and update saved references, but deleted message history cannot be recreated unless it was separately archived. A deleted ticket channel's old snowflake cannot be resurrected.
 - If the bot host is not a Linux systemd server, adapt the workflow's remote deployment step to the actual host platform before enabling it. Do not add a shell command executor to the bot itself.
 - Neon PostgreSQL remains the authoritative database. This feature does not reset ticket or configuration data and does not introduce SQLite.
+
+
+## Hybrid automatic updates (GitHub trigger + server watchdog)
+
+ResolveX has three coordinated safeguards:
+
+1. The existing GitHub Actions workflow deploys when a commit reaches main.
+2. The bot's commit monitor requests a deployment workflow run when it detects a newer main commit, if GITHUB_DEPLOY_TOKEN is configured. This is a fallback trigger, not a substitute for server deployment.
+3. An independent systemd timer runs scripts/self-update.sh every two minutes. It checks origin/main, builds and verifies the new source, runs PostgreSQL migrations, restarts the service and verifies that systemd reports it active. This works even if the bot process has crashed. GitHub Actions and the watchdog share a file lock and the same-commit check to avoid overlapping or redundant installs.
+
+A Git commit changes repository source; it does not replace JavaScript already loaded by a running Node process. The workflow/watchdog therefore build and restart the bot process. New UI or category behaviour appears only if the new code contains reconciliation logic for those elements.
+
+### Server-side watchdog setup required from the owner
+
+The checked-in systemd files are templates. Edit them for the actual host before enabling them:
+
+1. Place the repository on a persistent Linux server with systemd, Node.js/npm, Git, flock, and PostgreSQL network access. The deploy path must be a dedicated Git checkout of this repository.
+2. Edit deploy/systemd/resolvex-self-update.service so ExecStart points to the actual absolute path of scripts/self-update.sh. Set User and Group to the intended unprivileged deployment account. It needs write access to the checkout and permission to restart only the configured bot service.
+3. Install the units and create the environment file (substitute your actual paths/service name):
+
+   sudo cp deploy/systemd/resolvex-self-update.service /etc/systemd/system/
+
+   sudo cp deploy/systemd/resolvex-self-update.timer /etc/systemd/system/
+
+   sudo nano /etc/resolvex-update.env
+
+   Example environment values:
+   - SUPPORTFORGE_DEPLOY_PATH=/opt/resolvex
+   - SUPPORTFORGE_SERVICE_NAME=supportforge
+   - SUPPORTFORGE_UPDATE_LOCK=/tmp/resolvex-deploy.lock
+
+4. Ensure the service user can fetch the repository (if private), run npm scripts and restart the configured systemd service. Configure least-privilege sudo rules for that one service rather than unrestricted sudo.
+5. Run sudo systemctl daemon-reload, then sudo systemctl enable --now resolvex-self-update.timer. Verify with systemctl list-timers resolvex-self-update.timer and inspect failures with journalctl -u resolvex-self-update.service.
+6. Configure the GitHub Actions deployment secrets listed above. Put GITHUB_DEPLOY_TOKEN in the bot server's secret environment only if you want the bot monitor's optional dispatch fallback; the push workflow and watchdog do not depend on that bot token.
+7. Keep the bot .env out of Git. Set TICKET_ARCHIVE_MAX_ATTACHMENT_BYTES to a limit that fits the Neon storage budget. Take Neon backups and monitor archive growth.
+
+The current workflow and watchdog target Linux + systemd. If ResolveX runs on Windows, a container platform, or a managed host without SSH/systemd, this deployment template must be adapted to that host instead of enabling it as-is. Do not run the bot's deployed repository from a developer's working tree.
+
+### Ticket archive rollout
+
+The new Neon migration creates the durable message, channel snapshot, attachment and recovery tables. Existing channel history is backfilled in background pages of 100 messages. Let backfill catch up before relying on native-delete recovery for older conversations. Ticket-button deletion explicitly finishes the archive before deleting the channel. A native deletion can happen before background backfill reaches old messages, in which case only already archived history is recoverable.
+
+The archive includes attachment bytes when the CDN file can be fetched and fits TICKET_ARCHIVE_MAX_ATTACHMENT_BYTES. Larger or unavailable files retain metadata and are reported as unavailable during replay. This limit does not make Discord deleted-message APIs available; the archive is the recovery source.
