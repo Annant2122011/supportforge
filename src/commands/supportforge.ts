@@ -1873,7 +1873,11 @@ export async function execute(
           return;
         }
         if (panel.publishedChannelId && panel.publishedMessageId) {
-          const publishedChannel = await guild.channels.fetch(panel.publishedChannelId);
+          const publishedChannel = await guild.channels.fetch(panel.publishedChannelId).catch((error) => {
+            const code = (error as { code?: number }).code;
+            if (code === 10003) return null;
+            throw error;
+          });
           if (publishedChannel?.type === ChannelType.GuildText) {
             const publishedMessage = await publishedChannel.messages.fetch(panel.publishedMessageId).catch((error) => {
               const code = (error as { code?: number }).code;
