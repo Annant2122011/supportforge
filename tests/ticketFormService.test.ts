@@ -123,6 +123,24 @@ test('conditional fields are shown only when earlier-step conditions match', () 
   );
 });
 
+test('empty multi-select answers do not reveal negative conditional fields', () => {
+  const fields = parseTicketFormFields([
+    { id: 'issues', label: 'Issue types', type: 'multi_select', required: false, choices: ['Billing', 'Technical'], step: 1 },
+    {
+      id: 'billing_details',
+      label: 'Billing details',
+      type: 'short_text',
+      required: true,
+      step: 2,
+      condition: { fieldId: 'issues', operator: 'not_contains', value: 'Billing' },
+    },
+  ]);
+
+  assert.deepEqual(getVisibleTicketFormFields(fields, 2, { issues: [] }), []);
+  assert.deepEqual(getVisibleTicketFormFields(fields, 2, { issues: ['Technical'] }).map((field) => field.id), ['billing_details']);
+  assert.deepEqual(getVisibleTicketFormFields(fields, 2, { issues: ['Billing'] }), []);
+});
+
 test('does not require hidden conditional fields and ignores injected hidden answers', () => {
   const fields = parseTicketFormFields([
     { id: 'reason', label: 'Reason', type: 'dropdown', required: true, choices: ['Question', 'Refund'], step: 1 },
