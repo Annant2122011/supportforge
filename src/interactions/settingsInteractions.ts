@@ -61,6 +61,7 @@ import { addUseCasePreset, USE_CASE_PRESETS } from '../services/useCasePresetSer
 import { enforcePriorityRoleHierarchy } from '../services/priorityRoleService';
 import { UI_THEMES, getThemeColor, getThemeDefinition, isGuildTheme } from '../services/uiThemeService';
 import { handleTicketFormSettingsInteraction } from './ticketFormSettingsInteractions';
+import { handleCustomPanelSettingsInteraction } from './customPanelSettingsInteractions';
 import {
   answerTicketDeletionReview,
   listTicketRecoveryCandidates,
@@ -1625,6 +1626,10 @@ export async function handleSettingsInteraction(
 
   if (interaction.customId.startsWith('sf:settings:forms:')) {
     return await handleTicketFormSettingsInteraction(interaction);
+  }
+
+  if (interaction.customId.startsWith('sf:settings:panels:')) {
+    return await handleCustomPanelSettingsInteraction(interaction);
   }
 
   if (interaction.isStringSelectMenu() && interaction.customId === 'sf:settings:theme:select') {
