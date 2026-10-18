@@ -373,6 +373,71 @@ test(
   },
 );
 
+test(
+  'PostgreSQL recovery replay ledger deduplicates completed original messages',
+  { skip: !postgresIntegrationEnabled },
+  async () => {
+    await migratePostgres();
+    const pool = getPostgresPool();
+    await pool.query('TRUNCATE TABLE tickets CASCADE');
+
+    const record: TicketRepositoryRecord = {
+      id: 'postgres-replay-ledger-ticket',
+      guildId: 'postgres-replay-ledger-guild',
+      channelId: 'postgres-replay-ledger-channel',
+      ticketNumber: '78',
+      status: 'open',
+      departmentId: 'billing',
+      tagId: 'refund',
+      ownerId: 'postgres-replay-ledger-owner',
+      priority: 'normal',
+      claimedByIds: [],
+      participantIds: ['postgres-replay-ledger-owner'],
+      metadata: {},
+      createdAt: '2026-10-18T12:00:00.000Z',
+      updatedAt: '2026-10-18T12:00:00.000Z',
+      deletedAt: null,
+      deletionReason: null,
+    };
+    await new PostgresTicketRepository(pool).create(record);
+    await pool.query(
+      'INSERT INTO ticket_recovery_events (id,ticket_id,guild_id,original_channel_id,source,status,intent,actor_id,actor_name,actor_attribution,confirmation_stage,metadata) ' +
+        'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)',
+      [
+        'postgres-replay-ledger-event',
+        record.id,
+        record.guildId,
+        record.channelId,
+        'discord_native',
+        'restoring',
+        'unknown',
+        'unknown',
+        'Test actor',
+        'actorUnknown',
+        0,
+        JSON.stringify({ channelIdAtDeletion: record.channelId }),
+      ],
+    );
+
+    await pool.query(
+      'INSERT INTO ticket_recovery_replay_items (recovery_event_id,original_message_id,status) VALUES ($1,$2,$3) ' +
+        'ON CONFLICT (recovery_event_id,original_message_id) DO NOTHING',
+      ['postgres-replay-ledger-event', 'original-message-1', 'completed'],
+    );
+    await pool.query(
+      'INSERT INTO ticket_recovery_replay_items (recovery_event_id,original_message_id,status) VALUES ($1,$2,$3) ' +
+        'ON CONFLICT (recovery_event_id,original_message_id) DO NOTHING',
+      ['postgres-replay-ledger-event', 'original-message-1', 'completed'],
+    );
+
+    const saved = await pool.query(
+      'SELECT original_message_id FROM ticket_recovery_replay_items WHERE recovery_event_id=$1',
+      ['postgres-replay-ledger-event'],
+    );
+    assert.deepEqual(saved.rows.map((row: { original_message_id: string }) => row.original_message_id), ['original-message-1']);
+  },
+);
+
 test.after(async () => {
   if (!postgresIntegrationEnabled) return;
 
