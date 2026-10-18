@@ -485,6 +485,28 @@ export async function executeTicketCommand(
       return;
     }
 
+    if (subcommand === 'delete') {
+      const color = getThemeColor(context.config.theme);
+      await interaction.editReply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(color)
+            .setTitle('⚠️ Confirm ticket deletion · Step 1 of 2')
+            .setDescription(
+              'You are about to delete **Ticket #' + context.ticketNumber + '**. ResolveX will archive the available conversation and accessible attachments before deleting the channel. If the archive cannot finish, deletion will be cancelled.',
+            )
+            .setFooter({ text: 'ResolveX • Two-step deletion protection' }),
+        ],
+        components: [
+          new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId('ticket:delete:confirm-one').setLabel('Confirm step 1 of 2').setEmoji('⚠️').setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId('ticket:delete:cancel').setLabel('Cancel').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+          ),
+        ],
+      });
+      return;
+    }
+
     /*
      * Premium-only features.
      */
