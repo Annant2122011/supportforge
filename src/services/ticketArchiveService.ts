@@ -527,9 +527,14 @@ export async function recordTicketChannelDeleted(channel: TextChannel): Promise<
   });
 
   const pool = getPostgresPool();
+  // Only match a recent intent for this exact channel. A leftover pending
+  // record from a crashed process must not cause a later native Discord delete
+  // to be misfiled as a ticket-button deletion.
   const pending = await pool.query<QueryResultRow & { id: string }>(
-    'SELECT id FROM ticket_recovery_events WHERE ticket_id=$1 AND source=$2 AND status=$3 ORDER BY created_at DESC LIMIT 1',
-    [ticket.id, 'ticket_button', 'pending'],
+    "SELECT id FROM ticket_recovery_events WHERE ticket_id=$1 AND source=$2 AND status=$3 " +
+      "AND metadata->>'channelIdAtDeletion'=$4 AND created_at >= NOW() - INTERVAL '10 minutes' " +
+      'ORDER BY created_at DESC LIMIT 1',
+    [ticket.id, 'ticket_button', 'pending', channel.id],
   );
   if (pending.rows[0]) {
     await pool.query(
@@ -537,6 +542,11 @@ export async function recordTicketChannelDeleted(channel: TextChannel): Promise<
       [pending.rows[0].id, 'deleted'],
     );
   } else {
+    await pool.query(
+      "UPDATE ticket_recovery_events SET status='cancelled', updated_at=NOW(), resolved_at=NOW() " +
+        "WHERE ticket_id=$1 AND source='ticket_button' AND status='pending'",
+      [ticket.id],
+    );
     await pool.query(
       'INSERT INTO ticket_recovery_events (id,ticket_id,guild_id,original_channel_id,source,status,intent,actor_id,actor_name,actor_attribution,confirmation_stage,created_at,updated_at,metadata) ' +
         'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW(),NOW(),$12::jsonb)',
