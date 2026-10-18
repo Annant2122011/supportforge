@@ -11,7 +11,7 @@ import {
   RESTEvents,
 } from 'discord.js';
 
-import { execute } from './commands/supportforge';
+import { execute, runSupportForgeRepair } from './commands/supportforge';
 import {
   handleTicketInteraction,
 } from './interactions/ticketInteractions';
@@ -166,6 +166,30 @@ client.once('clientReady', (readyClient) => {
         await removeLegacyCustomCommands(guild);
       } catch (error) {
         console.warn('⚠️ Legacy settings command cleanup failed for guild ' + guild.id + ':', error);
+      }
+
+      // Deployment changes the running code, but configured server messages and
+      // categories must be reconciled by domain services after startup. Do not
+      // auto-create a complete support setup in brand-new/unconfigured guilds.
+      try {
+        const config = await getGuildConfig(guild.id);
+        const previouslyConfigured = Boolean(
+          config.supportCategoryId ||
+          config.panelChannelId ||
+          config.panelMessageId ||
+          config.auditChannelId ||
+          config.auditDevChannelId ||
+          Object.keys(config.departments ?? {}).length > 0
+        );
+        if (!previouslyConfigured) continue;
+
+        const result = await runSupportForgeRepair(guild);
+        console.info(
+          '✅ ResolveX startup reconciliation completed for guild ' + guild.id +
+          '; recovered ' + result.recoveredTickets + ' ticket record(s).',
+        );
+      } catch (error) {
+        console.warn('⚠️ ResolveX startup reconciliation failed for guild ' + guild.id + '; the next repair/startup can retry:', error);
       }
     }
   })();
