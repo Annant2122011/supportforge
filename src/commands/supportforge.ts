@@ -61,7 +61,7 @@ import {
   ensureAllDepartmentCategories,
 } from '../services/departmentCategoryService';
 
-import { getOrCreateAuditChannel, logSettingsEvent, logSystemEvent, handleAuditSlashCommand } from '../services/auditLogService';
+import { ensureAuditDeveloperInfrastructure, getOrCreateAuditChannel, logSettingsEvent, logSystemEvent, handleAuditSlashCommand } from '../services/auditLogService';
 import { performFactoryReset } from '../services/factoryResetService';
 import { recoverMissingTicketRecords } from '../services/ticketRecoveryService';
 import { addUseCasePreset } from '../services/useCasePresetService';
@@ -1544,9 +1544,27 @@ export async function runSupportForgeRepair(
   await ensureOpenCategory(guild);
   await ensureClosedCategory(guild);
   await ensureArchiveCategory(guild);
+  const advancedSettings = await getAdvancedSettings(guild.id);
+  if (advancedSettings.statusCategories.claimedCategoryId) {
+    await ensureOptionalStatusCategory(guild, 'claimed');
+  }
+  if (advancedSettings.statusCategories.pendingCategoryId) {
+    await ensureOptionalStatusCategory(guild, 'pending');
+  }
   await ensureSettingsChannel(guild, supportCategory.id);
   await ensureAllDepartmentCategories(guild);
   await ensureSupportForgeCategoryPurposeMessages(guild, supportCategory.id);
+
+  const currentConfig = await getGuildConfig(guild.id);
+  const hasDeveloperAuditSignal =
+    Boolean(currentConfig.auditDevChannelId || currentConfig.auditDeveloperRoleId) ||
+    guild.roles.cache.some((role) => !role.managed && role.name === 'developer-mode audit-log') ||
+    guild.channels.cache.some((channel) =>
+      channel.type === ChannelType.GuildText && channel.topic?.startsWith('supportforge:audit-dev'),
+    );
+  if (hasDeveloperAuditSignal) {
+    await ensureAuditDeveloperInfrastructure(guild, supportCategory.id);
+  }
 
   const recoveredTickets = await recoverMissingTicketRecords(guild);
   await syncPanel(guild);
