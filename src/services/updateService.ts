@@ -120,7 +120,18 @@ async function checkForUpdate(client: Client): Promise<void> {
   if (latestSha === baselineSha) return;
 
   baselineSha = latestSha;
-  console.log(`🔄 SupportForge update detected (${latestSha.slice(0, 8)}). Refreshing all SupportForge buttons and panels.`);
+  console.log('🔄 GitHub commit detected (' + latestSha.slice(0, 8) + '). Requesting the deployment workflow as a fallback; panel refresh alone does not update running code.');
+  const deployment = await requestGitHubDeployment().catch((error) => ({
+    requested: false,
+    reason: error instanceof Error ? error.message : 'GitHub deployment request failed.',
+  }));
+  if (deployment.requested) {
+    console.info('ResolveX deployment workflow accepted the detected commit: ' + deployment.reason);
+  } else {
+    console.warn('ResolveX did not dispatch a deployment from the bot monitor: ' + deployment.reason + ' The push-triggered workflow and server-side watchdog remain the automatic update paths.');
+  }
+  // UI reconciliation is separate from fetching/building/restarting code. The
+  // GitHub workflow and the independent server watchdog perform the deployment.
   await refreshAllSupportForgeUi(client);
 }
 
