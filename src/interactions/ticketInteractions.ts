@@ -6011,6 +6011,7 @@ async function handleTicketDeletionInteraction(interaction: ButtonInteraction): 
   }
 
   let intentRecorded = false;
+  let channelDeleted = false;
   try {
     await interaction.editReply({
       embeds: [
@@ -6048,18 +6049,9 @@ async function handleTicketDeletionInteraction(interaction: ButtonInteraction): 
     }
 
     await channel.delete('ResolveX ticket Delete button; actor ' + interaction.user.id + '; two confirmations completed');
-    await interaction.editReply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(color)
-          .setTitle('✅ Ticket channel deleted')
-          .setDescription('The channel was deleted after the durable archive step. Open **Settings → Repair System → Ticket Deletion Review** to answer “Was this ticket deleted by mistake?” The original channel ID and recovered-message attribution remain in the archive.')
-          .setFooter({ text: 'ResolveX • The replacement channel will have a new ID and URL if restored.' }),
-      ],
-      components: [],
-    });
+    channelDeleted = true;
   } catch (error) {
-    if (intentRecorded) {
+    if (intentRecorded && !channelDeleted) {
       await cancelTicketButtonDeletion(channel.id).catch(() => undefined);
     }
     const detail = error instanceof Error ? error.message : 'Unknown deletion error.';
@@ -6074,7 +6066,23 @@ async function handleTicketDeletionInteraction(interaction: ButtonInteraction): 
       ],
       components: [],
     }).catch(() => undefined);
+    return;
   }
+
+  // The delete endpoint has succeeded. A missing interaction response must not
+  // retroactively misreport a successful deletion as a failed operation.
+  await interaction.editReply({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(color)
+        .setTitle('✅ Ticket channel deleted')
+        .setDescription('The channel was deleted after the durable archive step. Open **Settings → Repair System → Ticket Deletion Review** to answer “Was this ticket deleted by mistake?” The original channel ID and recovered-message attribution remain in the archive.')
+        .setFooter({ text: 'ResolveX • The replacement channel will have a new ID and URL if restored.' }),
+    ],
+    components: [],
+  }).catch((error) => {
+    console.warn('Ticket channel deletion succeeded, but the ephemeral confirmation could not be edited:', error instanceof Error ? error.message : 'unknown interaction response failure');
+  });
 }
 
 export async function handleTicketInteraction(
