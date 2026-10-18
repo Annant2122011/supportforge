@@ -1,0 +1,104 @@
+name: Deploy SupportForge Server
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supportforge-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy latest main to the configured Linux server
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Validate deployment secrets
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_SERVICE_NAME: ${{ secrets.DEPLOY_SERVICE_NAME }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for key in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS DEPLOY_PATH DEPLOY_SERVICE_NAME; do
+            if [[ -z "${!key:-}" ]]; then missing+=("$key"); fi
+          done
+          if (("${#missing[@]}" > 0)); then
+            printf 'Deployment is not configured. Add these GitHub Actions repository secrets: %s\n' "${missing[*]}"
+            exit 1
+          fi
+          if [[ ! "${DEPLOY_PORT:-22}" =~ ^[0-9]+$ ]] || (( ${DEPLOY_PORT:-22} < 1 || ${DEPLOY_PORT:-22} > 65535 )); then
+            echo "DEPLOY_PORT must be a valid TCP port."
+            exit 1
+          fi
+
+      - name: Deploy over verified SSH
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_SERVICE_NAME: ${{ secrets.DEPLOY_SERVICE_NAME }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          set -euo pipefail
+          key_file="$(mktemp)"
+          trap 'rm -f "$key_file"' EXIT
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$key_file"
+          chmod 600 "$key_file"
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" >> "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          port="${DEPLOY_PORT:-22}"
+          printf -v remote_command 'DEPLOY_PATH=%q DEPLOY_SERVICE_NAME=%q bash -s' "$DEPLOY_PATH" "$DEPLOY_SERVICE_NAME"
+          ssh -i "$key_file" -p "$port" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=15 \
+            "$DEPLOY_USER@$DEPLOY_HOST" "$remote_command" <<'REMOTE'
+          set -Eeuo pipefail
+          cd "$DEPLOY_PATH"
+          if [[ ! -d .git ]]; then
+            echo "DEPLOY_PATH must point to the existing SupportForge Git clone."
+            exit 2
+          fi
+          old_sha="$(git rev-parse HEAD)"
+          rollback() {
+            status=$?
+            trap - ERR
+            echo "Deployment failed; attempting source rollback to $old_sha."
+            git reset --hard "$old_sha" || true
+            npm ci || true
+            npm run build || true
+            sudo systemctl restart "$DEPLOY_SERVICE_NAME" || true
+            exit "$status"
+          }
+          trap rollback ERR
+          git fetch --prune origin main
+          target_sha="$(git rev-parse origin/main)"
+          git checkout main
+          git reset --hard "$target_sha"
+          npm ci
+          npm run build
+          npm run db:migrate
+          npm run db:verify
+          sudo systemctl restart "$DEPLOY_SERVICE_NAME"
+          sudo systemctl is-active --quiet "$DEPLOY_SERVICE_NAME"
+          trap - ERR
+          echo "Deployment succeeded: $target_sha"
+          REMOTE
