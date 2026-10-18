@@ -66,6 +66,16 @@ import { performFactoryReset } from '../services/factoryResetService';
 import { recoverMissingTicketRecords } from '../services/ticketRecoveryService';
 import { addUseCasePreset } from '../services/useCasePresetService';
 import { moveTicketPanelToBottom } from '../services/ticketPanelService';
+import {
+  buildCustomPanelComponents,
+  buildCustomPanelEmbed,
+  createCustomPanel,
+  deleteCustomPanelDefinition,
+  getCustomPanel,
+  listCustomPanels,
+  markCustomPanelPublished,
+  updateCustomPanel,
+} from '../services/panelBuilderService';
 import { requestGitHubDeployment } from '../services/updateService';
 
 import {
@@ -836,6 +846,60 @@ export const data =
                 .setRequired(true)
                 .setMaxLength(80),
             ),
+        ),
+    )
+
+    // ─────────────────────────────────────────────
+    // CUSTOM MULTI-PANEL BUILDER
+    // ─────────────────────────────────────────────
+
+    .addSubcommandGroup((group) =>
+      group
+        .setName('panel')
+        .setDescription('Create, preview, publish, and manage support panels')
+        .addSubcommand((subcommand) =>
+          subcommand.setName('create').setDescription('Create a saved custom panel draft')
+            .addStringOption((option) => option.setName('name').setDescription('Unique panel name').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('title').setDescription('Panel heading').setRequired(true).setMaxLength(256))
+            .addStringOption((option) => option.setName('description').setDescription('Instructions shown above the ticket buttons').setRequired(true).setMaxLength(4000))
+            .addStringOption((option) => option.setName('buttons-json').setDescription('Ordered JSON array: departmentId, label, optional emoji/style').setRequired(true).setMaxLength(4000))
+            .addStringOption((option) => option.setName('footer').setDescription('Optional footer text').setRequired(false).setMaxLength(2048))
+            .addStringOption((option) => option.setName('color').setDescription('Optional six-digit hex color such as #22D3EE').setRequired(false).setMaxLength(7))
+            .addStringOption((option) => option.setName('thumbnail-url').setDescription('Optional public HTTPS thumbnail URL').setRequired(false).setMaxLength(2048))
+            .addStringOption((option) => option.setName('banner-url').setDescription('Optional public HTTPS banner image URL').setRequired(false).setMaxLength(2048)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('list').setDescription('List saved custom panels'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('show').setDescription('Show a saved custom panel')
+            .addStringOption((option) => option.setName('panel-id').setDescription('Panel ID from the list').setRequired(true).setMaxLength(12)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('update').setDescription('Update a saved panel draft')
+            .addStringOption((option) => option.setName('panel-id').setDescription('Panel ID from the list').setRequired(true).setMaxLength(12))
+            .addStringOption((option) => option.setName('name').setDescription('New panel name').setRequired(false).setMaxLength(80))
+            .addStringOption((option) => option.setName('title').setDescription('New panel heading').setRequired(false).setMaxLength(256))
+            .addStringOption((option) => option.setName('description').setDescription('New instructions').setRequired(false).setMaxLength(4000))
+            .addStringOption((option) => option.setName('footer').setDescription('Footer text, or none to clear').setRequired(false).setMaxLength(2048))
+            .addStringOption((option) => option.setName('color').setDescription('Hex color, or none to use server theme').setRequired(false).setMaxLength(7))
+            .addStringOption((option) => option.setName('thumbnail-url').setDescription('Thumbnail URL, or none to clear').setRequired(false).setMaxLength(2048))
+            .addStringOption((option) => option.setName('banner-url').setDescription('Banner image URL, or none to clear').setRequired(false).setMaxLength(2048))
+            .addStringOption((option) => option.setName('buttons-json').setDescription('Replace/reorder buttons using the create schema').setRequired(false).setMaxLength(4000)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('preview').setDescription('Preview the current draft privately; preview buttons are disabled')
+            .addStringOption((option) => option.setName('panel-id').setDescription('Panel ID from the list').setRequired(true).setMaxLength(12)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('publish').setDescription('Publish or update a panel message')
+            .addStringOption((option) => option.setName('panel-id').setDescription('Panel ID from the list').setRequired(true).setMaxLength(12))
+            .addChannelOption((option) => option.setName('channel').setDescription('Text channel where the panel will appear').setRequired(true).addChannelTypes(ChannelType.GuildText)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('delete').setDescription('Delete a saved panel and its published message, never its tickets')
+            .addStringOption((option) => option.setName('panel-id').setDescription('Panel ID from the list').setRequired(true).setMaxLength(12))
+            .addBooleanOption((option) => option.setName('confirm').setDescription('Confirm deleting this panel definition/message').setRequired(true)),
         ),
     )
 
@@ -1640,7 +1704,8 @@ export async function execute(
       (subcommand === 'setup' || subcommand === 'restore')) ||
     group === 'category' ||
     group === 'premium' ||
-    group === 'form'
+    group === 'form' ||
+    group === 'panel'
   ) {
     if (!isAdminLike(interaction)) {
       await interaction.reply({
@@ -1657,6 +1722,174 @@ export async function execute(
     if (group === 'audit') {
       await handleAuditSlashCommand(interaction);
       return;
+    }
+
+
+    if (group === 'panel') {
+      if (!isAdminLike(interaction)) {
+        await interaction.reply({
+          content: 'You need Manage Server or Administrator to manage custom support panels.',
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const action = interaction.options.getSubcommand();
+      const guildConfig = await getGuildConfig(guild.id);
+      const themeColor = getThemeColor(guildConfig.theme);
+      const panelId = interaction.options.getString('panel-id');
+      const writePanelAudit = (event: string, detail: string): void => {
+        if (!guildConfig.supportCategoryId) return;
+        void logSettingsEvent(guild, guildConfig.supportCategoryId, {
+          action: event,
+          actorId: interaction.user.id,
+          actorName: interaction.user.tag,
+          detail,
+        }).catch((error) => console.warn('Custom panel audit logging failed:', error));
+      };
+
+      if (action === 'create') {
+        const panel = await createCustomPanel(guild.id, {
+          name: interaction.options.getString('name', true),
+          title: interaction.options.getString('title', true),
+          description: interaction.options.getString('description', true),
+          buttons: interaction.options.getString('buttons-json', true),
+          footer: interaction.options.getString('footer') ?? undefined,
+          color: interaction.options.getString('color') ?? undefined,
+          thumbnailUrl: interaction.options.getString('thumbnail-url') ?? undefined,
+          bannerUrl: interaction.options.getString('banner-url') ?? undefined,
+        });
+        writePanelAudit('CUSTOM_PANEL_CREATED', 'Created panel "' + panel.name + '" (' + panel.id + ') with ' + panel.buttons.length + ' ordered ticket button(s).');
+        await interaction.editReply(
+          '**Panel draft created**\n\nName: **' + panel.name + '**\nPanel ID: `' + panel.id + '`\nButtons: **' + panel.buttons.length + '**\n\nUse `/supportforge panel preview` to inspect it privately, then `/supportforge panel publish` to put it in a channel. The draft is stored in Neon and is not public until published.',
+        );
+        return;
+      }
+
+      if (action === 'list') {
+        const panels = await listCustomPanels(guild.id);
+        const description = panels.length
+          ? panels.slice(0, 25).map((panel) =>
+              '**' + panel.name + '** · `' + panel.id + '` · ' +
+              (panel.publishedMessageId ? 'Published in <#' + panel.publishedChannelId + '>' : 'Draft') +
+              ' · ' + panel.buttons.length + ' button(s)',
+            ).join('\n')
+          : 'No custom panels have been created. Use `/supportforge panel create` to build the first one.';
+        const embed = new EmbedBuilder().setColor(themeColor).setTitle('ResolveX • Custom Panels').setDescription(description.slice(0, 4096)).setFooter({ text: panels.length + ' saved panel(s) • ordered buttons persist in Neon' });
+        if (panels.length > 25) embed.addFields({ name: 'More panels', value: 'Showing the first 25 of ' + panels.length + ' panels. Use Show with a panel ID to inspect an individual panel.' });
+        await interaction.editReply({ embeds: [embed] });
+        return;
+      }
+
+      if (!panelId) throw new Error('A panel ID is required for this action.');
+      let panel = await getCustomPanel(guild.id, panelId);
+      if (!panel) throw new Error('No custom panel was found with ID "' + panelId + '". Use /supportforge panel list to check the ID.');
+
+      if (action === 'show') {
+        const buttonLines = panel.buttons.map((item, index) =>
+          (index + 1) + '. ' + (item.emoji ? item.emoji + ' ' : '') + '**' + item.label + '** → ' +
+          guildConfig.departments[item.departmentId]?.name + ' (`' + item.departmentId + '`) · ' + item.style,
+        );
+        const embed = buildCustomPanelEmbed(panel, guild.name, themeColor, true)
+          .setTitle(panel.name + ' · ' + panel.title)
+          .addFields({ name: 'Panel ID', value: '`' + panel.id + '`', inline: true }, { name: 'Status', value: panel.publishedMessageId ? 'Published' : 'Draft', inline: true }, { name: 'Ordered ticket buttons', value: buttonLines.join('\n').slice(0, 1024) });
+        await interaction.editReply({ embeds: [embed] });
+        return;
+      }
+
+      if (action === 'update') {
+        const noneAsNull = (value: string | null): string | null | undefined => {
+          if (value === null) return undefined;
+          return value.trim().toLowerCase() === 'none' ? null : value;
+        };
+        const noneAsEmpty = (value: string | null): string | undefined => {
+          if (value === null) return undefined;
+          return value.trim().toLowerCase() === 'none' ? '' : value;
+        };
+        const buttonsJson = interaction.options.getString('buttons-json');
+        const updated = await updateCustomPanel(guild.id, panel.id, {
+          name: interaction.options.getString('name') ?? undefined,
+          title: interaction.options.getString('title') ?? undefined,
+          description: interaction.options.getString('description') ?? undefined,
+          footer: noneAsEmpty(interaction.options.getString('footer')),
+          color: noneAsNull(interaction.options.getString('color')),
+          thumbnailUrl: noneAsNull(interaction.options.getString('thumbnail-url')),
+          bannerUrl: noneAsNull(interaction.options.getString('banner-url')),
+          buttons: buttonsJson ?? undefined,
+        });
+        writePanelAudit('CUSTOM_PANEL_UPDATED', 'Updated panel "' + updated.name + '" (' + updated.id + '); existing tickets were not changed.');
+        await interaction.editReply('**Panel draft updated**\n\nPanel: **' + updated.name + '** · `' + updated.id + '`\nButtons: **' + updated.buttons.length + '**\n\nPreview the updated draft before publishing it. The existing published message stays unchanged until you publish again.');
+        return;
+      }
+
+      if (action === 'preview') {
+        const embed = buildCustomPanelEmbed(panel, guild.name, themeColor, true);
+        await interaction.editReply({ embeds: [embed], components: buildCustomPanelComponents(panel, true) });
+        return;
+      }
+
+      if (action === 'publish') {
+        const channel = interaction.options.getChannel('channel', true);
+        if (channel.type !== ChannelType.GuildText) throw new Error('Publish target must be a standard server text channel.');
+        const targetChannel = channel as TextChannel;
+        let oldChannelId = panel.publishedChannelId;
+        let oldMessageId = panel.publishedMessageId;
+        let message = oldChannelId === targetChannel.id && oldMessageId
+          ? await targetChannel.messages.fetch(oldMessageId).catch(() => null)
+          : null;
+        const payload = { embeds: [buildCustomPanelEmbed(panel, guild.name, themeColor)], components: buildCustomPanelComponents(panel, false) };
+        if (message) {
+          await message.edit(payload);
+        } else {
+          message = await targetChannel.send(payload);
+        }
+        panel = await markCustomPanelPublished(guild.id, panel.id, targetChannel.id, message.id);
+        let previousMessageRemoved = true;
+        if (oldChannelId && oldMessageId && (oldChannelId !== targetChannel.id || oldMessageId !== message.id)) {
+          try {
+            const oldChannel = await guild.channels.fetch(oldChannelId);
+            if (oldChannel?.type === ChannelType.GuildText) {
+              const oldMessage = await oldChannel.messages.fetch(oldMessageId).catch((error) => {
+                const code = (error as { code?: number }).code;
+                if (code === 10008) return null;
+                throw error;
+              });
+              if (oldMessage) await oldMessage.delete();
+            }
+          } catch (error) {
+            previousMessageRemoved = false;
+            console.warn('Custom panel was published, but its previous message could not be removed:', error);
+          }
+        }
+        writePanelAudit('CUSTOM_PANEL_PUBLISHED', 'Published panel "' + panel.name + '" (' + panel.id + ') in channel ' + targetChannel.id + '.');
+        await interaction.editReply('**Panel published**\n\n**' + panel.name + '** is live in <#' + targetChannel.id + '>.\nPanel ID: `' + panel.id + '`\nTicket buttons use the same validated ticket-creation flow as the default support panel.' + (previousMessageRemoved ? '' : '\n\n⚠️ The previous panel message could not be removed. Please delete that old message manually to avoid duplicate entry points.'));
+        return;
+      }
+
+      if (action === 'delete') {
+        if (interaction.options.getBoolean('confirm', true) !== true) {
+          await interaction.editReply('No changes made. Set confirm to true to delete the panel definition and its published message.');
+          return;
+        }
+        if (panel.publishedChannelId && panel.publishedMessageId) {
+          const publishedChannel = await guild.channels.fetch(panel.publishedChannelId);
+          if (publishedChannel?.type === ChannelType.GuildText) {
+            const publishedMessage = await publishedChannel.messages.fetch(panel.publishedMessageId).catch((error) => {
+              const code = (error as { code?: number }).code;
+              if (code === 10008) return null;
+              throw error;
+            });
+            if (publishedMessage) await publishedMessage.delete();
+          }
+        }
+        const deleted = await deleteCustomPanelDefinition(guild.id, panel.id);
+        writePanelAudit('CUSTOM_PANEL_DELETED', 'Deleted panel "' + deleted.name + '" (' + deleted.id + ') and its published panel message; tickets created from it were not changed.');
+        await interaction.editReply('**Panel deleted**\n\nThe saved panel definition and its published message have been removed. Tickets previously created through its buttons remain untouched.');
+        return;
+      }
+
+      throw new Error('Unknown custom panel action.');
     }
 
     if (group === 'settings') {
