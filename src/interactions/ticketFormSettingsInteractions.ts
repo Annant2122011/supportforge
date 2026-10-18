@@ -34,7 +34,9 @@ type FormSettingsInteraction = ButtonInteraction | StringSelectMenuInteraction |
 type ViewComponents = Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>>;
 
 const PREFIX = 'sf:settings:forms:';
-const PAGE_SIZE = 10;
+// Keep generated form-list messages comfortably under Discord's 2,000-character limit.
+// Names may be 80 characters and routing IDs can be long, so ten rows are not safe.
+const PAGE_SIZE = 6;
 const SCHEMA_PAGE_LENGTH = 1450;
 
 function button(id: string, label: string, style = ButtonStyle.Secondary, emoji?: string, disabled = false): ButtonBuilder {
