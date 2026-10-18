@@ -5919,7 +5919,23 @@ export async function executeTicketLifecycleCommand(
 
 
 async function handleTicketDeletionInteraction(interaction: ButtonInteraction): Promise<void> {
-  if (!(await safeDeferReply(interaction))) return;
+  const confirmationAction =
+    interaction.customId === 'ticket:delete:confirm-one' ||
+    interaction.customId === 'ticket:delete:confirm-two' ||
+    interaction.customId === 'ticket:delete:cancel';
+  if (confirmationAction) {
+    // Update the existing ephemeral confirmation instead of creating another
+    // reply. This disables stale confirmation buttons and prevents duplicate
+    // destructive operations from old copies of the same prompt.
+    try {
+      await interaction.deferUpdate();
+    } catch (error) {
+      console.warn('Could not acknowledge ticket deletion confirmation:', error);
+      return;
+    }
+  } else if (!(await safeDeferReply(interaction))) {
+    return;
+  }
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
     await interaction.editReply('This deletion control only works inside a ticket channel.');
     return;
