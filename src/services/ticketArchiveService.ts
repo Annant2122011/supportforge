@@ -1,0 +1,848 @@
+import {
+  AttachmentBuilder,
+  ChannelType,
+  EmbedBuilder,
+  PermissionFlagsBits,
+  PermissionsBitField,
+  type APIEmbed,
+  type Guild,
+  type Message,
+  type PermissionResolvable,
+  type TextChannel,
+} from 'discord.js';
+import { randomUUID } from 'node:crypto';
+import type { QueryResultRow } from 'pg';
+
+import { getPostgresPool } from '../core/persistence/postgresDatabase';
+import { getGuildConfig } from './configService';
+import {
+  getPersistedTicket,
+  getPersistedTicketById,
+  markPersistedTicketDeleted,
+} from './ticketPersistenceService';
+import { getField, isTicketTopic, removeField, setField } from './ticketStateService';
+import { refreshTicketPanel } from './ticketPanelService';
+
+const MAX_ARCHIVE_MESSAGES = 10_000;
+const ARCHIVE_PAGE_SIZE = 100;
+const DEFAULT_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const RECOVERY_FOOTER_PREFIX = 'ResolveX Recovery Archive';
+
+interface ChannelArchiveRow extends QueryResultRow {
+  ticket_id: string;
+  guild_id: string;
+  original_channel_id: string;
+  channel_name: string;
+  topic: string;
+  parent_id: string | null;
+  parent_name: string | null;
+  permission_overwrites: unknown;
+  position: number;
+  nsfw: boolean;
+  rate_limit_per_user: number;
+  backfill_cursor: string | null;
+  backfill_complete: boolean;
+}
+
+interface MessageArchiveRow extends QueryResultRow {
+  message_id: string;
+  ticket_id: string;
+  guild_id: string;
+  original_channel_id: string;
+  author_id: string;
+  author_username: string;
+  author_display_name: string;
+  author_avatar_url: string | null;
+  content: string;
+  created_at: Date | string;
+  edited_at: Date | string | null;
+  is_bot: boolean;
+  embeds: unknown;
+  components: unknown;
+  attachments: unknown;
+  metadata: unknown;
+}
+
+interface AttachmentArchiveRow extends QueryResultRow {
+  attachment_id: string;
+  original_filename: string;
+  content_type: string | null;
+  size_bytes: string | number;
+  source_url: string;
+  archived_bytes: Buffer | null;
+  archive_status: string;
+  archive_error: string | null;
+}
+
+export interface TicketRecoveryCandidate {
+  ticketId: string;
+  guildId: string;
+  originalChannelId: string;
+  ticketNumber: string;
+  ownerId: string;
+  source: 'discord_native' | 'ticket_button';
+  status: string;
+  intent: string;
+  accidentalAnswer: 'yes' | 'no' | null;
+  messageCount: number;
+  createdAt: string;
+  answeredBy: string | null;
+}
+
+function maxAttachmentBytes(): number {
+  const parsed = Number(process.env.TICKET_ARCHIVE_MAX_ATTACHMENT_BYTES);
+  if (!Number.isFinite(parsed) || parsed < 1024) return DEFAULT_MAX_ATTACHMENT_BYTES;
+  return Math.min(Math.floor(parsed), 100 * 1024 * 1024);
+}
+
+function isRecoveryReplay(message: Message): boolean {
+  return message.embeds.some((embed) =>
+    Boolean(embed.footer?.text?.startsWith(RECOVERY_FOOTER_PREFIX)),
+  );
+}
+
+function parseJsonArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function parseJsonObject(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function safeFilename(value: string): string {
+  const cleaned = value.replace(/[\\/\r\n\0]/g, '_').replace(/[^\w .()-]/g, '_').trim();
+  return (cleaned || 'recovered-attachment').slice(0, 120);
+}
+
+async function readBodyWithLimit(response: Response, maxBytes: number): Promise<Buffer> {
+  if (!response.body) return Buffer.alloc(0);
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const part = await reader.read();
+      if (part.done) break;
+      total += part.value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error('Attachment exceeded the configured archival size limit.');
+      }
+      chunks.push(part.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), total);
+}
+
+/** Save a durable snapshot of channel settings before the channel is lost. */
+export async function archiveTicketChannelSnapshot(channel: TextChannel): Promise<void> {
+  const topic = channel.topic ?? '';
+  if (!isTicketTopic(topic)) return;
+  const ticket = await getPersistedTicket(channel.id);
+  if (!ticket || !ticket.guildId) return;
+
+  const originalChannelId =
+    typeof ticket.metadata.originalChannelId === 'string'
+      ? ticket.metadata.originalChannelId
+      : channel.id;
+  const permissionOverwrites = Array.from(channel.permissionOverwrites.cache.values()).map((overwrite) => ({
+    id: overwrite.id,
+    type: overwrite.type,
+    allow: overwrite.allow.bitfield.toString(),
+    deny: overwrite.deny.bitfield.toString(),
+  }));
+
+  await getPostgresPool().query(
+    'INSERT INTO ticket_channel_archive ' +
+      '(ticket_id, guild_id, original_channel_id, channel_name, topic, parent_id, parent_name, permission_overwrites, channel_type, position, nsfw, rate_limit_per_user, updated_at) ' +
+      'VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,NOW()) ' +
+      'ON CONFLICT (ticket_id) DO UPDATE SET guild_id=EXCLUDED.guild_id, channel_name=EXCLUDED.channel_name, topic=EXCLUDED.topic, ' +
+      'parent_id=EXCLUDED.parent_id, parent_name=EXCLUDED.parent_name, permission_overwrites=EXCLUDED.permission_overwrites, ' +
+      'channel_type=EXCLUDED.channel_type, position=EXCLUDED.position, nsfw=EXCLUDED.nsfw, ' +
+      'rate_limit_per_user=EXCLUDED.rate_limit_per_user, updated_at=NOW()',
+    [
+      ticket.id,
+      ticket.guildId,
+      originalChannelId,
+      channel.name,
+      topic,
+      channel.parentId,
+      channel.parent?.name ?? null,
+      JSON.stringify(permissionOverwrites),
+      channel.type,
+      channel.position,
+      channel.nsfw,
+      channel.rateLimitPerUser,
+    ],
+  );
+}
+
+async function archiveAttachment(
+  messageId: string,
+  guildId: string,
+  attachment: {
+    id: string;
+    name: string;
+    url: string;
+    contentType: string | null;
+    size: number;
+  },
+): Promise<void> {
+  const pool = getPostgresPool();
+  const existing = await pool.query<AttachmentArchiveRow>(
+    'SELECT archive_status, archived_bytes FROM ticket_message_archive_attachments WHERE attachment_id=$1 LIMIT 1',
+    [attachment.id],
+  );
+  if (existing.rows[0]?.archive_status === 'archived' && existing.rows[0].archived_bytes) return;
+  if (existing.rows[0]?.archive_status === 'too_large' || existing.rows[0]?.archive_status === 'metadata_only') return;
+
+  const maxBytes = maxAttachmentBytes();
+  if (attachment.size > maxBytes) {
+    await pool.query(
+      'INSERT INTO ticket_message_archive_attachments (attachment_id,message_id,guild_id,original_filename,content_type,size_bytes,source_url,archive_status,archive_error,updated_at) ' +
+        'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW()) ON CONFLICT (attachment_id) DO UPDATE SET ' +
+        'message_id=EXCLUDED.message_id, source_url=EXCLUDED.source_url, archive_status=EXCLUDED.archive_status, archive_error=EXCLUDED.archive_error, updated_at=NOW()',
+      [attachment.id, messageId, guildId, attachment.name, attachment.contentType, attachment.size, attachment.url, 'too_large', 'Attachment exceeds TICKET_ARCHIVE_MAX_ATTACHMENT_BYTES (' + maxBytes + ' bytes).'],
+    );
+    return;
+  }
+
+  let source: URL;
+  try {
+    source = new URL(attachment.url);
+  } catch {
+    throw new Error('Attachment URL is invalid.');
+  }
+  if (source.protocol !== 'https:' || !['cdn.discordapp.com', 'media.discordapp.net'].includes(source.hostname)) {
+    throw new Error('Attachment URL is not from a trusted Discord CDN host.');
+  }
+
+  await pool.query(
+    'INSERT INTO ticket_message_archive_attachments (attachment_id,message_id,guild_id,original_filename,content_type,size_bytes,source_url,archive_status,updated_at) ' +
+      'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW()) ON CONFLICT (attachment_id) DO UPDATE SET ' +
+      'message_id=EXCLUDED.message_id, guild_id=EXCLUDED.guild_id, original_filename=EXCLUDED.original_filename, ' +
+      'content_type=EXCLUDED.content_type, size_bytes=EXCLUDED.size_bytes, source_url=EXCLUDED.source_url, updated_at=NOW()',
+    [attachment.id, messageId, guildId, attachment.name, attachment.contentType, attachment.size, attachment.url, 'pending'],
+  );
+
+  try {
+    const response = await fetch(attachment.url, {
+      headers: { 'User-Agent': 'ResolveX-Ticket-Archive/1.0' },
+      signal: AbortSignal.timeout(15_000),
+      redirect: 'error',
+    });
+    if (!response.ok) throw new Error('Discord CDN returned HTTP ' + response.status + '.');
+    if (response.url) {
+      const finalUrl = new URL(response.url);
+      if (!['cdn.discordapp.com', 'media.discordapp.net'].includes(finalUrl.hostname)) {
+        throw new Error('Attachment was redirected away from the trusted Discord CDN.');
+      }
+    }
+    const declaredSize = Number(response.headers.get('content-length') ?? 0);
+    if (declaredSize > maxBytes) throw new Error('Attachment response exceeded the configured archival size limit.');
+    const bytes = await readBodyWithLimit(response, maxBytes);
+    await pool.query(
+      'UPDATE ticket_message_archive_attachments SET archived_bytes=$2, archive_status=$3, archive_error=NULL, updated_at=NOW() WHERE attachment_id=$1',
+      [attachment.id, bytes, 'archived'],
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.slice(0, 400) : 'Unknown attachment archive error.';
+    await pool.query(
+      'UPDATE ticket_message_archive_attachments SET archive_status=$2, archive_error=$3, updated_at=NOW() WHERE attachment_id=$1',
+      [attachment.id, 'failed', detail],
+    );
+    console.warn('ResolveX could not archive attachment ' + attachment.id + ': ' + detail);
+  }
+}
+
+/** Archive message payload before it can disappear with its Discord channel. */
+export async function archiveTicketMessage(message: Message): Promise<void> {
+  if (!message.guild || message.channel.type !== ChannelType.GuildText || isRecoveryReplay(message)) return;
+  const channel = message.channel as TextChannel;
+  const topic = channel.topic ?? '';
+  if (!isTicketTopic(topic)) return;
+
+  const ticket = await getPersistedTicket(channel.id);
+  if (!ticket || !ticket.guildId || ticket.deletedAt) return;
+  const pool = getPostgresPool();
+  const snapshot = await pool.query('SELECT ticket_id FROM ticket_channel_archive WHERE ticket_id=$1 LIMIT 1', [ticket.id]);
+  if (!snapshot.rows.length) await archiveTicketChannelSnapshot(channel);
+
+  const attachments = Array.from(message.attachments.values()).map((attachment) => ({
+    id: attachment.id,
+    filename: attachment.name ?? 'attachment',
+    url: attachment.url,
+    contentType: attachment.contentType,
+    size: attachment.size,
+    description: attachment.description ?? null,
+    height: attachment.height ?? null,
+    width: attachment.width ?? null,
+    spoiler: attachment.spoiler,
+  }));
+  const embeds = message.embeds.map((embed) => embed.toJSON());
+  const components = message.components.map((component) => component.toJSON());
+  const displayName = message.member?.displayName ?? message.author.globalName ?? message.author.username;
+  const metadata = {
+    pinned: message.pinned,
+    webhookId: message.webhookId,
+    mentionEveryone: message.mentions.everyone,
+    userMentions: Array.from(message.mentions.users.keys()),
+    roleMentions: Array.from(message.mentions.roles.keys()),
+    channelMentions: Array.from(message.mentions.channels.keys()),
+  };
+
+  await pool.query(
+    'INSERT INTO ticket_message_archive ' +
+      '(message_id,ticket_id,guild_id,original_channel_id,author_id,author_username,author_display_name,author_avatar_url,content,created_at,edited_at,is_bot,message_type,embeds,components,attachments,edit_history,metadata,updated_at) ' +
+      'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16::jsonb,\\'[]\\'::jsonb,$17::jsonb,NOW()) ' +
+      'ON CONFLICT (message_id) DO UPDATE SET content=EXCLUDED.content, edited_at=COALESCE(EXCLUDED.edited_at,ticket_message_archive.edited_at), ' +
+      'embeds=EXCLUDED.embeds, components=EXCLUDED.components, attachments=EXCLUDED.attachments, metadata=EXCLUDED.metadata, updated_at=NOW(), ' +
+      'edit_history=CASE WHEN ticket_message_archive.content IS DISTINCT FROM EXCLUDED.content OR ticket_message_archive.embeds IS DISTINCT FROM EXCLUDED.embeds ' +
+      'THEN ticket_message_archive.edit_history || jsonb_build_array(jsonb_build_object(\\'recordedAt\\',NOW(),\\'previousContent\\',ticket_message_archive.content,\\'newContent\\',EXCLUDED.content,\\'previousEmbeds\\',ticket_message_archive.embeds,\\'newEmbeds\\',EXCLUDED.embeds)) ' +
+      'ELSE ticket_message_archive.edit_history END',
+    [
+      message.id,
+      ticket.id,
+      ticket.guildId,
+      channel.id,
+      message.author.id,
+      message.author.username,
+      displayName,
+      message.author.displayAvatarURL({ extension: 'png', size: 128 }),
+      message.content ?? '',
+      message.createdAt,
+      message.editedAt,
+      message.author.bot,
+      message.type,
+      JSON.stringify(embeds),
+      JSON.stringify(components),
+      JSON.stringify(attachments),
+      JSON.stringify(metadata),
+    ],
+  );
+
+  for (const attachment of message.attachments.values()) {
+    await archiveAttachment(message.id, ticket.guildId, {
+      id: attachment.id,
+      name: attachment.name ?? 'attachment',
+      url: attachment.url,
+      contentType: attachment.contentType,
+      size: attachment.size,
+    });
+  }
+}
+
+export async function markArchivedTicketMessageDeleted(
+  guildId: string,
+  channelId: string,
+  messageId: string,
+): Promise<void> {
+  await getPostgresPool().query(
+    'UPDATE ticket_message_archive SET deleted_at=COALESCE(deleted_at,NOW()), updated_at=NOW() ' +
+      'WHERE message_id=$1 AND guild_id=$2 AND original_channel_id=$3',
+    [messageId, guildId, channelId],
+  );
+}
+
+/** Capture one page of old history per call; the worker advances durably. */
+export async function backfillTicketArchiveBatch(client: { guilds: { cache: Map<string, Guild> } }): Promise<boolean> {
+  const pool = getPostgresPool();
+  for (const guild of client.guilds.cache.values()) {
+    for (const channel of guild.channels.cache.values()) {
+      if (channel.type !== ChannelType.GuildText || !isTicketTopic(channel.topic ?? '')) continue;
+      const ticket = await getPersistedTicket(channel.id).catch(() => undefined);
+      if (!ticket || ticket.deletedAt) continue;
+      await archiveTicketChannelSnapshot(channel);
+      const state = await pool.query<ChannelArchiveRow>(
+        'SELECT * FROM ticket_channel_archive WHERE ticket_id=$1 LIMIT 1',
+        [ticket.id],
+      );
+      const archive = state.rows[0];
+      if (archive?.backfill_complete) continue;
+
+      const queryOptions: { limit: number; before?: string } = { limit: ARCHIVE_PAGE_SIZE };
+      if (archive?.backfill_cursor) queryOptions.before = archive.backfill_cursor;
+      const page = await channel.messages.fetch(queryOptions);
+      if (!page.size) {
+        await pool.query('UPDATE ticket_channel_archive SET backfill_complete=TRUE, updated_at=NOW() WHERE ticket_id=$1', [ticket.id]);
+        continue;
+      }
+
+      const ordered = Array.from(page.values()).sort((a, b) => BigInt(a.id) < BigInt(b.id) ? -1 : BigInt(a.id) > BigInt(b.id) ? 1 : 0);
+      for (const message of ordered) await archiveTicketMessage(message);
+      const oldestId = ordered[0]?.id;
+      await pool.query(
+        'UPDATE ticket_channel_archive SET backfill_cursor=$2, backfill_complete=$3, updated_at=NOW() WHERE ticket_id=$1',
+        [ticket.id, oldestId ?? archive?.backfill_cursor ?? null, page.size < ARCHIVE_PAGE_SIZE],
+      );
+      return true;
+    }
+  }
+  return false;
+}
+
+export async function startTicketArchiveBackfill(client: { guilds: { cache: Map<string, Guild> } }): Promise<void> {
+  const tick = async (): Promise<void> => {
+    try {
+      const didWork = await backfillTicketArchiveBatch(client);
+      if (!didWork) return;
+    } catch (error) {
+      console.warn('ResolveX ticket archive backfill will retry:', error instanceof Error ? error.message : 'unknown error');
+    }
+  };
+  void tick();
+  const timer = setInterval(() => { void tick(); }, 30_000);
+  timer.unref();
+}
+
+/** Fully archive all remaining messages before a ticket-button deletion is allowed. */
+export async function archiveTicketChannelForRecovery(channel: TextChannel): Promise<void> {
+  if (!isTicketTopic(channel.topic ?? '')) throw new Error('This channel is not a managed ticket.');
+  await archiveTicketChannelSnapshot(channel);
+  const pool = getPostgresPool();
+  const ticket = await getPersistedTicket(channel.id);
+  if (!ticket || !ticket.guildId || ticket.deletedAt) {
+    throw new Error('The durable ticket record is missing or already marked deleted; the channel was not deleted.');
+  }
+
+  let processed = 0;
+  while (processed < MAX_ARCHIVE_MESSAGES) {
+    const state = await pool.query<ChannelArchiveRow>(
+      'SELECT * FROM ticket_channel_archive WHERE ticket_id=$1 LIMIT 1',
+      [ticket.id],
+    );
+    const archive = state.rows[0];
+    if (archive?.backfill_complete) return;
+    const queryOptions: { limit: number; before?: string } = { limit: ARCHIVE_PAGE_SIZE };
+    if (archive?.backfill_cursor) queryOptions.before = archive.backfill_cursor;
+    const page = await channel.messages.fetch(queryOptions);
+    if (!page.size) {
+      await pool.query('UPDATE ticket_channel_archive SET backfill_complete=TRUE, updated_at=NOW() WHERE ticket_id=$1', [ticket.id]);
+      return;
+    }
+    const ordered = Array.from(page.values()).sort((a, b) => BigInt(a.id) < BigInt(b.id) ? -1 : BigInt(a.id) > BigInt(b.id) ? 1 : 0);
+    for (const message of ordered) await archiveTicketMessage(message);
+    processed += ordered.length;
+    const oldestId = ordered[0]?.id;
+    const done = page.size < ARCHIVE_PAGE_SIZE || processed >= MAX_ARCHIVE_MESSAGES;
+    await pool.query(
+      'UPDATE ticket_channel_archive SET backfill_cursor=$2, backfill_complete=$3, updated_at=NOW() WHERE ticket_id=$1',
+      [ticket.id, oldestId ?? archive?.backfill_cursor ?? null, done],
+    );
+    if (processed >= MAX_ARCHIVE_MESSAGES) {
+      throw new Error('Archive reached the configured history limit of ' + MAX_ARCHIVE_MESSAGES + ' messages. Increase the limit or archive older history before deleting this ticket.');
+    }
+  }
+}
+
+export async function beginTicketButtonDeletion(
+  channel: TextChannel,
+  actorId: string,
+  actorName: string,
+): Promise<void> {
+  const ticket = await getPersistedTicket(channel.id);
+  if (!ticket || !ticket.guildId) throw new Error('Cannot delete a ticket without its durable record.');
+  await getPostgresPool().query(
+    'INSERT INTO ticket_recovery_events (id,ticket_id,guild_id,original_channel_id,source,status,intent,actor_id,actor_name,actor_attribution,confirmation_stage,created_at,updated_at,metadata) ' +
+      'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW(),NOW(),$12::jsonb)',
+    [
+      randomUUID(), ticket.id, ticket.guildId,
+      typeof ticket.metadata.originalChannelId === 'string' ? ticket.metadata.originalChannelId : channel.id,
+      'ticket_button', 'pending', 'intentional', actorId, actorName, 'actorKnown', 2,
+      JSON.stringify({ channelIdAtDeletion: channel.id, ticketNumber: ticket.ticketNumber }),
+    ],
+  );
+}
+
+export async function cancelTicketButtonDeletion(channelId: string): Promise<void> {
+  const ticket = await getPersistedTicket(channelId).catch(() => undefined);
+  if (!ticket) return;
+  await getPostgresPool().query(
+    'UPDATE ticket_recovery_events SET status=$2, updated_at=NOW(), resolved_at=NOW() ' +
+      'WHERE id=(SELECT id FROM ticket_recovery_events WHERE ticket_id=$1 AND source=$3 AND status=$4 ORDER BY created_at DESC LIMIT 1)',
+    [ticket.id, 'cancelled', 'ticket_button', 'pending'],
+  );
+}
+
+/** Called only for the actual Discord channelDelete event. */
+export async function recordTicketChannelDeleted(channel: TextChannel): Promise<void> {
+  const ticket = await getPersistedTicket(channel.id);
+  if (!ticket || !ticket.guildId) return;
+
+  await archiveTicketChannelSnapshot(channel).catch((error) => {
+    console.warn('Could not refresh ticket channel snapshot after deletion event:', error instanceof Error ? error.message : 'unknown error');
+  });
+
+  const pool = getPostgresPool();
+  const pending = await pool.query<QueryResultRow & { id: string }>(
+    'SELECT id FROM ticket_recovery_events WHERE ticket_id=$1 AND source=$2 AND status=$3 ORDER BY created_at DESC LIMIT 1',
+    [ticket.id, 'ticket_button', 'pending'],
+  );
+  if (pending.rows[0]) {
+    await pool.query(
+      'UPDATE ticket_recovery_events SET status=$2, updated_at=NOW(), resolved_at=NOW() WHERE id=$1',
+      [pending.rows[0].id, 'deleted'],
+    );
+  } else {
+    await pool.query(
+      'INSERT INTO ticket_recovery_events (id,ticket_id,guild_id,original_channel_id,source,status,intent,actor_id,actor_name,actor_attribution,confirmation_stage,created_at,updated_at,metadata) ' +
+        'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW(),NOW(),$12::jsonb)',
+      [
+        randomUUID(), ticket.id, ticket.guildId,
+        typeof ticket.metadata.originalChannelId === 'string' ? ticket.metadata.originalChannelId : channel.id,
+        'discord_native', 'deleted', 'unknown', 'unknown', 'Unknown actor', 'actorUnknown', 0,
+        JSON.stringify({ channelName: channel.name, channelIdAtDeletion: channel.id }),
+      ],
+    );
+  }
+
+  await markPersistedTicketDeleted(
+    channel.id,
+    'Ticket channel deleted via ' + (pending.rows[0] ? 'the ticket Delete button' : 'Discord channel controls'),
+    pending.rows[0]
+      ? { id: 'ticket-button', attribution: 'actorInferred', confidence: 'low' }
+      : { id: 'unknown', attribution: 'actorUnknown', confidence: 'none' },
+  );
+}
+
+export async function listTicketRecoveryCandidates(
+  guildId: string,
+  source: 'discord_native' | 'ticket_button',
+): Promise<TicketRecoveryCandidate[]> {
+  const statusPredicate = source === 'discord_native'
+    ? "r.status IN ('deleted','failed')"
+    : "((r.status='deleted' AND r.accidental_answer IS NULL) OR (r.status='reviewed' AND r.accidental_answer='yes'))";
+  const result = await getPostgresPool().query<QueryResultRow & {
+    ticket_id: string;
+    guild_id: string;
+    original_channel_id: string;
+    ticket_number: string | null;
+    owner_id: string | null;
+    source: 'discord_native' | 'ticket_button';
+    status: string;
+    intent: string;
+    accidental_answer: 'yes' | 'no' | null;
+    message_count: string | number;
+    created_at: Date | string;
+    answered_by: string | null;
+  }>(
+    'WITH latest AS (SELECT DISTINCT ON (ticket_id) * FROM ticket_recovery_events WHERE guild_id=$1 AND source=$2 ORDER BY ticket_id,created_at DESC) ' +
+      'SELECT r.ticket_id,r.guild_id,r.original_channel_id,t.ticket_number,t.owner_id,r.source,r.status,r.intent,r.accidental_answer,r.created_at,r.answered_by, ' +
+      'COUNT(m.message_id)::int AS message_count FROM latest r JOIN tickets t ON t.id=r.ticket_id ' +
+      'LEFT JOIN ticket_message_archive m ON m.ticket_id=r.ticket_id WHERE ' + statusPredicate +
+      ' GROUP BY r.ticket_id,r.guild_id,r.original_channel_id,t.ticket_number,t.owner_id,r.source,r.status,r.intent,r.accidental_answer,r.created_at,r.answered_by ' +
+      'ORDER BY r.created_at DESC LIMIT 200',
+    [guildId, source],
+  );
+
+  return result.rows.map((row) => ({
+    ticketId: row.ticket_id,
+    guildId: row.guild_id,
+    originalChannelId: row.original_channel_id,
+    ticketNumber: row.ticket_number ?? row.ticket_id.slice(0, 8),
+    ownerId: row.owner_id ?? 'unknown',
+    source: row.source,
+    status: row.status,
+    intent: row.intent,
+    accidentalAnswer: row.accidental_answer,
+    messageCount: Number(row.message_count),
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : new Date(row.created_at).toISOString(),
+    answeredBy: row.answered_by,
+  }));
+}
+
+export async function answerTicketDeletionReview(
+  ticketId: string,
+  answer: 'yes' | 'no',
+  actorId: string,
+  actorName: string,
+): Promise<{ ticketId: string; guildId: string; originalChannelId: string; ticketNumber: string }> {
+  const pool = getPostgresPool();
+  const ticket = await getPersistedTicketById(ticketId);
+  if (!ticket || !ticket.guildId) throw new Error('Ticket not found in durable storage.');
+  const updated = await pool.query<QueryResultRow & { id: string; original_channel_id: string }>(
+    'UPDATE ticket_recovery_events SET accidental_answer=$2, intent=$3, status=$4, answered_by=$5, answered_by_name=$6, answer_timestamp=NOW(), updated_at=NOW() ' +
+      'WHERE id=(SELECT id FROM ticket_recovery_events WHERE ticket_id=$1 AND source=$7 AND status=$8 AND accidental_answer IS NULL ORDER BY created_at DESC LIMIT 1) ' +
+      'RETURNING id,original_channel_id',
+    [ticketId, answer, answer === 'yes' ? 'accidental' : 'intentional', 'reviewed', actorId, actorName, 'ticket_button', 'deleted'],
+  );
+  if (!updated.rows[0]) throw new Error('This ticket deletion has already been reviewed or is no longer awaiting an answer.');
+  return {
+    ticketId,
+    guildId: ticket.guildId,
+    originalChannelId: updated.rows[0].original_channel_id,
+    ticketNumber: ticket.ticketNumber ?? ticketId.slice(0, 8),
+  };
+}
+
+async function permissionOverwritePayload(
+  guild: Guild,
+  ticket: NonNullable<Awaited<ReturnType<typeof getPersistedTicketById>>>,
+  raw: unknown,
+): Promise<Array<{ id: string; type: 'role' | 'member'; allow: PermissionResolvable[]; deny: PermissionResolvable[] }>> {
+  const values = parseJsonArray(raw) as Array<Record<string, unknown>>;
+  const map = new Map<string, { id: string; type: 'role' | 'member'; allow: PermissionResolvable[]; deny: PermissionResolvable[] }>();
+
+  for (const item of values) {
+    const id = typeof item.id === 'string' ? item.id : '';
+    const type = item.type === 1 ? 'member' : 'role';
+    if (!/^\d{17,20}$/.test(id)) continue;
+    if (type === 'role' && id !== guild.id && !guild.roles.cache.has(id)) continue;
+    if (type === 'member') {
+      const member = guild.members.cache.get(id) ?? await guild.members.fetch(id).catch(() => null);
+      if (!member) continue;
+    }
+    let allow: PermissionResolvable[] = [];
+    let deny: PermissionResolvable[] = [];
+    try { allow = new PermissionsBitField(BigInt(String(item.allow ?? '0'))).toArray(); } catch { /* malformed legacy snapshot */ }
+    try { deny = new PermissionsBitField(BigInt(String(item.deny ?? '0'))).toArray(); } catch { /* malformed legacy snapshot */ }
+    map.set(id, { id, type, allow, deny });
+  }
+
+  const everyone = map.get(guild.id) ?? { id: guild.id, type: 'role' as const, allow: [], deny: [] };
+  everyone.allow = everyone.allow.filter((permission) => permission !== PermissionFlagsBits.ViewChannel);
+  if (!everyone.deny.includes(PermissionFlagsBits.ViewChannel)) everyone.deny.push(PermissionFlagsBits.ViewChannel);
+  map.set(guild.id, everyone);
+
+  const bot = guild.members.me ?? await guild.members.fetchMe();
+  const botOverwrite = map.get(bot.id) ?? { id: bot.id, type: 'member' as const, allow: [], deny: [] };
+  botOverwrite.deny = botOverwrite.deny.filter((permission) =>
+    ![PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory,
+      PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ManageChannels].includes(permission as bigint),
+  );
+  for (const permission of [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory,
+    PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ManageChannels]) {
+    if (!botOverwrite.allow.includes(permission)) botOverwrite.allow.push(permission);
+  }
+  map.set(bot.id, botOverwrite);
+
+  const ownerId = ticket.ownerId;
+  const participantIds = [...new Set([...(ticket.participantIds ?? []), ...(ownerId ? [ownerId] : [])])].slice(0, 50);
+  for (const userId of participantIds) {
+    const member = guild.members.cache.get(userId) ?? await guild.members.fetch(userId).catch(() => null);
+    if (!member) continue;
+    const existing = map.get(userId) ?? { id: userId, type: 'member' as const, allow: [], deny: [] };
+    existing.deny = existing.deny.filter((permission) =>
+      ![PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks].includes(permission as bigint),
+    );
+    for (const permission of [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages,
+      PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks]) {
+      if (!existing.allow.includes(permission)) existing.allow.push(permission);
+    }
+    map.set(userId, existing);
+  }
+  return Array.from(map.values());
+}
+
+async function replayArchivedMessages(channel: TextChannel, ticketId: string): Promise<{ restored: number; failed: number }> {
+  const pool = getPostgresPool();
+  const messages = await pool.query<MessageArchiveRow>(
+    'SELECT * FROM ticket_message_archive WHERE ticket_id=$1 ORDER BY created_at ASC,message_id ASC LIMIT $2',
+    [ticketId, MAX_ARCHIVE_MESSAGES],
+  );
+  let restored = 0;
+  let failed = 0;
+  const botId = channel.client.user?.id;
+  for (const archived of messages.rows) {
+    const archivedEmbeds = parseJsonArray(archived.embeds);
+    const archivedComponents = parseJsonArray(archived.components) as Array<Record<string, unknown>>;
+    const isPanel = archived.is_bot && archivedComponents.some((row) => {
+      const components = Array.isArray(row.components) ? row.components as Array<Record<string, unknown>> : [];
+      return components.some((component) => {
+        const customId = String(component.custom_id ?? component.customId ?? '');
+        return customId.startsWith('ticket:');
+      });
+    }) && archivedEmbeds.some((entry) => String((entry as Record<string, unknown>).title ?? '').includes('SupportForge Ticket #'));
+    if (isPanel || (botId && archived.author_id === botId && archivedComponents.length > 0 && archivedEmbeds.length > 0 &&
+      archivedEmbeds.some((entry) => String((entry as Record<string, unknown>).title ?? '').includes('SupportForge Ticket #')))) {
+      continue;
+    }
+
+    try {
+      const author = archived.author_display_name || archived.author_username || 'Unknown author';
+      const embed = new EmbedBuilder()
+        .setTitle(('Recovered message • ' + author).slice(0, 256))
+        .setDescription((archived.content || '*(Original message contained no text content.)*').slice(0, 4000))
+        .addFields(
+          { name: 'Original author', value: (author + ' • User ID: ' + archived.author_id).slice(0, 1024) },
+          { name: 'Original channel ID', value: archived.original_channel_id.slice(0, 1024), inline: true },
+          { name: 'Original message ID', value: archived.message_id.slice(0, 1024), inline: true },
+          { name: 'Original timestamp (UTC)', value: (archived.created_at instanceof Date ? archived.created_at.toISOString() : new Date(archived.created_at).toISOString()).slice(0, 1024) },
+        )
+        .setFooter({ text: RECOVERY_FOOTER_PREFIX + ' • Original message ID ' + archived.message_id });
+      const config = await getGuildConfig(channel.guild.id).catch(() => null);
+      if (config) {
+        const color = ({ midnight: 0x5865f2, 'cyber-neon': 0x00f5ff, ocean: 0x0077b6, aurora: 0x8e44ad, ember: 0xe67e22, forest: 0x27ae60 } as Record<string, number>)[config.theme] ?? 0x5865f2;
+        embed.setColor(color);
+      }
+      try {
+        if (archived.author_avatar_url) embed.setAuthor({ name: author.slice(0, 256), iconURL: archived.author_avatar_url });
+      } catch { /* An expired avatar URL does not block message replay. */ }
+      if (archived.edited_at) {
+        const edited = archived.edited_at instanceof Date ? archived.edited_at.toISOString() : new Date(archived.edited_at).toISOString();
+        embed.addFields({ name: 'Last archived edit', value: edited, inline: true });
+      }
+
+      const originalEmbeds = archivedEmbeds
+        .slice(0, 9)
+        .flatMap((entry) => {
+          try { return [EmbedBuilder.from(entry as APIEmbed)]; } catch { return []; }
+        });
+      const attachmentRows = await pool.query<AttachmentArchiveRow>(
+        'SELECT * FROM ticket_message_archive_attachments WHERE message_id=$1 ORDER BY attachment_id',
+        [archived.message_id],
+      );
+      const files: AttachmentBuilder[] = [];
+      const unavailable: string[] = [];
+      for (const attachment of attachmentRows.rows) {
+        if (attachment.archived_bytes && attachment.archive_status === 'archived') {
+          files.push(new AttachmentBuilder(attachment.archived_bytes, { name: safeFilename(attachment.original_filename) }));
+        } else {
+          unavailable.push(attachment.original_filename + (attachment.archive_error ? ' (' + attachment.archive_error + ')' : ' (file bytes were not archived)'));
+        }
+      }
+      if (unavailable.length) {
+        embed.addFields({ name: 'Attachments not fully archived', value: unavailable.join('\\n').slice(0, 1024) });
+      }
+      await channel.send({
+        embeds: [embed, ...originalEmbeds].slice(0, 10),
+        files,
+        allowedMentions: { parse: [] },
+      });
+      restored += 1;
+    } catch (error) {
+      failed += 1;
+      console.warn('ResolveX could not replay archived message ' + archived.message_id + ':', error instanceof Error ? error.message : 'unknown error');
+    }
+  }
+  return { restored, failed };
+}
+
+/** Recreate a deleted ticket in a new channel and replay its archived conversation. */
+export async function restoreArchivedTicket(
+  guild: Guild,
+  ticketId: string,
+  source: 'discord_native' | 'ticket_button',
+): Promise<{ channelId: string; restoredMessages: number; failedMessages: number; ticketNumber: string }> {
+  const pool = getPostgresPool();
+  const ticket = await getPersistedTicketById(ticketId);
+  if (!ticket || ticket.guildId !== guild.id) throw new Error('Ticket was not found in this server.');
+  const events = await pool.query<QueryResultRow & { id: string; original_channel_id: string; status: string; accidental_answer: string | null }>(
+    'SELECT id,original_channel_id,status,accidental_answer FROM ticket_recovery_events WHERE ticket_id=$1 AND guild_id=$2 AND source=$3 ORDER BY created_at DESC LIMIT 1',
+    [ticketId, guild.id, source],
+  );
+  const recoveryEvent = events.rows[0];
+  if (!recoveryEvent) throw new Error('No recovery record exists for this ticket and deletion path.');
+  if (source === 'ticket_button' && !(recoveryEvent.status === 'reviewed' && recoveryEvent.accidental_answer === 'yes')) {
+    throw new Error('Ticket-button deletions can only be restored after the Settings review marks the deletion as accidental.');
+  }
+  if (source === 'discord_native' && !['deleted', 'failed'].includes(recoveryEvent.status)) {
+    throw new Error('This native channel deletion has already been restored or is not eligible for recovery.');
+  }
+
+  const snapshots = await pool.query<ChannelArchiveRow>(
+    'SELECT * FROM ticket_channel_archive WHERE ticket_id=$1 LIMIT 1',
+    [ticketId],
+  );
+  const snapshot = snapshots.rows[0];
+  const config = await getGuildConfig(guild.id);
+  let parentId: string | null = null;
+  if (snapshot?.parent_id) {
+    const candidate = guild.channels.cache.get(snapshot.parent_id);
+    if (candidate?.type === ChannelType.GuildCategory) parentId = candidate.id;
+  }
+  if (!parentId && config.supportCategoryId) {
+    const candidate = guild.channels.cache.get(config.supportCategoryId);
+    if (candidate?.type === ChannelType.GuildCategory) parentId = candidate.id;
+  }
+
+  const permissions = await permissionOverwritePayload(guild, ticket, snapshot?.permission_overwrites ?? []);
+  const channelName = (snapshot?.channel_name || ('ticket-' + (ticket.ticketNumber ?? ticketId.slice(0, 8))))
+    .toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').slice(0, 90) || 'recovered-ticket';
+  let topic = snapshot?.topic ?? '';
+  if (!topic || !isTicketTopic(topic)) {
+    topic = 'supportforge:ticket';
+    topic = setField(topic, 'number', ticket.ticketNumber ?? ticketId.slice(0, 8));
+    topic = setField(topic, 'owner', ticket.ownerId ?? '');
+    topic = setField(topic, 'department', ticket.departmentId ?? '');
+    topic = setField(topic, 'tags', ticket.tagId ?? '');
+    topic = setField(topic, 'priority', ticket.priority ?? 'normal');
+    topic = setField(topic, 'status', ticket.status);
+    topic = setField(topic, 'opened_at', ticket.createdAt);
+  }
+  topic = removeField(topic, 'message');
+  topic = setField(topic, 'original_channel_id', recoveryEvent.original_channel_id);
+  topic = setField(topic, 'restored_from', recoveryEvent.original_channel_id);
+  topic = setField(topic, 'status', ticket.status);
+
+  const channel = await guild.channels.create({
+    name: channelName,
+    type: ChannelType.GuildText,
+    ...(parentId ? { parent: parentId } : {}),
+    topic: topic.slice(0, 1024),
+    permissionOverwrites: permissions,
+    position: snapshot?.position,
+    nsfw: snapshot?.nsfw ?? false,
+    rateLimitPerUser: snapshot?.rate_limit_per_user ?? 0,
+    reason: 'ResolveX ticket recovery; original channel ID ' + recoveryEvent.original_channel_id,
+  });
+
+  const restoredAt = new Date().toISOString();
+  await pool.query(
+    'UPDATE tickets SET channel_id=$1, deleted_at=NULL, deletion_reason=NULL, updated_at=NOW(), ' +
+      'metadata=metadata || $2::jsonb WHERE id=$3 AND guild_id=$4',
+    [
+      channel.id,
+      JSON.stringify({
+        originalChannelId: recoveryEvent.original_channel_id,
+        restoredChannelId: channel.id,
+        restoredAt,
+        recoveredFromDeletionSource: source,
+      }),
+      ticketId,
+      guild.id,
+    ],
+  );
+  await pool.query(
+    'UPDATE ticket_recovery_events SET status=$2, replacement_channel_id=$3, updated_at=NOW(), resolved_at=NOW() WHERE id=$1',
+    [recoveryEvent.id, 'restored', channel.id],
+  );
+
+  await refreshTicketPanel(channel, topic);
+  const replay = await replayArchivedMessages(channel, ticketId);
+  await archiveTicketChannelSnapshot(channel).catch((error) => {
+    console.warn('Could not refresh the restored ticket channel snapshot:', error instanceof Error ? error.message : 'unknown error');
+  });
+
+  return {
+    channelId: channel.id,
+    restoredMessages: replay.restored,
+    failedMessages: replay.failed,
+    ticketNumber: ticket.ticketNumber ?? ticketId.slice(0, 8),
+  };
+}
