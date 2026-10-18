@@ -18,6 +18,8 @@ A background backfill archives existing message history in pages of 100 and stor
 - Ticket Deletion Review asks “Was this ticket deleted by mistake?” The Yes/No result and reviewer are stored in Neon and logged through both the ticket audit stream and developer/system audit stream.
 - A ticket-button deletion can be restored only after the reviewer chooses Yes. A native deletion does not trigger this question.
 
+Recovery attempts are durably marked as `restoring`, `failed`, or `restored`. The replacement channel ID is written back to Neon immediately after creation, and the recovery event ID is stored in the replacement channel topic so a restart can locate the channel even if the process stops between Discord creation and the database write. Completed archived-message replays are recorded in `ticket_recovery_replay_items`; retries reuse the same replacement channel and skip completed original messages rather than replaying the whole archive again. If an individual Discord send succeeds but the subsequent Neon ledger write fails, that one archived message may still be duplicated on retry because Discord sends and PostgreSQL commits cannot share one atomic transaction.
+
 ## Recovery limits
 
 Discord does not restore deleted channel/message IDs, usernames as message authors, reactions or arbitrary live component state. Recovery creates a new private channel, rebuilds the supported ticket controls, replays archived messages in chronological order with an explicit recovery label and original author/channel/message IDs, and attaches saved files with their new Discord upload URLs. It never impersonates users. Original embeds are replayed where Discord accepts their saved payloads; expired external embed media cannot be guaranteed.
