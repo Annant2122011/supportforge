@@ -47,6 +47,7 @@ git checkout -B main "$target_sha"
 git reset --hard "$target_sha"
 npm ci
 npm run build
+npm test
 npm run db:migrate
 npm run db:verify
 sudo systemctl restart "$SERVICE_NAME"

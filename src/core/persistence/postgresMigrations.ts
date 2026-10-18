@@ -421,6 +421,45 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+  {
+    id: 10,
+    name: 'prevent_duplicate_pending_ticket_button_deletions',
+    up: async (db) => {
+      // Repair any duplicate pending intents written by older bot versions before
+      // enforcing one in-flight destructive operation per actual Discord channel.
+      await db.query(`
+        WITH ranked AS (
+          SELECT id,
+            ROW_NUMBER() OVER (
+              PARTITION BY guild_id, metadata->>'channelIdAtDeletion'
+              ORDER BY created_at DESC, id DESC
+            ) AS sequence
+          FROM ticket_recovery_events
+          WHERE source = 'ticket_button'
+            AND status = 'pending'
+            AND NULLIF(metadata->>'channelIdAtDeletion', '') IS NOT NULL
+        )
+        UPDATE ticket_recovery_events AS events
+        SET status = 'cancelled',
+            updated_at = NOW(),
+            resolved_at = COALESCE(events.resolved_at, NOW()),
+            metadata = events.metadata || jsonb_build_object(
+              'cancelReason', 'superseded_duplicate_pending_deletion_intent'
+            )
+        FROM ranked
+        WHERE ranked.id = events.id
+          AND ranked.sequence > 1;
+      `);
+
+      await db.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_ticket_recovery_pending_button_channel
+        ON ticket_recovery_events (guild_id, (metadata->>'channelIdAtDeletion'))
+        WHERE source = 'ticket_button'
+          AND status = 'pending'
+          AND NULLIF(metadata->>'channelIdAtDeletion', '') IS NOT NULL;
+      `);
+    },
+  },
 ];
 export async function runPostgresMigrations(
   db: TransactionExecutor,

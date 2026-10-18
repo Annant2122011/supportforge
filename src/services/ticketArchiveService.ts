@@ -495,16 +495,43 @@ export async function beginTicketButtonDeletion(
 ): Promise<void> {
   const ticket = await getPersistedTicket(channel.id);
   if (!ticket || !ticket.guildId) throw new Error('Cannot delete a ticket without its durable record.');
-  await getPostgresPool().query(
-    'INSERT INTO ticket_recovery_events (id,ticket_id,guild_id,original_channel_id,source,status,intent,actor_id,actor_name,actor_attribution,confirmation_stage,created_at,updated_at,metadata) ' +
-      'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW(),NOW(),$12::jsonb)',
-    [
-      randomUUID(), ticket.id, ticket.guildId,
-      typeof ticket.metadata.originalChannelId === 'string' ? ticket.metadata.originalChannelId : channel.id,
-      'ticket_button', 'pending', 'intentional', actorId, actorName, 'actorKnown', 2,
-      JSON.stringify({ channelIdAtDeletion: channel.id, ticketNumber: ticket.ticketNumber }),
-    ],
+
+  const pool = getPostgresPool();
+
+  // A crashed process can leave a pending intent behind. Expire only an intent
+  // for this exact channel after the same ten-minute window used by the
+  // channelDelete classifier. The unique index below still arbitrates races.
+  await pool.query(
+    "UPDATE ticket_recovery_events SET status='cancelled', updated_at=NOW(), " +
+      "resolved_at=COALESCE(resolved_at,NOW()), metadata=metadata || jsonb_build_object('cancelReason','expired_pending_intent') " +
+      "WHERE guild_id=$1 AND source='ticket_button' AND status='pending' " +
+      "AND metadata->>'channelIdAtDeletion'=$2 AND created_at < NOW() - INTERVAL '10 minutes'",
+    [ticket.guildId, channel.id],
   );
+
+  try {
+    await pool.query(
+      'INSERT INTO ticket_recovery_events (id,ticket_id,guild_id,original_channel_id,source,status,intent,actor_id,actor_name,actor_attribution,confirmation_stage,created_at,updated_at,metadata) ' +
+        'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW(),NOW(),$12::jsonb)',
+      [
+        randomUUID(), ticket.id, ticket.guildId,
+        typeof ticket.metadata.originalChannelId === 'string' ? ticket.metadata.originalChannelId : channel.id,
+        'ticket_button', 'pending', 'intentional', actorId, actorName, 'actorKnown', 2,
+        JSON.stringify({ channelIdAtDeletion: channel.id, ticketNumber: ticket.ticketNumber }),
+      ],
+    );
+  } catch (error) {
+    const postgresError = error as { code?: unknown; constraint?: unknown };
+    if (
+      postgresError.code === '23505' &&
+      postgresError.constraint === 'idx_ticket_recovery_pending_button_channel'
+    ) {
+      throw new Error(
+        'A deletion confirmation for this ticket is already being processed. Wait for it to finish, then refresh the ticket controls.',
+      );
+    }
+    throw error;
+  }
 }
 
 export async function cancelTicketButtonDeletion(channelId: string): Promise<void> {
