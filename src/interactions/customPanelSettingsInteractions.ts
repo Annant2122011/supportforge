@@ -317,7 +317,12 @@ export async function handleCustomPanelSettingsInteraction(
       const panel = await getCustomPanel(guild.id, panelId);
       if (!panel) throw new Error('Panel not found.');
       if (panel.publishedChannelId && panel.publishedMessageId) {
-        const publishedChannel = await guild.channels.fetch(panel.publishedChannelId);
+        const publishedChannel = await guild.channels.fetch(panel.publishedChannelId).catch((error) => {
+          // A channel may have been deleted in Discord before panel cleanup.
+          // In that case the saved definition can still be safely removed.
+          if (resourceCode(error) === 10003) return null;
+          throw error;
+        });
         if (publishedChannel?.type === 0) {
           const publishedMessage = await publishedChannel.messages.fetch(panel.publishedMessageId).catch((error) => {
             if (resourceCode(error) === 10008) return null;
