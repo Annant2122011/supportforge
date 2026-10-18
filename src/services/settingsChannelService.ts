@@ -62,6 +62,7 @@ export function buildSettingsDashboardComponents(): ActionRowBuilder<ButtonBuild
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       settingsButton('sf:settings:theme', 'Server Theme', ButtonStyle.Primary, '🌈'),
       settingsButton('sf:settings:premium', 'Premium & Demo', ButtonStyle.Secondary, '💎'),
+      settingsButton('sf:settings:panels:home', 'Custom Panels', ButtonStyle.Primary, '🧱'),
     ),
   ];
 }
