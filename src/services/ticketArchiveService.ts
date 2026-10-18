@@ -695,14 +695,27 @@ async function permissionOverwritePayload(
 
 async function replayArchivedMessages(channel: TextChannel, ticketId: string): Promise<{ restored: number; failed: number }> {
   const pool = getPostgresPool();
-  const messages = await pool.query<MessageArchiveRow>(
-    'SELECT * FROM ticket_message_archive WHERE ticket_id=$1 ORDER BY created_at ASC,message_id ASC LIMIT $2',
-    [ticketId, MAX_ARCHIVE_MESSAGES],
-  );
   let restored = 0;
   let failed = 0;
   const botId = channel.client.user?.id;
-  for (const archived of messages.rows) {
+  let cursorCreatedAt: string | null = null;
+  let cursorMessageId: string | null = null;
+
+  // Keyset pagination replays the complete archive without loading every row
+  // into memory or silently truncating recovery at a fixed message count.
+  while (true) {
+    const messages = cursorCreatedAt === null || cursorMessageId === null
+      ? await pool.query<MessageArchiveRow>(
+          'SELECT * FROM ticket_message_archive WHERE ticket_id=$1 ORDER BY created_at ASC,message_id ASC LIMIT 100',
+          [ticketId],
+        )
+      : await pool.query<MessageArchiveRow>(
+          'SELECT * FROM ticket_message_archive WHERE ticket_id=$1 AND (created_at,message_id)>($2::timestamptz,$3::text) ORDER BY created_at ASC,message_id ASC LIMIT 100',
+          [ticketId, cursorCreatedAt, cursorMessageId],
+        );
+    if (!messages.rows.length) break;
+
+    for (const archived of messages.rows) {
     const archivedEmbeds = parseJsonArray(archived.embeds);
     const archivedComponents = parseJsonArray(archived.components) as Array<Record<string, unknown>>;
     const isPanel = archived.is_bot && archivedComponents.some((row) => {
@@ -826,6 +839,12 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string): P
       failed += 1;
       console.warn('ResolveX could not replay archived message ' + archived.message_id + ':', error instanceof Error ? error.message : 'unknown error');
     }
+
+    const lastArchived = messages.rows[messages.rows.length - 1]!;
+    cursorCreatedAt = lastArchived.created_at instanceof Date
+      ? lastArchived.created_at.toISOString()
+      : new Date(lastArchived.created_at).toISOString();
+    cursorMessageId = lastArchived.message_id;
   }
   return { restored, failed };
 }
