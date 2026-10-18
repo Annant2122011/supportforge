@@ -90,6 +90,21 @@ test('custom panel preview disables ticket buttons while published controls reta
   assert.equal(publishedButtons[1]?.data.custom_id, 'ticket:create:technical');
 });
 
+test('custom panels accept at most 25 ordered controls and publish within Discord row limits', () => {
+  const buttons = Array.from({ length: 25 }, (_, index) => ({
+    departmentId: index % 2 === 0 ? 'billing' : 'technical',
+    label: 'Support option ' + (index + 1),
+    style: 'primary',
+  }));
+  const parsed = parseCustomPanelButtons(buttons, departments);
+  assert.equal(parsed.length, 25);
+  const rows = buildCustomPanelComponents({ ...examplePanel, buttons: parsed }, false);
+  assert.equal(rows.length, 5);
+  assert.equal(rows.every((row) => row.components.length <= 5), true);
+  assert.equal(rows.flatMap((row) => row.components).length, 25);
+  assert.throws(() => parseCustomPanelButtons([...buttons, buttons[0]], departments), /between 1 and 25/);
+});
+
 test('custom panel embed renders its configured title, description, color, and banner', () => {
   const panel = { ...examplePanel, bannerUrl: 'https://cdn.example.com/banner.png' };
   const embed = buildCustomPanelEmbed(panel, 'Example Server', 0x5865f2, false).toJSON();
