@@ -407,16 +407,20 @@ export async function backfillTicketArchiveBatch(client: { guilds: { cache: Map<
 }
 
 export async function startTicketArchiveBackfill(client: { guilds: { cache: Map<string, Guild> } }): Promise<void> {
+  let running = false;
   const tick = async (): Promise<void> => {
+    if (running) return;
+    running = true;
     try {
-      const didWork = await backfillTicketArchiveBatch(client);
-      if (!didWork) return;
+      await backfillTicketArchiveBatch(client);
     } catch (error) {
       console.warn('ResolveX ticket archive backfill will retry:', error instanceof Error ? error.message : 'unknown error');
+    } finally {
+      running = false;
     }
   };
   void tick();
-  const timer = setInterval(() => { void tick(); }, 30_000);
+  const timer = setInterval(() => { void tick(); }, 15_000);
   timer.unref();
 }
 
@@ -437,7 +441,17 @@ export async function archiveTicketChannelForRecovery(channel: TextChannel): Pro
       [ticket.id],
     );
     const archive = state.rows[0];
-    if (archive?.backfill_complete) return;
+    if (archive?.backfill_complete) {
+      // The historic scan is complete, but recent messages may have been
+      // missed while Discord/Neon was temporarily unavailable. Reconcile the
+      // newest page once more before the destructive action is allowed.
+      const recent = await channel.messages.fetch({ limit: ARCHIVE_PAGE_SIZE });
+      const orderedRecent = Array.from(recent.values()).sort((a, b) =>
+        BigInt(a.id) < BigInt(b.id) ? -1 : BigInt(a.id) > BigInt(b.id) ? 1 : 0,
+      );
+      for (const message of orderedRecent) await archiveTicketMessage(message);
+      return;
+    }
     const queryOptions: { limit: number; before?: string } = { limit: ARCHIVE_PAGE_SIZE };
     if (archive?.backfill_cursor) queryOptions.before = archive.backfill_cursor;
     const page = await channel.messages.fetch(queryOptions);
