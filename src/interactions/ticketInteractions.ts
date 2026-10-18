@@ -74,6 +74,7 @@ import {
 } from '../services/ticketPersistenceService';
 
 import {
+  ensureAuditDeveloperInfrastructure,
   getTicketAuditHistory,
   logTicketEvent,
   logSystemEvent,
@@ -6031,6 +6032,9 @@ async function handleTicketDeletionInteraction(interaction: ButtonInteraction): 
     const supportCategoryId = config.supportCategoryId;
     const ticketNumber = ticket?.ticketNumber ?? getField(topic, 'number') ?? 'unknown';
     if (supportCategoryId) {
+      // Deletion confirmation is a required security event, so ensure a
+      // developer audit destination exists before removing the channel.
+      await ensureAuditDeveloperInfrastructure(interaction.guild, supportCategoryId);
       await logTicketEvent(interaction.guild, supportCategoryId, {
         ticketNumber,
         ticketChannelId: channel.id,
