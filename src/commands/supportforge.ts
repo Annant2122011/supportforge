@@ -1080,6 +1080,12 @@ export const data =
             ),
         )
 
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('delete')
+            .setDescription('Delete this ticket after two explicit confirmations'),
+        )
+
         // ADD USER
         .addSubcommand((subcommand) =>
           subcommand
