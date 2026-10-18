@@ -538,7 +538,11 @@ export function validateTicketFormAnswers(
   rawAnswers: Record<string, unknown>,
 ): Record<string, unknown> {
   const answers: Record<string, unknown> = {};
-  for (const field of fields) {
+  // Conditions depend on earlier steps, not schema array order. Normalize each
+  // step in order and ignore values submitted for fields the user was not shown.
+  const orderedFields = [...fields].sort((left, right) => left.step - right.step);
+  for (const field of orderedFields) {
+    if (field.condition && !conditionMatches(field.condition, answers)) continue;
     const raw = rawAnswers[field.id];
     const blank = raw === undefined || raw === null ||
       (typeof raw === 'string' && raw.trim().length === 0) ||
