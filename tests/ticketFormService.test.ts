@@ -123,6 +123,28 @@ test('conditional fields are shown only when earlier-step conditions match', () 
   );
 });
 
+test('does not require hidden conditional fields and ignores injected hidden answers', () => {
+  const fields = parseTicketFormFields([
+    { id: 'reason', label: 'Reason', type: 'dropdown', required: true, choices: ['Question', 'Refund'], step: 1 },
+    { id: 'refund_details', label: 'Refund details', type: 'short_text', required: true, step: 2,
+      condition: { fieldId: 'reason', operator: 'equals', value: 'Refund' } },
+  ]);
+
+  assert.deepEqual(validateTicketFormAnswers(fields, { reason: 'Question' }), { reason: 'Question' });
+  assert.deepEqual(
+    validateTicketFormAnswers(fields, { reason: 'Question', refund_details: 'injected hidden value' }),
+    { reason: 'Question' },
+  );
+  assert.throws(
+    () => validateTicketFormAnswers(fields, { reason: 'Refund' }),
+    /Refund details.*is required/,
+  );
+  assert.deepEqual(
+    validateTicketFormAnswers(fields, { reason: 'Refund', refund_details: 'Order was cancelled' }),
+    { reason: 'Refund', refund_details: 'Order was cancelled' },
+  );
+});
+
 test('validates text patterns and numeric boundaries server-side', () => {
   const fields = parseTicketFormFields([
     { id: 'order', label: 'Order code', type: 'short_text', required: true, pattern: '^[A-Z]{2}-[0-9]+$' },
