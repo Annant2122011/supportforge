@@ -469,7 +469,12 @@ function conditionMatches(condition: TicketFormCondition, answers: Record<string
   // A missing/hidden controller can never make a conditional field visible,
   // including for negative operators. This prevents skipped parent steps
   // accidentally revealing downstream questions.
-  if (observed === undefined || observed === null || observed === '') return false;
+  if (
+    observed === undefined ||
+    observed === null ||
+    observed === '' ||
+    (Array.isArray(observed) && observed.length === 0)
+  ) return false;
 
   const expected = condition.value;
   const equal = (): boolean => {
