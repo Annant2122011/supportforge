@@ -4,6 +4,7 @@ import {
   EmbedBuilder,
   PermissionFlagsBits,
   PermissionsBitField,
+  OverwriteType,
   type APIEmbed,
   type Guild,
   type Message,
@@ -603,13 +604,13 @@ async function permissionOverwritePayload(
   guild: Guild,
   ticket: NonNullable<Awaited<ReturnType<typeof getPersistedTicketById>>>,
   raw: unknown,
-): Promise<Array<{ id: string; type: 'role' | 'member'; allow: PermissionResolvable[]; deny: PermissionResolvable[] }>> {
+): Promise<Array<{ id: string; type: OverwriteType; allow: PermissionResolvable[]; deny: PermissionResolvable[] }>> {
   const values = parseJsonArray(raw) as Array<Record<string, unknown>>;
-  const map = new Map<string, { id: string; type: 'role' | 'member'; allow: PermissionResolvable[]; deny: PermissionResolvable[] }>();
+  const map = new Map<string, { id: string; type: OverwriteType; allow: PermissionResolvable[]; deny: PermissionResolvable[] }>();
 
   for (const item of values) {
     const id = typeof item.id === 'string' ? item.id : '';
-    const type = item.type === 1 ? 'member' : 'role';
+    const type = item.type === 1 ? OverwriteType.Member : OverwriteType.Role;
     if (!/^\d{17,20}$/.test(id)) continue;
     if (type === 'role' && id !== guild.id && !guild.roles.cache.has(id)) continue;
     if (type === 'member') {
@@ -623,13 +624,13 @@ async function permissionOverwritePayload(
     map.set(id, { id, type, allow, deny });
   }
 
-  const everyone = map.get(guild.id) ?? { id: guild.id, type: 'role' as const, allow: [], deny: [] };
+  const everyone = map.get(guild.id) ?? { id: guild.id, type: OverwriteType.Role, allow: [], deny: [] };
   everyone.allow = everyone.allow.filter((permission) => permission !== PermissionFlagsBits.ViewChannel);
   if (!everyone.deny.includes(PermissionFlagsBits.ViewChannel)) everyone.deny.push(PermissionFlagsBits.ViewChannel);
   map.set(guild.id, everyone);
 
   const bot = guild.members.me ?? await guild.members.fetchMe();
-  const botOverwrite = map.get(bot.id) ?? { id: bot.id, type: 'member' as const, allow: [], deny: [] };
+  const botOverwrite = map.get(bot.id) ?? { id: bot.id, type: OverwriteType.Member, allow: [], deny: [] };
   botOverwrite.deny = botOverwrite.deny.filter((permission) =>
     ![PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory,
       PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ManageChannels].includes(permission as bigint),
@@ -645,7 +646,7 @@ async function permissionOverwritePayload(
   for (const userId of participantIds) {
     const member = guild.members.cache.get(userId) ?? await guild.members.fetch(userId).catch(() => null);
     if (!member) continue;
-    const existing = map.get(userId) ?? { id: userId, type: 'member' as const, allow: [], deny: [] };
+    const existing = map.get(userId) ?? { id: userId, type: OverwriteType.Member, allow: [], deny: [] };
     existing.deny = existing.deny.filter((permission) =>
       ![PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory,
         PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks].includes(permission as bigint),
