@@ -2324,9 +2324,11 @@ export async function handleSettingsInteraction(
           reason: error instanceof Error ? error.message : 'GitHub deployment request failed.',
         }));
         await refreshSettingsChannel(guild);
+        const repairThemeColor = getThemeColor((await getGuildConfig(guild.id)).theme);
         await interaction.editReply({
           embeds: [
             new EmbedBuilder()
+              .setColor(repairThemeColor)
               .setTitle('🛡️ Restore & Update • Complete')
               .setDescription(
                 'The existing PostgreSQL-backed configuration and ticket records were retained. SupportForge has reconciled its managed categories, core channels, settings, transcript archive, audit panel, support panel, and department categories.\n\n' +
@@ -2964,10 +2966,12 @@ async function showHomeAfterUpdate(interaction: ButtonInteraction): Promise<void
 }
 
 async function showRepairSystem(interaction: ButtonInteraction): Promise<void> {
+  const themeColor = getThemeColor((await getGuildConfig(interaction.guild!.id)).theme);
   await renderSettingsView(
     interaction,
     [
       new EmbedBuilder()
+        .setColor(themeColor)
         .setTitle('🛠️ Repair System')
         .setDescription(
           'ResolveX repairs managed infrastructure without resetting Neon data. Restore & Update reconciles Discord infrastructure and requests a GitHub Actions deployment. Automatic pushes to main and the independent server watchdog deploy code without requiring this button. ' +
