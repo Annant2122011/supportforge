@@ -225,8 +225,15 @@ export async function handleCustomPanelSettingsInteraction(
       if (!panel) throw new Error('Panel not found.');
       const theme = await getGuildTheme(guild.id);
       const embed = buildCustomPanelEmbed(panel, guild.name, theme.color, true);
-      await render(interaction, panel.name + ' • Live Preview', 'Private draft preview. Ticket buttons are disabled here and only become active after publishing.', [
-        ...buildCustomPanelComponents(panel, true).map((component) => component as ActionRowBuilder<ButtonBuilder>),
+      const previewRows = buildCustomPanelComponents(panel, true);
+      // Discord allows five action rows per message. Reserve the fifth row for
+      // navigation, showing the first 20 controls when a draft has 21–25.
+      const visiblePreviewRows = previewRows.slice(0, 4);
+      const previewNote = panel.buttons.length > 20
+        ? 'Private draft preview. The first 20 buttons are shown here so navigation fits within Discord’s five-row limit; publishing includes all ' + panel.buttons.length + ' configured buttons. Preview buttons are disabled.'
+        : 'Private draft preview. Ticket buttons are disabled here and only become active after publishing.';
+      await render(interaction, panel.name + ' • Live Preview', previewNote, [
+        ...visiblePreviewRows,
         row(makeButton(PREFIX + 'detail:' + panel.id, 'Back to Panel Details', ButtonStyle.Secondary, '↩️')),
       ], [embed]);
       return true;
