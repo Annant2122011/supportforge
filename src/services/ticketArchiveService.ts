@@ -12,7 +12,7 @@ import {
   type TextChannel,
 } from 'discord.js';
 import { randomUUID } from 'node:crypto';
-import type { QueryResultRow } from 'pg';
+import type { QueryResult, QueryResultRow } from 'pg';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
 import { getGuildConfig } from './configService';
@@ -709,18 +709,19 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string): P
   // Keyset pagination replays the complete archive without loading every row
   // into memory or silently truncating recovery at a fixed message count.
   while (true) {
-    const messages: { rows: MessageArchiveRow[] } = cursorCreatedAt === null || cursorMessageId === null
+    const pageResult: QueryResult<MessageArchiveRow> = cursorCreatedAt === null || cursorMessageId === null
       ? await pool.query<MessageArchiveRow>(
-          'SELECT * FROM ticket_message_archive WHERE ticket_id=$1 ORDER BY created_at ASC,message_id ASC LIMIT 100',
-          [ticketId],
+          'SELECT * FROM ticket_message_archive WHERE ticket_id=$1 ORDER BY created_at ASC,message_id ASC LIMIT $2',
+          [ticketId, ARCHIVE_PAGE_SIZE],
         )
       : await pool.query<MessageArchiveRow>(
-          'SELECT * FROM ticket_message_archive WHERE ticket_id=$1 AND (created_at,message_id)>($2::timestamptz,$3::text) ORDER BY created_at ASC,message_id ASC LIMIT 100',
-          [ticketId, cursorCreatedAt, cursorMessageId],
+          'SELECT * FROM ticket_message_archive WHERE ticket_id=$1 AND (created_at,message_id)>($2::timestamptz,$3::text) ORDER BY created_at ASC,message_id ASC LIMIT $4',
+          [ticketId, cursorCreatedAt, cursorMessageId, ARCHIVE_PAGE_SIZE],
         );
-    if (!messages.rows.length) break;
+    const pageRows: MessageArchiveRow[] = pageResult.rows;
+    if (pageRows.length === 0) break;
 
-    for (const archived of messages.rows) {
+    for (const archived of pageRows) {
     const archivedEmbeds = parseJsonArray(archived.embeds);
     const archivedComponents = parseJsonArray(archived.components) as Array<Record<string, unknown>>;
     const isPanel = archived.is_bot && archivedComponents.some((row) => {
@@ -844,7 +845,7 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string): P
     }
     }
 
-    const lastArchived: MessageArchiveRow = messages.rows[messages.rows.length - 1]!;
+    const lastArchived = pageRows[pageRows.length - 1] as MessageArchiveRow;
     cursorCreatedAt = lastArchived.created_at instanceof Date
       ? lastArchived.created_at.toISOString()
       : new Date(lastArchived.created_at).toISOString();
