@@ -1,0 +1,9 @@
+[Unit]
+Description=ResolveX GitHub self-update reconciliation
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/resolvex-update.env
+ExecStart=/bin/bash /opt/resolvex/scripts/self-update.sh
