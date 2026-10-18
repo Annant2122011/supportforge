@@ -460,6 +460,25 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+  {
+    id: 11,
+    name: 'add_idempotent_ticket_recovery_replay_ledger',
+    up: async (db) => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS ticket_recovery_replay_items (
+          recovery_event_id TEXT NOT NULL REFERENCES ticket_recovery_events(id) ON DELETE CASCADE,
+          original_message_id TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'completed'
+            CHECK (status IN ('completed')),
+          replayed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (recovery_event_id, original_message_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ticket_recovery_replay_items_message
+          ON ticket_recovery_replay_items (original_message_id);
+      `);
+    },
+  },
 ];
 export async function runPostgresMigrations(
   db: TransactionExecutor,
