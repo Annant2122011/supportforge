@@ -7,6 +7,7 @@ import {
   EmbedBuilder,
   GatewayIntentBits,
   MessageFlags,
+  Partials,
   RESTEvents,
 } from 'discord.js';
 
@@ -97,6 +98,9 @@ async function initializeAndLogin(): Promise<void> {
 }
 
 const client = new Client({
+  // Partial message payloads allow deletion/edit events for uncached Discord
+  // messages to update the durable archive rather than silently disappearing.
+  partials: [Partials.Channel, Partials.Message],
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
