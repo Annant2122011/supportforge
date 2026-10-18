@@ -137,6 +137,21 @@ function safeFilename(value: string): string {
   return (cleaned || 'recovered-attachment').slice(0, 120);
 }
 
+function chunkText(value: string, maxLength: number): string[] {
+  if (!value) return [];
+  const chunks: string[] = [];
+  let current = '';
+  for (const character of value) {
+    if (current.length + character.length > maxLength && current) {
+      chunks.push(current);
+      current = '';
+    }
+    current += character;
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
 async function readBodyWithLimit(response: Response, maxBytes: number): Promise<Buffer> {
   if (!response.body) return Buffer.alloc(0);
   const reader = response.body.getReader();
@@ -700,55 +715,108 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string): P
 
     try {
       const author = archived.author_display_name || archived.author_username || 'Unknown author';
-      const embed = new EmbedBuilder()
+      const originalCreatedAt = archived.created_at instanceof Date
+        ? archived.created_at.toISOString()
+        : new Date(archived.created_at).toISOString();
+      const attribution = '[Recovered original message by ' + author +
+        ' • Original user ID: ' + archived.author_id +
+        ' • Original channel ID: ' + archived.original_channel_id +
+        ' • Original message ID: ' + archived.message_id +
+        ' • Original timestamp (UTC): ' + originalCreatedAt + ']';
+      const config = await getGuildConfig(channel.guild.id).catch(() => null);
+      const color = config
+        ? (({ midnight: 0x5865f2, 'cyber-neon': 0x00f5ff, ocean: 0x0077b6, aurora: 0x8e44ad, ember: 0xe67e22, forest: 0x27ae60 } as Record<string, number>)[config.theme] ?? 0x5865f2)
+        : 0x5865f2;
+
+      const header = new EmbedBuilder()
+        .setColor(color)
         .setTitle(('Recovered message • ' + author).slice(0, 256))
-        .setDescription((archived.content || '*(Original message contained no text content.)*').slice(0, 4000))
-        .addFields(
-          { name: 'Original author', value: (author + ' • User ID: ' + archived.author_id).slice(0, 1024) },
-          { name: 'Original channel ID', value: archived.original_channel_id.slice(0, 1024), inline: true },
-          { name: 'Original message ID', value: archived.message_id.slice(0, 1024), inline: true },
-          { name: 'Original timestamp (UTC)', value: (archived.created_at instanceof Date ? archived.created_at.toISOString() : new Date(archived.created_at).toISOString()).slice(0, 1024) },
+        .setDescription(
+          'This content was reposted by ResolveX from its durable archive. It is not an original Discord message authored by the user.\n\n' +
+          '**Original author:** ' + author + ' (user ID: ' + archived.author_id + ')\n' +
+          '**Original channel ID:** ' + archived.original_channel_id + '\n' +
+          '**Original message ID:** ' + archived.message_id + '\n' +
+          '**Original timestamp (UTC):** ' + originalCreatedAt,
         )
         .setFooter({ text: RECOVERY_FOOTER_PREFIX + ' • Original message ID ' + archived.message_id });
-      const config = await getGuildConfig(channel.guild.id).catch(() => null);
-      if (config) {
-        const color = ({ midnight: 0x5865f2, 'cyber-neon': 0x00f5ff, ocean: 0x0077b6, aurora: 0x8e44ad, ember: 0xe67e22, forest: 0x27ae60 } as Record<string, number>)[config.theme] ?? 0x5865f2;
-        embed.setColor(color);
-      }
       try {
-        if (archived.author_avatar_url) embed.setAuthor({ name: author.slice(0, 256), iconURL: archived.author_avatar_url });
+        if (archived.author_avatar_url) header.setAuthor({ name: author.slice(0, 256), iconURL: archived.author_avatar_url });
       } catch { /* An expired avatar URL does not block message replay. */ }
       if (archived.edited_at) {
         const edited = archived.edited_at instanceof Date ? archived.edited_at.toISOString() : new Date(archived.edited_at).toISOString();
-        embed.addFields({ name: 'Last archived edit', value: edited, inline: true });
+        header.addFields({ name: 'Last archived edit (UTC)', value: edited, inline: true });
+      }
+      const archivedComponents = parseJsonArray(archived.components) as Array<Record<string, unknown>>;
+      const componentCount = archivedComponents.reduce((total, row) =>
+        total + (Array.isArray(row.components) ? (row.components as unknown[]).length : 0), 0);
+      if (componentCount > 0) {
+        header.addFields({
+          name: 'Original interactive controls',
+          value: componentCount + ' control(s) were present. Historical controls are not reactivated during replay; the live ticket panel has been rebuilt with current safe actions.',
+        });
+      }
+      await channel.send({ embeds: [header], allowedMentions: { parse: [] } });
+
+      const content = archived.content ?? '';
+      if (content) {
+        const chunks = chunkText(content, Math.max(500, 1800 - attribution.length - 40));
+        for (let part = 0; part < chunks.length; part += 1) {
+          const partLabel = chunks.length > 1 ? ' • part ' + (part + 1) + '/' + chunks.length : '';
+          const prefix = attribution + partLabel + '\n';
+          await channel.send({
+            content: prefix + chunks[part],
+            allowedMentions: { parse: [] },
+          });
+        }
+      } else if (archivedEmbeds.length === 0 && archivedComponents.length === 0) {
+        await channel.send({
+          content: attribution + '\n[The original message contained no text content.]',
+          allowedMentions: { parse: [] },
+        });
       }
 
-      const originalEmbeds = archivedEmbeds
-        .slice(0, 9)
-        .flatMap((entry) => {
-          try { return [EmbedBuilder.from(entry as APIEmbed)]; } catch { return []; }
+      // Embeds are replayed separately so recovery attribution cannot push an
+      // originally valid embed over Discord's combined 6,000-character limit.
+      const originalEmbeds = archivedEmbeds.flatMap((entry) => {
+        try { return [EmbedBuilder.from(entry as APIEmbed)]; } catch { return []; }
+      });
+      for (let index = 0; index < originalEmbeds.length; index += 5) {
+        await channel.send({
+          content: attribution + (originalEmbeds.length > 5 ? ' • archived embed ' + (index + 1) + '-' + Math.min(index + 5, originalEmbeds.length) + '/' + originalEmbeds.length : ' • original embed'),
+          embeds: originalEmbeds.slice(index, index + 5),
+          allowedMentions: { parse: [] },
         });
+      }
+
       const attachmentRows = await pool.query<AttachmentArchiveRow>(
         'SELECT * FROM ticket_message_archive_attachments WHERE message_id=$1 ORDER BY attachment_id',
         [archived.message_id],
       );
-      const files: AttachmentBuilder[] = [];
       const unavailable: string[] = [];
       for (const attachment of attachmentRows.rows) {
         if (attachment.archived_bytes && attachment.archive_status === 'archived') {
-          files.push(new AttachmentBuilder(attachment.archived_bytes, { name: safeFilename(attachment.original_filename) }));
+          try {
+            await channel.send({
+              content: attribution + '\n📎 Recovered attachment: ' + attachment.original_filename,
+              files: [new AttachmentBuilder(attachment.archived_bytes, { name: safeFilename(attachment.original_filename) })],
+              allowedMentions: { parse: [] },
+            });
+          } catch (error) {
+            unavailable.push(attachment.original_filename + ' (upload failed: ' + (error instanceof Error ? error.message : 'unknown error') + ')');
+          }
         } else {
           unavailable.push(attachment.original_filename + (attachment.archive_error ? ' (' + attachment.archive_error + ')' : ' (file bytes were not archived)'));
         }
       }
       if (unavailable.length) {
-        embed.addFields({ name: 'Attachments not fully archived', value: unavailable.join('\\n').slice(0, 1024) });
+        const unavailableParts = chunkText(unavailable.join('\n'), 1500);
+        for (const part of unavailableParts) {
+          await channel.send({
+            content: attribution + '\nAttachments that could not be restored:\n' + part,
+            allowedMentions: { parse: [] },
+          });
+        }
       }
-      await channel.send({
-        embeds: [embed, ...originalEmbeds].slice(0, 10),
-        files,
-        allowedMentions: { parse: [] },
-      });
       restored += 1;
     } catch (error) {
       failed += 1;
