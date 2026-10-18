@@ -955,6 +955,21 @@ export async function restoreArchivedTicket(
   topic = setField(topic, 'restored_from', recoveryEvent.original_channel_id);
   topic = setField(topic, 'recovery_event', recoveryEvent.id);
   topic = setField(topic, 'status', ticket.status);
+  if (topic.length > 1024) {
+    // Keep the durable identifiers and routing metadata rather than truncating
+    // the recovery marker from a legacy topic that already used the full limit.
+    topic = 'supportforge:ticket';
+    topic = setField(topic, 'number', ticket.ticketNumber ?? ticketId.slice(0, 8));
+    topic = setField(topic, 'owner', ticket.ownerId ?? '');
+    topic = setField(topic, 'department', ticket.departmentId ?? '');
+    topic = setField(topic, 'tags', ticket.tagId ?? '');
+    topic = setField(topic, 'priority', ticket.priority ?? 'normal');
+    topic = setField(topic, 'status', ticket.status);
+    topic = setField(topic, 'opened_at', ticket.createdAt);
+    topic = setField(topic, 'original_channel_id', recoveryEvent.original_channel_id);
+    topic = setField(topic, 'restored_from', recoveryEvent.original_channel_id);
+    topic = setField(topic, 'recovery_event', recoveryEvent.id);
+  }
 
   let channel: TextChannel;
   const replacementBySavedId = recoveryEvent.replacement_channel_id
