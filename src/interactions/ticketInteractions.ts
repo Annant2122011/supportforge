@@ -76,6 +76,7 @@ import {
 import {
   getTicketAuditHistory,
   logTicketEvent,
+  logSystemEvent,
 } from '../services/auditLogService';
 import {
   TICKET_FORM_MODAL_TTL_MS,
@@ -99,6 +100,12 @@ import {
   acquireTicketCreationLease,
   releaseTicketCreationLease,
 } from '../services/ticketCreationLeaseService';
+
+import {
+  archiveTicketChannelForRecovery,
+  beginTicketButtonDeletion,
+  cancelTicketButtonDeletion,
+} from '../services/ticketArchiveService';
 
 import {
   TICKET_PREFIX,
@@ -5909,6 +5916,167 @@ export async function executeTicketLifecycleCommand(
   await transition(interaction, 'reopened');
 }
 
+
+async function handleTicketDeletionInteraction(interaction: ButtonInteraction): Promise<void> {
+  if (!(await safeDeferReply(interaction))) return;
+  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
+    await interaction.editReply('This deletion control only works inside a ticket channel.');
+    return;
+  }
+
+  const channel = interaction.channel as TextChannel;
+  const topic = channel.topic ?? '';
+  if (!isTicketTopic(topic)) {
+    await interaction.editReply('This channel is not a managed ResolveX ticket.');
+    return;
+  }
+
+  const config = await getGuildConfig(interaction.guild.id);
+  const ticket = await getPersistedTicket(channel.id);
+  const departmentId = ticket?.departmentId ?? getField(topic, 'department') ?? '';
+  const department = config.departments[departmentId];
+  const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+  const isStaff = Boolean(member && department?.staffRoleId && member.roles.cache.has(department.staffRoleId));
+  const isAdmin = Boolean(
+    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels),
+  );
+  if (!isAdmin && !isStaff) {
+    await interaction.editReply('Only configured department staff or administrators with Manage Channels can delete this ticket.');
+    return;
+  }
+
+  const color = getThemeColor(config.theme);
+  const cancel = new ButtonBuilder()
+    .setCustomId('ticket:delete:cancel')
+    .setLabel('Cancel')
+    .setEmoji('↩️')
+    .setStyle(ButtonStyle.Secondary);
+
+  if (interaction.customId === 'ticket:delete:cancel') {
+    await interaction.editReply({
+      embeds: [new EmbedBuilder().setColor(color).setTitle('Ticket deletion cancelled').setDescription('The ticket channel and its archived messages were left unchanged.')],
+      components: [],
+    });
+    return;
+  }
+
+  if (interaction.customId === 'ticket:delete:start') {
+    await interaction.editReply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(color)
+          .setTitle('⚠️ Confirm ticket deletion · Step 1 of 2')
+          .setDescription(
+            'You are about to delete **#' + (ticket?.ticketNumber ?? getField(topic, 'number') ?? 'unknown') +
+            '**. ResolveX will archive the available conversation and then delete this channel. This action removes the current channel URL and cannot be undone in place.',
+          )
+          .setFooter({ text: 'ResolveX • Two-step deletion protection' }),
+      ],
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId('ticket:delete:confirm-one').setLabel('Confirm step 1 of 2').setEmoji('⚠️').setStyle(ButtonStyle.Danger),
+          cancel,
+        ),
+      ],
+    });
+    return;
+  }
+
+  if (interaction.customId === 'ticket:delete:confirm-one') {
+    await interaction.editReply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(color)
+          .setTitle('🚨 Final confirmation · Step 2 of 2')
+          .setDescription(
+            'This is the second confirmation. ResolveX will finish archiving the ticket history before deleting the channel. If archival fails, deletion will be cancelled. A separate deletion-review record will be created.',
+          )
+          .setFooter({ text: 'ResolveX • Final confirmation required' }),
+      ],
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId('ticket:delete:confirm-two').setLabel('Delete ticket permanently').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+          cancel,
+        ),
+      ],
+    });
+    return;
+  }
+
+  if (interaction.customId !== 'ticket:delete:confirm-two') {
+    await interaction.editReply('This deletion confirmation is no longer recognized. Reopen the ticket panel and start again.');
+    return;
+  }
+
+  let intentRecorded = false;
+  try {
+    await interaction.editReply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(color)
+          .setTitle('📦 Preparing ticket archive')
+          .setDescription('ResolveX is saving message history, edits, attachment metadata and accessible attachment files before deletion. The channel will remain if archival cannot finish.')
+          .setFooter({ text: 'ResolveX • Durable recovery' }),
+      ],
+      components: [],
+    });
+
+    await archiveTicketChannelForRecovery(channel);
+    await beginTicketButtonDeletion(channel, interaction.user.id, interaction.user.tag);
+    intentRecorded = true;
+
+    const supportCategoryId = config.supportCategoryId;
+    const ticketNumber = ticket?.ticketNumber ?? getField(topic, 'number') ?? 'unknown';
+    if (supportCategoryId) {
+      await logTicketEvent(interaction.guild, supportCategoryId, {
+        ticketNumber,
+        ticketChannelId: channel.id,
+        event: 'TICKET_DELETE_BUTTON_CONFIRMED',
+        actor: interaction.user.tag,
+        actorId: interaction.user.id,
+        actorName: interaction.user.tag,
+        detail: 'Ticket deletion completed the two-confirmation flow. A separate Settings review will ask whether this deletion was a mistake.',
+      });
+      await logSystemEvent(
+        interaction.guild,
+        supportCategoryId,
+        'TICKET_DELETE_BUTTON_CONFIRMED',
+        'Ticket #' + ticketNumber + ' deletion initiated through the ticket button by ' + interaction.user.tag + ' (' + interaction.user.id + '). Confirmation count: 2. Channel ID: ' + channel.id,
+      );
+    }
+
+    await channel.delete('ResolveX ticket Delete button; actor ' + interaction.user.id + '; two confirmations completed');
+    await interaction.editReply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(color)
+          .setTitle('✅ Ticket channel deleted')
+          .setDescription('The channel was deleted after the durable archive step. Open **Settings → Repair System → Ticket Deletion Review** to answer “Was this ticket deleted by mistake?” The original channel ID and recovered-message attribution remain in the archive.')
+          .setFooter({ text: 'ResolveX • The replacement channel will have a new ID and URL if restored.' }),
+      ],
+      components: [],
+    });
+  } catch (error) {
+    if (intentRecorded) {
+      await cancelTicketButtonDeletion(channel.id).catch(() => undefined);
+    }
+    const detail = error instanceof Error ? error.message : 'Unknown deletion error.';
+    console.error('ResolveX ticket-button deletion failed:', error);
+    await interaction.editReply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(color)
+          .setTitle('❌ Ticket deletion did not complete')
+          .setDescription(detail.slice(0, 3500) + '\n\nThe ticket channel was not intentionally deleted by ResolveX. Check the archive and bot permissions before retrying.')
+          .setFooter({ text: 'ResolveX • Database and channel state are preserved where possible' }),
+      ],
+      components: [],
+    }).catch(() => undefined);
+  }
+}
+
 export async function handleTicketInteraction(
   interaction:
     | ButtonInteraction
@@ -5916,6 +6084,10 @@ export async function handleTicketInteraction(
     | ModalSubmitInteraction,
 ): Promise<void> {
   try {
+    if (interaction.isButton() && interaction.customId.startsWith('ticket:delete:')) {
+      await handleTicketDeletionInteraction(interaction);
+      return;
+    }
     const routingComponentRoute = classifyTicketRoutingComponent(interaction.customId);
     /*
      * Move/Restore is allowed to perform several Discord API operations,
