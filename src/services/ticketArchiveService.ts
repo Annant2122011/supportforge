@@ -626,8 +626,8 @@ async function permissionOverwritePayload(
     const id = typeof item.id === 'string' ? item.id : '';
     const type = item.type === 1 ? OverwriteType.Member : OverwriteType.Role;
     if (!/^\d{17,20}$/.test(id)) continue;
-    if (type === 'role' && id !== guild.id && !guild.roles.cache.has(id)) continue;
-    if (type === 'member') {
+    if (type === OverwriteType.Role && id !== guild.id && !guild.roles.cache.has(id)) continue;
+    if (type === OverwriteType.Member) {
       const member = guild.members.cache.get(id) ?? await guild.members.fetch(id).catch(() => null);
       if (!member) continue;
     }
