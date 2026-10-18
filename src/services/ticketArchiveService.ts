@@ -600,8 +600,8 @@ export async function listTicketRecoveryCandidates(
   source: 'discord_native' | 'ticket_button',
 ): Promise<TicketRecoveryCandidate[]> {
   const statusPredicate = source === 'discord_native'
-    ? "r.status IN ('deleted','failed')"
-    : "((r.status='deleted' AND r.accidental_answer IS NULL) OR (r.status='reviewed' AND r.accidental_answer='yes'))";
+    ? "r.status IN ('deleted','failed','restoring')"
+    : "((r.status='deleted' AND r.accidental_answer IS NULL) OR (r.status IN ('reviewed','failed','restoring') AND r.accidental_answer='yes'))";
   const result = await getPostgresPool().query<QueryResultRow & {
     ticket_id: string;
     guild_id: string;
@@ -1010,7 +1010,7 @@ export async function restoreArchivedTicket(
       "metadata=metadata || $4::jsonb WHERE id=$1",
     [
       recoveryEvent.id,
-      replay.failedMessages === 0 ? 'restored' : 'failed',
+      replay.failed === 0 ? 'restored' : 'failed',
       channel.id,
       JSON.stringify({ replayRestoredMessages: replay.restored, replayFailedMessages: replay.failed, replayAttemptedAt: new Date().toISOString() }),
     ],
