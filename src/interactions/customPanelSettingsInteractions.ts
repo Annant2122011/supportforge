@@ -106,6 +106,31 @@ function createPanelModal(): ModalBuilder {
     );
 }
 
+function appearancePanelModal(panel: {
+  id: string;
+  footer: string;
+  color: string | null;
+  thumbnailUrl: string | null;
+  bannerUrl: string | null;
+}): ModalBuilder {
+  const footer = new TextInputBuilder().setCustomId('footer').setLabel('Footer (type none to clear)').setStyle(TextInputStyle.Short).setMaxLength(2048).setRequired(false);
+  if (panel.footer) footer.setValue(panel.footer.slice(0, 1000));
+  const color = new TextInputBuilder().setCustomId('color').setLabel('Accent hex color, or none for server theme').setStyle(TextInputStyle.Short).setMaxLength(7).setRequired(false)
+    .setPlaceholder('#22D3EE');
+  if (panel.color) color.setValue('#' + panel.color);
+  const thumbnail = new TextInputBuilder().setCustomId('thumbnail-url').setLabel('Thumbnail URL (type none to clear)').setStyle(TextInputStyle.Short).setMaxLength(1000).setRequired(false);
+  if (panel.thumbnailUrl) thumbnail.setValue(panel.thumbnailUrl.slice(0, 1000));
+  const banner = new TextInputBuilder().setCustomId('banner-url').setLabel('Banner image URL (type none to clear)').setStyle(TextInputStyle.Short).setMaxLength(1000).setRequired(false);
+  if (panel.bannerUrl) banner.setValue(panel.bannerUrl.slice(0, 1000));
+  return new ModalBuilder().setCustomId(PREFIX + 'modal:appearance:' + panel.id).setTitle('Panel Branding')
+    .addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(footer),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(color),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(thumbnail),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(banner),
+    );
+}
+
 function updatePanelModal(panelId: string): ModalBuilder {
   const name = new TextInputBuilder().setCustomId('name').setLabel('Panel name (leave blank to keep)').setStyle(TextInputStyle.Short).setMaxLength(80).setRequired(false);
   const title = new TextInputBuilder().setCustomId('title').setLabel('Display title (leave blank to keep)').setStyle(TextInputStyle.Short).setMaxLength(256).setRequired(false);
@@ -171,6 +196,7 @@ async function showPanel(interaction: PanelSettingsInteraction, panelId: string)
       row(
         makeButton(PREFIX + 'preview:' + panel.id, 'Live Preview', ButtonStyle.Primary, '👁️'),
         makeButton(PREFIX + 'update:' + panel.id, 'Edit Draft', ButtonStyle.Secondary, '✏️'),
+        makeButton(PREFIX + 'appearance:' + panel.id, 'Branding', ButtonStyle.Secondary, '🎨'),
         makeButton(PREFIX + 'publish:' + panel.id, 'Publish / Update', ButtonStyle.Success, '🚀'),
       ),
       row(
@@ -246,6 +272,13 @@ export async function handleCustomPanelSettingsInteraction(
       const panelId = id.slice((PREFIX + 'update:').length);
       if (!await getCustomPanel(guild.id, panelId)) throw new Error('Panel not found.');
       await interaction.showModal(updatePanelModal(panelId));
+      return true;
+    }
+    if (interaction.isButton() && id.startsWith(PREFIX + 'appearance:')) {
+      const panelId = id.slice((PREFIX + 'appearance:').length);
+      const panel = await getCustomPanel(guild.id, panelId);
+      if (!panel) throw new Error('Panel not found.');
+      await interaction.showModal(appearancePanelModal(panel));
       return true;
     }
     if (interaction.isButton() && id.startsWith(PREFIX + 'publish:')) {
@@ -350,6 +383,31 @@ export async function handleCustomPanelSettingsInteraction(
       await render(interaction, 'Panel Draft Created', '**' + panel.name + '** was saved to Neon.\nPanel ID: `' + panel.id + '`\nButtons: **' + panel.buttons.length + '**\n\nPreview it privately and publish when ready.', [
         row(makeButton(PREFIX + 'preview:' + panel.id, 'Preview Draft', ButtonStyle.Primary, '👁️'), makeButton(PREFIX + 'detail:' + panel.id, 'Panel Details', ButtonStyle.Secondary, '🎛️')),
         row(makeButton(PREFIX + 'home', 'Custom Panels', ButtonStyle.Secondary, '↩️')),
+      ]);
+      return true;
+    }
+    if (interaction.isModalSubmit() && id.startsWith(PREFIX + 'modal:appearance:')) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const panelId = id.slice((PREFIX + 'modal:appearance:').length);
+      const optional = (fieldId: string): string | undefined => {
+        const value = interaction.fields.getTextInputValue(fieldId).trim();
+        return value || undefined;
+      };
+      const nullable = (fieldId: string): string | null | undefined => {
+        const value = optional(fieldId);
+        if (value === undefined) return undefined;
+        return value.toLowerCase() === 'none' ? null : value;
+      };
+      const footer = optional('footer');
+      const updated = await updateCustomPanel(guild.id, panelId, {
+        footer: footer === undefined ? undefined : (footer.toLowerCase() === 'none' ? '' : footer),
+        color: nullable('color'),
+        thumbnailUrl: nullable('thumbnail-url'),
+        bannerUrl: nullable('banner-url'),
+      });
+      await audit(interaction, 'CUSTOM_PANEL_BRANDING_UPDATED', 'Updated branding for panel "' + updated.name + '" (' + updated.id + ').');
+      await render(interaction, 'Panel Branding Updated', 'Saved branding for **' + updated.name + '**. Your published message stays unchanged until you publish the panel again.', [
+        row(makeButton(PREFIX + 'preview:' + updated.id, 'Preview Draft', ButtonStyle.Primary, '👁️'), makeButton(PREFIX + 'detail:' + updated.id, 'Panel Details', ButtonStyle.Secondary, '🎛️')),
       ]);
       return true;
     }
