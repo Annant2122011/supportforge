@@ -77,11 +77,14 @@ jobs:
             echo "DEPLOY_PATH must point to the existing SupportForge Git clone."
             exit 2
           fi
+          exec 9>/tmp/resolvex-deploy.lock
+          flock 9
           old_sha="$(git rev-parse HEAD)"
           rollback() {
             status=$?
             trap - ERR
             echo "Deployment failed; attempting source rollback to $old_sha."
+            git checkout -B main "$old_sha" || true
             git reset --hard "$old_sha" || true
             npm ci || true
             npm run build || true
@@ -91,13 +94,19 @@ jobs:
           trap rollback ERR
           git fetch --prune origin main
           target_sha="$(git rev-parse origin/main)"
-          git checkout main
+          if [[ "$target_sha" == "$old_sha" ]]; then
+            echo "Deployment is already current at $target_sha."
+            trap - ERR
+            exit 0
+          fi
+          git checkout -B main "$target_sha"
           git reset --hard "$target_sha"
           npm ci
           npm run build
           npm run db:migrate
           npm run db:verify
           sudo systemctl restart "$DEPLOY_SERVICE_NAME"
+          sleep 3
           sudo systemctl is-active --quiet "$DEPLOY_SERVICE_NAME"
           trap - ERR
           echo "Deployment succeeded: $target_sha"
