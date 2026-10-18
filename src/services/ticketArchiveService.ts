@@ -97,9 +97,13 @@ function maxAttachmentBytes(): number {
 }
 
 function isRecoveryReplay(message: Message): boolean {
-  return message.embeds.some((embed) =>
-    Boolean(embed.footer?.text?.startsWith(RECOVERY_FOOTER_PREFIX)),
-  );
+  // The original-author header uses a footer marker; replayed body and
+  // attachment posts use the same bracketed attribution prefix. Never ingest
+  // replayed copies as if they were fresh original messages.
+  return message.content.startsWith('[Recovered original message by ') ||
+    message.embeds.some((embed) =>
+      Boolean(embed.footer?.text?.startsWith(RECOVERY_FOOTER_PREFIX)),
+    );
 }
 
 function parseJsonArray(value: unknown): unknown[] {
