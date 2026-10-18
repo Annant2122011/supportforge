@@ -796,7 +796,7 @@ This becomes essential once the project moves into a real database.
 
 ## F-015 — Advanced Ticket Forms
 
-**Status:** `IMPLEMENTED — GitHub verification pending`  
+**Status:** `IMPLEMENTED — CI verified; live Discord acceptance pending`  
 **Priority:** `P1`
 
 ### Delivered behavior
@@ -812,7 +812,7 @@ This becomes essential once the project moves into a real database.
 
 ## F-016 — Conditional Form Fields
 
-**Status:** `IMPLEMENTED — GitHub verification pending`  
+**Status:** `IMPLEMENTED — CI verified; live Discord acceptance pending`  
 **Priority:** `P1`
 
 A field may contain a `step` number from 1 through 10 and a `condition` object, for example:
@@ -841,7 +841,7 @@ A field may contain a `step` number from 1 through 10 and a `condition` object, 
 
 ## F-017 — Form Templates
 
-**Status:** `IMPLEMENTED — GitHub verification pending`  
+**Status:** `IMPLEMENTED — CI verified; live Discord acceptance pending`  
 **Priority:** `P2`
 
 - `/supportforge form template-save` stores a validated schema as a server-scoped reusable template.
