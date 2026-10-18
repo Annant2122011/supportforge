@@ -6042,14 +6042,13 @@ async function handleTicketDeletionInteraction(interaction: ButtonInteraction): 
     });
 
     await archiveTicketChannelForRecovery(channel);
-    await beginTicketButtonDeletion(channel, interaction.user.id, interaction.user.tag);
-    intentRecorded = true;
 
     const supportCategoryId = config.supportCategoryId;
     const ticketNumber = ticket?.ticketNumber ?? getField(topic, 'number') ?? 'unknown';
     if (supportCategoryId) {
-      // Deletion confirmation is a required security event, so ensure a
-      // developer audit destination exists before removing the channel.
+      // Write the audit trail before deletion. The durable pending intent is
+      // then created immediately before the Discord delete request so a stale
+      // intent is less likely to misclassify a later native deletion.
       await ensureAuditDeveloperInfrastructure(interaction.guild, supportCategoryId);
       await logTicketEvent(interaction.guild, supportCategoryId, {
         ticketNumber,
@@ -6068,6 +6067,9 @@ async function handleTicketDeletionInteraction(interaction: ButtonInteraction): 
       );
     }
 
+    // Neon intent is durable before the destructive Discord API call.
+    await beginTicketButtonDeletion(channel, interaction.user.id, interaction.user.tag);
+    intentRecorded = true;
     await channel.delete('ResolveX ticket Delete button; actor ' + interaction.user.id + '; two confirmations completed');
     channelDeleted = true;
   } catch (error) {
