@@ -24,7 +24,6 @@ import {
 import { getField, isTicketTopic, removeField, setField } from './ticketStateService';
 import { refreshTicketPanel } from './ticketPanelService';
 
-const MAX_ARCHIVE_MESSAGES = 10_000;
 const ARCHIVE_PAGE_SIZE = 100;
 const DEFAULT_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const RECOVERY_FOOTER_PREFIX = 'ResolveX Recovery Archive';
@@ -453,8 +452,7 @@ export async function archiveTicketChannelForRecovery(channel: TextChannel): Pro
     throw new Error('The durable ticket record is missing or already marked deleted; the channel was not deleted.');
   }
 
-  let processed = 0;
-  while (processed < MAX_ARCHIVE_MESSAGES) {
+  while (true) {
     const state = await pool.query<ChannelArchiveRow>(
       'SELECT * FROM ticket_channel_archive WHERE ticket_id=$1 LIMIT 1',
       [ticket.id],
@@ -476,20 +474,16 @@ export async function archiveTicketChannelForRecovery(channel: TextChannel): Pro
     const page = await channel.messages.fetch(queryOptions);
     if (!page.size) {
       await pool.query('UPDATE ticket_channel_archive SET backfill_complete=TRUE, updated_at=NOW() WHERE ticket_id=$1', [ticket.id]);
-      return;
+      continue;
     }
     const ordered = Array.from(page.values()).sort((a, b) => BigInt(a.id) < BigInt(b.id) ? -1 : BigInt(a.id) > BigInt(b.id) ? 1 : 0);
     for (const message of ordered) await archiveTicketMessage(message);
-    processed += ordered.length;
     const oldestId = ordered[0]?.id;
-    const done = page.size < ARCHIVE_PAGE_SIZE || processed >= MAX_ARCHIVE_MESSAGES;
+    const done = page.size < ARCHIVE_PAGE_SIZE;
     await pool.query(
       'UPDATE ticket_channel_archive SET backfill_cursor=$2, backfill_complete=$3, updated_at=NOW() WHERE ticket_id=$1',
       [ticket.id, oldestId ?? archive?.backfill_cursor ?? null, done],
     );
-    if (processed >= MAX_ARCHIVE_MESSAGES) {
-      throw new Error('Archive reached the configured history limit of ' + MAX_ARCHIVE_MESSAGES + ' messages. Increase the limit or archive older history before deleting this ticket.');
-    }
   }
 }
 
