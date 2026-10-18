@@ -322,7 +322,7 @@ const MIGRATIONS: readonly PostgresMigration[] = [
     id: 9,
     name: 'create_durable_ticket_message_archive_and_recovery',
     up: async (db) => {
-      await db.query(\`
+      await db.query(`
         CREATE TABLE IF NOT EXISTS ticket_channel_archive (
           ticket_id TEXT PRIMARY KEY REFERENCES tickets(id) ON DELETE CASCADE,
           guild_id TEXT NOT NULL,
@@ -418,7 +418,7 @@ const MIGRATIONS: readonly PostgresMigration[] = [
 
         CREATE INDEX IF NOT EXISTS idx_ticket_recovery_events_unresolved
           ON ticket_recovery_events (guild_id, source, status, created_at DESC);
-      \`);
+      `);
     },
   },
 ];
