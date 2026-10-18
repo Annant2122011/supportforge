@@ -20,6 +20,31 @@ export interface DepartmentConfig {
   createdAt: string;
 }
 
+export type SupportPanelButtonStyle = 'primary' | 'secondary' | 'success';
+
+export interface CustomSupportPanelButton {
+  departmentId: string;
+  label: string;
+  emoji?: string;
+  style: SupportPanelButtonStyle;
+}
+
+export interface CustomSupportPanel {
+  id: string;
+  name: string;
+  title: string;
+  description: string;
+  footer: string;
+  color: string | null;
+  thumbnailUrl: string | null;
+  bannerUrl: string | null;
+  buttons: CustomSupportPanelButton[];
+  publishedChannelId: string | null;
+  publishedMessageId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface GuildConfig {
   supportCategoryId: string | null;
   openCategoryId: string | null;
@@ -35,6 +60,8 @@ export interface GuildConfig {
   departments: Record<string, DepartmentConfig>;
   retiredCategoryIds: string[];
   managedCategoryIds: string[];
+  /** Custom panel definitions are versioned with the existing Neon-backed guild config document. */
+  customPanels: Record<string, CustomSupportPanel>;
 }
 
 interface ConfigFile {
@@ -57,6 +84,7 @@ const DEFAULT_CONFIG: GuildConfig = {
   departments: {},
   retiredCategoryIds: [],
   managedCategoryIds: [],
+  customPanels: {},
 };
 
 let state: ConfigFile | null = null;
@@ -68,6 +96,7 @@ function cloneDefaultConfig(): GuildConfig {
     departments: {},
     retiredCategoryIds: [],
     managedCategoryIds: [],
+    customPanels: {},
   };
 }
 
@@ -119,6 +148,14 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
   const savedTheme: unknown = (current.guilds[guildId] as { theme?: unknown }).theme;
   if (savedTheme !== 'midnight' && savedTheme !== 'cyber-neon' && savedTheme !== 'ocean' && savedTheme !== 'aurora' && savedTheme !== 'ember' && savedTheme !== 'forest') {
     current.guilds[guildId].theme = 'midnight';
+    migrated = true;
+  }
+  if (
+    !current.guilds[guildId].customPanels ||
+    typeof current.guilds[guildId].customPanels !== 'object' ||
+    Array.isArray(current.guilds[guildId].customPanels)
+  ) {
+    current.guilds[guildId].customPanels = {};
     migrated = true;
   }
   if (!Array.isArray(current.guilds[guildId].retiredCategoryIds)) {
