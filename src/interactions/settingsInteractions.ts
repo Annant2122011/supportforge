@@ -1526,7 +1526,16 @@ async function handleTicketRecoveryInteraction(interaction: TicketRecoveryIntera
         });
         await logSystemEvent(guild, config.supportCategoryId, 'DEVELOPER_' + eventName, detail);
       }
-      await showRecoveryCandidateDetail(interaction, ticketId, 'ticket_button');
+      if (answer === 'yes') {
+        await showRecoveryCandidateDetail(interaction, ticketId, 'ticket_button');
+      } else {
+        const embed = await recoveryEmbed(guild, '✅ Deletion review saved', 'The answer was recorded as **No, this deletion was intentional**. The response, reviewer ID and timestamp were written to the ticket audit stream and developer/system audit stream. This ticket will not appear in the accidental-deletion restoration path.');
+        await interaction.editReply({
+          content: '',
+          embeds: [embed],
+          components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:review', 'Back to Ticket Deletion Review', ButtonStyle.Secondary, '↩️'))],
+        });
+      }
     } catch (error) {
       const embed = await recoveryEmbed(guild, '❌ Could not save deletion review', error instanceof Error ? error.message : 'Unknown review error.');
       await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:review', 'Back to review list', ButtonStyle.Secondary, '↩️'))] });
@@ -1662,6 +1671,11 @@ export async function handleSettingsInteraction(
 
   if (interaction.isButton()) {
     const id = interaction.customId;
+
+    if (id === 'sf:settings:repair:back') {
+      await showRepairSystem(interaction);
+      return true;
+    }
 
     if (id === 'sf:settings:home') {
       await restoreSettingsHome(interaction);
@@ -2952,9 +2966,8 @@ async function showRepairSystem(interaction: ButtonInteraction): Promise<void> {
       new EmbedBuilder()
         .setTitle('🛠️ Repair System')
         .setDescription(
-          'SupportForge can repair its managed infrastructure without resetting ticket data. ' +
-          'Restore & Update reconciles managed channels/categories against the existing database, repairs support/settings/audit/transcript infrastructure, recovers missing ticket records from surviving channel metadata, and requests a GitHub Actions deployment. ' +
-          'Normal Repair checks infrastructure without deploying code. Storage Repair only verifies the Closed and Archive storage categories.',
+          'ResolveX repairs managed infrastructure without resetting Neon data. Restore & Update reconciles Discord infrastructure and requests a GitHub Actions deployment. Automatic pushes to main and the independent server watchdog deploy code without requiring this button. ' +
+          'Restore Channel handles native Discord channel deletions; Ticket Deletion Review handles only ticket-button deletions and their accidental-deletion question. Normal Repair checks infrastructure without deploying code. Storage Repair verifies the Closed and Archive storage categories.',
         ),
     ],
     [
