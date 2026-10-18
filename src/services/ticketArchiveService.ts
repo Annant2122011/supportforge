@@ -704,7 +704,7 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string): P
   // Keyset pagination replays the complete archive without loading every row
   // into memory or silently truncating recovery at a fixed message count.
   while (true) {
-    const messages = cursorCreatedAt === null || cursorMessageId === null
+    const messages: { rows: MessageArchiveRow[] } = cursorCreatedAt === null || cursorMessageId === null
       ? await pool.query<MessageArchiveRow>(
           'SELECT * FROM ticket_message_archive WHERE ticket_id=$1 ORDER BY created_at ASC,message_id ASC LIMIT 100',
           [ticketId],
@@ -841,7 +841,7 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string): P
     }
     }
 
-    const lastArchived = messages.rows[messages.rows.length - 1]!;
+    const lastArchived: MessageArchiveRow = messages.rows[messages.rows.length - 1]!;
     cursorCreatedAt = lastArchived.created_at instanceof Date
       ? lastArchived.created_at.toISOString()
       : new Date(lastArchived.created_at).toISOString();
