@@ -5,6 +5,8 @@ import { refreshTicketPanelControls } from './ticketPanelService';
 import { getOrCreateAuditChannel } from './auditLogService';
 
 const UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
+const GITHUB_REPOSITORY = 'Annant2122011/supportforge';
+const DEPLOY_WORKFLOW = 'deploy-server.yml';
 const UPDATE_URL = 'https://api.github.com/repos/Annant2122011/supportforge/commits/main';
 
 let baselineSha: string | null = null;
@@ -40,6 +42,55 @@ async function refreshGuildUi(guild: Guild): Promise<void> {
     getOrCreateAuditChannel(guild, config.supportCategoryId),
     refreshTicketPanelControls(guild),
   ]);
+}
+
+export interface GitHubDeployRequestResult {
+  requested: boolean;
+  reason: string;
+}
+
+/**
+ * Ask GitHub Actions to deploy the current main branch. The token must be a
+ * repository-scoped fine-grained token with Actions: write. No shell command
+ * is executed inside the bot process.
+ */
+export async function requestGitHubDeployment(): Promise<GitHubDeployRequestResult> {
+  const token = process.env.GITHUB_DEPLOY_TOKEN?.trim();
+  if (!token) {
+    return {
+      requested: false,
+      reason: 'Code deployment is not configured on this server. Set GITHUB_DEPLOY_TOKEN and the SSH deployment secrets in GitHub Actions.',
+    };
+  }
+
+  const response = await fetch(
+    `https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/${DEPLOY_WORKFLOW}/dispatches`,
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${token}`,
+        'X-GitHub-Api-Version': '2022-11-28',
+        'Content-Type': 'application/json',
+        'User-Agent': 'SupportForge-Deployment-Control',
+      },
+      body: JSON.stringify({ ref: 'main' }),
+      signal: AbortSignal.timeout(20_000),
+    },
+  );
+
+  if (response.status === 204) {
+    return { requested: true, reason: 'GitHub Actions accepted a deployment of main. The server will update and restart through the configured SSH workflow.' };
+  }
+
+  const detail = (await response.text().catch(() => '')).slice(0, 500);
+  if (response.status === 401 || response.status === 403) {
+    return { requested: false, reason: 'GitHub rejected GITHUB_DEPLOY_TOKEN. Use a repository-scoped fine-grained token with Actions: write.' };
+  }
+  if (response.status === 404) {
+    return { requested: false, reason: 'GitHub could not find the deployment workflow. Ensure .github/workflows/deploy-server.yml is on main.' };
+  }
+  return { requested: false, reason: `GitHub deployment request failed (HTTP ${response.status}). ${detail}`.trim() };
 }
 
 export async function refreshAllSupportForgeUi(client: Client): Promise<void> {

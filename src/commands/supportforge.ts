@@ -66,6 +66,7 @@ import { performFactoryReset } from '../services/factoryResetService';
 import { recoverMissingTicketRecords } from '../services/ticketRecoveryService';
 import { addUseCasePreset } from '../services/useCasePresetService';
 import { moveTicketPanelToBottom } from '../services/ticketPanelService';
+import { requestGitHubDeployment } from '../services/updateService';
 
 import {
   ensureSettingsChannel,
@@ -1665,13 +1666,26 @@ export async function execute(
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const restoreMode = subcommand === 'restore';
       const result = await runSupportForgeSetup(guild, restoreMode);
+      let repairSummary = '';
+      let deploymentSummary = '';
+      if (restoreMode) {
+        const repair = await runSupportForgeRepair(guild);
+        repairSummary = '\n🧾 Missing ticket records recovered: **' + repair.recoveredTickets + '**.';
+        const deployment = await requestGitHubDeployment().catch((error) => ({
+          requested: false,
+          reason: error instanceof Error ? error.message : 'GitHub deployment request failed.',
+        }));
+        deploymentSummary = '\n\n' + (deployment.requested
+          ? '🚀 **Code deployment queued.** ' + deployment.reason
+          : '⚠️ **Discord restore completed; code deployment was not queued.** ' + deployment.reason);
+      }
       await interaction.editReply(
         (restoreMode ? '✅ **SupportForge restored successfully.**' : '✅ **SupportForge setup complete.**') +
         '\n\n📁 Container: <#' + result.supportCategoryId + '>\n' +
         '📂 Department categories: **' + result.departmentCount + '**\n' +
         (result.legacyOpenCategoryId ? '🟢 Legacy Open bucket: <#' + result.legacyOpenCategoryId + '>\n' : '') +
         '📋 Departments: **' + result.departmentCount + '**\n' +
-        '🎫 Panel has been created/repaired and is ready.'
+        '🎫 Panel has been created/repaired and is ready.' + repairSummary + deploymentSummary
       );
       return;
     }

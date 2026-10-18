@@ -11,7 +11,7 @@ import {
   type DepartmentConfig,
 } from './configService';
 import { logSystemEvent } from './auditLogService';
-import { getPersistedTicketStatus } from './ticketPersistenceService';
+import { getPersistedTicketRecords, getPersistedTicketStatus } from './ticketPersistenceService';
 import { getField, isTicketTopic } from './ticketStateService';
 import { setChannelParent } from './discordChannelService';
 
@@ -255,6 +255,13 @@ export async function ensureAllDepartmentCategories(
   }
 
   const ticketDepartments = new Set<string>();
+  // Discord channels can be deleted while their durable ticket records remain.
+  // Those records still prove that the department category is needed.
+  const durableTickets = await getPersistedTicketRecords(guild.id);
+  for (const ticket of durableTickets) {
+    if (!ticket.deletedAt && ticket.departmentId) ticketDepartments.add(ticket.departmentId);
+  }
+
   for (const channel of channels.values()) {
     if (!channel || channel.type !== ChannelType.GuildText) continue;
     const topic = channel.topic ?? '';

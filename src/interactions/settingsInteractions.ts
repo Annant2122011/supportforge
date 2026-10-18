@@ -52,6 +52,7 @@ import {
 } from '../services/departmentCategoryService';
 
 import { logSettingsEvent, refreshAuditPanelTheme } from '../services/auditLogService';
+import { requestGitHubDeployment } from '../services/updateService';
 import { getField, getTicketStatus, setField } from '../services/ticketStateService';
 import { migrateDepartmentStaffRole } from '../services/departmentStaffRoleService';
 import { getPersistedTicket, getPersistedTicketStatus } from '../services/ticketPersistenceService';
@@ -2022,6 +2023,39 @@ export async function handleSettingsInteraction(
       return true;
     }
 
+    if (id === 'sf:settings:repair:all') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        const result = await runSupportForgeRepair(guild);
+        const deployment = await requestGitHubDeployment().catch((error) => ({
+          requested: false,
+          reason: error instanceof Error ? error.message : 'GitHub deployment request failed.',
+        }));
+        await refreshSettingsChannel(guild);
+        await interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle('🛡️ Restore & Update • Complete')
+              .setDescription(
+                'The existing PostgreSQL-backed configuration and ticket records were retained. SupportForge has reconciled its managed categories, core channels, settings, transcript archive, audit panel, support panel, and department categories.\n\n' +
+                'Recovered missing ticket records from surviving channel metadata: **' + result.recoveredTickets + '**.\n\n' +
+                (deployment.requested
+                  ? '🚀 **Code deployment queued.** ' + deployment.reason
+                  : '⚠️ **Discord recovery completed, but code deployment was not queued.** ' + deployment.reason),
+              )
+              .setFooter({ text: 'Deleted Discord messages cannot be recreated by the Discord API.' })
+              .setTimestamp(),
+          ],
+          components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+        });
+        await auditSettingsAction(guild, interaction, 'RESTORE_AND_UPDATE', 'Reconciled SupportForge infrastructure; deployment requested=' + deployment.requested + '; recovered ticket records=' + result.recoveredTickets + '.');
+      } catch (error) {
+        console.error('❌ Restore & Update failed:', error);
+        await interaction.editReply('❌ Restore & Update stopped before completion: ' + (error instanceof Error ? error.message : 'Unknown error. Existing database records were not intentionally reset.'));
+      }
+      return true;
+    }
+
     if (id === 'sf:settings:repair:normal') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
@@ -2645,12 +2679,17 @@ async function showRepairSystem(interaction: ButtonInteraction): Promise<void> {
         .setTitle('🛠️ Repair System')
         .setDescription(
           'SupportForge can repair its managed infrastructure without resetting ticket data. ' +
-          'Normal Repair checks the main container, panel, transcript, settings channel, and explicitly routed department categories. ' +
-          'Storage Repair only verifies the Closed and Archive storage categories.',
+          'Restore & Update reconciles managed channels/categories against the existing database, repairs support/settings/audit/transcript infrastructure, recovers missing ticket records from surviving channel metadata, and requests a GitHub Actions deployment. ' +
+          'Normal Repair checks infrastructure without deploying code. Storage Repair only verifies the Closed and Archive storage categories.',
         ),
     ],
     [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId('sf:settings:repair:all')
+          .setLabel('Restore & Update')
+          .setEmoji('🚀')
+          .setStyle(ButtonStyle.Success),
         new ButtonBuilder()
           .setCustomId('sf:settings:repair:normal')
           .setLabel('Normal Repair')
