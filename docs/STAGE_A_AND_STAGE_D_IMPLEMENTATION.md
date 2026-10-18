@@ -1,5 +1,7 @@
 # Stage A and Stage D Implementation Report
 
+> **Historical checkpoint note:** This report describes an earlier Stage A/Stage D implementation checkpoint and its original verification plan. It is not the current status report. The latest audit is [Stage A–E Inspection and Completion Record](stages-a-to-e-audit.md). Current code includes multi-step conditional forms, form templates, and the Stage E custom panel builder; older scope statements below are superseded where they conflict with the current code and audit.
+
 **Branch:** `stage-a-stage-d`  
 **Base checkpoint:** `94bb4cb677038cd93d2e12c2991afe76f4e0c90b`  
 **Scope:** Stage A reliability/audit fixes and Stage D advanced ticket forms  
@@ -77,20 +79,20 @@ Supported types: `short_text`, `long_text`, `number`, `decimal`, `url`, `email`,
 
 Validation supports required/optional values; min/max text length; safe patterns for text; numeric minimum/maximum; allowed selection choices; selected Discord users/roles; and actual attachment size/MIME/source-host checks. Limits and validation are rechecked on submission at the server/service layer.
 
-Discord's current modal layout has five top-level labeled components. The built-in Subject and Description use two, so Stage D currently permits up to three custom fields per form. This is an explicit platform-driven limit, not a silent field truncation.
+Discord's current modal layout has five top-level labeled components. The built-in Subject and Description use two, so each form step permits up to three custom fields. Current code supports up to 25 custom fields across at most 10 steps. Conditional fields must depend on earlier steps so the bot can evaluate visibility before displaying the next modal.
 
 ### Durable submission and recovery
 
 Migration 6 adds `ticket_forms`, `ticket_form_versions`, `ticket_form_submissions` and `ticket_creation_locks`. Form versions, exact form snapshots, answers, guild/user/form identifiers, submission time, and available ticket/channel linkage are stored in Neon PostgreSQL. The draft is written before external ticket-channel creation so a later Discord failure cannot erase an already-accepted response from durable storage. Ticket metadata carries only the form/submission identifiers needed for reconciliation; answers are not included in form-management audit details. The recovery worker links pending/failed submissions to their persisted ticket when the ticket is available.
 
-## Scope boundary
+## Historical scope boundary
 
-F-015 (Advanced Ticket Forms) is implemented on this branch, pending automated/local verification. F-016 (Conditional Form Fields) and F-017 (Form Templates) remain separate backlog features; conditional visibility needs a multi-step interaction design rather than falsely pretending static modal components can dynamically hide themselves. Stage E and later roadmap stages were not started.
+At the time of this report, F-015 was the primary scope and conditional fields, templates, and Stage E were not yet included in that checkpoint. The current repository subsequently implements conditional multi-step forms and form templates, and Stage E now has a first custom multi-panel builder. Refer to `FEATURES.md` and `stages-a-to-e-audit.md` for the current status; the earlier checkpoint labels here are retained only to preserve implementation history.
 
 ## Verification checklist for the pull
 
 1. Check GitHub Actions build, tests and database verification for this branch.
-2. Pull `stage-a-stage-d` to the Windows checkout and run the project's standard checks against the intended Neon/test database.
+2. Pull the current reviewed feature branch into the Windows checkout and run the project's standard checks against a disposable/test PostgreSQL database, not production.
 3. In a test server, create a form for a real existing department/tag, activate it, and create a ticket with every native field type.
 4. Try a malformed/stale/expired form, invalid values, a wrong user/role, an untrusted or oversized attachment, a disabled form, and a form update while a modal is open.
 5. Submit duplicate ticket requests from two workers if the deployment runs multiple replicas, then test unclaim/claim and the existing ticket lifecycle buttons.
