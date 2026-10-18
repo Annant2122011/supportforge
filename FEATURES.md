@@ -275,12 +275,20 @@ Discord bot, guild configuration, department configuration.
 
 ## F-002 — Custom Panel Builder
 
-**Status:** `PLANNED`  
+**Status:** `PARTIAL`  
 **Priority:** `P1`
 
 ### Purpose
 
 Turn the generated Support Center into a true configurable panel builder rather than a mostly fixed bot-generated message.
+
+### Current implementation checkpoint (ResolveX Stage E)
+
+The Discord implementation now supports multiple saved panel definitions in the Neon-backed guild configuration document. Administrators can create and update drafts, set title/description/footer/accent color/thumbnail/banner, define and reorder up to 25 department-targeted buttons, inspect a private preview with disabled controls, publish or update a panel in a text channel, and delete a saved panel after explicit confirmation. The settings dashboard includes a button-driven Custom Panels manager, alongside the matching `/supportforge panel` command family.
+
+Published buttons deliberately reuse the validated `ticket:create:<departmentId>` entry point; the panel builder does not create a separate ticket-creation pathway. Editing a draft does not mutate a published message until publish is requested. Deleting a panel removes its stored definition and known published message, never tickets that were created from it.
+
+Remaining F-002 scope: button targets currently route to existing departments (not arbitrary named workflows); per-panel permissions, workflow confirmations, custom icons, and richer drag-and-drop ordering remain unimplemented. Button order can be changed by supplying the ordered JSON array in the update flow. Live acceptance in a Discord server is still required.
 
 ### Configuration fields
 
