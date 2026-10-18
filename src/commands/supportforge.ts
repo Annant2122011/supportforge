@@ -2085,6 +2085,18 @@ export async function execute(
     // ─────────────────────────────────────────────
 
     if (group === 'form') {
+      const canManageForms = Boolean(
+        interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
+        interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild),
+      );
+      if (!canManageForms) {
+        await interaction.reply({
+          content: 'Only server administrators or members with Manage Server can manage ticket forms and templates.',
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const action = interaction.options.getSubcommand();
       const actorId = interaction.user.id;
