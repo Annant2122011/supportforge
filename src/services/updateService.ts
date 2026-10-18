@@ -139,14 +139,11 @@ export function startSupportForgeUpdateMonitor(client: Client): void {
   if (scheduler) return;
 
   /*
-   * Reconcile core SupportForge infrastructure immediately on startup.
-   * This recreates a missing audit channel/panel even when no new GitHub
-   * release has been detected.
+   * Full infrastructure reconciliation is run once by index.ts after startup.
+   * Avoid starting a second overlapping set of channel/message mutations here.
+   * This monitor is responsible for detecting commits and refreshing UI after
+   * an update event, while the separate server watchdog handles deployments.
    */
-  void refreshAllSupportForgeUi(client).catch((error) => {
-    console.warn('⚠️ Initial SupportForge UI refresh failed:', error);
-  });
-
   void checkForUpdate(client);
 
   scheduler = setInterval(() => {
