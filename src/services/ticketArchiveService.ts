@@ -318,11 +318,11 @@ export async function archiveTicketMessage(message: Message): Promise<void> {
   await pool.query(
     'INSERT INTO ticket_message_archive ' +
       '(message_id,ticket_id,guild_id,original_channel_id,author_id,author_username,author_display_name,author_avatar_url,content,created_at,edited_at,is_bot,message_type,embeds,components,attachments,edit_history,metadata,updated_at) ' +
-      'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16::jsonb,\\'[]\\'::jsonb,$17::jsonb,NOW()) ' +
+      'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16::jsonb,\'[]\'::jsonb,$17::jsonb,NOW()) ' +
       'ON CONFLICT (message_id) DO UPDATE SET content=EXCLUDED.content, edited_at=COALESCE(EXCLUDED.edited_at,ticket_message_archive.edited_at), ' +
       'embeds=EXCLUDED.embeds, components=EXCLUDED.components, attachments=EXCLUDED.attachments, metadata=EXCLUDED.metadata, updated_at=NOW(), ' +
       'edit_history=CASE WHEN ticket_message_archive.content IS DISTINCT FROM EXCLUDED.content OR ticket_message_archive.embeds IS DISTINCT FROM EXCLUDED.embeds ' +
-      'THEN ticket_message_archive.edit_history || jsonb_build_array(jsonb_build_object(\\'recordedAt\\',NOW(),\\'previousContent\\',ticket_message_archive.content,\\'newContent\\',EXCLUDED.content,\\'previousEmbeds\\',ticket_message_archive.embeds,\\'newEmbeds\\',EXCLUDED.embeds)) ' +
+      'THEN ticket_message_archive.edit_history || jsonb_build_array(jsonb_build_object(\'recordedAt\',NOW(),\'previousContent\',ticket_message_archive.content,\'newContent\',EXCLUDED.content,\'previousEmbeds\',ticket_message_archive.embeds,\'newEmbeds\',EXCLUDED.embeds)) ' +
       'ELSE ticket_message_archive.edit_history END',
     [
       message.id,
