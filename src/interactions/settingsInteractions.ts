@@ -51,7 +51,7 @@ import {
   ensureAllDepartmentCategories,
 } from '../services/departmentCategoryService';
 
-import { logSettingsEvent, refreshAuditPanelTheme, logTicketEvent, logSystemEvent } from '../services/auditLogService';
+import { ensureAuditDeveloperInfrastructure, logSettingsEvent, refreshAuditPanelTheme, logTicketEvent, logSystemEvent } from '../services/auditLogService';
 import { requestGitHubDeployment } from '../services/updateService';
 import { getField, getTicketStatus, setField } from '../services/ticketStateService';
 import { migrateDepartmentStaffRole } from '../services/departmentStaffRoleService';
@@ -1464,6 +1464,7 @@ async function handleTicketRecoveryInteraction(interaction: TicketRecoveryIntera
       const config = await getGuildConfig(guild.id);
       const ticket = await getPersistedTicketById(ticketId);
       if (config.supportCategoryId) {
+        await ensureAuditDeveloperInfrastructure(guild, config.supportCategoryId);
         await logTicketEvent(guild, config.supportCategoryId, {
           ticketNumber: restored.ticketNumber,
           ticketChannelId: ticket?.channelId ?? restored.channelId,
@@ -1508,13 +1509,15 @@ async function handleTicketRecoveryInteraction(interaction: TicketRecoveryIntera
       return true;
     }
     try {
-      const result = await answerTicketDeletionReview(ticketId, answer, interaction.user.id, interaction.user.tag);
       const ticket = await getPersistedTicketById(ticketId);
+      if (!ticket || ticket.guildId !== guild.id) throw new Error('Ticket deletion review belongs to a different server or no longer exists.');
+      const result = await answerTicketDeletionReview(ticketId, answer, interaction.user.id, interaction.user.tag);
       const config = await getGuildConfig(guild.id);
       const eventName = answer === 'yes' ? 'TICKET_DELETION_MARKED_ACCIDENTAL' : 'TICKET_DELETION_MARKED_INTENTIONAL';
       const detail = 'Answer to “Was this ticket deleted by mistake?”: ' + (answer === 'yes' ? 'YES, deleted by mistake.' : 'NO, deletion was intentional.') +
         ' Reviewer: ' + interaction.user.tag + ' (' + interaction.user.id + '). Original channel ID: ' + result.originalChannelId + '.';
       if (config.supportCategoryId) {
+        await ensureAuditDeveloperInfrastructure(guild, config.supportCategoryId);
         await logTicketEvent(guild, config.supportCategoryId, {
           ticketNumber: result.ticketNumber,
           ticketChannelId: ticket?.channelId ?? result.originalChannelId,
@@ -1550,6 +1553,7 @@ async function handleTicketRecoveryInteraction(interaction: TicketRecoveryIntera
       const config = await getGuildConfig(guild.id);
       const ticket = await getPersistedTicketById(ticketId);
       if (config.supportCategoryId) {
+        await ensureAuditDeveloperInfrastructure(guild, config.supportCategoryId);
         await logTicketEvent(guild, config.supportCategoryId, {
           ticketNumber: restored.ticketNumber,
           ticketChannelId: ticket?.channelId ?? restored.channelId,
