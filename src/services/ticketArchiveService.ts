@@ -839,6 +839,7 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string): P
       failed += 1;
       console.warn('ResolveX could not replay archived message ' + archived.message_id + ':', error instanceof Error ? error.message : 'unknown error');
     }
+    }
 
     const lastArchived = messages.rows[messages.rows.length - 1]!;
     cursorCreatedAt = lastArchived.created_at instanceof Date
