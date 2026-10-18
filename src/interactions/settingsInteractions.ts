@@ -51,16 +51,22 @@ import {
   ensureAllDepartmentCategories,
 } from '../services/departmentCategoryService';
 
-import { logSettingsEvent, refreshAuditPanelTheme } from '../services/auditLogService';
+import { logSettingsEvent, refreshAuditPanelTheme, logTicketEvent, logSystemEvent } from '../services/auditLogService';
 import { requestGitHubDeployment } from '../services/updateService';
 import { getField, getTicketStatus, setField } from '../services/ticketStateService';
 import { migrateDepartmentStaffRole } from '../services/departmentStaffRoleService';
-import { getPersistedTicket, getPersistedTicketStatus } from '../services/ticketPersistenceService';
+import { getPersistedTicket, getPersistedTicketById, getPersistedTicketStatus } from '../services/ticketPersistenceService';
 import { performFactoryReset } from '../services/factoryResetService';
 import { addUseCasePreset, USE_CASE_PRESETS } from '../services/useCasePresetService';
 import { enforcePriorityRoleHierarchy } from '../services/priorityRoleService';
 import { UI_THEMES, getThemeColor, getThemeDefinition, isGuildTheme } from '../services/uiThemeService';
 import { handleTicketFormSettingsInteraction } from './ticketFormSettingsInteractions';
+import {
+  answerTicketDeletionReview,
+  listTicketRecoveryCandidates,
+  restoreArchivedTicket,
+  type TicketRecoveryCandidate,
+} from '../services/ticketArchiveService';
 import {
   approveRetentionDeletion,
   declineRetentionDeletion,
@@ -1294,6 +1300,270 @@ async function openModal(
   }
 }
 
+
+type TicketRecoveryInteraction = ButtonInteraction | StringSelectMenuInteraction;
+const RECOVERY_PAGE_SIZE = 20;
+
+async function recoveryEmbed(guild: Guild, title: string, description: string): Promise<EmbedBuilder> {
+  const config = await getGuildConfig(guild.id);
+  return new EmbedBuilder()
+    .setColor(getThemeColor(config.theme))
+    .setTitle(title.slice(0, 256))
+    .setDescription((description || 'Use the controls below to continue.').slice(0, 3900))
+    .setFooter({ text: getThemeDefinition(config.theme).label + ' theme • ResolveX Ticket Recovery' })
+    .setTimestamp();
+}
+
+async function ensureRecoveryReply(interaction: TicketRecoveryInteraction): Promise<void> {
+  if (interaction.deferred || interaction.replied) return;
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+}
+
+function recoveryButton(id: string, label: string, style: ButtonStyle = ButtonStyle.Secondary, emoji?: string, disabled = false): ButtonBuilder {
+  const result = new ButtonBuilder().setCustomId(id).setLabel(label).setStyle(style).setDisabled(disabled);
+  if (emoji) result.setEmoji(emoji);
+  return result;
+}
+
+function recoverySelect(candidates: TicketRecoveryCandidate[], source: 'discord_native' | 'ticket_button'): ActionRowBuilder<StringSelectMenuBuilder> | null {
+  if (!candidates.length) return null;
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId(source === 'discord_native' ? 'sf:settings:recovery:channels:pick' : 'sf:settings:recovery:review:pick')
+    .setPlaceholder(source === 'discord_native' ? 'Choose a channel to restore' : 'Choose a deletion to review')
+    .addOptions(candidates.slice(0, 25).map((item) => ({
+      label: ('Ticket #' + item.ticketNumber).slice(0, 100),
+      value: item.ticketId,
+      description: (item.messageCount + ' archived messages • owner ' + item.ownerId).slice(0, 100),
+    })));
+  return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu);
+}
+
+async function showRecoveryCandidates(
+  interaction: TicketRecoveryInteraction,
+  source: 'discord_native' | 'ticket_button',
+  requestedPage = 1,
+): Promise<void> {
+  await ensureRecoveryReply(interaction);
+  const guild = interaction.guild;
+  if (!guild) {
+    await interaction.editReply('Ticket recovery must be opened inside a server.');
+    return;
+  }
+
+  const all = await listTicketRecoveryCandidates(guild.id, source);
+  const pages = Math.max(1, Math.ceil(all.length / RECOVERY_PAGE_SIZE));
+  const page = Math.min(Math.max(1, requestedPage), pages);
+  const candidates = all.slice((page - 1) * RECOVERY_PAGE_SIZE, page * RECOVERY_PAGE_SIZE);
+  const native = source === 'discord_native';
+  const rows: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>> = [];
+  const select = recoverySelect(candidates, source);
+  if (select) rows.push(select);
+  if (pages > 1) {
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      recoveryButton('sf:settings:recovery:' + (native ? 'channels' : 'review') + ':page:' + (page - 1), 'Previous', ButtonStyle.Secondary, '◀️', page <= 1),
+      recoveryButton('sf:settings:recovery:' + (native ? 'channels' : 'review') + ':page:' + (page + 1), 'Next', ButtonStyle.Secondary, '▶️', page >= pages),
+      recoveryButton('sf:settings:repair:back', 'Repair System', ButtonStyle.Secondary, '↩️'),
+    ));
+  } else {
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      recoveryButton('sf:settings:repair:back', 'Repair System', ButtonStyle.Secondary, '↩️'),
+    ));
+  }
+
+  const lines = candidates.map((item) =>
+    '• **Ticket #' + item.ticketNumber + '** • ' + item.messageCount + ' archived message(s) • original channel ID: ' + item.originalChannelId +
+    (item.accidentalAnswer === 'yes' ? ' • **marked accidental, ready to restore**' : ''),
+  );
+  const description = native
+    ? (all.length ? 'Native Discord deletions only. These records never enter the ticket-button accidental-deletion review.\\n\\n' : 'No native Discord channel deletions are currently available for restoration.\\n\\n')
+    : (all.length ? 'Ticket-button deletions only. Choose a record to answer the question or restore a ticket already marked as accidental.\\n\\n' : 'No ticket-button deletions are awaiting review or accidental-deletion recovery.\\n\\n');
+  const embed = await recoveryEmbed(
+    guild,
+    native ? '♻️ Restore Channel' : '🛡️ Ticket Deletion Review',
+    description + (lines.length ? lines.join('\\n') : 'Nothing to display on this page.') + '\\n\\nPage ' + page + ' / ' + pages,
+  );
+  await interaction.editReply({ content: '', embeds: [embed], components: rows });
+}
+
+async function showRecoveryCandidateDetail(
+  interaction: TicketRecoveryInteraction,
+  ticketId: string,
+  source: 'discord_native' | 'ticket_button',
+): Promise<void> {
+  await ensureRecoveryReply(interaction);
+  const guild = interaction.guild;
+  if (!guild) {
+    await interaction.editReply('Ticket recovery must be opened inside a server.');
+    return;
+  }
+  const item = (await listTicketRecoveryCandidates(guild.id, source)).find((candidate) => candidate.ticketId === ticketId);
+  if (!item) {
+    await interaction.editReply({
+      content: '',
+      embeds: [await recoveryEmbed(guild, 'Recovery record no longer available', 'Refresh the recovery list. The record may already have been restored or reviewed.')],
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:' + (source === 'discord_native' ? 'channels' : 'review'), 'Back to list', ButtonStyle.Secondary, '↩️'))],
+    });
+    return;
+  }
+
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  if (source === 'discord_native') {
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      recoveryButton('sf:settings:recovery:channels:restore:' + ticketId, 'Restore Channel', ButtonStyle.Success, '♻️'),
+      recoveryButton('sf:settings:recovery:channels', 'Back to list', ButtonStyle.Secondary, '↩️'),
+    ));
+  } else if (item.accidentalAnswer === 'yes') {
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      recoveryButton('sf:settings:recovery:review:restore:' + ticketId, 'Restore Ticket', ButtonStyle.Success, '♻️'),
+      recoveryButton('sf:settings:recovery:review', 'Back to list', ButtonStyle.Secondary, '↩️'),
+    ));
+  } else {
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      recoveryButton('sf:settings:recovery:review:answer:' + ticketId + ':yes', 'Yes, deleted by mistake', ButtonStyle.Success, '✅'),
+      recoveryButton('sf:settings:recovery:review:answer:' + ticketId + ':no', 'No, intentional', ButtonStyle.Danger, '🛑'),
+      recoveryButton('sf:settings:recovery:review', 'Back', ButtonStyle.Secondary, '↩️'),
+    ));
+  }
+
+  const text = source === 'discord_native'
+    ? 'This channel was deleted outside the ResolveX ticket Delete button. Native deletion is recorded separately and does not trigger the accidental-deletion question.'
+    : item.accidentalAnswer === 'yes'
+      ? 'Review answer: **Yes, it was deleted by mistake.** This ticket is eligible for restoration through this review workflow.'
+      : 'Was this ticket deleted by mistake?\\n\\nOriginal channel ID: ' + item.originalChannelId +
+        '\\nTicket creator ID: ' + item.ownerId +
+        '\\nArchived messages: ' + item.messageCount +
+        '\\n\\nYour answer will be saved in Neon and logged in both the ticket audit stream and developer/system audit stream.';
+  const embed = await recoveryEmbed(guild, (source === 'discord_native' ? '♻️ Restore Channel' : '🛡️ Ticket Deletion Review') + ' • Ticket #' + item.ticketNumber, text);
+  await interaction.editReply({ content: '', embeds: [embed], components: rows });
+}
+
+async function handleTicketRecoveryInteraction(interaction: TicketRecoveryInteraction): Promise<boolean> {
+  const id = interaction.customId;
+  if (!id.startsWith('sf:settings:recovery:')) return false;
+  const guild = interaction.guild;
+  if (!guild) return true;
+
+  if (id === 'sf:settings:recovery:channels') {
+    await showRecoveryCandidates(interaction, 'discord_native');
+    return true;
+  }
+  if (id.startsWith('sf:settings:recovery:channels:page:')) {
+    await showRecoveryCandidates(interaction, 'discord_native', Number(id.slice('sf:settings:recovery:channels:page:'.length)) || 1);
+    return true;
+  }
+  if (id === 'sf:settings:recovery:channels:pick' && interaction.isStringSelectMenu()) {
+    const selected = interaction.values[0];
+    if (selected) await showRecoveryCandidateDetail(interaction, selected, 'discord_native');
+    return true;
+  }
+  if (id.startsWith('sf:settings:recovery:channels:restore:')) {
+    await ensureRecoveryReply(interaction);
+    const ticketId = id.slice('sf:settings:recovery:channels:restore:'.length);
+    try {
+      const restored = await restoreArchivedTicket(guild, ticketId, 'discord_native');
+      const config = await getGuildConfig(guild.id);
+      const ticket = await getPersistedTicketById(ticketId);
+      if (config.supportCategoryId) {
+        await logTicketEvent(guild, config.supportCategoryId, {
+          ticketNumber: restored.ticketNumber,
+          ticketChannelId: ticket?.channelId ?? restored.channelId,
+          event: 'TICKET_RESTORED_AFTER_NATIVE_DELETION',
+          actorId: interaction.user.id,
+          actor: interaction.user.tag,
+          actorName: interaction.user.tag,
+          detail: 'Restored into new channel ' + restored.channelId + '; replayed ' + restored.restoredMessages + ' archived messages; failed messages=' + restored.failedMessages + '.',
+        });
+        await logSystemEvent(guild, config.supportCategoryId, 'TICKET_NATIVE_DELETION_RECOVERED',
+          'Moderator ' + interaction.user.tag + ' restored ticket #' + restored.ticketNumber + ' from native Discord deletion. New channel ID: ' + restored.channelId + '. Replayed messages: ' + restored.restoredMessages + '. Failed messages: ' + restored.failedMessages + '.');
+      }
+      const embed = await recoveryEmbed(guild, '✅ Ticket channel restored', 'Ticket #' + restored.ticketNumber + ' now exists in ' + '<#' + restored.channelId + '> with new channel ID ' + restored.channelId + ' and a new URL.\\n\\nReplayed messages: **' + restored.restoredMessages + '**\\nMessages that failed to replay: **' + restored.failedMessages + '**\\n\\nArchived author/channel/message IDs are included in each recovery message. The bot does not impersonate original users.');
+      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:channels', 'Back to Restore Channel', ButtonStyle.Secondary, '↩️'))] });
+    } catch (error) {
+      const embed = await recoveryEmbed(guild, '❌ Ticket recovery failed', error instanceof Error ? error.message : 'Unknown recovery error.');
+      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:channels', 'Back to Restore Channel', ButtonStyle.Secondary, '↩️'))] });
+    }
+    return true;
+  }
+
+  if (id === 'sf:settings:recovery:review') {
+    await showRecoveryCandidates(interaction, 'ticket_button');
+    return true;
+  }
+  if (id.startsWith('sf:settings:recovery:review:page:')) {
+    await showRecoveryCandidates(interaction, 'ticket_button', Number(id.slice('sf:settings:recovery:review:page:'.length)) || 1);
+    return true;
+  }
+  if (id === 'sf:settings:recovery:review:pick' && interaction.isStringSelectMenu()) {
+    const selected = interaction.values[0];
+    if (selected) await showRecoveryCandidateDetail(interaction, selected, 'ticket_button');
+    return true;
+  }
+  if (id.startsWith('sf:settings:recovery:review:answer:')) {
+    await ensureRecoveryReply(interaction);
+    const parts = id.slice('sf:settings:recovery:review:answer:'.length).split(':');
+    const ticketId = parts[0] ?? '';
+    const answer = parts[1] === 'yes' ? 'yes' : parts[1] === 'no' ? 'no' : null;
+    if (!answer) {
+      await interaction.editReply('Invalid deletion-review answer.');
+      return true;
+    }
+    try {
+      const result = await answerTicketDeletionReview(ticketId, answer, interaction.user.id, interaction.user.tag);
+      const ticket = await getPersistedTicketById(ticketId);
+      const config = await getGuildConfig(guild.id);
+      const eventName = answer === 'yes' ? 'TICKET_DELETION_MARKED_ACCIDENTAL' : 'TICKET_DELETION_MARKED_INTENTIONAL';
+      const detail = 'Answer to “Was this ticket deleted by mistake?”: ' + (answer === 'yes' ? 'YES, deleted by mistake.' : 'NO, deletion was intentional.') +
+        ' Reviewer: ' + interaction.user.tag + ' (' + interaction.user.id + '). Original channel ID: ' + result.originalChannelId + '.';
+      if (config.supportCategoryId) {
+        await logTicketEvent(guild, config.supportCategoryId, {
+          ticketNumber: result.ticketNumber,
+          ticketChannelId: ticket?.channelId ?? result.originalChannelId,
+          event: eventName,
+          actorId: interaction.user.id,
+          actor: interaction.user.tag,
+          actorName: interaction.user.tag,
+          detail,
+        });
+        await logSystemEvent(guild, config.supportCategoryId, 'DEVELOPER_' + eventName, detail);
+      }
+      await showRecoveryCandidateDetail(interaction, ticketId, 'ticket_button');
+    } catch (error) {
+      const embed = await recoveryEmbed(guild, '❌ Could not save deletion review', error instanceof Error ? error.message : 'Unknown review error.');
+      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:review', 'Back to review list', ButtonStyle.Secondary, '↩️'))] });
+    }
+    return true;
+  }
+  if (id.startsWith('sf:settings:recovery:review:restore:')) {
+    await ensureRecoveryReply(interaction);
+    const ticketId = id.slice('sf:settings:recovery:review:restore:'.length);
+    try {
+      const restored = await restoreArchivedTicket(guild, ticketId, 'ticket_button');
+      const config = await getGuildConfig(guild.id);
+      const ticket = await getPersistedTicketById(ticketId);
+      if (config.supportCategoryId) {
+        await logTicketEvent(guild, config.supportCategoryId, {
+          ticketNumber: restored.ticketNumber,
+          ticketChannelId: ticket?.channelId ?? restored.channelId,
+          event: 'TICKET_RESTORED_AFTER_ACCIDENTAL_BUTTON_DELETION',
+          actorId: interaction.user.id,
+          actor: interaction.user.tag,
+          actorName: interaction.user.tag,
+          detail: 'Moderator restored a ticket-button deletion marked accidental. Replacement channel ' + restored.channelId + '; replayed messages=' + restored.restoredMessages + '; failed=' + restored.failedMessages + '.',
+        });
+        await logSystemEvent(guild, config.supportCategoryId, 'TICKET_ACCIDENTAL_DELETION_RECOVERED',
+          'Moderator ' + interaction.user.tag + ' restored ticket #' + restored.ticketNumber + ' after marking its ticket-button deletion accidental. New channel ID: ' + restored.channelId + '.');
+      }
+      const embed = await recoveryEmbed(guild, '✅ Accidentally deleted ticket restored', 'Ticket #' + restored.ticketNumber + ' is available in ' + '<#' + restored.channelId + '>.\\n\\nReplayed messages: **' + restored.restoredMessages + '**\\nMessages that failed to replay: **' + restored.failedMessages + '**\\n\\nThe new channel has a new ID and URL. Recovery messages clearly show their original user and channel IDs.');
+      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:review', 'Back to Ticket Deletion Review', ButtonStyle.Secondary, '↩️'))] });
+    } catch (error) {
+      const embed = await recoveryEmbed(guild, '❌ Ticket recovery failed', error instanceof Error ? error.message : 'Unknown recovery error.');
+      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:review', 'Back to Ticket Deletion Review', ButtonStyle.Secondary, '↩️'))] });
+    }
+    return true;
+  }
+  return true;
+}
+
 export async function handleSettingsInteraction(
   interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
 ): Promise<boolean> {
@@ -1304,7 +1574,7 @@ export async function handleSettingsInteraction(
    * authorization/configuration lookups because Discord expires unacknowledged
    * component interactions after a few seconds.
    */
-  if (interaction.isStringSelectMenu()) {
+  if (interaction.isStringSelectMenu() && !interaction.customId.startsWith('sf:settings:recovery:')) {
     await interaction.deferUpdate().catch(() => undefined);
   }
 
@@ -1335,6 +1605,10 @@ export async function handleSettingsInteraction(
   }
 
   const guild = interaction.guild;
+
+  if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('sf:settings:recovery:')) {
+    return await handleTicketRecoveryInteraction(interaction);
+  }
 
   if (interaction.customId.startsWith('sf:settings:forms:')) {
     return await handleTicketFormSettingsInteraction(interaction);
@@ -2710,6 +2984,18 @@ async function showRepairSystem(interaction: ButtonInteraction): Promise<void> {
           .setLabel('Restore')
           .setEmoji('♻️')
           .setStyle(ButtonStyle.Secondary),
+      ),
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId('sf:settings:recovery:channels')
+          .setLabel('Restore Channel')
+          .setEmoji('♻️')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId('sf:settings:recovery:review')
+          .setLabel('Ticket Deletion Review')
+          .setEmoji('🛡️')
+          .setStyle(ButtonStyle.Primary),
         backButton(),
       ),
     ],
