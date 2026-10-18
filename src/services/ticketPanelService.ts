@@ -103,6 +103,13 @@ export function buildTicketPanelComponents(
   topic = '',
 ): ActionRowBuilder<ButtonBuilder>[] {
   const lifecycle = new ActionRowBuilder<ButtonBuilder>();
+  const deleteControls = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId('ticket:delete:start')
+      .setLabel('Delete Ticket')
+      .setEmoji('🗑️')
+      .setStyle(ButtonStyle.Danger),
+  );
 
   if (status === 'open' || status === 'reopened') {
     lifecycle.addComponents(
@@ -143,7 +150,7 @@ export function buildTicketPanelComponents(
       tools.addComponents(
         new ButtonBuilder().setCustomId('ticket:panel:history').setLabel('History').setEmoji('📜').setStyle(ButtonStyle.Secondary),
       );
-      return [lifecycle, tools];
+      return [lifecycle, tools, deleteControls];
     }
 
     tools.addComponents(
@@ -219,11 +226,11 @@ export function buildTicketPanelComponents(
     );
 
     return voiceControls.components.length
-      ? [lifecycle, tools, voiceControls, positioning]
-      : [lifecycle, tools, positioning];
+      ? [lifecycle, tools, voiceControls, positioning, deleteControls]
+      : [lifecycle, tools, positioning, deleteControls];
   }
 
-  return status === 'archived' ? [lifecycle] : [lifecycle, tools];
+  return status === 'archived' ? [lifecycle, deleteControls] : [lifecycle, tools, deleteControls];
 }
 
 
