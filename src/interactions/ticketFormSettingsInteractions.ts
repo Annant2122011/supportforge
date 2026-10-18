@@ -5,6 +5,7 @@ import {
   EmbedBuilder,
   MessageFlags,
   ModalBuilder,
+  PermissionFlagsBits,
   StringSelectMenuBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -71,7 +72,7 @@ async function render(interaction: FormSettingsInteraction, content: string, com
   const description = heading ? content.replace(heading[0], '').trim() : content;
   const embed = new EmbedBuilder()
     .setColor(theme.color)
-    .setAuthor({ name: 'SupportForge • Forms & Templates' })
+    .setAuthor({ name: 'ResolveX • Forms & Templates' })
     .setTitle(title)
     .setDescription((description || 'Use the controls below to continue.').slice(0, 4096))
     .setFooter({ text: theme.label + ' theme • Guided setup and advanced schema tools' });
@@ -506,10 +507,28 @@ async function submitModal(interaction: ModalSubmitInteraction): Promise<void> {
   throw new Error('Unsupported ticket form modal action.');
 }
 
+function canManageTicketForms(interaction: FormSettingsInteraction): boolean {
+  return Boolean(
+    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild),
+  );
+}
+
 export async function handleTicketFormSettingsInteraction(interaction: FormSettingsInteraction): Promise<boolean> {
   if (!interaction.customId.startsWith(PREFIX)) return false;
   const guild = interaction.guild;
   if (!guild) return true;
+
+  // Form configuration can change live ticket routing and user-submitted data.
+  // Enforce authorization at the interaction boundary, not just in the UI.
+  if (!canManageTicketForms(interaction)) {
+    await prepare(interaction);
+    await showFailure(
+      interaction,
+      new Error('Only server administrators or members with Manage Server can manage ticket forms and templates.'),
+    );
+    return true;
+  }
 
   try {
     const id = interaction.customId;
