@@ -56,6 +56,7 @@ import { isFactoryResetInProgress } from './services/factoryResetService';
 import { startSupportForgeUpdateMonitor } from './services/updateService';
 import type { GuildBasedChannel, TextChannel } from 'discord.js';
 import { initializePersistence } from './core/persistence/provider';
+import { initializeSupportHoursService } from './services/supportHoursService';
 import { startOutboxProcessor } from './core/events/outboxProcessor';
 import { TicketOutboxPublisher } from './services/ticketOutboxPublisher';
 import { configureDiscordChannelRest } from './services/discordChannelService';
@@ -84,6 +85,7 @@ if (!token) {
 async function initializeAndLogin(): Promise<void> {
   try {
     await initializePersistence();
+    await initializeSupportHoursService();
     await refreshActiveTicketFormCache().catch((error) => {
       console.warn('⚠️ Ticket form cache could not be initialized before login; scheduled refresh will retry:', error);
     });
