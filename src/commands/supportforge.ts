@@ -1503,6 +1503,38 @@ export const data =
         )
         .addSubcommand((subcommand) =>
           subcommand
+            .setName('support-hours')
+            .setDescription('Configure time-zone-aware support hours for this server, department, or panel')
+            .addStringOption((option) => option.setName('action').setDescription('Support-hours action').setRequired(true).addChoices(
+              { name: 'Show effective schedule', value: 'show' },
+              { name: 'Set time zone', value: 'set-timezone' },
+              { name: 'Set one weekday', value: 'set-day' },
+              { name: 'Set outside-hours behavior', value: 'behavior' },
+              { name: 'Enable schedule enforcement', value: 'enable' },
+              { name: 'Disable schedule enforcement', value: 'disable' },
+              { name: 'Remove this scope override', value: 'clear-scope' },
+            ))
+            .addStringOption((option) => option.setName('scope').setDescription('Which schedule to configure').setRequired(true).addChoices(
+              { name: 'Server default', value: 'guild' },
+              { name: 'Department override', value: 'department' },
+              { name: 'Ticket panel override', value: 'panel' },
+            ))
+            .addStringOption((option) => option.setName('scope-id').setDescription('Department ID or panel ID; omit for server default').setMaxLength(40))
+            .addStringOption((option) => option.setName('timezone').setDescription('IANA time zone, such as Asia/Kolkata').setMaxLength(100))
+            .addStringOption((option) => option.setName('day').setDescription('Weekday to configure').addChoices(
+              { name: 'Monday', value: 'monday' }, { name: 'Tuesday', value: 'tuesday' },
+              { name: 'Wednesday', value: 'wednesday' }, { name: 'Thursday', value: 'thursday' },
+              { name: 'Friday', value: 'friday' }, { name: 'Saturday', value: 'saturday' },
+              { name: 'Sunday', value: 'sunday' },
+            ))
+            .addStringOption((option) => option.setName('intervals').setDescription('Example: 09:00-12:00,13:00-17:00; or closed').setMaxLength(300))
+            .addStringOption((option) => option.setName('behavior').setDescription('What to do outside opening hours').addChoices(
+              { name: 'Allow tickets with an out-of-hours notice', value: 'allow' },
+              { name: 'Restrict new ticket creation', value: 'restrict' },
+            )),
+        ),
+        .addSubcommand((subcommand) =>
+          subcommand
             .setName('reset')
             .setDescription('Factory-reset SupportForge after typed confirmation')
             .addStringOption((option) => option.setName('confirmation').setDescription('Type DELETE SUPPORT FORGE exactly').setRequired(true).setMinLength(20).setMaxLength(20))
