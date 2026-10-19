@@ -74,6 +74,7 @@ import {
   getCustomPanel,
   listCustomPanels,
   markCustomPanelPublished,
+  restoreCustomPanelPublication,
   updateCustomPanel,
 } from '../services/panelBuilderService';
 import { requestGitHubDeployment } from '../services/updateService';
@@ -1849,6 +1850,9 @@ export async function execute(
         try {
           panel = await markCustomPanelPublished(guild.id, panel.id, targetChannel.id, message.id);
         } catch (error) {
+          await restoreCustomPanelPublication(guild.id, panel.id, panel).catch((restoreError) => {
+            console.error('Failed to restore the last published panel pointer after a publish error:', restoreError);
+          });
           await message.delete().catch(() => undefined);
           throw error;
         }
