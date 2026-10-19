@@ -480,6 +480,44 @@ export async function addCustomPanelButton(
   return button;
 }
 
+export async function retargetCustomPanelButton(
+  guildId: string,
+  panelId: string,
+  buttonId: string,
+  target: {
+    targetType: CustomSupportPanelTargetType;
+    departmentId?: string;
+    formId?: string;
+    tagId?: string | null;
+  },
+): Promise<CustomSupportPanelButton> {
+  const config = await getGuildConfig(guildId);
+  const panel = normalizedDraft(config.customPanels?.[panelId] as CustomSupportPanel);
+  if (!config.customPanels?.[panelId]) throw new Error('Custom panel was not found.');
+  const existing = panel.buttons.find((button) => button.id === buttonId);
+  if (!existing) throw new Error('The button was not found. Refresh and try again.');
+  const forms = target.targetType === 'form' ? await listTicketForms(guildId) : [];
+  // Retargeting rotates the component identity so an interaction already in
+  // flight against the previous target cannot accidentally launch the new one.
+  const raw = {
+    ...existing,
+    ...target,
+    id: randomBytes(5).toString('hex'),
+    ...(target.targetType === 'department' ? { formId: null, formVersion: null } : {}),
+  };
+  const updated = parseCustomPanelButtons([raw], config.departments, forms)[0];
+  if (!updated) throw new Error('The new target could not be validated.');
+  await updateGuildConfig(guildId, (current) => {
+    const saved = current.customPanels?.[panelId];
+    if (!saved) throw new Error('Custom panel was deleted while its button was being retargeted.');
+    const currentButtons = normalizedDraft(saved).buttons;
+    if (!currentButtons.some((button) => button.id === buttonId)) throw new Error('The button changed while you were editing it. Refresh and retry.');
+    saved.buttons = currentButtons.map((button) => button.id === buttonId ? updated : button);
+    saved.updatedAt = new Date().toISOString();
+  });
+  return updated;
+}
+
 export async function updateCustomPanelButton(
   guildId: string,
   panelId: string,
