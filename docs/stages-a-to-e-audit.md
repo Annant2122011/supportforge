@@ -53,25 +53,42 @@ Automated tests cover schema and answer validation, conditional visibility, empt
 
 Remaining acceptance: exercise every supported field type in Discord, test an expired or stale modal, update a form while a user is mid-flow, attach real supported files, and verify submissions recover/link correctly after ticket-channel creation fails.
 
-## Stage E — Multiple custom panels, live preview and Start Ticket
+## Stage E — Custom ticket panels and Settings dashboard builder
 
-**Code status: implemented baseline; richer F-002 features remain partial.**
+**Code status: broad self-service baseline implemented; live Discord acceptance still required.**
 
-The previous single-panel-only model was not sufficient for the roadmap. This branch now adds:
+The earlier single-panel-only model has been extended in this branch into two separate, server-configurable builders.
 
-- Multiple panel definitions persisted in the existing Neon-backed guild configuration document, with legacy configs normalized safely.
-- Slash-command management: `/supportforge panel create/list/show/update/preview/publish/delete`.
-- A **Settings → Custom Panels** button flow to create drafts, select saved panels, preview, edit, choose a publish channel, and confirm deletion.
-- Configurable title, description, footer, optional six-digit accent color, optional thumbnail/banner URLs, and 1–25 ordered buttons.
-- Server-side validation that every button targets an existing department, with supported button styles and optional emoji.
-- A private preview with disabled buttons; publishing activates the buttons.
-- Stable reuse of `ticket:create:<departmentId>`, so all custom panel buttons enter the same validated ticket-creation flow as the standard panel.
-- Persisted published channel/message IDs; republishing edits the existing message when possible and attempts to remove the previous message after moving a panel.
-- Explicit deletion confirmation. Deleting a panel removes its definition and known panel message, but never deletes the tickets created from it.
-- The Settings-panel preview limits visible preview controls to 20 when a draft has 21–25 buttons, reserving a row for navigation within Discord's five-row message limit. Publishing includes all configured buttons.
-- Deleting a panel definition remains possible if the panel's Discord channel was deleted beforehand; the cleanup treats a missing channel/message as already removed and still removes the definition.
+### Public ticket panel builder
 
-Remaining F-002 scope: arbitrary named workflows (rather than department-only targets), panel-level permission rules, optional workflow confirmation messages, a custom icon, richer ordering controls beyond supplying the ordered JSON list, and live Discord acceptance. Publishing to another channel is an external Discord/database sequence, not an atomic transaction. If message publication succeeds but Neon persistence fails, an orphaned message may need manual cleanup.
+- Multiple panel definitions persist in the existing Neon-backed guild configuration document; no SQL migration or database reset is required.
+- Button-driven builder: **Settings → Ticket Panels**. Slash-command fallback: `/supportforge panel create/list/show/update/preview/publish/delete`.
+- A guided UI can create an empty draft, add department/form buttons one at a time, edit button labels/emoji/style/confirmation, change a button target, reorder/remove controls, assign allowed roles at the panel and button level, preview, publish and delete with explicit confirmation.
+- Branding includes panel name, title, instructions, footer, accent, author icon URL, thumbnail URL and banner image URL.
+- Button targets: department ticket flow with an optional fixed tag (or a tag picker), or a specific active ticket form pinned to a concrete tag and form version.
+- Button launch reuses the existing validated ticket/form flow. No separate ticket-creation implementation was introduced.
+- Every public button is tied to the exact published channel/message and a stable per-button ID. A target change rotates the ID. Copied, stale and prior-revision buttons are rejected.
+- Role rules at panel and button level are combined. Manage Server/Administrator bypasses role restrictions; other members must meet the configured role rule at each restricted level.
+- Optional confirmation prompts are ephemeral, bound to the initiating user and source public message, and checked again on click before starting the validated target flow.
+- Draft and published configuration are separate. Editing a draft does not reinterpret a button already displayed to customers.
+- Publishing sends a replacement message, saves the new published snapshot/pointer, then tries to retire the previous message. If the database write fails, the replacement is removed where possible so the old panel remains the current published version. A stale orphan after a cleanup failure is rejected by the runtime route.
+- Panel deletion removes only the panel definition and known published message, never tickets created from that panel.
+- Discord's constraints are enforced: at most 25 buttons; the private preview reserves one of five rows for navigation and displays the first 20 buttons when needed; the published panel can use all 25.
+
+### Settings channel dashboard builder
+
+- The Settings dashboard has independent per-server title, description and footer.
+- Administrators can reorder its navigation buttons and customize each button's label and emoji using the visual **Settings Layout** editor.
+- A private disabled-control preview is available.
+- Every built-in control remains in the dashboard. Customization cannot remove or hide repair, refresh, or Delete Everything, nor change semantic button styles such as the destructive reset style.
+- Settings presentation is stored in the existing Neon-backed advanced-settings JSON document, with defaults and validation for older saved configurations; no SQL migration is needed.
+
+### Remaining scope and reliability boundaries
+
+- Button target types are department and specific active ticket form. A future pluggable workflow registry (arbitrary admin-defined business workflows) is not part of this Stage E slice.
+- Icons are provided as validated image URLs rather than uploads. Published panels remain constrained by Discord's five-row/25-component grid.
+- Discord message sends and Neon writes cannot be one atomic transaction. Publication compensates on persistence failure and rejects stale buttons, but a failed Discord cleanup can leave a visible, nonfunctional old message that an administrator may need to remove.
+- A CI pass does not prove actual permissions, message visibility, role-select UX, Discord rate-limit behavior or every interruption case. Those need the live acceptance checklist below.
 
 ## Automated verification
 
