@@ -1908,6 +1908,62 @@ export async function handleSettingsInteraction(
       return true;
     }
 
+    if (id === SETTINGS_LAYOUT_PREFIX || id === SETTINGS_LAYOUT_PREFIX + ':home') {
+      await showSettingsDashboardBuilder(interaction);
+      return true;
+    }
+
+    if (id === SETTINGS_LAYOUT_PREFIX + ':edit') {
+      const settings = await getAdvancedSettings(guild.id);
+      const description = new TextInputBuilder().setCustomId('description').setLabel('Dashboard description').setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setRequired(false);
+      if (settings.settingsDashboard.description) description.setValue(settings.settingsDashboard.description.slice(0, 4000));
+      const footer = new TextInputBuilder().setCustomId('footer').setLabel('Dashboard footer').setStyle(TextInputStyle.Short).setMaxLength(1800).setRequired(false).setValue(settings.settingsDashboard.footer.slice(0, 1800));
+      await openModal(interaction, 'sf:settings:modal:dashboard-builder', 'Settings Dashboard Branding', [
+        new TextInputBuilder().setCustomId('title').setLabel('Dashboard title').setStyle(TextInputStyle.Short).setMaxLength(256).setRequired(true).setValue(settings.settingsDashboard.title.slice(0, 256)),
+        description,
+        footer,
+      ]);
+      return true;
+    }
+
+    if (id === SETTINGS_LAYOUT_PREFIX + ':preview') {
+      await showSettingsDashboardPreview(interaction);
+      return true;
+    }
+
+    if (id === SETTINGS_LAYOUT_PREFIX + ':reset-order') {
+      await interaction.deferUpdate();
+      await updateAdvancedSettings(guild.id, (settings) => {
+        settings.settingsDashboard.buttonOrder = [...SETTINGS_DASHBOARD_BUTTON_KEYS];
+      });
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'SETTINGS_DASHBOARD_ORDER_RESET', 'Reset the per-server Settings dashboard control order.');
+      await showSettingsDashboardBuilder(interaction, '✅ The default safe control order has been restored.');
+      return true;
+    }
+
+    if (id.startsWith(SETTINGS_LAYOUT_PREFIX + ':up:') || id.startsWith(SETTINGS_LAYOUT_PREFIX + ':down:')) {
+      const movingUp = id.startsWith(SETTINGS_LAYOUT_PREFIX + ':up:');
+      const key = id.slice((SETTINGS_LAYOUT_PREFIX + (movingUp ? ':up:' : ':down:')).length);
+      if (!(SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(key)) {
+        await reject(interaction, 'That Settings control is not supported.');
+        return true;
+      }
+      await interaction.deferUpdate();
+      await updateAdvancedSettings(guild.id, (settings) => {
+        const order = settingsButtonOrder(settings);
+        const currentIndex = order.indexOf(key as SettingsDashboardButtonKey);
+        const targetIndex = currentIndex + (movingUp ? -1 : 1);
+        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= order.length) return;
+        [order[currentIndex], order[targetIndex]] = [order[targetIndex]!, order[currentIndex]!];
+        settings.settingsDashboard.buttonOrder = order;
+      });
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'SETTINGS_DASHBOARD_ORDER_CHANGED', 'Moved ' + SETTINGS_LAYOUT_LABELS[key as SettingsDashboardButtonKey] + ' ' + (movingUp ? 'up' : 'down') + ' in the Settings dashboard.');
+      await showSettingsDashboardOrder(interaction, key as SettingsDashboardButtonKey);
+      return true;
+    }
+
     if (id === 'sf:settings:panel') {
       await showPanelSettings(interaction);
       return true;
@@ -2528,6 +2584,15 @@ export async function handleSettingsInteraction(
   }
 
   if (interaction.isStringSelectMenu()) {
+    if (interaction.customId === SETTINGS_LAYOUT_PREFIX + ':reorder-select') {
+      const key = interaction.values[0];
+      if (!key || !(SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(key)) {
+        await reject(interaction, 'Choose a valid Settings control to reorder.');
+        return true;
+      }
+      await showSettingsDashboardOrder(interaction, key as SettingsDashboardButtonKey);
+      return true;
+    }
     if (interaction.customId === 'sf:settings:tags:remove:select') {
       const departmentId = interaction.values[0];
       const config = await getGuildConfig(guild.id);
@@ -3059,6 +3124,37 @@ export async function handleSettingsInteraction(
             '❌ The complete reset encountered an error. Check the bot console for details.',
         }).catch(() => undefined);
       }
+      return true;
+    }
+
+    if (interaction.customId === 'sf:settings:modal:dashboard-builder') {
+      const title = interaction.fields.getTextInputValue('title').trim();
+      const description = interaction.fields.getTextInputValue('description').trim();
+      const footer = interaction.fields.getTextInputValue('footer').trim();
+      if (!title) {
+        await reject(interaction, 'Dashboard title cannot be empty.');
+        return true;
+      }
+      if (title.length > 256 || description.length > 4000 || footer.length > 1800) {
+        await reject(interaction, 'Dashboard title, description or footer exceeds the supported Discord limit.');
+        return true;
+      }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await updateAdvancedSettings(guild.id, (settings) => {
+        settings.settingsDashboard.title = title;
+        // Empty description intentionally falls back to the built-in helper text.
+        settings.settingsDashboard.description = description;
+        settings.settingsDashboard.footer = footer || 'ResolveX • Settings Dashboard';
+      });
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'SETTINGS_DASHBOARD_BRANDING_CHANGED', 'Updated the per-server Settings dashboard title, description or footer.');
+      await interaction.editReply({
+        content: '✅ Settings dashboard branding saved and refreshed for this server.',
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel('Open Layout Builder').setEmoji('🧰').setStyle(ButtonStyle.Primary),
+          backButton(),
+        )],
+      });
       return true;
     }
 
