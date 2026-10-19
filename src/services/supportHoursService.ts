@@ -216,7 +216,7 @@ export function parseSupportHoursIntervals(input: string): SupportHoursInterval[
   if (pieces.length > 8) throw new Error('A day can contain at most 8 intervals.');
   const intervals: SupportHoursInterval[] = pieces.map((piece) => {
     const match = /^(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})$/.exec(piece);
-    if (!match) throw new Error('Use intervals such as 09:00-12:00,13:00-17:00, or type closed.');
+    if (!match) throw new Error('Intervals must use HH:mm format, such as 09:00-12:00,13:00-17:00, or type closed.');
     const start = match[1]!;
     const end = match[2]!;
     const startMinute = parseClock(start);
