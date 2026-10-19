@@ -196,8 +196,15 @@ function appearancePanelModal(panel: {
     );
 }
 
-function addDepartmentButtonModal(panelId: string, departmentId: string, departmentName: string): ModalBuilder {
-  return new ModalBuilder().setCustomId(PREFIX + 'modal:add-department:' + panelId + ':' + departmentId).setTitle('Add Department Button')
+function addDepartmentButtonModal(
+  panelId: string,
+  departmentId: string,
+  departmentName: string,
+  tagId: string | null,
+): ModalBuilder {
+  return new ModalBuilder()
+    .setCustomId(PREFIX + 'modal:add-department:' + panelId + ':' + departmentId + ':' + (tagId ?? '*'))
+    .setTitle('Add Department Button')
     .addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder().setCustomId('label').setLabel('Button label').setStyle(TextInputStyle.Short).setMaxLength(80).setRequired(true).setValue(departmentName.slice(0, 80)),
@@ -207,9 +214,6 @@ function addDepartmentButtonModal(panelId: string, departmentId: string, departm
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder().setCustomId('style').setLabel('Style: primary/secondary/success/danger').setStyle(TextInputStyle.Short).setMaxLength(9).setRequired(true).setValue('primary'),
-      ),
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId('tag-id').setLabel('Tag ID (blank = ask user)').setStyle(TextInputStyle.Short).setMaxLength(28).setRequired(false).setPlaceholder('Leave empty to show tag picker'),
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder().setCustomId('confirmation').setLabel('Confirmation text (optional)').setStyle(TextInputStyle.Paragraph).setMaxLength(1000).setRequired(false),
@@ -498,6 +502,49 @@ async function showDepartmentPicker(
         ? 'The button ID will rotate when the target changes, invalidating buttons from the previous target after you re-publish.'
         : 'You can optionally pin a tag or let customers choose one when they click the published button.') +
       '\nPage ' + (safePage + 1) + ' / ' + pageCount,
+    components,
+  );
+}
+
+async function showDepartmentTagPicker(
+  interaction: PanelSettingsInteraction,
+  panelId: string,
+  departmentId: string,
+  page = 0,
+): Promise<void> {
+  const department = (await getGuildConfig(interaction.guild!.id)).departments[departmentId];
+  if (!department) throw new Error('That department no longer exists. Refresh the panel builder.');
+  const tags = Object.values(department.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
+  // Reserve one select option for "ask the customer", leaving at most 24 tags
+  // per page so the picker never exceeds Discord's 25-option limit.
+  const pageSize = 24;
+  const pageCount = Math.max(1, Math.ceil(tags.length / pageSize));
+  const safePage = Math.min(Math.max(page, 0), pageCount - 1);
+  const visible = tags.slice(safePage * pageSize, (safePage + 1) * pageSize);
+  const components: PanelComponents = [
+    selectRow(new StringSelectMenuBuilder()
+      .setCustomId(PREFIX + 'department-tag-pick:' + panelId + ':' + departmentId + ':' + safePage)
+      .setPlaceholder('Choose a fixed tag or let the customer choose')
+      .addOptions([
+        { label: 'Customer chooses a tag', value: '*', description: 'Show the existing tag picker when the panel button is clicked.' },
+        ...visible.map((tag) => ({
+          label: tag.name.slice(0, 100),
+          value: tag.id,
+          description: 'Pin this button to the ' + tag.name + ' tag.',
+        })),
+      ])),
+  ];
+  if (pageCount > 1) {
+    components.push(row(
+      makeButton(PREFIX + 'department-tag-page:' + panelId + ':' + departmentId + ':' + (safePage - 1), 'Previous', ButtonStyle.Secondary, '⬅️', safePage === 0),
+      makeButton(PREFIX + 'department-tag-page:' + panelId + ':' + departmentId + ':' + (safePage + 1), 'Next', ButtonStyle.Secondary, '➡️', safePage >= pageCount - 1),
+    ));
+  }
+  components.push(row(makeButton(PREFIX + 'buttons:' + panelId, 'Cancel', ButtonStyle.Secondary, '↩️')));
+  await render(
+    interaction,
+    'Choose Department Button Tag',
+    '**Department:** ' + department.name + '\nChoose a tag to pin to the button, or select **Customer chooses a tag** to use the normal ticket tag picker.\nPage ' + (safePage + 1) + ' / ' + pageCount,
     components,
   );
 }
@@ -879,7 +926,23 @@ export async function handleCustomPanelSettingsInteraction(
       const departmentId = interaction.values[0] ?? '';
       const department = (await getGuildConfig(guild.id)).departments[departmentId];
       if (!department) throw new Error('That department no longer exists. Refresh and try again.');
-      await interaction.showModal(addDepartmentButtonModal(panelId, department.id, department.name));
+      await showDepartmentTagPicker(interaction, panelId, department.id);
+      return true;
+    }
+    if (interaction.isButton() && id.startsWith(PREFIX + 'department-tag-page:')) {
+      const parts = id.split(':');
+      await showDepartmentTagPicker(interaction, parts[4] ?? '', parts[5] ?? '', Number(parts[6] ?? '0'));
+      return true;
+    }
+    if (interaction.isStringSelectMenu() && id.startsWith(PREFIX + 'department-tag-pick:')) {
+      const parts = id.split(':');
+      const panelId = parts[4] ?? '';
+      const departmentId = parts[5] ?? '';
+      const tagValue = interaction.values[0] ?? '*';
+      const department = (await getGuildConfig(guild.id)).departments[departmentId];
+      if (!department) throw new Error('That department no longer exists. Refresh and try again.');
+      if (tagValue !== '*' && !department.tags[tagValue]) throw new Error('That tag no longer exists. Refresh the tag picker.');
+      await interaction.showModal(addDepartmentButtonModal(panelId, department.id, department.name, tagValue === '*' ? null : tagValue));
       return true;
     }
     if (interaction.isButton() && id.startsWith(PREFIX + 'retarget-form:')) {
@@ -1125,8 +1188,8 @@ export async function handleCustomPanelSettingsInteraction(
       const parts = id.split(':');
       const panelId = parts[5] ?? '';
       const departmentId = parts[6] ?? '';
-      const tagInput = readOptionalModalText(interaction, 'tag-id');
-      const tagId = !tagInput || tagInput === '*' ? null : tagInput;
+      const selectedTag = parts[7] ?? '*';
+      const tagId = selectedTag === '*' ? null : selectedTag;
       const confirmationInput = readOptionalModalText(interaction, 'confirmation');
       const button = await addCustomPanelButton(guild.id, panelId, {
         targetType: 'department',
