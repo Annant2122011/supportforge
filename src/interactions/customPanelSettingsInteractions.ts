@@ -919,16 +919,6 @@ export async function handleCustomPanelSettingsInteraction(
       await showTargetTypePicker(interaction, parts[4] ?? '', parts[5] ?? '');
       return true;
     }
-    if (interaction.isButton() && id.startsWith(PREFIX + 'retarget-department:')) {
-      const parts = id.split(':');
-      await showDepartmentPicker(interaction, parts[4] ?? '', Number(parts[6] ?? '0'), parts[5] ?? '');
-      return true;
-    }
-    if (interaction.isButton() && id.startsWith(PREFIX + 'retarget-form:')) {
-      const parts = id.split(':');
-      await showFormPicker(interaction, parts[4] ?? '', Number(parts[6] ?? '0'), parts[5] ?? '');
-      return true;
-    }
     if (interaction.isButton() && id.startsWith(PREFIX + 'retarget-form-tag-page:')) {
       const parts = id.split(':');
       await showFormTagPicker(interaction, parts[4] ?? '', parts[6] ?? '', Number(parts[7] ?? '0'), parts[5] ?? '');
