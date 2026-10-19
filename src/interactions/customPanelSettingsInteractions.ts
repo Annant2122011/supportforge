@@ -391,6 +391,27 @@ async function showButtonManager(interaction: PanelSettingsInteraction, panelId:
   );
 }
 
+async function showTargetTypePicker(
+  interaction: PanelSettingsInteraction,
+  panelId: string,
+  buttonId: string,
+): Promise<void> {
+  const panel = await getCustomPanel(interaction.guild!.id, panelId);
+  const button = panel?.buttons.find((candidate) => candidate.id === buttonId);
+  if (!panel || !button) throw new Error('Button not found.');
+  const chooser = new StringSelectMenuBuilder()
+    .setCustomId(PREFIX + 'retarget-type:' + panelId + ':' + buttonId)
+    .setPlaceholder('Choose what this button should open')
+    .addOptions(
+      { label: 'Department ticket flow', value: 'department', description: 'Open the tag picker or a pinned department/tag ticket modal.', default: button.targetType === 'department' },
+      { label: 'Specific ticket form', value: 'form', description: 'Open a specific active, version-pinned form.', default: button.targetType === 'form' },
+    );
+  await render(interaction, 'Change Button Target', 'Current target: **' + button.targetType + '**. Choose a new target type. The button identity rotates when the target is saved so clicks against the previous target are rejected.', [
+    selectRow(chooser),
+    row(makeButton(PREFIX + 'button:' + panelId + ':' + buttonId, 'Cancel', ButtonStyle.Secondary, '↩️')),
+  ]);
+}
+
 async function showButtonDetail(interaction: PanelSettingsInteraction, panelId: string, buttonId: string): Promise<void> {
   const panel = await getCustomPanel(interaction.guild!.id, panelId);
   if (!panel) throw new Error('Panel not found.');
@@ -538,12 +559,26 @@ async function showFormPicker(
   );
 }
 
-async function showFormTagPicker(interaction: ButtonInteraction | StringSelectMenuInteraction, panelId: string, formId: string, page = 0): Promise<void> {
+async function showFormTagPicker(
+  interaction: ButtonInteraction | StringSelectMenuInteraction,
+  panelId: string,
+  formId: string,
+  page = 0,
+  retargetButtonId?: string,
+): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
   const form = (await listTicketForms(interaction.guild!.id)).find((candidate) => candidate.id === formId && candidate.active);
   if (!form) throw new Error('That form was deactivated. Refresh the active form list.');
   if (form.tagId) {
-    await interaction.showModal(addFormButtonModal(panelId, form.id, form.tagId, form.name));
+    if (retargetButtonId) {
+      const updated = await retargetCustomPanelButton(interaction.guild!.id, panelId, retargetButtonId, {
+        targetType: 'form', formId: form.id, tagId: form.tagId,
+      });
+      await audit(interaction, 'CUSTOM_PANEL_BUTTON_RETARGETED', 'Changed button "' + updated.label + '" to form ' + form.id + ' version ' + form.version + '.');
+      await showButtonDetail(interaction, panelId, updated.id);
+    } else {
+      await interaction.showModal(addFormButtonModal(panelId, form.id, form.tagId, form.name));
+    }
     return;
   }
   const department = config.departments[form.departmentId];
@@ -553,19 +588,32 @@ async function showFormTagPicker(interaction: ButtonInteraction | StringSelectMe
   const pageCount = Math.max(1, Math.ceil(tags.length / PAGE_SIZE));
   const safePage = Math.min(Math.max(page, 0), pageCount - 1);
   const visible = tags.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+  const tagSelectId = retargetButtonId
+    ? PREFIX + 'retarget-form-tag-pick:' + panelId + ':' + retargetButtonId + ':' + formId + ':' + safePage
+    : PREFIX + 'form-tag-pick:' + panelId + ':' + formId + ':' + safePage;
   const components: PanelComponents = [
-    selectRow(new StringSelectMenuBuilder().setCustomId(PREFIX + 'form-tag-pick:' + panelId + ':' + formId + ':' + safePage)
+    selectRow(new StringSelectMenuBuilder().setCustomId(tagSelectId)
       .setPlaceholder('Choose the tag this form button should use')
       .addOptions(visible.map((tag) => ({ label: tag.name.slice(0, 100), value: tag.id })))),
   ];
   if (pageCount > 1) {
     components.push(row(
-      makeButton(PREFIX + 'form-tag-page:' + panelId + ':' + formId + ':' + (safePage - 1), 'Previous', ButtonStyle.Secondary, '⬅️', safePage === 0),
-      makeButton(PREFIX + 'form-tag-page:' + panelId + ':' + formId + ':' + (safePage + 1), 'Next', ButtonStyle.Secondary, '➡️', safePage >= pageCount - 1),
+      makeButton(retargetButtonId
+        ? PREFIX + 'retarget-form-tag-page:' + panelId + ':' + retargetButtonId + ':' + formId + ':' + (safePage - 1)
+        : PREFIX + 'form-tag-page:' + panelId + ':' + formId + ':' + (safePage - 1),
+      'Previous', ButtonStyle.Secondary, '⬅️', safePage === 0),
+      makeButton(retargetButtonId
+        ? PREFIX + 'retarget-form-tag-page:' + panelId + ':' + retargetButtonId + ':' + formId + ':' + (safePage + 1)
+        : PREFIX + 'form-tag-page:' + panelId + ':' + formId + ':' + (safePage + 1),
+      'Next', ButtonStyle.Secondary, '➡️', safePage >= pageCount - 1),
     ));
   }
-  components.push(row(makeButton(PREFIX + 'buttons:' + panelId, 'Cancel', ButtonStyle.Secondary, '↩️')));
-  await render(interaction, 'Select Form Tag', 'This form applies to all tags. Select the tag whose tickets should open this exact form.', components);
+  components.push(row(makeButton(
+    retargetButtonId ? PREFIX + 'button:' + panelId + ':' + retargetButtonId : PREFIX + 'buttons:' + panelId,
+    'Cancel', ButtonStyle.Secondary, '↩️',
+  )));
+  await render(interaction, retargetButtonId ? 'Change Button Target • Select Form Tag' : 'Select Form Tag',
+    'This form applies to all tags. Select the tag whose tickets should open this exact form.', components);
 }
 
 async function showPanelAccess(interaction: PanelSettingsInteraction, panelId: string, buttonId?: string): Promise<void> {
