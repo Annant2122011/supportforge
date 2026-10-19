@@ -65,6 +65,7 @@ const SETTINGS_DASHBOARD_BUTTONS: Record<SettingsDashboardButtonKey, {
   premium: { customId: 'sf:settings:premium', label: 'Premium & Demo', style: ButtonStyle.Secondary, emoji: '💎' },
   panels: { customId: 'sf:settings:panels:home', label: 'Ticket Panels', style: ButtonStyle.Primary, emoji: '🧱' },
   'dashboard-builder': { customId: 'sf:settings:dashboard-builder', label: 'Settings Layout', style: ButtonStyle.Primary, emoji: '🧰' },
+  'support-hours': { customId: 'sf:settings:support-hours', label: 'Support Hours', style: ButtonStyle.Primary, emoji: '🕒' },
 };
 
 /** Per-server order is customizable, but every built-in control remains available. */
