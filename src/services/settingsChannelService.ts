@@ -84,7 +84,12 @@ export function buildSettingsDashboardComponents(
   }
   const buttons = order.map((key) => {
     const item = SETTINGS_DASHBOARD_BUTTONS[key];
-    return settingsButton(item.customId, item.label, item.style, item.emoji, disabled);
+    const customization = settings?.settingsDashboard?.buttonCustomizations?.[key];
+    const label = customization?.label ?? item.label;
+    const emoji = customization ? customization.emoji ?? undefined : item.emoji;
+    // Semantic styles are intentionally not editable: delete stays destructive,
+    // and navigation/recovery actions retain the built-in safe styling.
+    return settingsButton(item.customId, label, item.style, emoji, disabled);
   });
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
   for (let index = 0; index < buttons.length; index += 5) {
