@@ -492,16 +492,24 @@ export async function retargetCustomPanelButton(
   },
 ): Promise<CustomSupportPanelButton> {
   const config = await getGuildConfig(guildId);
-  const panel = normalizedDraft(config.customPanels?.[panelId] as CustomSupportPanel);
-  if (!config.customPanels?.[panelId]) throw new Error('Custom panel was not found.');
+  const savedPanel = config.customPanels?.[panelId];
+  if (!savedPanel) throw new Error('Custom panel was not found.');
+  const panel = normalizedDraft(savedPanel);
   const existing = panel.buttons.find((button) => button.id === buttonId);
   if (!existing) throw new Error('The button was not found. Refresh and try again.');
   const forms = target.targetType === 'form' ? await listTicketForms(guildId) : [];
+  const selectedForm = target.targetType === 'form'
+    ? forms.find((form) => form.id === target.formId && form.active)
+    : undefined;
+  if (target.targetType === 'form' && !selectedForm) {
+    throw new Error('The selected form is missing or inactive. Refresh the active form list and retry.');
+  }
   // Retargeting rotates the component identity so an interaction already in
   // flight against the previous target cannot accidentally launch the new one.
   const raw = {
     ...existing,
     ...target,
+    ...(target.targetType === 'form' ? { departmentId: selectedForm!.departmentId } : {}),
     id: randomBytes(5).toString('hex'),
     ...(target.targetType === 'department' ? { formId: null, formVersion: null } : {}),
   };
