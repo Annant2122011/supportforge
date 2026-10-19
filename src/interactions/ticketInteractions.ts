@@ -5987,10 +5987,56 @@ async function handleCustomPanelEntry(interaction: ButtonInteraction): Promise<v
   const action = parts[2] ?? '';
   const isConfirm = action === 'confirm';
   const isCancel = action === 'cancel';
-  const panelId = (isConfirm || isCancel) ? (parts[3] ?? '') : action;
-  const buttonId = (isConfirm || isCancel) ? (parts[4] ?? '') : (parts[3] ?? '');
-  if (!panelId || !buttonId || parts.length !== ((isConfirm || isCancel) ? 5 : 4)) {
+  const panelId = parts[3] ?? '';
+  const buttonId = parts[4] ?? '';
+  const sourceMessageId = isConfirm || isCancel ? parts[5] ?? '' : '';
+  const promptOwnerId = isConfirm || isCancel ? parts[6] ?? '' : '';
+
+  // Confirmation controls are ephemeral responses, not components on the
+  // public panel itself. Carry the source message and initiating user through
+  // the ephemeral prompt, then revalidate both against the published snapshot.
+  if (
+    !panelId ||
+    !buttonId ||
+    (isConfirm || isCancel
+      ? parts.length !== 7 || !/^\d{17,20}$/.test(sourceMessageId) || !/^\d{17,20}$/.test(promptOwnerId)
+      : parts.length !== 4 || (action !== 'confirm' && action !== 'cancel'))
+  ) {
     await replyError(interaction, 'This panel button is malformed. Refresh the support panel and try again.');
+    return;
+  }
+
+  if (isConfirm || isCancel) {
+    if (
+      interaction.user.id !== promptOwnerId ||
+      !interaction.message.flags.has(MessageFlags.Ephemeral)
+    ) {
+      await replyError(interaction, 'This confirmation belongs to another user or is not a valid private prompt.');
+      return;
+    }
+  }
+
+  const panel = await getCustomPanel(interaction.guild.id, panelId);
+  if (!panel || !panel.publishedConfig || !panel.publishedMessageId || !panel.publishedChannelId) {
+    await replyError(interaction, 'This panel is no longer published. Ask an administrator to publish the current draft.');
+    return;
+  }
+  const livePanel = panel.publishedConfig;
+  const sourceIsCurrent = isConfirm || isCancel
+    ? sourceMessageId === panel.publishedMessageId
+    : interaction.message.id === panel.publishedMessageId;
+  if (!sourceIsCurrent || interaction.channelId !== panel.publishedChannelId) {
+    await replyError(interaction, 'This is an old or copied panel button. Use the current published support panel instead.');
+    return;
+  }
+
+  const button = livePanel.buttons.find((candidate) => candidate.id === buttonId);
+  if (!button) {
+    await replyError(interaction, 'This button belongs to an older panel revision. The administrator must republish the current panel.');
+    return;
+  }
+  if (!hasRequiredPanelAccess(interaction, livePanel.allowedRoleIds ?? [], button.allowedRoleIds ?? [])) {
+    await replyError(interaction, 'You do not have a role allowed to use this support-panel option.');
     return;
   }
 
@@ -6003,49 +6049,24 @@ async function handleCustomPanelEntry(interaction: ButtonInteraction): Promise<v
     return;
   }
 
-  const panel = await getCustomPanel(interaction.guild.id, panelId);
-  if (!panel || !panel.publishedConfig || !panel.publishedMessageId) {
-    await replyError(interaction, 'This panel is no longer published. Ask an administrator to publish the current draft.');
-    return;
-  }
-  const livePanel = panel.publishedConfig;
-  // Custom IDs alone are not proof that a click came from the panel we
-  // published. Bind interactions to the exact saved channel/message as well,
-  // so a copied/stale button cannot be replayed from a different message.
-  if (
-    interaction.message.id !== panel.publishedMessageId ||
-    interaction.channelId !== panel.publishedChannelId
-  ) {
-    await replyError(interaction, 'This is an old or copied panel button. Use the current published support panel instead.');
-    return;
-  }
-  const button = livePanel.buttons.find((candidate) => candidate.id === buttonId);
-  if (!button) {
-    await replyError(interaction, 'This button belongs to an older panel revision. The administrator must republish the current panel.');
-    return;
-  }
-  if (!hasRequiredPanelAccess(interaction, livePanel.allowedRoleIds ?? [], button.allowedRoleIds ?? [])) {
-    await replyError(interaction, 'You do not have a role allowed to use this support-panel option.');
-    return;
-  }
-
   if (!isConfirm && button.confirmationMessage) {
     const confirmation = new EmbedBuilder()
       .setColor(getThemeColor((await getGuildConfig(interaction.guild.id)).theme))
       .setTitle('Confirm support request')
       .setDescription(button.confirmationMessage.slice(0, 4096))
       .setFooter({ text: 'ResolveX • No ticket is created until you confirm' });
+    const confirmationPrefix = 'ticket:custom:';
     await interaction.reply({
       embeds: [confirmation],
       components: [
         new ActionRowBuilder<ButtonBuilder>().addComponents(
           new ButtonBuilder()
-            .setCustomId('ticket:custom:confirm:' + panelId + ':' + buttonId)
+            .setCustomId(confirmationPrefix + 'confirm:' + panelId + ':' + buttonId + ':' + panel.publishedMessageId + ':' + interaction.user.id)
             .setLabel('Continue')
             .setEmoji('🎫')
             .setStyle(ButtonStyle.Success),
           new ButtonBuilder()
-            .setCustomId('ticket:custom:cancel:' + panelId + ':' + buttonId)
+            .setCustomId(confirmationPrefix + 'cancel:' + panelId + ':' + buttonId + ':' + panel.publishedMessageId + ':' + interaction.user.id)
             .setLabel('Cancel')
             .setEmoji('↩️')
             .setStyle(ButtonStyle.Secondary),
@@ -6057,6 +6078,9 @@ async function handleCustomPanelEntry(interaction: ButtonInteraction): Promise<v
   }
 
   try {
+    // A confirm click is accepted only after the private prompt owner, source
+    // public message, published snapshot, role restrictions and target have
+    // all been revalidated. The action then reuses the normal ticket flow.
     await startCustomPanelTarget(interaction, button);
   } catch (error) {
     console.error('Custom support-panel route failed:', error);
