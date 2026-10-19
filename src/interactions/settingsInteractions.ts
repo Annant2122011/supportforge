@@ -1981,12 +1981,15 @@ export async function handleSettingsInteraction(
     if (id === SETTINGS_LAYOUT_PREFIX + ':reset-order') {
       await interaction.deferUpdate();
       await updateAdvancedSettings(guild.id, (settings) => {
+        settings.settingsDashboard.title = '⚙️ ResolveX Settings';
+        settings.settingsDashboard.description = 'Configure your server’s ticket system, support panels and retention policies.';
+        settings.settingsDashboard.footer = 'ResolveX • Settings Dashboard';
         settings.settingsDashboard.buttonOrder = [...SETTINGS_DASHBOARD_BUTTON_KEYS];
         settings.settingsDashboard.buttonCustomizations = {};
       });
       await refreshSettingsChannel(guild);
-      await auditSettingsAction(guild, interaction, 'SETTINGS_DASHBOARD_LAYOUT_RESET', 'Reset the per-server Settings dashboard order, labels and emojis.');
-      await showSettingsDashboardBuilder(interaction, '✅ The default Settings layout, labels and emojis have been restored.');
+      await auditSettingsAction(guild, interaction, 'SETTINGS_DASHBOARD_LAYOUT_RESET', 'Reset the per-server Settings dashboard branding, order, labels and emojis.');
+      await showSettingsDashboardBuilder(interaction, '✅ The default Settings dashboard branding, order, labels and emojis have been restored.');
       return true;
     }
 
