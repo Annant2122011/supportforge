@@ -595,7 +595,7 @@ async function showHome(interaction: SettingsViewInteraction): Promise<void> {
         config.theme,
       ),
     ],
-    buildSettingsDashboardComponents(),
+    buildSettingsDashboardComponents(settings),
   );
 }
 
