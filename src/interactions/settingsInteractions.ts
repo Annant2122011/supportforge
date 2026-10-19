@@ -637,6 +637,14 @@ function effectiveSettingsLayoutLabel(
   return settings.settingsDashboard.buttonCustomizations[key]?.label ?? SETTINGS_LAYOUT_LABELS[key];
 }
 
+function effectiveSettingsLayoutEmoji(
+  settings: Awaited<ReturnType<typeof getAdvancedSettings>>,
+  key: SettingsDashboardButtonKey,
+): string {
+  const custom = settings.settingsDashboard.buttonCustomizations[key];
+  return custom ? (custom.emoji ?? '') : SETTINGS_LAYOUT_DEFAULT_EMOJIS[key];
+}
+
 
 function settingsButtonOrder(settings: Awaited<ReturnType<typeof getAdvancedSettings>>): SettingsDashboardButtonKey[] {
   const valid: SettingsDashboardButtonKey[] = [];
@@ -659,7 +667,7 @@ async function showSettingsDashboardBuilder(
   const settings = await getAdvancedSettings(guildId);
   const config = await getGuildConfig(guildId);
   const order = settingsButtonOrder(settings);
-  const orderText = order.map((key, index) => (index + 1) + '. ' + effectiveSettingsLayoutLabel(settings, key)).join('\n');
+  const orderText = order.map((key, index) => (index + 1) + '. ' + (effectiveSettingsLayoutEmoji(settings, key) ? effectiveSettingsLayoutEmoji(settings, key) + ' ' : '') + effectiveSettingsLayoutLabel(settings, key)).join('\n');
   const chooser = new StringSelectMenuBuilder()
     .setCustomId(SETTINGS_LAYOUT_PREFIX + ':reorder-select')
     .setPlaceholder('Choose a control to move up or down')
@@ -704,8 +712,9 @@ async function showSettingsDashboardOrder(
     new EmbedBuilder()
       .setTitle('Reorder Settings Control')
       .setDescription(
-        '**Selected:** ' + effectiveSettingsLayoutLabel(settings, key) + '\n' +
-        '**Current position:** ' + (index + 1) + ' of ' + order.length + '\n\n' +
+        '**Selected:** ' + (effectiveSettingsLayoutEmoji(settings, key) ? effectiveSettingsLayoutEmoji(settings, key) + ' ' : '') + effectiveSettingsLayoutLabel(settings, key) + '\n' +
+        '**Current position:** ' + (index + 1) + ' of ' + order.length + '\n' +
+        '**Emoji:** ' + (effectiveSettingsLayoutEmoji(settings, key) || 'None') + '\n\n' +
         'Moving this item changes the order of buttons on the persistent Settings dashboard for this server. It does not remove or disable the selected feature.',
       ),
   ], [
