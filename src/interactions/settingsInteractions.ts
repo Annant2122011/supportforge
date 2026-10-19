@@ -623,6 +623,21 @@ const SETTINGS_LAYOUT_LABELS: Record<SettingsDashboardButtonKey, string> = {
   'dashboard-builder': 'Settings Layout',
 };
 
+const SETTINGS_LAYOUT_DEFAULT_EMOJIS: Record<SettingsDashboardButtonKey, string> = {
+  panel: '🎛️', defaults: '🎟️', tags: '🏷️', usecases: '🧩', reports: '🚩',
+  retention: '🧹', appearance: '🎨', storage: '🗄️', rules: '🛡️', repair: '🛠️',
+  team: '👥', manual: '📖', forms: '🧾', refresh: '🔄', reset: '🚨', theme: '🌈',
+  premium: '💎', panels: '🧱', 'dashboard-builder': '🧰',
+};
+
+function effectiveSettingsLayoutLabel(
+  settings: Awaited<ReturnType<typeof getAdvancedSettings>>,
+  key: SettingsDashboardButtonKey,
+): string {
+  return settings.settingsDashboard.buttonCustomizations[key]?.label ?? SETTINGS_LAYOUT_LABELS[key];
+}
+
+
 function settingsButtonOrder(settings: Awaited<ReturnType<typeof getAdvancedSettings>>): SettingsDashboardButtonKey[] {
   const valid: SettingsDashboardButtonKey[] = [];
   for (const candidate of settings.settingsDashboard.buttonOrder) {
@@ -644,12 +659,12 @@ async function showSettingsDashboardBuilder(
   const settings = await getAdvancedSettings(guildId);
   const config = await getGuildConfig(guildId);
   const order = settingsButtonOrder(settings);
-  const orderText = order.map((key, index) => (index + 1) + '. ' + SETTINGS_LAYOUT_LABELS[key]).join('\n');
+  const orderText = order.map((key, index) => (index + 1) + '. ' + effectiveSettingsLayoutLabel(settings, key)).join('\n');
   const chooser = new StringSelectMenuBuilder()
     .setCustomId(SETTINGS_LAYOUT_PREFIX + ':reorder-select')
     .setPlaceholder('Choose a control to move up or down')
     .addOptions(order.map((key) => ({
-      label: SETTINGS_LAYOUT_LABELS[key].slice(0, 100),
+      label: effectiveSettingsLayoutLabel(settings, key).slice(0, 100),
       value: key,
       description: 'Current position ' + (order.indexOf(key) + 1) + ' of ' + order.length,
       default: key === order[0],
@@ -659,7 +674,7 @@ async function showSettingsDashboardBuilder(
       .setTitle('🧰 Settings Dashboard Builder')
       .setDescription(
         (notice ? notice + '\n\n' : '') +
-        'Customize the **Settings channel itself** for this server. Change its heading, description and footer; reorder its navigation controls; and preview the result before saving. This changes only the Settings dashboard, not the public ticket panel.\n\n' +
+        'Customize the **Settings channel itself** for this server. Change its heading, description, footer, control order, per-control labels and emojis, then preview the result. This changes only the Settings dashboard, not the public ticket panel.\n\n' +
         '**Title:** ' + settings.settingsDashboard.title + '\n' +
         '**Description:** ' + (settings.settingsDashboard.description || 'No description') + '\n' +
         '**Footer:** ' + settings.settingsDashboard.footer + '\n\n' +
@@ -689,7 +704,7 @@ async function showSettingsDashboardOrder(
     new EmbedBuilder()
       .setTitle('Reorder Settings Control')
       .setDescription(
-        '**Selected:** ' + SETTINGS_LAYOUT_LABELS[key] + '\n' +
+        '**Selected:** ' + effectiveSettingsLayoutLabel(settings, key) + '\n' +
         '**Current position:** ' + (index + 1) + ' of ' + order.length + '\n\n' +
         'Moving this item changes the order of buttons on the persistent Settings dashboard for this server. It does not remove or disable the selected feature.',
       ),
@@ -697,7 +712,8 @@ async function showSettingsDashboardOrder(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':up:' + key).setLabel('Move Up').setEmoji('⬆️').setStyle(ButtonStyle.Secondary).setDisabled(index === 0),
       new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':down:' + key).setLabel('Move Down').setEmoji('⬇️').setStyle(ButtonStyle.Secondary).setDisabled(index === order.length - 1),
-      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':preview').setLabel('Preview').setEmoji('👁️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':customize:' + key).setLabel('Customize Label / Emoji').setEmoji('✏️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':preview').setLabel('Preview').setEmoji('👁️').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel('Layout Builder').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
     ),
   ]);
@@ -1938,10 +1954,11 @@ export async function handleSettingsInteraction(
       await interaction.deferUpdate();
       await updateAdvancedSettings(guild.id, (settings) => {
         settings.settingsDashboard.buttonOrder = [...SETTINGS_DASHBOARD_BUTTON_KEYS];
+        settings.settingsDashboard.buttonCustomizations = {};
       });
       await refreshSettingsChannel(guild);
-      await auditSettingsAction(guild, interaction, 'SETTINGS_DASHBOARD_ORDER_RESET', 'Reset the per-server Settings dashboard control order.');
-      await showSettingsDashboardBuilder(interaction, '✅ The default safe control order has been restored.');
+      await auditSettingsAction(guild, interaction, 'SETTINGS_DASHBOARD_LAYOUT_RESET', 'Reset the per-server Settings dashboard order, labels and emojis.');
+      await showSettingsDashboardBuilder(interaction, '✅ The default Settings layout, labels and emojis have been restored.');
       return true;
     }
 
