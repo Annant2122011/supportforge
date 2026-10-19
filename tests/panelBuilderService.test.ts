@@ -91,6 +91,10 @@ test('custom panel button validation rejects unknown departments and malformed i
   assert.throws(() => parseCustomPanelButtons([], departments), /0–25 buttons/);
   assert.throws(() => parseCustomPanelButtons([{ departmentId: 'billing', label: 'x'.repeat(81) }], departments), /label/);
   assert.throws(() => parseCustomPanelButtons([{ departmentId: 'billing', label: 'Billing', style: 'link' }], departments), /style/);
+  assert.throws(() => parseCustomPanelButtons([
+    { id: 'duplicate1', departmentId: 'billing', label: 'Billing' },
+    { id: 'duplicate1', departmentId: 'technical', label: 'Technical' },
+  ], departments), /Button IDs must be unique/);
   assert.throws(() => parseCustomPanelButtons([{ targetType: 'department', departmentId: 'billing', tagId: 'missing', label: 'Refund' }], departments), /tagId/);
   assert.throws(() => parseCustomPanelButtons([{ targetType: 'department', departmentId: 'billing', label: 'Refund', allowedRoleIds: ['not-a-role-id'] }], departments), /invalid Discord role ID/);
 });
