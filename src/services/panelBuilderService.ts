@@ -667,6 +667,27 @@ export async function markCustomPanelPublished(
   return saved;
 }
 
+/**
+ * Compensate when Discord accepted a replacement message but Neon could not
+ * durably save the new publication pointer. Restore both persisted and
+ * process-local published state to the last known-good snapshot.
+ */
+export async function restoreCustomPanelPublication(
+  guildId: string,
+  panelId: string,
+  previous: Pick<CustomSupportPanel, 'publishedChannelId' | 'publishedMessageId' | 'publishedConfig'>,
+): Promise<void> {
+  await updateGuildConfig(guildId, (current) => {
+    const panel = current.customPanels?.[panelId];
+    if (!panel) return;
+    panel.publishedChannelId = previous.publishedChannelId;
+    panel.publishedMessageId = previous.publishedMessageId;
+    panel.publishedConfig = previous.publishedConfig
+      ? JSON.parse(JSON.stringify(previous.publishedConfig)) as CustomSupportPanelPublishedConfig
+      : null;
+  });
+}
+
 export async function deleteCustomPanelDefinition(
   guildId: string,
   panelId: string,
