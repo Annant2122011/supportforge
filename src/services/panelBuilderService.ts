@@ -694,23 +694,26 @@ export async function deleteCustomPanelDefinition(
 ): Promise<CustomSupportPanel> {
   const before = await getCustomPanel(guildId, panelId);
   if (!before) throw new Error('Custom panel "' + panelId + '" was not found.');
+  let removedFromMemory = false;
   try {
     await updateGuildConfig(guildId, (current) => {
       const panel = current.customPanels?.[panelId];
       if (!panel) throw new Error('Custom panel "' + panelId + '" was not found.');
       delete current.customPanels[panelId];
+      removedFromMemory = true;
     });
   } catch (error) {
     // updateGuildConfig mutates the in-memory document before writing Neon.
-    // If the durable delete fails, restore the panel definition in memory and
-    // make a best-effort write-back so its still-visible public buttons remain
-    // functional rather than pointing at a missing definition.
-    await updateGuildConfig(guildId, (current) => {
-      current.customPanels ??= {};
-      current.customPanels[panelId] = before;
-    }).catch((restoreError) => {
-      console.error('Could not restore panel definition after failed delete:', restoreError);
-    });
+    // Restore only when this operation actually removed the panel: if another
+    // worker deleted it first, do not resurrect its stale configuration.
+    if (removedFromMemory) {
+      await updateGuildConfig(guildId, (current) => {
+        current.customPanels ??= {};
+        current.customPanels[panelId] = before;
+      }).catch((restoreError) => {
+        console.error('Could not restore panel definition after failed delete:', restoreError);
+      });
+    }
     throw error;
   }
   return before;
