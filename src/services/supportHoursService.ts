@@ -363,7 +363,7 @@ export async function saveSupportHoursPolicy(
   const policy: SupportHoursPolicy = {
     ...normalized,
     id: previous?.id ?? key,
-    scopeId: normalized.scopeId,
+    scopeId: normalized.scopeId ?? null,
     version: (previous?.version ?? 0) + 1,
     updatedAt: new Date().toISOString(),
   };
