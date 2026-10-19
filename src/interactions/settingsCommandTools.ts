@@ -325,7 +325,7 @@ export async function handleSettingsSlashCommand(
           scheduleLines.join('\n') + '\n\n' +
           (evaluated.nextOpeningAt
             ? 'Next opening: **' + formatSupportHoursInstant(evaluated.nextOpeningAt, evaluated.timezone) + '**'
-            : (!evaluated.isOpen && evaluated.policyEnabled ? 'No next opening is configured.' : ''));
+            : (!evaluated.isOpen && evaluated.policyEnabled ? 'No next opening is configured.' : '')));
         return;
       }
 
