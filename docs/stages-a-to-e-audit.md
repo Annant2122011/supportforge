@@ -102,6 +102,11 @@ Those runs include the custom-panel ID parser tests, Settings-button customizati
 - [ ] Test native channel deletion separately from Delete Ticket button confirmation/review.
 - [ ] Test interrupted recovery and repeated retry without losing saved archives.
 - [ ] Create two custom panels, preview both, publish them to separate channels, update/reorder buttons, republish, and delete one while confirming existing tickets remain.
+- [ ] Add department buttons using both the "customer chooses a tag" option and a pinned tag selected from the dropdown; test a department with more than 24 tags to verify paging.
+- [ ] Add a specific active form button, test wildcard-form tag selection, edit/retarget the button, then re-publish. Confirm that changed/deactivated form versions produce a clear repair path rather than silently switching schemas.
+- [ ] Configure panel-level and button-level role rules, and test allowed, disallowed, admin-bypass, confirmation Continue, confirmation Cancel, and a stale/copied button interaction.
+- [ ] Simulate Neon persistence failure during publish in a controlled test environment and confirm the old published panel pointer remains current and the unregistered replacement message is removed where possible.
+- [ ] Reorder Settings controls; edit several labels/emojis (including clearing an emoji); preview the disabled layout; reset layout; confirm all controls remain and Delete Everything retains danger styling.
 - [ ] Verify the intended Neon project, backups, migrations, and restore drill.
 - [ ] Review deployment secrets and host watchdog configuration before deployment.
 
