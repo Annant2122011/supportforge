@@ -79,7 +79,12 @@ import {
   getTicketAuditHistory,
   logTicketEvent,
   logSystemEvent,
+  logSettingsEvent,
 } from '../services/auditLogService';
+import {
+  evaluateSupportHours,
+  formatSupportHoursInstant,
+} from '../services/supportHoursService';
 import {
   TICKET_FORM_MODAL_TTL_MS,
   getCachedActiveTicketFormById,
@@ -1023,13 +1028,51 @@ interface PreparedTicketFormData {
   description: string;
 }
 
+
+async function ensureSupportHoursAllows(
+  interaction: ButtonInteraction | ChatInputCommandInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
+  guildId: string,
+  departmentId: string,
+  panelId?: string,
+): Promise<boolean> {
+  const decision = await evaluateSupportHours(guildId, { departmentId, panelId });
+  if (decision.ticketCreationAllowed) return true;
+
+  const nextOpening = decision.nextOpeningAt
+    ? ' Next opening: ' + formatSupportHoursInstant(decision.nextOpeningAt, decision.timezone) + '.'
+    : ' No next opening is configured; contact a server administrator.';
+  const message = '⏰ Support is currently closed in ' + decision.timezone +
+    '. New tickets are restricted by the configured support-hours policy.' + nextOpening;
+  await replyError(interaction, message);
+
+  // Audit delivery must not delay Discord's initial acknowledgement.
+  void (async () => {
+    const guild = interaction.guild;
+    if (!guild) return;
+    const config = await getGuildConfig(guildId);
+    if (!config.supportCategoryId) return;
+    await logSettingsEvent(guild, config.supportCategoryId, {
+      action: 'SUPPORT_HOURS_BLOCKED',
+      actorId: interaction.user.id,
+      actorName: interaction.user.tag,
+      detail: 'Blocked new ticket intake for department ' + departmentId +
+        (panelId ? ' via panel ' + panelId : '') +
+        '; timezone=' + decision.timezone +
+        '; policy=' + (decision.scopeType ?? 'none') +
+        '; policyVersion=' + (decision.policyVersion ?? 'none') + '.',
+    });
+  })().catch((error) => console.warn('Support-hours block audit failed:', error));
+  return false;
+}
+
 async function createTicket(
   interaction: ModalSubmitInteraction,
   departmentId: string,
   tagId: string,
-  formRoute?: { formId: string; version: number; expiresAt: number; submissionId?: string },
+  formRoute?: { formId: string; version: number; expiresAt: number; submissionId?: string; panelId?: string },
   preparedForm?: PreparedTicketFormData,
   alreadyAcknowledged = false,
+  panelId?: string,
 ): Promise<void> {
   if (!alreadyAcknowledged && !(await safeDeferReply(interaction))) {
     return;
@@ -1113,6 +1156,10 @@ async function createTicket(
         interaction,
         '❌ This department/tag combination no longer exists. Please refresh the support panel.',
       );
+      return;
+    }
+
+    if (!(await ensureSupportHoursAllows(interaction, guild.id, departmentId, panelId ?? formRoute?.panelId))) {
       return;
     }
 
@@ -3059,9 +3106,8 @@ export async function showTicketCreationModalFromCommand(
   const tagId = interaction.options.getString('tag-id', true).trim();
 
   try {
-    // Do not perform database/network work before showModal(): Discord's
-    // initial interaction acknowledgement window is short. The modal-submit
-    // handler revalidates the department and tag before creating anything.
+    if (!(await ensureSupportHoursAllows(interaction, guild.id, departmentId))) return;
+    // The intake admission check uses preloaded policy state; ticket creation rechecks it after the form is submitted.
     const cachedForm = getCachedActiveTicketFormForRouting(guild.id, departmentId, tagId);
     if (!cachedForm.ready) {
       await interaction.reply({ content: 'Ticket forms are still loading. Please try again in a moment.', flags: MessageFlags.Ephemeral });
@@ -3107,12 +3153,15 @@ async function showTicketTagSelector(
   interaction: ButtonInteraction,
   departmentId: string,
   page = 0,
+  panelId?: string,
 ): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
   if (!interaction.guild) {
     await replyError(interaction, '❌ This action must be used inside a server.');
     return;
   }
+
+  if (!(await ensureSupportHoursAllows(interaction, interaction.guild.id, departmentId, panelId))) return;
 
   const config = await getGuildConfig(interaction.guild.id);
   const department = config.departments[departmentId];
@@ -3141,7 +3190,7 @@ async function showTicketTagSelector(
   );
 
   const menu = new StringSelectMenuBuilder()
-    .setCustomId('ticket:create-tag:select:' + departmentId)
+    .setCustomId('ticket:create-tag:select:' + departmentId + (panelId ? ':' + panelId : ''))
     .setPlaceholder('Choose a tag')
     .setMinValues(1)
     .setMaxValues(1)
@@ -3165,21 +3214,21 @@ async function showTicketTagSelector(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
           .setCustomId(
-            'ticket:create-tag:page:' + departmentId + ':' + (safePage - 1),
+            'ticket:create-tag:page:' + departmentId + ':' + (safePage - 1) + (panelId ? ':' + panelId : ''),
           )
           .setLabel('Previous')
           .setEmoji('⬅️')
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(safePage === 0),
         new ButtonBuilder()
-          .setCustomId('ticket:create-tag:page:' + departmentId + ':' + safePage)
+          .setCustomId('ticket:create-tag:page:' + departmentId + ':' + safePage + (panelId ? ':' + panelId : ''))
           .setLabel('Page ' + (safePage + 1) + ' / ' + pageCount)
           .setEmoji('📄')
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(true),
         new ButtonBuilder()
           .setCustomId(
-            'ticket:create-tag:page:' + departmentId + ':' + (safePage + 1),
+            'ticket:create-tag:page:' + departmentId + ':' + (safePage + 1) + (panelId ? ':' + panelId : ''),
           )
           .setLabel('Next')
           .setEmoji('➡️')
@@ -3201,6 +3250,7 @@ async function showTicketTagSelector(
 async function handleTicketTagSelection(interaction: StringSelectMenuInteraction): Promise<void> {
   const parts = interaction.customId.split(':');
   const departmentId = parts[3] ?? '';
+  const panelId = parts[4] || undefined;
   const tagId = interaction.values[0] ?? '';
 
   /*
@@ -3209,7 +3259,7 @@ async function handleTicketTagSelection(interaction: StringSelectMenuInteraction
    * interaction has a very short acknowledgement window. The modal submit
    * validates the department/tag again before creating the ticket.
    */
-  await showTicketCreationModal(interaction, departmentId, tagId);
+  await showTicketCreationModal(interaction, departmentId, tagId, panelId);
 }
 
 interface ParsedTicketFormModalId {
@@ -3219,6 +3269,7 @@ interface ParsedTicketFormModalId {
   sessionId: string;
   tagId: string;
   step: number;
+  panelId?: string;
 }
 
 function encodeFormIdForModal(formId: string): string {
@@ -3245,6 +3296,7 @@ function buildTicketFormModalCustomId(args: {
   sessionId: string;
   tagId: string;
   step: number;
+  panelId?: string;
 }): string {
   const customId = [
     'tf',
@@ -3254,6 +3306,7 @@ function buildTicketFormModalCustomId(args: {
     args.sessionId,
     Buffer.from(args.tagId, 'utf8').toString('base64url'),
     String(args.step),
+    ...(args.panelId ? [Buffer.from(args.panelId, 'utf8').toString('base64url')] : []),
   ].join(':');
   if (customId.length > 100) throw new Error('This form route is too long to fit Discord’s modal custom-id limit.');
   return customId;
@@ -3261,7 +3314,7 @@ function buildTicketFormModalCustomId(args: {
 
 function parseTicketFormModalCustomId(customId: string): ParsedTicketFormModalId | null {
   const parts = customId.split(':');
-  if (parts.length !== 7 || parts[0] !== 'tf') return null;
+  if ((parts.length !== 7 && parts.length !== 8) || parts[0] !== 'tf') return null;
   const formId = decodeFormIdFromModal(parts[1] ?? '');
   const version = Number(parts[2]);
   const expiresSeconds = Number.parseInt(parts[3] ?? '', 36);
@@ -3269,19 +3322,22 @@ function parseTicketFormModalCustomId(customId: string): ParsedTicketFormModalId
   const tagIdEncoded = parts[5] ?? '';
   const step = Number(parts[6]);
   let tagId = '';
+  let panelId: string | undefined;
   try {
     tagId = Buffer.from(tagIdEncoded, 'base64url').toString('utf8');
+    if (parts[7]) panelId = Buffer.from(parts[7], 'base64url').toString('utf8');
   } catch {
     return null;
   }
-  if (!formId || !Number.isSafeInteger(version) || version < 1 ||
+  if ((panelId !== undefined && !/^[A-Za-z0-9_-]{1,50}$/.test(panelId)) ||
+      !formId || !Number.isSafeInteger(version) || version < 1 ||
       !Number.isSafeInteger(expiresSeconds) || expiresSeconds < 1 ||
       !/^[A-Za-z0-9_-]{12,20}$/.test(sessionId) ||
       !tagId || tagId.length > 100 ||
       !Number.isInteger(step) || step < 1 || step > 10) {
     return null;
   }
-  return { formId, version, expiresAt: expiresSeconds * 1000, sessionId, tagId, step };
+  return { formId, version, expiresAt: expiresSeconds * 1000, sessionId, tagId, step, ...(panelId ? { panelId } : {}) };
 }
 
 function buildTicketFormModal(
@@ -3291,6 +3347,7 @@ function buildTicketFormModal(
   sessionId: string,
   step: number,
   priorAnswers: Record<string, unknown>,
+  panelId?: string,
 ): ModalBuilder {
   const customId = buildTicketFormModalCustomId({
     formId: form.id,
@@ -3299,6 +3356,7 @@ function buildTicketFormModal(
     sessionId,
     tagId,
     step,
+    panelId,
   });
   const modal = new ModalBuilder()
     .setCustomId(customId)
@@ -3433,6 +3491,7 @@ async function showTicketCreationModal(
   interaction: ButtonInteraction | StringSelectMenuInteraction,
   departmentId: string,
   tagId: string,
+  panelId?: string,
 ): Promise<void> {
   if (!interaction.guild) {
     await replyError(
@@ -3443,11 +3502,10 @@ async function showTicketCreationModal(
   }
 
   try {
+    if (!(await ensureSupportHoursAllows(interaction, interaction.guild.id, departmentId, panelId))) return;
     /*
-     * Do not load guild configuration before showModal(). A slow config
-     * read must never make a valid tag selection expire as Unknown
-     * interaction (10062). The modal submit revalidates the department/tag
-     * before any ticket is created.
+     * The support-hours service is initialized before login and evaluates its
+     * cached policy without a network call. Submission rechecks the policy.
      */
     /*
      * Form configuration is stored durably in Neon. Only the matching
@@ -3471,14 +3529,14 @@ async function showTicketCreationModal(
       const expiresAt = Date.now() + TICKET_FORM_MODAL_TTL_MS;
       const sessionId = randomBytes(10).toString('base64url');
       await interaction.showModal(
-        buildTicketFormModal(form, tagId, expiresAt, sessionId, 1, {}),
+        buildTicketFormModal(form, tagId, expiresAt, sessionId, 1, {}, panelId),
       );
       return;
     }
 
     // Keep the no-form legacy flow compact. Department and tag are validated
     // by createTicket after it acknowledges the modal submission.
-    const customId = `ticket:modal:${departmentId}:${tagId}`;
+    const customId = 'ticket:modal:' + departmentId + ':' + tagId + (panelId ? ':panel:' + panelId : '');
     const modal = new ModalBuilder()
       .setCustomId(customId)
       .setTitle('Support Request');
@@ -3642,6 +3700,7 @@ async function handleTicketFormWizardContinue(interaction: ButtonInteraction): P
         route.sessionId,
         route.step,
         session.answers,
+        route.panelId,
       ),
     );
   } catch (error) {
@@ -3770,6 +3829,7 @@ async function handleTicketFormWizardModal(interaction: ModalSubmitInteraction):
         sessionId: route.sessionId,
         tagId: route.tagId,
         step: nextStep,
+        panelId: route.panelId,
       });
       await interaction.editReply({
         content: '✅ Your answers are saved. Continue to the next section when ready.',
@@ -3794,6 +3854,7 @@ async function handleTicketFormWizardModal(interaction: ModalSubmitInteraction):
         version: currentForm.version,
         expiresAt: route.expiresAt,
         submissionId: route.sessionId,
+        panelId: route.panelId,
       },
       {
         form: currentForm,
@@ -3802,6 +3863,7 @@ async function handleTicketFormWizardModal(interaction: ModalSubmitInteraction):
         description: session.description ?? '',
       },
       true,
+      route.panelId,
     );
   } catch (error) {
     await replyError(
@@ -5934,6 +5996,7 @@ function hasRequiredPanelAccess(
 async function startCustomPanelTarget(
   interaction: ButtonInteraction,
   button: CustomSupportPanelButton,
+  panelId?: string,
 ): Promise<void> {
   if (!interaction.guild) {
     await replyError(interaction, 'This support panel can only be used inside a server.');
@@ -5959,10 +6022,11 @@ async function startCustomPanelTarget(
       await replyError(interaction, 'This panel points to a form version that was changed or deactivated. Ask an administrator to edit and republish the panel.');
       return;
     }
+    if (!(await ensureSupportHoursAllows(interaction, interaction.guild.id, button.departmentId, panelId))) return;
     const expiresAt = Date.now() + TICKET_FORM_MODAL_TTL_MS;
     const sessionId = randomBytes(10).toString('base64url');
     await interaction.showModal(
-      buildTicketFormModal(cached.form, button.tagId, expiresAt, sessionId, 1, {}),
+      buildTicketFormModal(cached.form, button.tagId, expiresAt, sessionId, 1, {}, panelId),
     );
     return;
   }
@@ -5972,9 +6036,9 @@ async function startCustomPanelTarget(
     return;
   }
   if (button.tagId) {
-    await showTicketCreationModal(interaction, button.departmentId, button.tagId);
+    await showTicketCreationModal(interaction, button.departmentId, button.tagId, panelId);
   } else {
-    await showTicketTagSelector(interaction, button.departmentId);
+    await showTicketTagSelector(interaction, button.departmentId, 0, panelId);
   }
 }
 
@@ -6039,6 +6103,7 @@ async function handleCustomPanelEntry(interaction: ButtonInteraction): Promise<v
     await replyError(interaction, 'You do not have a role allowed to use this support-panel option.');
     return;
   }
+  if (!(await ensureSupportHoursAllows(interaction, interaction.guild.id, button.departmentId, panelId))) return;
 
   if (!isConfirm && button.confirmationMessage) {
     const confirmation = new EmbedBuilder()
@@ -6072,7 +6137,7 @@ async function handleCustomPanelEntry(interaction: ButtonInteraction): Promise<v
     // A confirm click is accepted only after the private prompt owner, source
     // public message, published snapshot, role restrictions and target have
     // all been revalidated. The action then reuses the normal ticket flow.
-    await startCustomPanelTarget(interaction, button);
+    await startCustomPanelTarget(interaction, button, panelId);
   } catch (error) {
     console.error('Custom support-panel route failed:', error);
     await replyError(interaction, 'ResolveX could not open this ticket request. Please try again or use another support-panel option.');
@@ -6361,11 +6426,13 @@ export async function handleTicketInteraction(
       const parts = interaction.customId.split(':');
       const departmentId = parts[3] ?? '';
       const page = Number(parts[4] ?? '0');
+      const panelId = parts[5] || undefined;
 
       await showTicketTagSelector(
         interaction,
         departmentId,
         Number.isInteger(page) ? page : 0,
+        panelId,
       );
       return;
     }
@@ -6541,7 +6608,8 @@ export async function handleTicketInteraction(
           return;
         }
 
-        const formId = parts[4];
+        const panelId = parts[4] === 'panel' ? parts[5] : undefined;
+        const formId = parts[4] === 'panel' ? undefined : parts[4];
         const version = Number(parts[5]);
         const expiresAt = Number(parts[6]);
         const formRoute = formId
@@ -6563,6 +6631,9 @@ export async function handleTicketInteraction(
           departmentId,
           tagId,
           formRoute,
+          undefined,
+          false,
+          panelId,
         );
 
         return;
