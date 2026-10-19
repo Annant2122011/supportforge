@@ -88,7 +88,7 @@ test('custom panel button schema preserves order and supports existing departmen
 test('custom panel button validation rejects unknown departments and malformed input', () => {
   assert.throws(() => parseCustomPanelButtons([{ departmentId: 'missing', label: 'Help' }], departments), /unknown department/);
   assert.throws(() => parseCustomPanelButtons('{bad json', departments), /valid JSON/);
-  assert.throws(() => parseCustomPanelButtons([], departments), /between 1 and 25/);
+  assert.throws(() => parseCustomPanelButtons([], departments), /0–25 buttons/);
   assert.throws(() => parseCustomPanelButtons([{ departmentId: 'billing', label: 'x'.repeat(81) }], departments), /label/);
   assert.throws(() => parseCustomPanelButtons([{ departmentId: 'billing', label: 'Billing', style: 'link' }], departments), /style/);
   assert.throws(() => parseCustomPanelButtons([{ targetType: 'department', departmentId: 'billing', tagId: 'missing', label: 'Refund' }], departments), /tagId/);
@@ -133,7 +133,7 @@ test('custom panels accept at most 25 ordered controls and publish within Discor
   assert.equal(rows.length, 5);
   assert.equal(rows.every((row) => row.components.length <= 5), true);
   assert.equal(rows.flatMap((row) => row.components).length, 25);
-  assert.throws(() => parseCustomPanelButtons([...buttons, buttons[0]], departments), /between 1 and 25/);
+  assert.throws(() => parseCustomPanelButtons([...buttons, buttons[0]], departments), /0–25 buttons/);
 });
 
 test('custom panel embed renders its configured title, description, color, and banner', () => {
