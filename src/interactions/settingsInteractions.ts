@@ -63,6 +63,17 @@ import { performFactoryReset } from '../services/factoryResetService';
 import { addUseCasePreset, USE_CASE_PRESETS } from '../services/useCasePresetService';
 import { enforcePriorityRoleHierarchy } from '../services/priorityRoleService';
 import { UI_THEMES, getThemeColor, getThemeDefinition, isGuildTheme } from '../services/uiThemeService';
+import {
+  createDefaultSupportHoursPolicy,
+  deleteSupportHoursPolicy,
+  evaluateSupportHours,
+  formatSupportHoursInstant,
+  formatSupportHoursWeeklySchedule,
+  getSupportHoursPolicy,
+  parseSupportHoursWeeklySchedule,
+  saveSupportHoursPolicy,
+  SUPPORT_HOURS_DAYS,
+} from '../services/supportHoursService';
 import { normalizeDiscordEmoji } from '../core/domain/discordEmoji';
 import { handleTicketFormSettingsInteraction } from './ticketFormSettingsInteractions';
 import { handleCustomPanelSettingsInteraction } from './customPanelSettingsInteractions';
@@ -622,13 +633,14 @@ const SETTINGS_LAYOUT_LABELS: Record<SettingsDashboardButtonKey, string> = {
   premium: 'Premium & Demo',
   panels: 'Ticket Panels',
   'dashboard-builder': 'Settings Layout',
+  'support-hours': 'Support Hours',
 };
 
 const SETTINGS_LAYOUT_DEFAULT_EMOJIS: Record<SettingsDashboardButtonKey, string> = {
   panel: '🎛️', defaults: '🎟️', tags: '🏷️', usecases: '🧩', reports: '🚩',
   retention: '🧹', appearance: '🎨', storage: '🗄️', rules: '🛡️', repair: '🛠️',
   team: '👥', manual: '📖', forms: '🧾', refresh: '🔄', reset: '🚨', theme: '🌈',
-  premium: '💎', panels: '🧱', 'dashboard-builder': '🧰',
+  premium: '💎', panels: '🧱', 'dashboard-builder': '🧰', 'support-hours': '🕒',
 };
 
 function effectiveSettingsLayoutLabel(
@@ -766,6 +778,53 @@ async function showPremiumSettings(interaction: SettingsViewInteraction, notice 
         .setLabel('Switch to ' + tierLabel(next))
         .setEmoji('🔁')
         .setStyle(ButtonStyle.Primary),
+      backButton(),
+    ),
+  ]);
+}
+
+
+async function showSupportHoursSettings(
+  interaction: SettingsViewInteraction,
+  notice = '',
+): Promise<void> {
+  const guild = interaction.guild!;
+  const policy = await getSupportHoursPolicy(guild.id, 'guild');
+  const decision = await evaluateSupportHours(guild.id);
+  const schedule = policy
+    ? formatSupportHoursWeeklySchedule(policy.weeklySchedule)
+    : SUPPORT_HOURS_DAYS.map((day) => day + '=closed').join('\n');
+  const status = !policy
+    ? 'Not configured · ticket creation is unrestricted by the server default'
+    : !policy.enabled
+      ? 'Enforcement disabled'
+      : decision.isOpen
+        ? 'OPEN'
+        : policy.outsideHoursBehavior === 'allow'
+          ? 'CLOSED · new tickets allowed with notice'
+          : 'CLOSED · new ticket creation restricted';
+  const embed = new EmbedBuilder()
+    .setTitle('🕒 Support Hours & Time Zone')
+    .setDescription(
+      (notice ? notice + '\n\n' : '') +
+      'This editor controls the **server-wide default**. Department and individual ticket-panel overrides are available through /supportforge settings support-hours.\\n\\n' +
+      '**Status:** ' + status + '\n' +
+      '**Time zone:** ' + (policy?.timezone ?? 'Not configured') + '\n' +
+      '**Outside hours:** ' + (policy?.outsideHoursBehavior ?? 'restrict') + '\n' +
+      '**Policy version:** ' + (policy?.version ?? 'Not saved') + '\n\n' +
+      '**Weekly schedule**\n' + schedule +
+      (decision.nextOpeningAt ? '\n\n**Next opening:** ' + formatSupportHoursInstant(decision.nextOpeningAt, decision.timezone) : '') +
+      '\n\nUse 24-hour local times. Daylight-saving transitions are handled by the shared schedule service.',
+    );
+  const hasIntervals = Boolean(policy && SUPPORT_HOURS_DAYS.some((day) => policy.weeklySchedule[day].length > 0));
+  await renderSettingsView(interaction, [embed], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:support-hours:edit').setLabel('Edit Weekly Schedule').setEmoji('🗓️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:support-hours:toggle').setLabel(policy?.enabled ? 'Disable Enforcement' : 'Enable Enforcement').setEmoji(policy?.enabled ? '⏸️' : '▶️').setStyle(policy?.enabled ? ButtonStyle.Danger : ButtonStyle.Success).setDisabled(!policy?.enabled && !hasIntervals),
+      new ButtonBuilder().setCustomId('sf:settings:support-hours:behavior').setLabel(policy?.outsideHoursBehavior === 'allow' ? 'Restrict After Hours' : 'Allow After Hours').setEmoji('🚦').setStyle(ButtonStyle.Secondary).setDisabled(!policy),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:support-hours:clear').setLabel('Clear Server Default').setEmoji('🧹').setStyle(ButtonStyle.Secondary).setDisabled(!policy),
       backButton(),
     ),
   ]);
@@ -2025,6 +2084,79 @@ export async function handleSettingsInteraction(
       return true;
     }
 
+    if (id === 'sf:settings:support-hours') {
+      await showSupportHoursSettings(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:support-hours:edit') {
+      const policy = await getSupportHoursPolicy(guild.id, 'guild');
+      const timezone = new TextInputBuilder()
+        .setCustomId('timezone')
+        .setLabel('IANA time zone (e.g. Asia/Kolkata)')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(100)
+        .setValue((policy?.timezone ?? 'UTC').slice(0, 100));
+      const schedule = new TextInputBuilder()
+        .setCustomId('schedule')
+        .setLabel('All seven weekdays: day=intervals')
+        .setStyle(TextInputStyle.Paragraph)
+        .setPlaceholder('monday=09:00-17:00\ntuesday=09:00-17:00\n...\nsunday=closed')
+        .setRequired(true)
+        .setMaxLength(4000)
+        .setValue((policy ? formatSupportHoursWeeklySchedule(policy.weeklySchedule) : SUPPORT_HOURS_DAYS.map((day) => day + '=closed').join('\n')).slice(0, 4000));
+      await openModal(interaction, 'sf:settings:modal:support-hours', 'Edit Support Hours', [timezone, schedule]);
+      return true;
+    }
+
+    if (id === 'sf:settings:support-hours:toggle') {
+      const current = await getSupportHoursPolicy(guild.id, 'guild');
+      const enabling = !current?.enabled;
+      const base = current ?? createDefaultSupportHoursPolicy('guild');
+      const hasIntervals = SUPPORT_HOURS_DAYS.some((day) => base.weeklySchedule[day].length > 0);
+      if (enabling && !hasIntervals) {
+        await showSupportHoursSettings(interaction, 'Add at least one opening interval before enabling enforcement.');
+        return true;
+      }
+      await interaction.deferUpdate();
+      const saved = await saveSupportHoursPolicy(guild.id, {
+        ...base,
+        scopeType: 'guild',
+        scopeId: null,
+        enabled: enabling,
+        updatedBy: interaction.user.id,
+      });
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'SUPPORT_HOURS_CHANGED', 'Server default support-hours enforcement ' + (saved.enabled ? 'enabled' : 'disabled') + '; policy version=' + saved.version + '.');
+      await showSupportHoursSettings(interaction, saved.enabled ? '✅ Support-hours enforcement enabled.' : 'Support-hours enforcement disabled.');
+      return true;
+    }
+
+    if (id === 'sf:settings:support-hours:behavior') {
+      const current = await getSupportHoursPolicy(guild.id, 'guild');
+      if (!current) {
+        await reject(interaction, 'Edit and save a weekly schedule first.');
+        return true;
+      }
+      await interaction.deferUpdate();
+      const behavior = current.outsideHoursBehavior === 'allow' ? 'restrict' : 'allow';
+      const saved = await saveSupportHoursPolicy(guild.id, { ...current, outsideHoursBehavior: behavior, updatedBy: interaction.user.id });
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'SUPPORT_HOURS_CHANGED', 'Server default outside-hours behavior changed to ' + behavior + '; policy version=' + saved.version + '.');
+      await showSupportHoursSettings(interaction, '✅ Outside-hours behavior set to ' + behavior + '.');
+      return true;
+    }
+
+    if (id === 'sf:settings:support-hours:clear') {
+      await interaction.deferUpdate();
+      const removed = await deleteSupportHoursPolicy(guild.id, 'guild');
+      await refreshSettingsChannel(guild);
+      if (removed) await auditSettingsAction(guild, interaction, 'SUPPORT_HOURS_CHANGED', 'Removed the server-default support-hours policy; more-specific overrides remain.');
+      await showSupportHoursSettings(interaction, removed ? '✅ Server default removed. More-specific overrides still apply.' : 'No server-default policy existed.');
+      return true;
+    }
+
     if (id === 'sf:settings:panel') {
       await showPanelSettings(interaction);
       return true;
@@ -3066,6 +3198,42 @@ export async function handleSettingsInteraction(
         '. Existing ticket staff role access migrated from ' +
         (oldStaffRoleId ?? 'none') + ' to ' + (staffRoleId ?? 'none') + '.',
       );
+      return true;
+    }
+
+    if (interaction.customId === 'sf:settings:modal:support-hours') {
+      const timezone = interaction.fields.getTextInputValue('timezone').trim();
+      const scheduleText = interaction.fields.getTextInputValue('schedule');
+      let weeklySchedule;
+      try {
+        weeklySchedule = parseSupportHoursWeeklySchedule(scheduleText);
+      } catch (error) {
+        await reject(interaction, error instanceof Error ? error.message : 'The weekly schedule is invalid.');
+        return true;
+      }
+      const current = await getSupportHoursPolicy(guild.id, 'guild');
+      try {
+        const saved = await saveSupportHoursPolicy(guild.id, {
+          ...(current ?? createDefaultSupportHoursPolicy('guild')),
+          scopeType: 'guild',
+          scopeId: null,
+          timezone,
+          weeklySchedule,
+          updatedBy: interaction.user.id,
+        });
+        await refreshSettingsChannel(guild);
+        await auditSettingsAction(guild, interaction, 'SUPPORT_HOURS_CHANGED', 'Updated server-default weekly schedule in ' + saved.timezone + '; policy version=' + saved.version + '.');
+        await interaction.reply({
+          content: '✅ Server-default support schedule saved. Enforcement is ' + (saved.enabled ? 'enabled' : 'disabled') + '. Use the Support Hours panel to enable or review it.',
+          flags: MessageFlags.Ephemeral,
+          components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId('sf:settings:support-hours').setLabel('Open Support Hours').setEmoji('🕒').setStyle(ButtonStyle.Primary),
+            backButton(),
+          )],
+        });
+      } catch (error) {
+        await reject(interaction, error instanceof Error ? error.message : 'Could not save that support-hours schedule.');
+      }
       return true;
     }
 
