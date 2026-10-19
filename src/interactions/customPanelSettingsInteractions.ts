@@ -1116,22 +1116,33 @@ export async function handleCustomPanelSettingsInteraction(
       const panelId = id.slice((PREFIX + 'delete-confirm:').length);
       const panel = await getCustomPanel(guild.id, panelId);
       if (!panel) throw new Error('Panel not found.');
+
+      // Remove the durable definition first. If Neon rejects the delete, the
+      // public message remains functional. Once the definition is gone, any
+      // message cleanup failure can only leave a stale button, which the
+      // interaction router rejects because no published panel exists.
+      const deleted = await deleteCustomPanelDefinition(guild.id, panelId);
+      let cleanupWarning = '';
       if (panel.publishedChannelId && panel.publishedMessageId) {
-        const publishedChannel = await guild.channels.fetch(panel.publishedChannelId).catch((error) => {
-          if (resourceCode(error) === 10003) return null;
-          throw error;
-        });
-        if (publishedChannel?.type === 0) {
-          const publishedMessage = await publishedChannel.messages.fetch(panel.publishedMessageId).catch((error) => {
-            if (resourceCode(error) === 10008) return null;
+        try {
+          const publishedChannel = await guild.channels.fetch(panel.publishedChannelId).catch((error) => {
+            if (resourceCode(error) === 10003) return null;
             throw error;
           });
-          if (publishedMessage) await publishedMessage.delete();
+          if (publishedChannel?.type === 0) {
+            const publishedMessage = await publishedChannel.messages.fetch(panel.publishedMessageId).catch((error) => {
+              if (resourceCode(error) === 10008) return null;
+              throw error;
+            });
+            if (publishedMessage) await publishedMessage.delete();
+          }
+        } catch (error) {
+          cleanupWarning = '\\n\\n⚠️ The panel definition is deleted and its buttons are no longer functional, but the old Discord message could not be removed. Delete that message manually.';
+          console.warn('Custom panel definition deleted but Discord message cleanup failed:', error);
         }
       }
-      const deleted = await deleteCustomPanelDefinition(guild.id, panelId);
-      await audit(interaction, 'CUSTOM_PANEL_DELETED', 'Deleted panel "' + deleted.name + '" (' + deleted.id + '); existing tickets were preserved.');
-      await render(interaction, 'Panel Deleted', 'The panel definition and published message were removed. Tickets created from it remain untouched.', [
+      await audit(interaction, 'CUSTOM_PANEL_DELETED', 'Deleted panel "' + deleted.name + '" (' + deleted.id + '); existing tickets were preserved.' + (cleanupWarning ? ' Discord message cleanup needs manual review.' : ''));
+      await render(interaction, 'Panel Deleted', 'The saved panel definition has been removed. Tickets created from it remain untouched.' + cleanupWarning, [
         row(makeButton(PREFIX + 'home', 'Back to Custom Panels', ButtonStyle.Primary, '📋'), makeButton('sf:settings:home', 'Settings', ButtonStyle.Secondary, '↩️')),
       ]);
       return true;
