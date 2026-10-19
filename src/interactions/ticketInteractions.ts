@@ -31,6 +31,7 @@ import {
   getTier,
   isPremiumOrHigher,
   type DepartmentConfig,
+  type CustomSupportPanelButton,
   updateGuildConfig,
 } from '../services/configService';
 
@@ -126,6 +127,7 @@ import {
   moveTicketPanelToBottom,
   queueTicketChannelRename,
 } from '../services/ticketPanelService';
+import { getCustomPanel } from '../services/panelBuilderService';
 
 function parseTicketPriority(value: string): TicketPriority | null {
   return value === 'low' ||
@@ -5901,6 +5903,158 @@ function capitalize(
 }
 
 /* -------------------------------------------------------------------------- */
+/* Published custom-panel routing                                              */
+/* -------------------------------------------------------------------------- */
+
+function interactionRoleIds(interaction: ButtonInteraction): Set<string> {
+  const member = interaction.member;
+  if (!member || !('roles' in member)) return new Set();
+  const roles = member.roles;
+  if (Array.isArray(roles)) return new Set(roles);
+  if ('cache' in roles) return new Set(roles.cache.keys());
+  return new Set();
+}
+
+function hasRequiredPanelAccess(
+  interaction: ButtonInteraction,
+  panelRoleIds: string[],
+  buttonRoleIds: string[],
+): boolean {
+  if (
+    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)
+  ) return true;
+  const roles = interactionRoleIds(interaction);
+  const panelAllows = panelRoleIds.length === 0 || panelRoleIds.some((roleId) => roles.has(roleId));
+  const buttonAllows = buttonRoleIds.length === 0 || buttonRoleIds.some((roleId) => roles.has(roleId));
+  return panelAllows && buttonAllows;
+}
+
+async function startCustomPanelTarget(
+  interaction: ButtonInteraction,
+  button: CustomSupportPanelButton,
+): Promise<void> {
+  if (!interaction.guild) {
+    await replyError(interaction, 'This support panel can only be used inside a server.');
+    return;
+  }
+
+  if (button.targetType === 'form') {
+    if (!button.formId || !button.formVersion || !button.tagId) {
+      await replyError(interaction, 'This form button is incomplete. Ask an administrator to repair and republish the panel.');
+      return;
+    }
+    const cached = getCachedActiveTicketFormById(
+      interaction.guild.id,
+      button.formId,
+      button.formVersion,
+      button.tagId,
+    );
+    if (!cached.ready) {
+      await replyError(interaction, 'Ticket forms are still loading. Please try again in a moment.');
+      return;
+    }
+    if (!cached.form) {
+      await replyError(interaction, 'This panel points to a form version that was changed or deactivated. Ask an administrator to edit and republish the panel.');
+      return;
+    }
+    const expiresAt = Date.now() + TICKET_FORM_MODAL_TTL_MS;
+    const sessionId = randomBytes(10).toString('base64url');
+    await interaction.showModal(
+      buildTicketFormModal(cached.form, button.tagId, expiresAt, sessionId, 1, {}),
+    );
+    return;
+  }
+
+  if (!button.departmentId) {
+    await replyError(interaction, 'This panel button has no department target. Ask an administrator to repair the panel.');
+    return;
+  }
+  if (button.tagId) {
+    await showTicketCreationModal(interaction, button.departmentId, button.tagId);
+  } else {
+    await showTicketTagSelector(interaction, button.departmentId);
+  }
+}
+
+async function handleCustomPanelEntry(interaction: ButtonInteraction): Promise<void> {
+  if (!interaction.guild) {
+    await replyError(interaction, 'Custom support panels only work inside a server.');
+    return;
+  }
+
+  const parts = interaction.customId.split(':');
+  const action = parts[2] ?? '';
+  const isConfirm = action === 'confirm';
+  const isCancel = action === 'cancel';
+  const panelId = (isConfirm || isCancel) ? (parts[3] ?? '') : action;
+  const buttonId = (isConfirm || isCancel) ? (parts[4] ?? '') : (parts[3] ?? '');
+  if (!panelId || !buttonId || parts.length !== ((isConfirm || isCancel) ? 5 : 4)) {
+    await replyError(interaction, 'This panel button is malformed. Refresh the support panel and try again.');
+    return;
+  }
+
+  if (isCancel) {
+    await interaction.update({
+      content: 'Ticket request cancelled. No ticket was created.',
+      embeds: [],
+      components: [],
+    }).catch(() => undefined);
+    return;
+  }
+
+  const panel = await getCustomPanel(interaction.guild.id, panelId);
+  if (!panel || !panel.publishedConfig || !panel.publishedMessageId) {
+    await replyError(interaction, 'This panel is no longer published. Ask an administrator to publish the current draft.');
+    return;
+  }
+  const livePanel = panel.publishedConfig;
+  const button = livePanel.buttons.find((candidate) => candidate.id === buttonId);
+  if (!button) {
+    await replyError(interaction, 'This button belongs to an older panel revision. The administrator must republish the current panel.');
+    return;
+  }
+  if (!hasRequiredPanelAccess(interaction, livePanel.allowedRoleIds ?? [], button.allowedRoleIds ?? [])) {
+    await replyError(interaction, 'You do not have a role allowed to use this support-panel option.');
+    return;
+  }
+
+  if (!isConfirm && button.confirmationMessage) {
+    const confirmation = new EmbedBuilder()
+      .setColor(getThemeColor((await getGuildConfig(interaction.guild.id)).theme))
+      .setTitle('Confirm support request')
+      .setDescription(button.confirmationMessage.slice(0, 4096))
+      .setFooter({ text: 'ResolveX • No ticket is created until you confirm' });
+    await interaction.reply({
+      embeds: [confirmation],
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId('ticket:custom:confirm:' + panelId + ':' + buttonId)
+            .setLabel('Continue')
+            .setEmoji('🎫')
+            .setStyle(ButtonStyle.Success),
+          new ButtonBuilder()
+            .setCustomId('ticket:custom:cancel:' + panelId + ':' + buttonId)
+            .setLabel('Cancel')
+            .setEmoji('↩️')
+            .setStyle(ButtonStyle.Secondary),
+        ),
+      ],
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  try {
+    await startCustomPanelTarget(interaction, button);
+  } catch (error) {
+    console.error('Custom support-panel route failed:', error);
+    await replyError(interaction, 'ResolveX could not open this ticket request. Please try again or use another support-panel option.');
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /* Main interaction router                                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -6210,6 +6364,14 @@ export async function handleTicketInteraction(
     if (
       interaction.isButton()
     ) {
+      // Custom-panel buttons bind to immutable published snapshots. This keeps
+      // unpublished edits from changing the meaning of buttons already visible
+      // to customers.
+      if (interaction.customId.startsWith('ticket:custom:')) {
+        await handleCustomPanelEntry(interaction);
+        return;
+      }
+
       /*
        * Department ticket creation buttons.
        *
