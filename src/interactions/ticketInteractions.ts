@@ -6005,6 +6005,17 @@ async function handleCustomPanelEntry(interaction: ButtonInteraction): Promise<v
     }
   }
 
+  // Cancellation is non-destructive and should remain available even if the
+  // panel was unpublished or the user's role changed while the prompt was open.
+  if (isCancel) {
+    await interaction.update({
+      content: 'Ticket request cancelled. No ticket was created.',
+      embeds: [],
+      components: [],
+    }).catch(() => undefined);
+    return;
+  }
+
   const panel = await getCustomPanel(interaction.guild.id, panelId);
   if (!panel || !panel.publishedConfig || !panel.publishedMessageId || !panel.publishedChannelId) {
     await replyError(interaction, 'This panel is no longer published. Ask an administrator to publish the current draft.');
@@ -6026,15 +6037,6 @@ async function handleCustomPanelEntry(interaction: ButtonInteraction): Promise<v
   }
   if (!hasRequiredPanelAccess(interaction, livePanel.allowedRoleIds ?? [], button.allowedRoleIds ?? [])) {
     await replyError(interaction, 'You do not have a role allowed to use this support-panel option.');
-    return;
-  }
-
-  if (isCancel) {
-    await interaction.update({
-      content: 'Ticket request cancelled. No ticket was created.',
-      embeds: [],
-      components: [],
-    }).catch(() => undefined);
     return;
   }
 
