@@ -179,6 +179,10 @@ async function loadState(): Promise<SupportHoursStore> {
   return state;
 }
 
+export async function initializeSupportHoursService(): Promise<void> {
+  await loadState();
+}
+
 async function persistState(): Promise<void> {
   if (!state) return;
   const snapshot = JSON.parse(JSON.stringify(state)) as SupportHoursStore;
