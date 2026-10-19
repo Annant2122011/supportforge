@@ -274,8 +274,8 @@ export function buildSettingsDashboardEmbed(
     .setTitle(settings.settingsDashboard.title || SETTINGS_TITLE)
     .setColor(getThemeColor(theme))
     .setDescription(
-      (settings.settingsDashboard.description || 'Configure your server ticket system, support panels and retention policies.') +
-        '\n\nButton-driven configuration • actions are audited. Use **Refresh** to re-read the latest saved configuration.',
+      ((settings.settingsDashboard.description || 'Configure your server ticket system, support panels and retention policies.') +
+        '\\n\\nButton-driven configuration • actions are audited. Use **Refresh** to re-read the latest saved configuration.').slice(0, 3900),
     )
     .addFields(
       {
@@ -357,7 +357,8 @@ export function buildSettingsDashboardEmbed(
       },
     )
     .setFooter({
-      text: (settings.settingsDashboard.footer || 'ResolveX • Settings Dashboard').slice(0, 1800) + ' • ' + themeInfo.label + ' theme',
+      // Stable suffix lets cleanup find this dashboard when a server customizes its visible footer.
+      text: (settings.settingsDashboard.footer || 'Settings for this server').slice(0, 1600) + ' • ResolveX Settings Dashboard • ' + themeInfo.label + ' theme',
     })
     .setTimestamp();
 }
@@ -373,7 +374,7 @@ function isSettingsDashboardMessage(message: {
 
   return message.embeds.some(
     (embed) =>
-      embed.footer?.text?.startsWith('ResolveX • Settings Dashboard') ||
+      embed.footer?.text?.includes('ResolveX Settings Dashboard') ||
       embed.title === SETTINGS_TITLE ||
       embed.title === '⚙️ SupportForge Settings' ||
       embed.footer?.text?.startsWith('SupportForge • Advanced Ticket Configuration'),
