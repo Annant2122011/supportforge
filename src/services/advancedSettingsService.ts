@@ -55,11 +55,18 @@ export const SETTINGS_DASHBOARD_BUTTON_KEYS = [
 
 export type SettingsDashboardButtonKey = (typeof SETTINGS_DASHBOARD_BUTTON_KEYS)[number];
 
+export interface SettingsDashboardButtonCustomization {
+  label: string;
+  /** Null intentionally removes the default emoji. */
+  emoji: string | null;
+}
+
 export interface SettingsDashboardSettings {
   title: string;
   description: string;
   footer: string;
   buttonOrder: SettingsDashboardButtonKey[];
+  buttonCustomizations: Partial<Record<SettingsDashboardButtonKey, SettingsDashboardButtonCustomization>>;
 }
 
 export interface AdvancedGuildSettings {
@@ -175,6 +182,7 @@ const DEFAULTS: AdvancedGuildSettings = {
     description: 'Configure your server’s ticket system, support panels and retention policies.',
     footer: 'ResolveX • Settings Dashboard',
     buttonOrder: [...SETTINGS_DASHBOARD_BUTTON_KEYS],
+    buttonCustomizations: {},
   },
   ticketDefaults: {
     priority: 'normal',
@@ -210,6 +218,7 @@ function cloneDefaults(): AdvancedGuildSettings {
     settingsDashboard: {
       ...DEFAULTS.settingsDashboard,
       buttonOrder: [...DEFAULTS.settingsDashboard.buttonOrder],
+      buttonCustomizations: {},
     },
     ticketDefaults: { ...DEFAULTS.ticketDefaults },
     reports: {
@@ -323,11 +332,29 @@ function normalizeExistingSettings(
       }
       const text = (value: unknown, fallback: string, max: number): string =>
         typeof value === 'string' ? value.trim().slice(0, max) : fallback;
+      const rawCustomizations = saved?.buttonCustomizations && typeof saved.buttonCustomizations === 'object' &&
+        !Array.isArray(saved.buttonCustomizations)
+        ? saved.buttonCustomizations as Record<string, unknown>
+        : {};
+      const buttonCustomizations: SettingsDashboardSettings['buttonCustomizations'] = {};
+      for (const key of SETTINGS_DASHBOARD_BUTTON_KEYS) {
+        const candidate = rawCustomizations[key];
+        if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue;
+        const value = candidate as Record<string, unknown>;
+        const label = text(value.label, '', 80);
+        const emoji = value.emoji === null
+          ? null
+          : typeof value.emoji === 'string'
+            ? value.emoji.trim().slice(0, 100) || null
+            : null;
+        if (label) buttonCustomizations[key] = { label, emoji };
+      }
       return {
         title: text(saved?.title, DEFAULTS.settingsDashboard.title, 256) || DEFAULTS.settingsDashboard.title,
         description: text(saved?.description, DEFAULTS.settingsDashboard.description, 4000),
         footer: text(saved?.footer, DEFAULTS.settingsDashboard.footer, 2048) || DEFAULTS.settingsDashboard.footer,
         buttonOrder: uniqueOrder,
+        buttonCustomizations,
       };
     })(),
     ticketDefaults: {
