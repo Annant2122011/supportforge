@@ -7,7 +7,8 @@ ResolveX is a Discord-first support ticket system. It uses Neon PostgreSQL as th
 - Ticket creation, assignment/claiming, priority, participants, notes, lifecycle state and audit history.
 - Neon/PostgreSQL ticket repositories, migrations, transactional domain events and a durable retrying outbox.
 - Versioned ticket forms, conditional fields across steps, answer validation and reusable form templates.
-- Multiple custom support panels with ordered department buttons, theme/accent and image options, private draft preview, publish/update and confirmed delete.
+- Multiple custom ticket panels with department or form targets, ordered controls, role access, optional confirmation prompts, branding, safe publish/update and confirmed delete.
+- A separate per-server Settings-channel dashboard builder for branding, navigation order, button labels and emojis, with a disabled preview that always retains recovery and reset controls.
 - Ticket message archives and recovery workflows for supported Discord channel/ticket deletion cases.
 - Settings dashboard with server-specific themes and button-based configuration flows.
 - GitHub Actions CI plus an optional server-side systemd self-update watchdog.
@@ -50,29 +51,32 @@ SQLite is not an allowed live persistence provider. Legacy SQLite migration/repo
 
 For development, `npm run dev` starts the TypeScript entry point directly. Do not run destructive PostgreSQL integration tests against production data; the integration suite deliberately refuses non-local database URLs.
 
-## Build a custom support panel
+## Build custom ticket panels
 
-The administrator UI is available from **SupportForge Settings → Custom Panels** after setup/refresh. It provides draft creation, panel selection, private preview, draft editing, channel selection for publishing, and a two-step delete confirmation.
+After setup, open **Settings → Ticket Panels**. This is the visual panel builder, intended for server administrators who should not have to edit source or routinely write JSON.
 
-The equivalent slash-command flow is:
+1. Create an empty panel draft.
+2. Add buttons from existing departments or active ticket forms.
+3. Edit each button's label, emoji, style, optional tag, access roles and optional confirmation message.
+4. Reorder buttons with Move Up / Move Down; preview the draft privately with disabled controls.
+5. Publish to an accessible text channel. The builder stores the published snapshot before trying to remove the prior panel message.
+6. Delete a panel only after confirmation. Tickets already created from that panel are retained.
 
-- `/supportforge panel create`: create a draft with a name, title, description, and ordered `buttons-json` array.
-- `/supportforge panel list` and `show`: find and inspect panel IDs and routing targets.
-- `/supportforge panel update`: change content or replace/reorder the ordered buttons array.
-- `/supportforge panel preview`: display a private preview with disabled ticket controls.
-- `/supportforge panel publish`: publish/update the panel in a standard text channel.
-- `/supportforge panel delete`: remove a panel only after explicit confirmation.
+The matching slash-command family is `/supportforge panel create/list/show/update/preview/publish/delete`. Commands cover panel metadata and JSON button replacement; the button-based builder is the recommended way to add, retarget and reorder individual controls. Blank drafts are valid but cannot be published until they have at least one valid button.
 
-Example button schema (replace the department IDs with IDs from your own server):
+**Supported button target types**
 
-```json
-[
-  { "departmentId": "billing", "label": "Billing Support", "emoji": "💳", "style": "primary" },
-  { "departmentId": "technical", "label": "Technical Help", "emoji": "🛠️", "style": "success" }
-]
-```
+A department target opens the regular department/tag ticket flow. A form target opens one specific active ticket form at the published version, pinned to a concrete tag. The target and permissions are checked again at click time. Panel and button allowed-role lists combine, and administrators can use the panel regardless of those role lists. Optional confirmation text is shown privately before opening the flow.
 
-Allowed button styles are `primary`, `secondary`, and `success`. Each target department must already exist. Button order follows array order. Published buttons reuse the standard validated `ticket:create:<departmentId>` flow; previews disable the controls. Deleting a panel never deletes tickets already created from it.
+Panel-level options include title, instructions, footer, accent color, author icon URL, thumbnail and banner image URL. Button styles are `primary`, `secondary`, `success`, and `danger`. A panel supports at most 25 buttons due to Discord's component limit. The private preview reserves the fifth row for navigation, so it shows the first 20 buttons when a draft has 21–25; published panels can use all 25.
+
+Editing the draft does not change how the currently published panel behaves. Re-publishing saves a new published snapshot and message pointer before retiring the previous message. If a stale copy of a panel remains after a Discord cleanup failure, its interactions are rejected because they no longer originate from the currently published message.
+
+## Build your server's Settings channel layout
+
+Open **Settings → Settings Layout** from the persistent Settings dashboard. Servers can edit the Settings-channel title, description and footer, reorder navigation buttons, and customize each button's label and emoji. A private preview displays disabled controls. All built-in features remain present; repair, refresh and Delete Everything cannot be hidden, and destructive/security-relevant button styles cannot be changed by visual customization.
+
+Settings-channel customization is stored separately from the public ticket panels, per server, in Neon-backed configuration. Changing it does not change a public ticket panel; changing a public panel does not alter the Settings-channel dashboard.
 
 ## Verification and rollout
 
