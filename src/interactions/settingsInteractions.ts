@@ -1750,7 +1750,10 @@ export async function handleSettingsInteraction(
     return await handleTicketRecoveryInteraction(interaction);
   }
 
-  if (interaction.customId.startsWith('sf:settings:forms:')) {
+  if (
+    (interaction.isButton() || interaction.isStringSelectMenu() || interaction.isModalSubmit()) &&
+    interaction.customId.startsWith('sf:settings:forms:')
+  ) {
     return await handleTicketFormSettingsInteraction(interaction);
   }
 
