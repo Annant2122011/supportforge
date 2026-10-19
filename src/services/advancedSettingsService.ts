@@ -51,7 +51,7 @@ export interface FlagRule {
 export const SETTINGS_DASHBOARD_BUTTON_KEYS = [
   'panel', 'defaults', 'tags', 'usecases', 'reports', 'retention', 'appearance',
   'storage', 'rules', 'repair', 'team', 'manual', 'forms', 'refresh', 'reset',
-  'theme', 'premium', 'panels', 'dashboard-builder',
+  'theme', 'premium', 'panels', 'dashboard-builder', 'support-hours',
 ] as const;
 
 export type SettingsDashboardButtonKey = (typeof SETTINGS_DASHBOARD_BUTTON_KEYS)[number];
