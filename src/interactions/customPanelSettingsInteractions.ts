@@ -1001,15 +1001,17 @@ export async function handleCustomPanelSettingsInteraction(
       };
       const oldChannelId = panel.publishedChannelId;
       const oldMessageId = panel.publishedMessageId;
-      let message = oldChannelId === target.id && oldMessageId
-        ? await target.messages.fetch(oldMessageId).catch((error) => {
-            if (resourceCode(error) === 10008) return null;
-            throw error;
-          })
-        : null;
-      if (message) await message.edit(payload);
-      else message = await target.send(payload);
-      const updated = await markCustomPanelPublished(guild.id, panelId, target.id, message.id);
+      // Never edit the currently working public message before persistence
+      // commits the new snapshot. Send a replacement first; if the DB commit
+      // fails, remove this unregistered message and keep the previous panel live.
+      const message = await target.send(payload);
+      let updated;
+      try {
+        updated = await markCustomPanelPublished(guild.id, panelId, target.id, message.id);
+      } catch (error) {
+        await message.delete().catch(() => undefined);
+        throw error;
+      }
       let cleanupWarning = '';
       if (oldChannelId && oldMessageId && (oldChannelId !== target.id || oldMessageId !== message.id)) {
         try {
