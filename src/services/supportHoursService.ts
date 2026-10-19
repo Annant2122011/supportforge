@@ -435,18 +435,18 @@ function localMinuteToInstant(
   }
   if (candidates.length) return new Date(preferLater ? Math.max(...candidates) : Math.min(...candidates));
 
-  // DST can remove a local wall-clock time. Resolve a nonexistent opening
-  // to the first real minute on the same local date after the scheduled time.
-  let fallback: number | null = null;
-  for (let offset = -4 * 60; offset <= 4 * 60; offset += 1) {
+  // DST can remove a local wall-clock time. UTC and local wall time may
+  // differ by as much as 14 hours, so search a full bounded timezone window.
+  // Candidates are chronological; the first later local minute on the target
+  // date is the deterministic resolution for a skipped opening time.
+  for (let offset = -18 * 60; offset <= 18 * 60; offset += 1) {
     const candidate = base + offset * 60_000;
     const parts = zonedParts(new Date(candidate), timezone);
     if (parts.year === targetYear && parts.month === targetMonth && parts.day === targetDay &&
         localMinuteOfDay(parts) >= targetMinute) {
-      if (fallback === null || candidate < fallback) fallback = candidate;
+      return new Date(candidate);
     }
   }
-  if (fallback !== null) return new Date(fallback);
   throw new Error('Could not resolve a scheduled local time in time zone ' + timezone + '.');
 }
 
