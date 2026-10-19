@@ -10,6 +10,7 @@ import {
   PermissionFlagsBits,
   StringSelectMenuBuilder,
   StringSelectMenuInteraction,
+  RoleSelectMenuInteraction,
   TextInputBuilder,
   TextInputStyle,
   type Guild,
@@ -29,6 +30,8 @@ import {
 import {
   getAdvancedSettings,
   updateAdvancedSettings,
+  SETTINGS_DASHBOARD_BUTTON_KEYS,
+  type SettingsDashboardButtonKey,
   type TicketPriority,
 } from '../services/advancedSettingsService';
 
@@ -88,7 +91,7 @@ const SETTINGS_TOPIC_PREFIX = 'supportforge:settings';
 
 type SettingsViewInteraction = ButtonInteraction | StringSelectMenuInteraction;
 
-function isAdministrator(interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction): boolean {
+function isAdministrator(interaction: ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction | ModalSubmitInteraction): boolean {
   return Boolean(
     interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
       interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild),
@@ -103,7 +106,7 @@ const PRIORITY_ROLE_DEFINITIONS: Record<TicketPriority, { label: string; emoji: 
   critical: { label: 'Critical', emoji: '🟣', color: 0x9b59b6 },
 };
 
-async function isDepartmentStaff(interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction): Promise<boolean> {
+async function isDepartmentStaff(interaction: ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction | ModalSubmitInteraction): Promise<boolean> {
   const guild = interaction.guild;
   if (!guild) return false;
   const roleIds = new Set(
@@ -468,12 +471,12 @@ async function deletePriorityRole(
     );
   }
 }
-function isSettingsChannel(interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction): boolean {
+function isSettingsChannel(interaction: ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction | ModalSubmitInteraction): boolean {
   return interaction.channel?.type === ChannelType.GuildText &&
     Boolean(interaction.channel.topic?.startsWith(SETTINGS_TOPIC_PREFIX));
 }
 
-async function reject(interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction, content: string): Promise<void> {
+async function reject(interaction: ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction | ModalSubmitInteraction, content: string): Promise<void> {
   if (interaction.replied || interaction.deferred) {
     await interaction.editReply(content).catch(() => undefined);
     return;
@@ -558,7 +561,7 @@ async function renderSettingsView(
 
 async function auditSettingsAction(
   guild: Guild,
-  interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
+  interaction: ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction | ModalSubmitInteraction,
   action: string,
   detail: string,
 ): Promise<void> {
@@ -1579,7 +1582,7 @@ async function handleTicketRecoveryInteraction(interaction: TicketRecoveryIntera
 }
 
 export async function handleSettingsInteraction(
-  interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
+  interaction: ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction | ModalSubmitInteraction,
 ): Promise<boolean> {
   if (!interaction.guild) return false;
 
@@ -1588,12 +1591,12 @@ export async function handleSettingsInteraction(
    * authorization/configuration lookups because Discord expires unacknowledged
    * component interactions after a few seconds.
    */
-  if (interaction.isStringSelectMenu() && !interaction.customId.startsWith('sf:settings:recovery:')) {
+  if ((interaction.isStringSelectMenu() || interaction.isRoleSelectMenu()) && !interaction.customId.startsWith('sf:settings:recovery:')) {
     await interaction.deferUpdate().catch(() => undefined);
   }
 
   if (
-    (interaction.isButton() || interaction.isStringSelectMenu() || interaction.isModalSubmit()) &&
+    (interaction.isButton() || interaction.isStringSelectMenu() || interaction.isRoleSelectMenu() || interaction.isModalSubmit()) &&
     (interaction.customId.startsWith('sf:settings:'))
   ) {
     if (!isSettingsChannel(interaction)) {
