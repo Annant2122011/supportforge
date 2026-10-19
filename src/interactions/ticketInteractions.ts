@@ -6009,6 +6009,16 @@ async function handleCustomPanelEntry(interaction: ButtonInteraction): Promise<v
     return;
   }
   const livePanel = panel.publishedConfig;
+  // Custom IDs alone are not proof that a click came from the panel we
+  // published. Bind interactions to the exact saved channel/message as well,
+  // so a copied/stale button cannot be replayed from a different message.
+  if (
+    interaction.message.id !== panel.publishedMessageId ||
+    interaction.channelId !== panel.publishedChannelId
+  ) {
+    await replyError(interaction, 'This is an old or copied panel button. Use the current published support panel instead.');
+    return;
+  }
   const button = livePanel.buttons.find((candidate) => candidate.id === buttonId);
   if (!button) {
     await replyError(interaction, 'This button belongs to an older panel revision. The administrator must republish the current panel.');
