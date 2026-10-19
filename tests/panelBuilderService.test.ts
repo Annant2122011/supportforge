@@ -9,6 +9,7 @@ import {
   parseCustomPanelButtons,
 } from '../src/services/panelBuilderService';
 import type { CustomSupportPanel, DepartmentConfig } from '../src/services/configService';
+import type { TicketFormVersion } from '../src/services/ticketFormService';
 
 const departments: Record<string, DepartmentConfig> = {
   billing: {
@@ -34,17 +35,43 @@ const examplePanel: CustomSupportPanel = {
   description: 'Choose a department to start a ticket.',
   footer: 'ResolveX Support',
   color: '22D3EE',
+  iconUrl: null,
   thumbnailUrl: null,
   bannerUrl: null,
+  allowedRoleIds: [],
   buttons: [
-    { departmentId: 'billing', label: 'Billing', emoji: '💳', style: 'primary' },
-    { departmentId: 'technical', label: 'Technical', emoji: '🛠️', style: 'success' },
+    { id: 'buttonbill1', targetType: 'department', departmentId: 'billing', formId: null, formVersion: null, tagId: null, label: 'Billing', emoji: '💳', style: 'primary', confirmationMessage: null, allowedRoleIds: [] },
+    { id: 'buttontech1', targetType: 'department', departmentId: 'technical', formId: null, formVersion: null, tagId: null, label: 'Technical', emoji: '🛠️', style: 'success', confirmationMessage: null, allowedRoleIds: [] },
   ],
   publishedChannelId: null,
   publishedMessageId: null,
+  publishedConfig: null,
   createdAt: '2026-10-18T10:00:00.000Z',
   updatedAt: '2026-10-18T10:00:00.000Z',
 };
+
+const exampleForm = {
+  id: '12345678-1234-1234-1234-123456789abc',
+  guildId: 'guild',
+  name: 'Refund Request',
+  departmentId: 'billing',
+  tagId: null,
+  currentVersion: 2,
+  version: 2,
+  active: true,
+  createdBy: 'admin',
+  createdAt: '2026-10-01T00:00:00.000Z',
+  updatedAt: '2026-10-02T00:00:00.000Z',
+  fields: [],
+  snapshot: {
+    id: '12345678-1234-1234-1234-123456789abc',
+    name: 'Refund Request',
+    departmentId: 'billing',
+    tagId: null,
+    version: 2,
+    fields: [],
+  },
+} satisfies TicketFormVersion;
 
 test('custom panel button schema preserves order and supports existing department routing IDs', () => {
   const buttons = parseCustomPanelButtons(JSON.stringify([
@@ -54,6 +81,8 @@ test('custom panel button schema preserves order and supports existing departmen
   assert.deepEqual(buttons.map((button) => button.departmentId), ['technical', 'billing']);
   assert.equal(buttons[0]?.style, 'success');
   assert.equal(buttons[1]?.style, 'secondary');
+  assert.equal(buttons[0]?.targetType, 'department');
+  assert.ok(buttons[0]?.id);
 });
 
 test('custom panel button validation rejects unknown departments and malformed input', () => {
@@ -62,6 +91,8 @@ test('custom panel button validation rejects unknown departments and malformed i
   assert.throws(() => parseCustomPanelButtons([], departments), /between 1 and 25/);
   assert.throws(() => parseCustomPanelButtons([{ departmentId: 'billing', label: 'x'.repeat(81) }], departments), /label/);
   assert.throws(() => parseCustomPanelButtons([{ departmentId: 'billing', label: 'Billing', style: 'link' }], departments), /style/);
+  assert.throws(() => parseCustomPanelButtons([{ targetType: 'department', departmentId: 'billing', tagId: 'missing', label: 'Refund' }], departments), /tagId/);
+  assert.throws(() => parseCustomPanelButtons([{ targetType: 'department', departmentId: 'billing', label: 'Refund', allowedRoleIds: ['not-a-role-id'] }], departments), /invalid Discord role ID/);
 });
 
 test('custom panel image URLs allow HTTP(S) only and reject credential-bearing URLs', () => {
@@ -86,8 +117,8 @@ test('custom panel preview disables ticket buttons while published controls reta
   assert.equal(publishedButtons.length, 2);
   assert.equal(previewButtons.every((button) => button.data.disabled === true), true);
   assert.equal(publishedButtons.every((button) => button.data.disabled !== true), true);
-  assert.equal(publishedButtons[0]?.data.custom_id, 'ticket:create:billing');
-  assert.equal(publishedButtons[1]?.data.custom_id, 'ticket:create:technical');
+  assert.equal(publishedButtons[0]?.data.custom_id, 'ticket:custom:abc123def456:buttonbill1');
+  assert.equal(publishedButtons[1]?.data.custom_id, 'ticket:custom:abc123def456:buttontech1');
 });
 
 test('custom panels accept at most 25 ordered controls and publish within Discord row limits', () => {
@@ -112,4 +143,42 @@ test('custom panel embed renders its configured title, description, color, and b
   assert.equal(embed.description, 'Choose a department to start a ticket.');
   assert.equal(embed.color, 0x22d3ee);
   assert.equal(embed.image?.url, 'https://cdn.example.com/banner.png');
+});
+
+test('custom panel form buttons pin an active form version and concrete tag', () => {
+  const buttons = parseCustomPanelButtons([{
+    targetType: 'form',
+    formId: exampleForm.id,
+    tagId: 'refund',
+    label: 'Open Refund Form',
+    confirmationMessage: 'This opens a refund request. Continue?',
+    allowedRoleIds: ['12345678901234567'],
+  }], departments, [exampleForm]);
+  assert.equal(buttons[0]?.targetType, 'form');
+  assert.equal(buttons[0]?.formId, exampleForm.id);
+  assert.equal(buttons[0]?.formVersion, 2);
+  assert.equal(buttons[0]?.departmentId, 'billing');
+  assert.equal(buttons[0]?.tagId, 'refund');
+  assert.equal(buttons[0]?.confirmationMessage, 'This opens a refund request. Continue?');
+  assert.deepEqual(buttons[0]?.allowedRoleIds, ['12345678901234567']);
+});
+
+test('custom panel form buttons reject disabled forms, mismatched tags and missing concrete tags', () => {
+  assert.throws(() => parseCustomPanelButtons([{
+    targetType: 'form', formId: exampleForm.id, tagId: 'refund', label: 'Refund',
+  }], departments, [{ ...exampleForm, active: false }]), /missing or inactive/);
+  assert.throws(() => parseCustomPanelButtons([{
+    targetType: 'form', formId: exampleForm.id, label: 'Refund',
+  }], departments, [exampleForm]), /concrete tag/);
+  assert.throws(() => parseCustomPanelButtons([{
+    targetType: 'form', formId: exampleForm.id, tagId: 'missing', label: 'Refund',
+  }], departments, [exampleForm]), /not a tag/);
+});
+
+test('empty drafts are allowed only when explicitly requested and draft confirmations are bounded', () => {
+  assert.deepEqual(parseCustomPanelButtons([], departments, [], true), []);
+  assert.throws(() => parseCustomPanelButtons([], departments), /at least one button/);
+  assert.throws(() => parseCustomPanelButtons([{
+    departmentId: 'billing', label: 'Billing', confirmationMessage: 'x'.repeat(1001),
+  }], departments), /confirmationMessage/);
 });
