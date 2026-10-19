@@ -531,6 +531,51 @@ async function showPanelAccess(interaction: PanelSettingsInteraction, panelId: s
   );
 }
 
+async function showPublishChannelPicker(
+  interaction: PanelSettingsInteraction,
+  panelId: string,
+  page = 0,
+): Promise<void> {
+  await prepare(interaction);
+  const panel = await getCustomPanel(interaction.guild!.id, panelId);
+  if (!panel) throw new Error('Panel not found.');
+  if (!panel.buttons.length) throw new Error('Add at least one button before publishing a panel.');
+  const channels = [...(await interaction.guild!.channels.fetch()).values()]
+    .filter((channel): channel is import('discord.js').TextChannel =>
+      Boolean(channel && channel.type === 0 && channel.viewable && channel.permissionsFor(interaction.guild!.members.me!)?.has(['ViewChannel', 'SendMessages', 'EmbedLinks'])),
+    )
+    .sort((a, b) => a.name.localeCompare(b.name));
+  if (!channels.length) {
+    throw new Error('No accessible text channels were found where ResolveX can view, send messages and embeds.');
+  }
+  const pageCount = Math.max(1, Math.ceil(channels.length / PAGE_SIZE));
+  const safePage = Math.min(Math.max(page, 0), pageCount - 1);
+  const visible = channels.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+  const components: PanelComponents = [
+    selectRow(new StringSelectMenuBuilder()
+      .setCustomId(PREFIX + 'channel:' + panelId)
+      .setPlaceholder('Choose where to publish this panel')
+      .addOptions(visible.map((channel) => ({
+        label: channel.name.slice(0, 100),
+        value: channel.id,
+        description: 'Publish to #' + channel.name,
+      })))),
+  ];
+  if (pageCount > 1) {
+    components.push(row(
+      makeButton(PREFIX + 'channels:' + panelId + ':' + (safePage - 1), 'Previous', ButtonStyle.Secondary, '⬅️', safePage === 0),
+      makeButton(PREFIX + 'channels:' + panelId + ':' + (safePage + 1), 'Next', ButtonStyle.Secondary, '➡️', safePage >= pageCount - 1),
+    ));
+  }
+  components.push(row(makeButton(PREFIX + 'detail:' + panelId, 'Cancel', ButtonStyle.Secondary, '↩️')));
+  await render(
+    interaction,
+    'Publish Custom Panel',
+    'Choose a text channel where ResolveX can view messages, post embeds and create buttons. After the new public message is saved, ResolveX attempts to remove the previous message.\n\n**Panel:** ' + panel.name + '\n**Available channels:** ' + channels.length + '\n**Page:** ' + (safePage + 1) + ' / ' + pageCount,
+    components,
+  );
+}
+
 function resourceCode(error: unknown): number | undefined {
   if (!error || typeof error !== 'object' || !('code' in error)) return undefined;
   const code = (error as { code?: unknown }).code;
@@ -748,18 +793,12 @@ export async function handleCustomPanelSettingsInteraction(
       return true;
     }
     if (interaction.isButton() && id.startsWith(PREFIX + 'publish:')) {
-      const panelId = id.slice((PREFIX + 'publish:').length);
-      const panel = await getCustomPanel(guild.id, panelId);
-      if (!panel) throw new Error('Panel not found.');
-      if (panel.buttons.length < 1) throw new Error('Add at least one button before publishing a panel.');
-      const channels = (await guild.channels.fetch()).filter((channel) => channel?.type === 0).map((channel) => channel!).sort((a, b) => a.name.localeCompare(b.name));
-      if (!channels.length) throw new Error('No standard text channels were found.');
-      const select = new StringSelectMenuBuilder().setCustomId(PREFIX + 'channel:' + panelId).setPlaceholder('Choose where to publish this panel')
-        .addOptions(channels.slice(0, 25).map((channel) => ({ label: channel.name.slice(0, 100), value: channel.id, description: 'Publish to #' + channel.name })));
-      await render(interaction, 'Publish Custom Panel', 'Choose a text channel for this panel. ResolveX saves the published snapshot and attempts to remove the previous panel message after the new message is secured.', [
-        selectRow(select),
-        row(makeButton(PREFIX + 'detail:' + panelId, 'Cancel', ButtonStyle.Secondary, '↩️')),
-      ]);
+      await showPublishChannelPicker(interaction, id.slice((PREFIX + 'publish:').length), 0);
+      return true;
+    }
+    if (interaction.isButton() && id.startsWith(PREFIX + 'channels:')) {
+      const parts = id.split(':');
+      await showPublishChannelPicker(interaction, parts[4] ?? '', Number(parts[5] ?? '0'));
       return true;
     }
     if (interaction.isStringSelectMenu() && id.startsWith(PREFIX + 'channel:')) {
