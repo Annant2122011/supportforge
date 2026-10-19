@@ -85,6 +85,22 @@ test('custom panel button schema preserves order and supports existing departmen
   assert.ok(buttons[0]?.id);
 });
 
+test('custom panel buttons reject invalid emoji strings and preserve valid Unicode/custom emoji', () => {
+  const unicode = parseCustomPanelButtons([
+    { departmentId: 'billing', label: 'Tickets', emoji: '🎫' },
+  ], departments);
+  assert.equal(unicode[0]?.emoji, '🎫');
+
+  const custom = parseCustomPanelButtons([
+    { departmentId: 'billing', label: 'Tickets', emoji: '<:support:12345678901234567>' },
+  ], departments);
+  assert.equal(custom[0]?.emoji, '<:support:12345678901234567>');
+
+  assert.throws(() => parseCustomPanelButtons([
+    { departmentId: 'billing', label: 'Tickets', emoji: 'please' },
+  ], departments), /Unicode emoji or Discord custom emoji/);
+});
+
 test('custom panel button validation rejects unknown departments and malformed input', () => {
   assert.throws(() => parseCustomPanelButtons([{ departmentId: 'missing', label: 'Help' }], departments), /unknown department/);
   assert.throws(() => parseCustomPanelButtons('{bad json', departments), /valid JSON/);
