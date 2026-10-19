@@ -275,7 +275,7 @@ Discord bot, guild configuration, department configuration.
 
 ## F-002 — Custom Panel Builder
 
-**Status:** `PARTIAL`  
+**Status:** `BUILT / PARTIAL`  
 **Priority:** `P1`
 
 ### Purpose
