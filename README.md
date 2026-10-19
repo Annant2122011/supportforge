@@ -70,7 +70,7 @@ A department target opens the regular department/tag ticket flow. A form target 
 
 Panel-level options include title, instructions, footer, accent color, author icon URL, thumbnail and banner image URL. Button styles are `primary`, `secondary`, `success`, and `danger`. A panel supports at most 25 buttons due to Discord's component limit. The private preview reserves the fifth row for navigation, so it shows the first 20 buttons when a draft has 21–25; published panels can use all 25.
 
-Editing the draft does not change how the currently published panel behaves. Re-publishing saves a new published snapshot and message pointer before retiring the previous message. If a stale copy of a panel remains after a Discord cleanup failure, its interactions are rejected because they no longer originate from the currently published message.
+Editing the draft does not change how the currently published panel behaves. Re-publishing saves a new published snapshot and message pointer before retiring the previous message. If a stale copy of a panel remains after a Discord cleanup failure, its interactions are rejected because they no longer originate from the currently published message. Older panel definitions created before published-snapshot tracking was added need a one-time republish from Settings → Ticket Panels; their old messages fail closed until the snapshot is registered.
 
 ## Build your server's Settings channel layout
 
