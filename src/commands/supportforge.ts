@@ -862,9 +862,10 @@ export const data =
             .addStringOption((option) => option.setName('name').setDescription('Unique panel name').setRequired(true).setMaxLength(80))
             .addStringOption((option) => option.setName('title').setDescription('Panel heading').setRequired(true).setMaxLength(256))
             .addStringOption((option) => option.setName('description').setDescription('Instructions shown above the ticket buttons').setRequired(true).setMaxLength(4000))
-            .addStringOption((option) => option.setName('buttons-json').setDescription('Ordered JSON array: departmentId, label, optional emoji/style').setRequired(true).setMaxLength(4000))
+            .addStringOption((option) => option.setName('buttons-json').setDescription('Optional ordered button JSON. Omit for an empty draft and manage buttons in Settings.').setRequired(false).setMaxLength(4000))
             .addStringOption((option) => option.setName('footer').setDescription('Optional footer text').setRequired(false).setMaxLength(2048))
             .addStringOption((option) => option.setName('color').setDescription('Optional six-digit hex color such as #22D3EE').setRequired(false).setMaxLength(7))
+            .addStringOption((option) => option.setName('icon-url').setDescription('Optional public HTTPS icon URL').setRequired(false).setMaxLength(2048))
             .addStringOption((option) => option.setName('thumbnail-url').setDescription('Optional public HTTPS thumbnail URL').setRequired(false).setMaxLength(2048))
             .addStringOption((option) => option.setName('banner-url').setDescription('Optional public HTTPS banner image URL').setRequired(false).setMaxLength(2048)),
         )
@@ -883,6 +884,7 @@ export const data =
             .addStringOption((option) => option.setName('description').setDescription('New instructions').setRequired(false).setMaxLength(4000))
             .addStringOption((option) => option.setName('footer').setDescription('Footer text, or none to clear').setRequired(false).setMaxLength(2048))
             .addStringOption((option) => option.setName('color').setDescription('Hex color, or none to use server theme').setRequired(false).setMaxLength(7))
+            .addStringOption((option) => option.setName('icon-url').setDescription('Icon URL, or none to clear').setRequired(false).setMaxLength(2048))
             .addStringOption((option) => option.setName('thumbnail-url').setDescription('Thumbnail URL, or none to clear').setRequired(false).setMaxLength(2048))
             .addStringOption((option) => option.setName('banner-url').setDescription('Banner image URL, or none to clear').setRequired(false).setMaxLength(2048))
             .addStringOption((option) => option.setName('buttons-json').setDescription('Replace/reorder buttons using the create schema').setRequired(false).setMaxLength(4000)),
@@ -1754,9 +1756,10 @@ export async function execute(
           name: interaction.options.getString('name', true),
           title: interaction.options.getString('title', true),
           description: interaction.options.getString('description', true),
-          buttons: interaction.options.getString('buttons-json', true),
+          buttons: interaction.options.getString('buttons-json') ?? [],
           footer: interaction.options.getString('footer') ?? undefined,
           color: interaction.options.getString('color') ?? undefined,
+          iconUrl: interaction.options.getString('icon-url') ?? undefined,
           thumbnailUrl: interaction.options.getString('thumbnail-url') ?? undefined,
           bannerUrl: interaction.options.getString('banner-url') ?? undefined,
         });
@@ -1789,7 +1792,10 @@ export async function execute(
       if (action === 'show') {
         const buttonLines = panel.buttons.map((item, index) =>
           (index + 1) + '. ' + (item.emoji ? item.emoji + ' ' : '') + '**' + item.label + '** → ' +
-          guildConfig.departments[item.departmentId]?.name + ' (`' + item.departmentId + '`) · ' + item.style,
+          (item.targetType === 'form' ? 'Form `' + (item.formId ?? 'missing') + '`' : guildConfig.departments[item.departmentId]?.name + ' (`' + item.departmentId + '`)') +
+          (item.tagId ? ' · tag `' + item.tagId + '`' : '') + ' · ' + item.style +
+          (item.allowedRoleIds?.length ? ' · role-restricted' : '') +
+          (item.confirmationMessage ? ' · confirmation enabled' : ''),
         );
         const embed = buildCustomPanelEmbed(panel, guild.name, themeColor, true)
           .setTitle(panel.name + ' · ' + panel.title)
@@ -1814,6 +1820,7 @@ export async function execute(
           description: interaction.options.getString('description') ?? undefined,
           footer: noneAsEmpty(interaction.options.getString('footer')),
           color: noneAsNull(interaction.options.getString('color')),
+          iconUrl: noneAsNull(interaction.options.getString('icon-url')),
           thumbnailUrl: noneAsNull(interaction.options.getString('thumbnail-url')),
           bannerUrl: noneAsNull(interaction.options.getString('banner-url')),
           buttons: buttonsJson ?? undefined,
