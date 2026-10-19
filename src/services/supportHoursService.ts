@@ -366,6 +366,7 @@ export async function saveSupportHoursPolicy(
     scopeId: normalized.scopeId ?? null,
     version: (previous?.version ?? 0) + 1,
     updatedAt: new Date().toISOString(),
+    updatedBy: normalized.updatedBy ?? null,
   };
   current.guilds[guildId][key] = policy;
   await persistState();
