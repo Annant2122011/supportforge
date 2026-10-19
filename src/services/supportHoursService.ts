@@ -229,6 +229,38 @@ export function parseSupportHoursIntervals(input: string): SupportHoursInterval[
   return intervals;
 }
 
+export function parseSupportHoursWeeklySchedule(input: string): SupportHoursWeeklySchedule {
+  if (typeof input !== 'string' || input.length > 4000) {
+    throw new Error('Enter a weekly schedule no longer than 4,000 characters.');
+  }
+  const schedule = EMPTY_SCHEDULE();
+  const seen = new Set<SupportHoursDay>();
+  const lines = input.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    const match = /^([a-z]+)\s*=\s*(.+)$/i.exec(line);
+    if (!match) throw new Error('Use one line per day, for example monday=09:00-17:00; use closed for a closed day.');
+    const day = match[1]!.toLowerCase() as SupportHoursDay;
+    if (!(SUPPORT_HOURS_DAYS as readonly string[]).includes(day)) {
+      throw new Error('Unknown weekday in schedule: ' + match[1] + '.');
+    }
+    if (seen.has(day)) throw new Error('The weekly schedule contains ' + day + ' more than once.');
+    seen.add(day);
+    schedule[day] = parseSupportHoursIntervals(match[2]!);
+  }
+  const missing = SUPPORT_HOURS_DAYS.filter((day) => !seen.has(day));
+  if (missing.length) throw new Error('Include all seven weekdays. Missing: ' + missing.join(', ') + '.');
+  return validateSupportHoursSchedule(schedule);
+}
+
+export function formatSupportHoursWeeklySchedule(schedule: SupportHoursWeeklySchedule): string {
+  const normalized = validateSupportHoursSchedule(schedule);
+  return SUPPORT_HOURS_DAYS.map((day) => day + '=' + (
+    normalized[day].length
+      ? normalized[day].map((interval) => interval.start + '-' + interval.end).join(',')
+      : 'closed'
+  )).join('\n');
+}
+
 function intervalDuration(start: number, end: number): number {
   if (end === 1440) return 1440 - start;
   return end > start ? end - start : 1440 - start + end;
