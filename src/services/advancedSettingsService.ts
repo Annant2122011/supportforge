@@ -1,4 +1,5 @@
 import type { Guild } from 'discord.js';
+import { normalizeDiscordEmoji } from '../core/domain/discordEmoji';
 import { getJsonDocument, setJsonDocument } from './jsonDocumentPersistenceService';
 
 export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent' | 'critical';
@@ -342,11 +343,18 @@ function normalizeExistingSettings(
         if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue;
         const value = candidate as Record<string, unknown>;
         const label = text(value.label, '', 80);
-        const emoji = value.emoji === null
-          ? null
-          : typeof value.emoji === 'string'
-            ? value.emoji.trim().slice(0, 100) || null
-            : null;
+        let emoji: string | null;
+        if (value.emoji === null) {
+          emoji = null;
+        } else {
+          try {
+            emoji = normalizeDiscordEmoji(value.emoji, 'Settings dashboard button emoji') ?? null;
+          } catch {
+            // Bad legacy customization must not prevent the Settings dashboard
+            // from rendering after a restart.
+            continue;
+          }
+        }
         if (label) buttonCustomizations[key] = { label, emoji };
       }
       return {
