@@ -471,7 +471,7 @@ async function showFormPicker(interaction: PanelSettingsInteraction, panelId: st
   await render(interaction, 'Add Form Button', 'Choose an active form. Buttons pin the current form version so the public link cannot silently change meaning after an administrator edits the form.\nPage ' + (safePage + 1) + ' / ' + pageCount, components);
 }
 
-async function showFormTagPicker(interaction: PanelSettingsInteraction, panelId: string, formId: string, page = 0): Promise<void> {
+async function showFormTagPicker(interaction: ButtonInteraction | StringSelectMenuInteraction, panelId: string, formId: string, page = 0): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
   const form = (await listTicketForms(interaction.guild!.id)).find((candidate) => candidate.id === formId && candidate.active);
   if (!form) throw new Error('That form was deactivated. Refresh the active form list.');
