@@ -86,3 +86,27 @@ The Build and SupportForge CI workflows run the TypeScript build, automated test
 - [Ticket archive and recovery behavior](docs/recovery-archive.md)
 - [Slash-command and button parity](docs/interaction-parity.md)
 - [Restore and deployment guide](docs/restore-and-deploy.md)
+
+## Stage F · Part 1: support hours and time zones
+
+Stage F is split into two independent increments. **Part 1** implements the shared support-hours policy and time-zone engine. **Part 2**, intentionally not included here, will add private-thread ticket workspaces.
+
+Support-hours policies are stored in the existing Neon-backed JSON-document repository under a separate support-hours document. This avoids coupling schedule rules to guild appearance settings and does not introduce a second database or SQL migration. Policy scopes resolve in this order: **ticket panel → department → server default**. An explicit disabled policy at a more-specific scope disables enforcement there; removing an override restores inheritance.
+
+The Settings channel now has a **Support Hours** button for editing the server-default weekly schedule. The equivalent slash-command group supports server, department and panel scopes:
+
+- /supportforge settings support-hours action:show scope:guild
+- /supportforge settings support-hours action:set-timezone scope:guild timezone:Asia/Kolkata
+- /supportforge settings support-hours action:set-day scope:guild day:monday intervals:09:00-12:00,13:00-17:00
+- /supportforge settings support-hours action:set-day scope:guild day:sunday intervals:closed
+- /supportforge settings support-hours action:behavior scope:guild behavior:restrict
+- /supportforge settings support-hours action:enable scope:guild
+- /supportforge settings support-hours action:show scope:department scope-id:department-id
+- /supportforge settings support-hours action:show scope:panel scope-id:panel-id
+
+For a department or panel override, provide scope-id. Use valid IANA time-zone names, such as Asia/Kolkata or America/New_York; fixed UTC offsets are not accepted as time zones. Times use 24-hour HH:mm values. An interval can cross midnight, for example 22:00-02:00. Multiple intervals use commas. Overlapping intervals are rejected, including overlap across midnight.
+
+When enforcement is enabled, every supported ticket-entry route checks the effective policy and final ticket submission checks it again. A blocked request receives a closed-hours notice and the next opening time when one can be calculated. Existing tickets and administrator actions are not disabled. Panels stay published when support is closed. Policy mutations and blocked intake are audited.
+
+The schedule engine handles daylight-saving gaps and repeated local times deterministically, uses the same calculation path for status and next-opening time, and is covered by fake-time/unit tests. Live Discord acceptance testing is still required before production rollout. See [Stage F Part 1 architecture and acceptance notes](docs/stage-f-part-1-support-hours.md).
+
