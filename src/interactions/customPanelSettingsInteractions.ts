@@ -29,6 +29,7 @@ import {
   listCustomPanels,
   markCustomPanelPublished,
   moveCustomPanelButton,
+  retargetCustomPanelButton,
   setCustomPanelRoleAccess,
   updateCustomPanel,
   updateCustomPanelButton,
@@ -409,6 +410,7 @@ async function showButtonDetail(interaction: PanelSettingsInteraction, panelId: 
     [
       row(
         makeButton(PREFIX + 'edit-button:' + panelId + ':' + buttonId, 'Edit Button', ButtonStyle.Primary, '✏️'),
+        makeButton(PREFIX + 'retarget:' + panelId + ':' + buttonId, 'Change Target', ButtonStyle.Secondary, '🎯'),
         makeButton(PREFIX + 'access-button:' + panelId + ':' + buttonId, 'Button Access', ButtonStyle.Secondary, '🔐'),
       ),
       row(
@@ -421,14 +423,23 @@ async function showButtonDetail(interaction: PanelSettingsInteraction, panelId: 
   );
 }
 
-async function showDepartmentPicker(interaction: PanelSettingsInteraction, panelId: string, page = 0): Promise<void> {
-  const departments = Object.values((await getGuildConfig(interaction.guild!.id)).departments).sort((a, b) => a.name.localeCompare(b.name));
+async function showDepartmentPicker(
+  interaction: PanelSettingsInteraction,
+  panelId: string,
+  page = 0,
+  retargetButtonId?: string,
+): Promise<void> {
+  const departments = Object.values((await getGuildConfig(interaction.guild!.id)).departments)
+    .sort((a, b) => a.name.localeCompare(b.name));
   if (!departments.length) throw new Error('Create a department in Settings → Tags / Departments first.');
   const pageCount = Math.max(1, Math.ceil(departments.length / PAGE_SIZE));
   const safePage = Math.min(Math.max(page, 0), pageCount - 1);
   const visible = departments.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+  const selectId = retargetButtonId
+    ? PREFIX + 'retarget-department-pick:' + panelId + ':' + retargetButtonId + ':' + safePage
+    : PREFIX + 'department-pick:' + panelId + ':' + safePage;
   const components: PanelComponents = [
-    selectRow(new StringSelectMenuBuilder().setCustomId(PREFIX + 'department-pick:' + panelId + ':' + safePage)
+    selectRow(new StringSelectMenuBuilder().setCustomId(selectId)
       .setPlaceholder('Choose the target department')
       .addOptions(visible.map((department) => ({
         label: department.name.slice(0, 100),
@@ -438,22 +449,56 @@ async function showDepartmentPicker(interaction: PanelSettingsInteraction, panel
   ];
   if (pageCount > 1) {
     components.push(row(
-      makeButton(PREFIX + 'add-department:' + panelId + ':' + (safePage - 1), 'Previous', ButtonStyle.Secondary, '⬅️', safePage === 0),
-      makeButton(PREFIX + 'add-department:' + panelId + ':' + (safePage + 1), 'Next', ButtonStyle.Secondary, '➡️', safePage >= pageCount - 1),
+      makeButton(
+        retargetButtonId
+          ? PREFIX + 'retarget-department:' + panelId + ':' + retargetButtonId + ':' + (safePage - 1)
+          : PREFIX + 'add-department:' + panelId + ':' + (safePage - 1),
+        'Previous', ButtonStyle.Secondary, '⬅️', safePage === 0,
+      ),
+      makeButton(
+        retargetButtonId
+          ? PREFIX + 'retarget-department:' + panelId + ':' + retargetButtonId + ':' + (safePage + 1)
+          : PREFIX + 'add-department:' + panelId + ':' + (safePage + 1),
+        'Next', ButtonStyle.Secondary, '➡️', safePage >= pageCount - 1,
+      ),
     ));
   }
-  components.push(row(makeButton(PREFIX + 'buttons:' + panelId, 'Cancel', ButtonStyle.Secondary, '↩️')));
-  await render(interaction, 'Add Department Button', 'Choose an existing department. You can optionally pin a tag or let customers choose one when they click the published button.\nPage ' + (safePage + 1) + ' / ' + pageCount, components);
+  components.push(row(makeButton(
+    retargetButtonId
+      ? PREFIX + 'button:' + panelId + ':' + retargetButtonId
+      : PREFIX + 'buttons:' + panelId,
+    'Cancel', ButtonStyle.Secondary, '↩️',
+  )));
+  await render(
+    interaction,
+    retargetButtonId ? 'Change Button Target • Department' : 'Add Department Button',
+    'Choose an existing department. ' +
+      (retargetButtonId
+        ? 'The button ID will rotate when the target changes, invalidating buttons from the previous target after you re-publish.'
+        : 'You can optionally pin a tag or let customers choose one when they click the published button.') +
+      '\nPage ' + (safePage + 1) + ' / ' + pageCount,
+    components,
+  );
 }
 
-async function showFormPicker(interaction: PanelSettingsInteraction, panelId: string, page = 0): Promise<void> {
-  const forms = (await listTicketForms(interaction.guild!.id)).filter((form) => form.active).sort((a, b) => a.name.localeCompare(b.name));
+async function showFormPicker(
+  interaction: PanelSettingsInteraction,
+  panelId: string,
+  page = 0,
+  retargetButtonId?: string,
+): Promise<void> {
+  const forms = (await listTicketForms(interaction.guild!.id))
+    .filter((form) => form.active)
+    .sort((a, b) => a.name.localeCompare(b.name));
   if (!forms.length) throw new Error('There are no active forms. Create and activate a form before adding a form-target button.');
   const pageCount = Math.max(1, Math.ceil(forms.length / PAGE_SIZE));
   const safePage = Math.min(Math.max(page, 0), pageCount - 1);
   const visible = forms.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+  const selectId = retargetButtonId
+    ? PREFIX + 'retarget-form-pick:' + panelId + ':' + retargetButtonId + ':' + safePage
+    : PREFIX + 'form-pick:' + panelId + ':' + safePage;
   const components: PanelComponents = [
-    selectRow(new StringSelectMenuBuilder().setCustomId(PREFIX + 'form-pick:' + panelId + ':' + safePage)
+    selectRow(new StringSelectMenuBuilder().setCustomId(selectId)
       .setPlaceholder('Choose an active form')
       .addOptions(visible.map((form) => ({
         label: (form.name + ' · v' + form.version).slice(0, 100),
@@ -463,12 +508,34 @@ async function showFormPicker(interaction: PanelSettingsInteraction, panelId: st
   ];
   if (pageCount > 1) {
     components.push(row(
-      makeButton(PREFIX + 'add-form:' + panelId + ':' + (safePage - 1), 'Previous', ButtonStyle.Secondary, '⬅️', safePage === 0),
-      makeButton(PREFIX + 'add-form:' + panelId + ':' + (safePage + 1), 'Next', ButtonStyle.Secondary, '➡️', safePage >= pageCount - 1),
+      makeButton(
+        retargetButtonId
+          ? PREFIX + 'retarget-form:' + panelId + ':' + retargetButtonId + ':' + (safePage - 1)
+          : PREFIX + 'add-form:' + panelId + ':' + (safePage - 1),
+        'Previous', ButtonStyle.Secondary, '⬅️', safePage === 0,
+      ),
+      makeButton(
+        retargetButtonId
+          ? PREFIX + 'retarget-form:' + panelId + ':' + retargetButtonId + ':' + (safePage + 1)
+          : PREFIX + 'add-form:' + panelId + ':' + (safePage + 1),
+        'Next', ButtonStyle.Secondary, '➡️', safePage >= pageCount - 1,
+      ),
     ));
   }
-  components.push(row(makeButton(PREFIX + 'buttons:' + panelId, 'Cancel', ButtonStyle.Secondary, '↩️')));
-  await render(interaction, 'Add Form Button', 'Choose an active form. Buttons pin the current form version so the public link cannot silently change meaning after an administrator edits the form.\nPage ' + (safePage + 1) + ' / ' + pageCount, components);
+  components.push(row(makeButton(
+    retargetButtonId
+      ? PREFIX + 'button:' + panelId + ':' + retargetButtonId
+      : PREFIX + 'buttons:' + panelId,
+    'Cancel', ButtonStyle.Secondary, '↩️',
+  )));
+  await render(
+    interaction,
+    retargetButtonId ? 'Change Button Target • Form' : 'Add Form Button',
+    'Choose an active form. Buttons pin the current form version so a saved form edit cannot silently change the published panel flow. ' +
+      (retargetButtonId ? 'Changing target rotates the button identity.' : '') +
+      '\nPage ' + (safePage + 1) + ' / ' + pageCount,
+    components,
+  );
 }
 
 async function showFormTagPicker(interaction: ButtonInteraction | StringSelectMenuInteraction, panelId: string, formId: string, page = 0): Promise<void> {
