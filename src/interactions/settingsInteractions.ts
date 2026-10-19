@@ -63,6 +63,7 @@ import { performFactoryReset } from '../services/factoryResetService';
 import { addUseCasePreset, USE_CASE_PRESETS } from '../services/useCasePresetService';
 import { enforcePriorityRoleHierarchy } from '../services/priorityRoleService';
 import { UI_THEMES, getThemeColor, getThemeDefinition, isGuildTheme } from '../services/uiThemeService';
+import { normalizeDiscordEmoji } from '../core/domain/discordEmoji';
 import { handleTicketFormSettingsInteraction } from './ticketFormSettingsInteractions';
 import { handleCustomPanelSettingsInteraction } from './customPanelSettingsInteractions';
 import {
@@ -3203,11 +3204,19 @@ export async function handleSettingsInteraction(
       const label = submittedLabel.toLowerCase() === 'default'
         ? SETTINGS_LAYOUT_LABELS[key]
         : submittedLabel;
-      const emoji = submittedEmoji.toLowerCase() === 'none'
-        ? null
-        : submittedEmoji.toLowerCase() === 'default' || !submittedEmoji
-          ? SETTINGS_LAYOUT_DEFAULT_EMOJIS[key]
-          : submittedEmoji.slice(0, 100);
+      let emoji: string | null;
+      if (submittedEmoji.toLowerCase() === 'none') {
+        emoji = null;
+      } else if (submittedEmoji.toLowerCase() === 'default' || !submittedEmoji) {
+        emoji = SETTINGS_LAYOUT_DEFAULT_EMOJIS[key];
+      } else {
+        try {
+          emoji = normalizeDiscordEmoji(submittedEmoji, 'Settings button emoji') ?? null;
+        } catch (error) {
+          await reject(interaction, error instanceof Error ? error.message : 'Enter a valid Unicode or Discord custom emoji.');
+          return true;
+        }
+      }
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       await updateAdvancedSettings(guild.id, (settings) => {
         if (label === SETTINGS_LAYOUT_LABELS[key] && emoji === SETTINGS_LAYOUT_DEFAULT_EMOJIS[key]) {
