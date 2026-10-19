@@ -886,6 +886,7 @@ client.on(
       if (
         interaction.isButton() ||
         interaction.isStringSelectMenu() ||
+        interaction.isRoleSelectMenu() ||
         interaction.isModalSubmit()
       ) {
         if (interaction.customId.startsWith('sf:audit:') && interaction.isButton()) {
