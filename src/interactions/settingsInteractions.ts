@@ -807,7 +807,7 @@ async function showSupportHoursSettings(
     .setTitle('🕒 Support Hours & Time Zone')
     .setDescription(
       (notice ? notice + '\n\n' : '') +
-      'This editor controls the **server-wide default**. Department and individual ticket-panel overrides are available through /supportforge settings support-hours.\\n\\n' +
+      'This editor controls the **server-wide default**. Department and individual ticket-panel overrides are available through /supportforge settings support-hours.\n\n' +
       '**Status:** ' + status + '\n' +
       '**Time zone:** ' + (policy?.timezone ?? 'Not configured') + '\n' +
       '**Outside hours:** ' + (policy?.outsideHoursBehavior ?? 'restrict') + '\n' +
@@ -3202,9 +3202,10 @@ export async function handleSettingsInteraction(
     }
 
     if (interaction.customId === 'sf:settings:modal:support-hours') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const timezone = interaction.fields.getTextInputValue('timezone').trim();
       const scheduleText = interaction.fields.getTextInputValue('schedule');
-      let weeklySchedule;
+      let weeklySchedule: ReturnType<typeof parseSupportHoursWeeklySchedule>;
       try {
         weeklySchedule = parseSupportHoursWeeklySchedule(scheduleText);
       } catch (error) {
@@ -3223,9 +3224,8 @@ export async function handleSettingsInteraction(
         });
         await refreshSettingsChannel(guild);
         await auditSettingsAction(guild, interaction, 'SUPPORT_HOURS_CHANGED', 'Updated server-default weekly schedule in ' + saved.timezone + '; policy version=' + saved.version + '.');
-        await interaction.reply({
+        await interaction.editReply({
           content: '✅ Server-default support schedule saved. Enforcement is ' + (saved.enabled ? 'enabled' : 'disabled') + '. Use the Support Hours panel to enable or review it.',
-          flags: MessageFlags.Ephemeral,
           components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
             new ButtonBuilder().setCustomId('sf:settings:support-hours').setLabel('Open Support Hours').setEmoji('🕒').setStyle(ButtonStyle.Primary),
             backButton(),
