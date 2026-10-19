@@ -674,7 +674,7 @@ async function showSettingsDashboardBuilder(
       .setTitle('🧰 Settings Dashboard Builder')
       .setDescription(
         (notice ? notice + '\n\n' : '') +
-        'Customize the **Settings channel itself** for this server. Change its heading, description, footer, control order, per-control labels and emojis, then preview the result. This changes only the Settings dashboard, not the public ticket panel.\n\n' +
+        'Customize the **Settings channel itself** for this server. Change its heading, description, footer, control order, per-control labels and emojis. Edits save immediately; Preview shows the saved layout with disabled controls. This changes only the Settings dashboard, not the public ticket panel.\n\n' +
         '**Title:** ' + settings.settingsDashboard.title + '\n' +
         '**Description:** ' + (settings.settingsDashboard.description || 'No description') + '\n' +
         '**Footer:** ' + settings.settingsDashboard.footer + '\n\n' +
@@ -685,7 +685,7 @@ async function showSettingsDashboardBuilder(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':edit').setLabel('Edit Branding').setEmoji('🎨').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':preview').setLabel('Preview').setEmoji('👁️').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':reset-order').setLabel('Reset Order').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':reset-order').setLabel('Reset Layout').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
       backButton(),
     ),
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(chooser),
