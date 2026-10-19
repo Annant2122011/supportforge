@@ -162,11 +162,17 @@ export function parseCustomPanelButtons(
     throw new Error('A custom panel draft can contain 0–25 buttons; publish requires at least one button.');
   }
 
+  const seenButtonIds = new Set<string>();
   return raw.map((entry, index): CustomSupportPanelButton => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
       throw new Error('Button ' + (index + 1) + ' must be an object.');
     }
     const value = entry as Record<string, unknown>;
+    const id = panelButtonId(value.id);
+    if (seenButtonIds.has(id)) {
+      throw new Error('Button IDs must be unique within a panel. Duplicate ID "' + id + '" was supplied.');
+    }
+    seenButtonIds.add(id);
     const targetType: CustomSupportPanelTargetType = value.targetType === undefined ? 'department' : value.targetType as CustomSupportPanelTargetType;
     if (targetType !== 'department' && targetType !== 'form') {
       throw new Error('Button ' + (index + 1) + ' targetType must be department or form.');
@@ -198,7 +204,7 @@ export function parseCustomPanelButtons(
         throw new Error('Button ' + (index + 1) + ' tagId must refer to a tag in its department.');
       }
       return {
-        id: panelButtonId(value.id),
+        id,
         targetType,
         departmentId,
         formId: null,
@@ -422,9 +428,23 @@ export async function updateCustomPanel(
   if (!existing) throw new Error('Custom panel "' + panelId + '" was not found.');
   const normalized = normalizedDraft(existing);
   const forms = updates.buttons === undefined ? [] : await formsForButtons(guildId, updates.buttons);
-  const buttons = updates.buttons === undefined
+  const parsedButtons = updates.buttons === undefined
     ? normalized.buttons
     : parseCustomPanelButtons(updates.buttons, config.departments, forms, true);
+  const existingButtons = new Map(normalized.buttons.map((button) => [button.id, button]));
+  const buttons = parsedButtons.map((button) => {
+    const previous = existingButtons.get(button.id);
+    if (!previous) return button;
+    const targetChanged =
+      previous.targetType !== button.targetType ||
+      previous.departmentId !== button.departmentId ||
+      previous.formId !== button.formId ||
+      previous.formVersion !== button.formVersion ||
+      previous.tagId !== button.tagId;
+    // Rotate the stable component identity if its workflow changes. Older
+    // published interactions can then never be reinterpreted as a new target.
+    return targetChanged ? { ...button, id: randomBytes(5).toString('hex') } : button;
+  });
   const nextName = updates.name === undefined ? normalized.name : boundedText(updates.name, 'Panel name', 80);
   await updateGuildConfig(guildId, (current) => {
     current.customPanels ??= {};
