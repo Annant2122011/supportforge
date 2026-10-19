@@ -5,6 +5,7 @@ import {
   createDefaultSupportHoursPolicy,
   evaluateSupportHoursSchedule,
   parseSupportHoursIntervals,
+  parseSupportHoursWeeklySchedule,
   resolveEffectiveSupportHoursPolicy,
   validateSupportHoursPolicy,
   validateSupportHoursSchedule,
@@ -116,6 +117,26 @@ test('uses deterministic earlier opening and later closing when local time repea
   });
   assert.equal(evaluateSupportHoursSchedule(p, new Date('2026-11-01T05:30:00.000Z')).isOpen, true);
   assert.equal(evaluateSupportHoursSchedule(p, new Date('2026-11-01T06:30:00.000Z')).isOpen, true);
+});
+
+test('parses a complete seven-day schedule and rejects missing or duplicate weekdays', () => {
+  const parsed = parseSupportHoursWeeklySchedule([
+    'monday=09:00-12:00,13:00-17:00',
+    'tuesday=09:00-17:00',
+    'wednesday=09:00-17:00',
+    'thursday=09:00-17:00',
+    'friday=09:00-17:00',
+    'saturday=10:00-14:00',
+    'sunday=closed',
+  ].join('\n'));
+  assert.equal(parsed.monday.length, 2);
+  assert.equal(parsed.saturday[0]?.start, '10:00');
+  assert.deepEqual(parsed.sunday, []);
+  assert.throws(() => parseSupportHoursWeeklySchedule('monday=09:00-17:00'), /Include all seven weekdays/);
+  assert.throws(() => parseSupportHoursWeeklySchedule([
+    'monday=closed', 'monday=closed', 'tuesday=closed', 'wednesday=closed',
+    'thursday=closed', 'friday=closed', 'saturday=closed', 'sunday=closed',
+  ].join('\n')), /more than once/);
 });
 
 test('validates a normalized weekly schedule without mutating the caller object', () => {
