@@ -6,7 +6,7 @@ import { getSupportForgeDatabase, type SqliteDatabase } from '../core/persistenc
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
 import type { PersistenceProvider } from '../core/persistence/provider';
 
-export type JsonDocumentKey = 'guild-config' | 'advanced-settings' | 'reports' | 'audit-log' | 'legacy-tickets-import-status';
+export type JsonDocumentKey = 'guild-config' | 'advanced-settings' | 'reports' | 'audit-log' | 'legacy-tickets-import-status' | 'support-hours';
 
 export interface JsonDocumentRepository {
   get(key: JsonDocumentKey): Promise<unknown | undefined>;
