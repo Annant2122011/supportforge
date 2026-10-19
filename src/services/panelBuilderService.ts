@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { normalizeDiscordEmoji } from '../core/domain/discordEmoji';
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -184,7 +185,7 @@ export function parseCustomPanelButtons(
     }
     let emoji: string | undefined;
     if (value.emoji !== undefined && value.emoji !== null && value.emoji !== '') {
-      emoji = boundedText(value.emoji, 'Button ' + (index + 1) + ' emoji', 100);
+      emoji = normalizeDiscordEmoji(value.emoji, 'Button ' + (index + 1) + ' emoji');
     }
     const confirmationMessage = value.confirmationMessage === undefined || value.confirmationMessage === null
       ? null
@@ -559,7 +560,7 @@ export async function updateCustomPanelButton(
   const updated: CustomSupportPanelButton = {
     ...existing,
     label: updates.label === undefined ? existing.label : boundedText(updates.label, 'Button label', 80),
-    emoji: updates.emoji === undefined ? existing.emoji : (updates.emoji?.trim() || undefined),
+    emoji: updates.emoji === undefined ? existing.emoji : normalizeDiscordEmoji(updates.emoji, 'Button emoji'),
     style: updates.style === undefined ? existing.style : updates.style,
     confirmationMessage: updates.confirmationMessage === undefined
       ? existing.confirmationMessage
