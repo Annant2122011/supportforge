@@ -1840,18 +1840,18 @@ export async function execute(
         const channel = interaction.options.getChannel('channel', true);
         if (channel.type !== ChannelType.GuildText) throw new Error('Publish target must be a standard server text channel.');
         const targetChannel = channel as TextChannel;
-        let oldChannelId = panel.publishedChannelId;
-        let oldMessageId = panel.publishedMessageId;
-        let message = oldChannelId === targetChannel.id && oldMessageId
-          ? await targetChannel.messages.fetch(oldMessageId).catch(() => null)
-          : null;
+        const oldChannelId = panel.publishedChannelId;
+        const oldMessageId = panel.publishedMessageId;
         const payload = { embeds: [buildCustomPanelEmbed(panel, guild.name, themeColor)], components: buildCustomPanelComponents(panel, false) };
-        if (message) {
-          await message.edit(payload);
-        } else {
-          message = await targetChannel.send(payload);
+        // Preserve the last known-good public panel until the new publication
+        // has a durable Neon snapshot and channel/message pointer.
+        const message = await targetChannel.send(payload);
+        try {
+          panel = await markCustomPanelPublished(guild.id, panel.id, targetChannel.id, message.id);
+        } catch (error) {
+          await message.delete().catch(() => undefined);
+          throw error;
         }
-        panel = await markCustomPanelPublished(guild.id, panel.id, targetChannel.id, message.id);
         let previousMessageRemoved = true;
         if (oldChannelId && oldMessageId && (oldChannelId !== targetChannel.id || oldMessageId !== message.id)) {
           try {
