@@ -1529,7 +1529,7 @@ export const data =
             ))
             .addStringOption((option) => option.setName('intervals').setDescription('Example: 09:00-12:00,13:00-17:00; or closed').setMaxLength(300))
             .addStringOption((option) => option.setName('behavior').setDescription('What to do outside opening hours').addChoices(
-              { name: 'Allow tickets with an out-of-hours notice', value: 'allow' },
+              { name: 'Allow new tickets outside opening hours', value: 'allow' },
               { name: 'Restrict new ticket creation', value: 'restrict' },
             )),
         )
