@@ -13,7 +13,7 @@ ResolveX is a Discord-first support ticket system. It uses Neon PostgreSQL as th
 - Settings dashboard with server-specific themes and button-based configuration flows.
 - GitHub Actions CI plus an optional server-side systemd self-update watchdog.
 
-Some roadmap areas remain partial. In particular, custom panel buttons currently target existing ticket departments rather than arbitrary named workflows, and live acceptance in a Discord test server is still required before treating A–E as production-complete. See [the Stage A–E audit](docs/stages-a-to-e-audit.md) and [FEATURES.md](FEATURES.md).
+Some roadmap areas remain partial: Stage E supports department and pinned-form workflows, while a general-purpose user-defined workflow graph remains future scope. Actual Discord permissions, role selects, publishing and confirmation interactions still require live test-guild acceptance before calling the product production-complete. See [the Stage A–E audit](docs/stages-a-to-e-audit.md) and [FEATURES.md](FEATURES.md).
 
 ## Requirements
 
@@ -56,7 +56,7 @@ For development, `npm run dev` starts the TypeScript entry point directly. Do no
 After setup, open **Settings → Ticket Panels**. This is the visual panel builder, intended for server administrators who should not have to edit source or routinely write JSON.
 
 1. Create an empty panel draft.
-2. Add buttons from existing departments or active ticket forms.
+2. Add buttons from existing departments or active ticket forms. The department builder includes a visual tag picker, so admins do not have to copy tag IDs.
 3. Edit each button's label, emoji, style, optional tag, access roles and optional confirmation message.
 4. Reorder buttons with Move Up / Move Down; preview the draft privately with disabled controls.
 5. Publish to an accessible text channel. The builder stores the published snapshot before trying to remove the prior panel message.
@@ -66,7 +66,7 @@ The matching slash-command family is `/supportforge panel create/list/show/updat
 
 **Supported button target types**
 
-A department target opens the regular department/tag ticket flow. A form target opens one specific active ticket form at the published version, pinned to a concrete tag. The target and permissions are checked again at click time. Panel and button allowed-role lists combine, and administrators can use the panel regardless of those role lists. Optional confirmation text is shown privately before opening the flow.
+A department target opens the regular department/tag ticket flow. A form target opens one specific active ticket form at the published version, pinned to a concrete tag. The target and permissions are checked again at click time. Panel and button allowed-role lists combine, and administrators can use the panel regardless of those role lists. Optional confirmation text is shown privately before opening the flow. Confirmation actions are bound to the initiating user and exact source panel message, and a changed form version requires the administrator to retarget and republish that form button.
 
 Panel-level options include title, instructions, footer, accent color, author icon URL, thumbnail and banner image URL. Button styles are `primary`, `secondary`, `success`, and `danger`. A panel supports at most 25 buttons due to Discord's component limit. The private preview reserves the fifth row for navigation, so it shows the first 20 buttons when a draft has 21–25; published panels can use all 25.
 
