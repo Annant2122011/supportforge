@@ -28,6 +28,7 @@ import {
   getCustomPanel,
   listCustomPanels,
   markCustomPanelPublished,
+  restoreCustomPanelPublication,
   moveCustomPanelButton,
   retargetCustomPanelButton,
   setCustomPanelRoleAccess,
@@ -1072,6 +1073,9 @@ export async function handleCustomPanelSettingsInteraction(
       try {
         updated = await markCustomPanelPublished(guild.id, panelId, target.id, message.id);
       } catch (error) {
+        await restoreCustomPanelPublication(guild.id, panelId, panel).catch((restoreError) => {
+          console.error('Failed to restore the last published panel pointer after a publish error:', restoreError);
+        });
         await message.delete().catch(() => undefined);
         throw error;
       }
