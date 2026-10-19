@@ -1932,6 +1932,34 @@ export async function handleSettingsInteraction(
       return true;
     }
 
+    if (id.startsWith(SETTINGS_LAYOUT_PREFIX + ':customize:')) {
+      const rawKey = id.slice((SETTINGS_LAYOUT_PREFIX + ':customize:').length);
+      if (!(SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(rawKey)) {
+        await reject(interaction, 'That Settings control is not supported.');
+        return true;
+      }
+      const key = rawKey as SettingsDashboardButtonKey;
+      const settings = await getAdvancedSettings(guild.id);
+      const saved = settings.settingsDashboard.buttonCustomizations[key];
+      const label = new TextInputBuilder()
+        .setCustomId('label')
+        .setLabel('Button label (type default to reset)')
+        .setStyle(TextInputStyle.Short)
+        .setMaxLength(80)
+        .setRequired(true)
+        .setValue((saved?.label ?? SETTINGS_LAYOUT_LABELS[key]).slice(0, 80));
+      const emoji = new TextInputBuilder()
+        .setCustomId('emoji')
+        .setLabel('Emoji (type none to remove)')
+        .setStyle(TextInputStyle.Short)
+        .setMaxLength(100)
+        .setRequired(false)
+        .setPlaceholder(SETTINGS_LAYOUT_DEFAULT_EMOJIS[key]);
+      emoji.setValue(saved ? (saved.emoji ?? 'none') : SETTINGS_LAYOUT_DEFAULT_EMOJIS[key]);
+      await openModal(interaction, 'sf:settings:modal:dashboard-button:' + key, 'Customize Settings Button', [label, emoji]);
+      return true;
+    }
+
     if (id === SETTINGS_LAYOUT_PREFIX + ':edit') {
       const settings = await getAdvancedSettings(guild.id);
       const description = new TextInputBuilder().setCustomId('description').setLabel('Dashboard description').setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setRequired(false);
@@ -3144,6 +3172,47 @@ export async function handleSettingsInteraction(
             '❌ The complete reset encountered an error. Check the bot console for details.',
         }).catch(() => undefined);
       }
+      return true;
+    }
+
+    if (interaction.customId.startsWith('sf:settings:modal:dashboard-button:')) {
+      const rawKey = interaction.customId.slice('sf:settings:modal:dashboard-button:'.length);
+      if (!(SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(rawKey)) {
+        await reject(interaction, 'That Settings control is not supported.');
+        return true;
+      }
+      const key = rawKey as SettingsDashboardButtonKey;
+      const submittedLabel = interaction.fields.getTextInputValue('label').trim();
+      const submittedEmoji = interaction.fields.getTextInputValue('emoji').trim();
+      if (!submittedLabel || submittedLabel.length > 80) {
+        await reject(interaction, 'Button label must contain 1–80 characters.');
+        return true;
+      }
+      const label = submittedLabel.toLowerCase() === 'default'
+        ? SETTINGS_LAYOUT_LABELS[key]
+        : submittedLabel;
+      const emoji = submittedEmoji.toLowerCase() === 'none'
+        ? null
+        : submittedEmoji.toLowerCase() === 'default' || !submittedEmoji
+          ? SETTINGS_LAYOUT_DEFAULT_EMOJIS[key]
+          : submittedEmoji.slice(0, 100);
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await updateAdvancedSettings(guild.id, (settings) => {
+        if (label === SETTINGS_LAYOUT_LABELS[key] && emoji === SETTINGS_LAYOUT_DEFAULT_EMOJIS[key]) {
+          delete settings.settingsDashboard.buttonCustomizations[key];
+        } else {
+          settings.settingsDashboard.buttonCustomizations[key] = { label, emoji };
+        }
+      });
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'SETTINGS_DASHBOARD_BUTTON_CUSTOMIZED', 'Customized the label or emoji for Settings control "' + SETTINGS_LAYOUT_LABELS[key] + '".');
+      await interaction.editReply({
+        content: '✅ Settings control updated. The persistent dashboard has been refreshed.',
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel('Return to Settings Layout').setEmoji('🧰').setStyle(ButtonStyle.Primary),
+          backButton(),
+        )],
+      });
       return true;
     }
 
