@@ -589,7 +589,7 @@ export async function restoreSettingsChannelToBottom(guild: Guild): Promise<void
           ),
         ),
       ],
-      components: buildSettingsDashboardComponents(),
+      components: buildSettingsDashboardComponents(resolvedSettings),
     });
   } else {
     await channel.send({
@@ -603,7 +603,7 @@ export async function restoreSettingsChannelToBottom(guild: Guild): Promise<void
           ),
         ),
       ],
-      components: buildSettingsDashboardComponents(),
+      components: buildSettingsDashboardComponents(settings),
     });
   }
 
