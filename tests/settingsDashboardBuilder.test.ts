@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { ButtonStyle } from 'discord.js';
 import test from 'node:test';
 import {
   SETTINGS_DASHBOARD_BUTTON_KEYS,
@@ -53,4 +54,27 @@ test('Settings dashboard repairs partial and duplicate control orders determinis
   assert.equal(ids[1], 'sf:settings:reset');
   assert.equal(ids.length, SETTINGS_DASHBOARD_BUTTON_KEYS.length);
   assert.equal(new Set(ids).size, SETTINGS_DASHBOARD_BUTTON_KEYS.length);
+});
+
+
+test('Settings dashboard custom labels and emojis override presentation but keep semantic styles', () => {
+  const partial = {
+    settingsDashboard: {
+      buttonOrder: ['reset', 'repair'],
+      buttonCustomizations: {
+        reset: { label: 'Danger Zone', emoji: null },
+        repair: { label: 'System Tools', emoji: '🧰' },
+      },
+    },
+  } as unknown as AdvancedGuildSettings;
+  const buttons = buildSettingsDashboardComponents(partial).flatMap((row) => row.components);
+  const reset = buttons.find((button) => button.data.custom_id === 'sf:settings:reset');
+  const repair = buttons.find((button) => button.data.custom_id === 'sf:settings:repair');
+
+  assert.equal(reset?.data.label, 'Danger Zone');
+  assert.equal(reset?.data.style, ButtonStyle.Danger);
+  assert.equal(reset?.data.emoji, undefined);
+  assert.equal(repair?.data.label, 'System Tools');
+  assert.equal(repair?.data.emoji?.name, '🧰');
+  assert.equal(buttons.length, SETTINGS_DASHBOARD_BUTTON_KEYS.length);
 });
