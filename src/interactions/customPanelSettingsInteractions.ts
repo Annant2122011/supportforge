@@ -717,6 +717,55 @@ export async function handleCustomPanelSettingsInteraction(
   const guild = interaction.guild;
   const id = interaction.customId;
   try {
+    if (interaction.isStringSelectMenu() && id.startsWith(PREFIX + 'retarget-type:')) {
+      const parts = id.split(':');
+      const panelId = parts[4] ?? '';
+      const buttonId = parts[5] ?? '';
+      const targetType = interaction.values[0];
+      if (targetType === 'department') {
+        await showDepartmentPicker(interaction, panelId, 0, buttonId);
+      } else if (targetType === 'form') {
+        await showFormPicker(interaction, panelId, 0, buttonId);
+      } else {
+        throw new Error('Choose a supported button target.');
+      }
+      return true;
+    }
+    if (interaction.isStringSelectMenu() && id.startsWith(PREFIX + 'retarget-department-pick:')) {
+      const parts = id.split(':');
+      const panelId = parts[4] ?? '';
+      const buttonId = parts[5] ?? '';
+      const departmentId = interaction.values[0] ?? '';
+      const config = await getGuildConfig(guild.id);
+      if (!config.departments[departmentId]) throw new Error('That department no longer exists. Refresh the builder.');
+      const updated = await retargetCustomPanelButton(guild.id, panelId, buttonId, {
+        targetType: 'department', departmentId, tagId: null,
+      });
+      await audit(interaction, 'CUSTOM_PANEL_BUTTON_RETARGETED', 'Changed button "' + updated.label + '" to department ' + departmentId + '.');
+      await showButtonDetail(interaction, panelId, updated.id);
+      return true;
+    }
+    if (interaction.isStringSelectMenu() && id.startsWith(PREFIX + 'retarget-form-pick:')) {
+      const parts = id.split(':');
+      const panelId = parts[4] ?? '';
+      const buttonId = parts[5] ?? '';
+      const formId = interaction.values[0] ?? '';
+      await showFormTagPicker(interaction, panelId, formId, 0, buttonId);
+      return true;
+    }
+    if (interaction.isStringSelectMenu() && id.startsWith(PREFIX + 'retarget-form-tag-pick:')) {
+      const parts = id.split(':');
+      const panelId = parts[4] ?? '';
+      const buttonId = parts[5] ?? '';
+      const formId = parts[6] ?? '';
+      const tagId = interaction.values[0] ?? '';
+      const updated = await retargetCustomPanelButton(guild.id, panelId, buttonId, {
+        targetType: 'form', formId, tagId,
+      });
+      await audit(interaction, 'CUSTOM_PANEL_BUTTON_RETARGETED', 'Changed button "' + updated.label + '" to form ' + formId + ' version ' + updated.formVersion + '.');
+      await showButtonDetail(interaction, panelId, updated.id);
+      return true;
+    }
     if (interaction.isRoleSelectMenu() && id.startsWith(PREFIX + 'role-select-panel:')) {
       const panelId = id.slice((PREFIX + 'role-select-panel:').length);
       await setCustomPanelRoleAccess(guild.id, panelId, interaction.values);
@@ -814,6 +863,11 @@ export async function handleCustomPanelSettingsInteraction(
       else await showPanel(interaction, panelId);
       return true;
     }
+    if (interaction.isButton() && id.startsWith(PREFIX + 'retarget-department:')) {
+      const parts = id.split(':');
+      await showDepartmentPicker(interaction, parts[4] ?? '', Number(parts[6] ?? '0'), parts[5] ?? '');
+      return true;
+    }
     if (interaction.isButton() && id.startsWith(PREFIX + 'add-department:')) {
       const parts = id.split(':');
       await showDepartmentPicker(interaction, parts[4] ?? '', Number(parts[5] ?? '0'));
@@ -826,6 +880,11 @@ export async function handleCustomPanelSettingsInteraction(
       const department = (await getGuildConfig(guild.id)).departments[departmentId];
       if (!department) throw new Error('That department no longer exists. Refresh and try again.');
       await interaction.showModal(addDepartmentButtonModal(panelId, department.id, department.name));
+      return true;
+    }
+    if (interaction.isButton() && id.startsWith(PREFIX + 'retarget-form:')) {
+      const parts = id.split(':');
+      await showFormPicker(interaction, parts[4] ?? '', Number(parts[6] ?? '0'), parts[5] ?? '');
       return true;
     }
     if (interaction.isButton() && id.startsWith(PREFIX + 'add-form:')) {
@@ -853,6 +912,26 @@ export async function handleCustomPanelSettingsInteraction(
       const form = (await listTicketForms(guild.id)).find((candidate) => candidate.id === formId && candidate.active);
       if (!form) throw new Error('The selected form is no longer active.');
       await interaction.showModal(addFormButtonModal(panelId, formId, tagId, form.name));
+      return true;
+    }
+    if (interaction.isButton() && id.startsWith(PREFIX + 'retarget:')) {
+      const parts = id.split(':');
+      await showTargetTypePicker(interaction, parts[4] ?? '', parts[5] ?? '');
+      return true;
+    }
+    if (interaction.isButton() && id.startsWith(PREFIX + 'retarget-department:')) {
+      const parts = id.split(':');
+      await showDepartmentPicker(interaction, parts[4] ?? '', Number(parts[6] ?? '0'), parts[5] ?? '');
+      return true;
+    }
+    if (interaction.isButton() && id.startsWith(PREFIX + 'retarget-form:')) {
+      const parts = id.split(':');
+      await showFormPicker(interaction, parts[4] ?? '', Number(parts[6] ?? '0'), parts[5] ?? '');
+      return true;
+    }
+    if (interaction.isButton() && id.startsWith(PREFIX + 'retarget-form-tag-page:')) {
+      const parts = id.split(':');
+      await showFormTagPicker(interaction, parts[4] ?? '', parts[6] ?? '', Number(parts[7] ?? '0'), parts[5] ?? '');
       return true;
     }
     if (interaction.isButton() && id.startsWith(PREFIX + 'edit-button:')) {
