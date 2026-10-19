@@ -5987,8 +5987,8 @@ async function handleCustomPanelEntry(interaction: ButtonInteraction): Promise<v
   const action = parts[2] ?? '';
   const isConfirm = action === 'confirm';
   const isCancel = action === 'cancel';
-  const panelId = parts[3] ?? '';
-  const buttonId = parts[4] ?? '';
+  const panelId = isConfirm || isCancel ? parts[3] ?? '' : action;
+  const buttonId = isConfirm || isCancel ? parts[4] ?? '' : parts[3] ?? '';
   const sourceMessageId = isConfirm || isCancel ? parts[5] ?? '' : '';
   const promptOwnerId = isConfirm || isCancel ? parts[6] ?? '' : '';
 
@@ -6000,7 +6000,7 @@ async function handleCustomPanelEntry(interaction: ButtonInteraction): Promise<v
     !buttonId ||
     (isConfirm || isCancel
       ? parts.length !== 7 || !/^\d{17,20}$/.test(sourceMessageId) || !/^\d{17,20}$/.test(promptOwnerId)
-      : parts.length !== 4 || (action !== 'confirm' && action !== 'cancel'))
+      : parts.length !== 4)
   ) {
     await replyError(interaction, 'This panel button is malformed. Refresh the support panel and try again.');
     return;
