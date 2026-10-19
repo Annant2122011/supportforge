@@ -599,6 +599,129 @@ async function showHome(interaction: SettingsViewInteraction): Promise<void> {
   );
 }
 
+const SETTINGS_LAYOUT_PREFIX = 'sf:settings:dashboard-builder';
+
+const SETTINGS_LAYOUT_LABELS: Record<SettingsDashboardButtonKey, string> = {
+  panel: 'Panel Automation',
+  defaults: 'Ticket Defaults',
+  tags: 'Tags / Departments',
+  usecases: 'Use Cases',
+  reports: 'Safety & Reports',
+  retention: 'Retention',
+  appearance: 'Public Panel Appearance',
+  storage: 'Storage',
+  rules: 'Rules & Roles',
+  repair: 'Repair System',
+  team: 'Team & Voice',
+  manual: 'Staff Manual',
+  forms: 'Ticket Forms',
+  refresh: 'Refresh',
+  reset: 'Delete Everything',
+  theme: 'Server Theme',
+  premium: 'Premium & Demo',
+  panels: 'Ticket Panels',
+  'dashboard-builder': 'Settings Layout',
+};
+
+function settingsButtonOrder(settings: Awaited<ReturnType<typeof getAdvancedSettings>>): SettingsDashboardButtonKey[] {
+  const valid: SettingsDashboardButtonKey[] = [];
+  for (const candidate of settings.settingsDashboard.buttonOrder) {
+    if ((SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(candidate) && !valid.includes(candidate)) {
+      valid.push(candidate);
+    }
+  }
+  for (const candidate of SETTINGS_DASHBOARD_BUTTON_KEYS) {
+    if (!valid.includes(candidate)) valid.push(candidate);
+  }
+  return valid;
+}
+
+async function showSettingsDashboardBuilder(
+  interaction: SettingsViewInteraction,
+  notice = '',
+): Promise<void> {
+  const guildId = interaction.guild!.id;
+  const settings = await getAdvancedSettings(guildId);
+  const config = await getGuildConfig(guildId);
+  const order = settingsButtonOrder(settings);
+  const orderText = order.map((key, index) => (index + 1) + '. ' + SETTINGS_LAYOUT_LABELS[key]).join('\n');
+  const chooser = new StringSelectMenuBuilder()
+    .setCustomId(SETTINGS_LAYOUT_PREFIX + ':reorder-select')
+    .setPlaceholder('Choose a control to move up or down')
+    .addOptions(order.map((key) => ({
+      label: SETTINGS_LAYOUT_LABELS[key].slice(0, 100),
+      value: key,
+      description: 'Current position ' + (order.indexOf(key) + 1) + ' of ' + order.length,
+      default: key === order[0],
+    })));
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('🧰 Settings Dashboard Builder')
+      .setDescription(
+        (notice ? notice + '\n\n' : '') +
+        'Customize the **Settings channel itself** for this server. Change its heading, description and footer; reorder its navigation controls; and preview the result before saving. This changes only the Settings dashboard, not the public ticket panel.\n\n' +
+        '**Title:** ' + settings.settingsDashboard.title + '\n' +
+        '**Description:** ' + (settings.settingsDashboard.description || 'No description') + '\n' +
+        '**Footer:** ' + settings.settingsDashboard.footer + '\n\n' +
+        '**Control order**\n' + orderText +
+        '\n\nSafety rule: all built-in controls remain available. Reordering cannot hide repair, refresh or Delete Everything.',
+      ),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':edit').setLabel('Edit Branding').setEmoji('🎨').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':preview').setLabel('Preview').setEmoji('👁️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':reset-order').setLabel('Reset Order').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+      backButton(),
+    ),
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(chooser),
+  ]);
+}
+
+async function showSettingsDashboardOrder(
+  interaction: SettingsViewInteraction,
+  key: SettingsDashboardButtonKey,
+): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const order = settingsButtonOrder(settings);
+  const index = order.indexOf(key);
+  if (index < 0) throw new Error('That Settings control no longer exists.');
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('Reorder Settings Control')
+      .setDescription(
+        '**Selected:** ' + SETTINGS_LAYOUT_LABELS[key] + '\n' +
+        '**Current position:** ' + (index + 1) + ' of ' + order.length + '\n\n' +
+        'Moving this item changes the order of buttons on the persistent Settings dashboard for this server. It does not remove or disable the selected feature.',
+      ),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':up:' + key).setLabel('Move Up').setEmoji('⬆️').setStyle(ButtonStyle.Secondary).setDisabled(index === 0),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':down:' + key).setLabel('Move Down').setEmoji('⬇️').setStyle(ButtonStyle.Secondary).setDisabled(index === order.length - 1),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':preview').setLabel('Preview').setEmoji('👁️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel('Layout Builder').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+    ),
+  ]);
+}
+
+async function showSettingsDashboardPreview(interaction: SettingsViewInteraction): Promise<void> {
+  const guildId = interaction.guild!.id;
+  const settings = await getAdvancedSettings(guildId);
+  const config = await getGuildConfig(guildId);
+  const departmentCount = Object.keys(config.departments).length;
+  const tagCount = Object.values(config.departments).reduce(
+    (total, department) => total + Object.keys(department.tags ?? {}).length,
+    0,
+  );
+  const preview = buildSettingsDashboardEmbed(settings, departmentCount, tagCount, config.theme)
+    .addFields({ name: 'Preview only', value: 'These controls are disabled. Saving the builder changes the persistent Settings dashboard for this server.' });
+  await renderSettingsView(interaction, [preview], [
+    ...buildSettingsDashboardComponents(settings, true),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel('Return to Layout Builder').setEmoji('↩️').setStyle(ButtonStyle.Primary),
+    ),
+  ]);
+}
+
 async function showPremiumSettings(interaction: SettingsViewInteraction, notice = ''): Promise<void> {
   const tier = await getTier(interaction.guild!.id);
   const next = tier === 'free' ? 'premium-demo' : tier === 'premium-demo' ? 'pro-demo' : 'free';
