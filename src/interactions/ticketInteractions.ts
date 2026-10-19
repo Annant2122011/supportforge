@@ -128,6 +128,7 @@ import {
   queueTicketChannelRename,
 } from '../services/ticketPanelService';
 import { getCustomPanel } from '../services/panelBuilderService';
+import { parseCustomPanelInteractionId } from '../core/domain/customPanelInteraction';
 
 function parseTicketPriority(value: string): TicketPriority | null {
   return value === 'low' ||
@@ -5983,29 +5984,17 @@ async function handleCustomPanelEntry(interaction: ButtonInteraction): Promise<v
     return;
   }
 
-  const parts = interaction.customId.split(':');
-  const action = parts[2] ?? '';
-  const isConfirm = action === 'confirm';
-  const isCancel = action === 'cancel';
-  const panelId = isConfirm || isCancel ? parts[3] ?? '' : action;
-  const buttonId = isConfirm || isCancel ? parts[4] ?? '' : parts[3] ?? '';
-  const sourceMessageId = isConfirm || isCancel ? parts[5] ?? '' : '';
-  const promptOwnerId = isConfirm || isCancel ? parts[6] ?? '' : '';
-
-  // Confirmation controls are ephemeral responses, not components on the
-  // public panel itself. Carry the source message and initiating user through
-  // the ephemeral prompt, then revalidate both against the published snapshot.
-  if (
-    !panelId ||
-    !buttonId ||
-    (isConfirm || isCancel
-      ? parts.length !== 7 || !/^\d{17,20}$/.test(sourceMessageId) || !/^\d{17,20}$/.test(promptOwnerId)
-      : parts.length !== 4)
-  ) {
-    await replyError(interaction, 'This panel button is malformed. Refresh the support panel and try again.');
+  const parsed = parseCustomPanelInteractionId(interaction.customId);
+  if (!parsed) {
+    await replyError(interaction, 'This panel button is malformed or outdated. Refresh the support panel and try again.');
     return;
   }
+  const { action, panelId, buttonId, sourceMessageId, promptOwnerId } = parsed;
+  const isConfirm = action === 'confirm';
+  const isCancel = action === 'cancel';
 
+  // Confirmation controls live on an ephemeral response, not the public panel.
+  // They are valid only for the initiating user and currently published source.
   if (isConfirm || isCancel) {
     if (
       interaction.user.id !== promptOwnerId ||
