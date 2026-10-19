@@ -47,6 +47,21 @@ export interface FlagRule {
   updatedAt: string;
 }
 
+export const SETTINGS_DASHBOARD_BUTTON_KEYS = [
+  'panel', 'defaults', 'tags', 'usecases', 'reports', 'retention', 'appearance',
+  'storage', 'rules', 'repair', 'team', 'manual', 'forms', 'refresh', 'reset',
+  'theme', 'premium', 'panels', 'dashboard-builder',
+] as const;
+
+export type SettingsDashboardButtonKey = (typeof SETTINGS_DASHBOARD_BUTTON_KEYS)[number];
+
+export interface SettingsDashboardSettings {
+  title: string;
+  description: string;
+  footer: string;
+  buttonOrder: SettingsDashboardButtonKey[];
+}
+
 export interface AdvancedGuildSettings {
   version: 5;
   settingsChannelId: string | null;
@@ -77,6 +92,8 @@ export interface AdvancedGuildSettings {
     panelDescription: string;
     panelFooter: string;
   };
+  /** Per-server Settings-channel branding and button order; essential controls are never hidden. */
+  settingsDashboard: SettingsDashboardSettings;
   ticketDefaults: {
     priority: TicketPriority;
     maxClaimedModerators: number;
@@ -153,6 +170,12 @@ const DEFAULTS: AdvancedGuildSettings = {
       'Click a department button below to open a private support ticket.',
     panelFooter: 'SupportForge • Professional Ticket System',
   },
+  settingsDashboard: {
+    title: '⚙️ ResolveX Settings',
+    description: 'Configure your server’s ticket system, support panels and retention policies.',
+    footer: 'ResolveX • Settings Dashboard',
+    buttonOrder: [...SETTINGS_DASHBOARD_BUTTON_KEYS],
+  },
   ticketDefaults: {
     priority: 'normal',
     maxClaimedModerators: 2,
@@ -184,6 +207,10 @@ function cloneDefaults(): AdvancedGuildSettings {
     },
     statusCategories: { ...DEFAULTS.statusCategories },
     appearance: { ...DEFAULTS.appearance },
+    settingsDashboard: {
+      ...DEFAULTS.settingsDashboard,
+      buttonOrder: [...DEFAULTS.settingsDashboard.buttonOrder],
+    },
     ticketDefaults: { ...DEFAULTS.ticketDefaults },
     reports: {
       ...DEFAULTS.reports,
@@ -284,6 +311,25 @@ function normalizeExistingSettings(
       ...DEFAULTS.appearance,
       ...(settings.appearance ?? {}),
     },
+    settingsDashboard: (() => {
+      const saved = settings.settingsDashboard;
+      const rawOrder = Array.isArray(saved?.buttonOrder) ? saved.buttonOrder : [];
+      const validOrder = rawOrder.filter((key): key is SettingsDashboardButtonKey =>
+        typeof key === 'string' && (SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(key),
+      );
+      const uniqueOrder = [...new Set(validOrder)];
+      for (const key of SETTINGS_DASHBOARD_BUTTON_KEYS) {
+        if (!uniqueOrder.includes(key)) uniqueOrder.push(key);
+      }
+      const text = (value: unknown, fallback: string, max: number): string =>
+        typeof value === 'string' ? value.trim().slice(0, max) : fallback;
+      return {
+        title: text(saved?.title, DEFAULTS.settingsDashboard.title, 256) || DEFAULTS.settingsDashboard.title,
+        description: text(saved?.description, DEFAULTS.settingsDashboard.description, 4000),
+        footer: text(saved?.footer, DEFAULTS.settingsDashboard.footer, 2048) || DEFAULTS.settingsDashboard.footer,
+        buttonOrder: uniqueOrder,
+      };
+    })(),
     ticketDefaults: {
       ...DEFAULTS.ticketDefaults,
       ...(settings.ticketDefaults ?? {}),
