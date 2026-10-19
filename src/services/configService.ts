@@ -20,13 +20,36 @@ export interface DepartmentConfig {
   createdAt: string;
 }
 
-export type SupportPanelButtonStyle = 'primary' | 'secondary' | 'success';
+export type SupportPanelButtonStyle = 'primary' | 'secondary' | 'success' | 'danger';
+export type CustomSupportPanelTargetType = 'department' | 'form';
 
 export interface CustomSupportPanelButton {
+  /** Stable identity. Published messages bind to this ID, never to a mutable array index. */
+  id: string;
+  targetType: CustomSupportPanelTargetType;
   departmentId: string;
+  /** For form-target buttons, identifies the active form version the admin published. */
+  formId: string | null;
+  formVersion: number | null;
+  /** Optional explicit tag. Department buttons may omit this to show the tag picker. */
+  tagId: string | null;
   label: string;
   emoji?: string;
   style: SupportPanelButtonStyle;
+  confirmationMessage: string | null;
+  allowedRoleIds: string[];
+}
+
+export interface CustomSupportPanelPublishedConfig {
+  title: string;
+  description: string;
+  footer: string;
+  color: string | null;
+  iconUrl: string | null;
+  thumbnailUrl: string | null;
+  bannerUrl: string | null;
+  allowedRoleIds: string[];
+  buttons: CustomSupportPanelButton[];
 }
 
 export interface CustomSupportPanel {
@@ -36,11 +59,15 @@ export interface CustomSupportPanel {
   description: string;
   footer: string;
   color: string | null;
+  iconUrl: string | null;
   thumbnailUrl: string | null;
   bannerUrl: string | null;
+  allowedRoleIds: string[];
   buttons: CustomSupportPanelButton[];
   publishedChannelId: string | null;
   publishedMessageId: string | null;
+  /** Immutable snapshot used by still-published buttons while an unpublished draft is edited. */
+  publishedConfig: CustomSupportPanelPublishedConfig | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -157,6 +184,71 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
   ) {
     current.guilds[guildId].customPanels = {};
     migrated = true;
+  }
+  // Normalize custom-panel drafts written by earlier builder revisions. These
+  // stable IDs keep old published buttons from ever being remapped by index.
+  for (const [panelId, panel] of Object.entries(current.guilds[guildId].customPanels)) {
+    if (!panel || typeof panel !== 'object' || Array.isArray(panel)) {
+      delete current.guilds[guildId].customPanels[panelId];
+      migrated = true;
+      continue;
+    }
+    const candidate = panel as CustomSupportPanel & Record<string, unknown>;
+    const rawButtons = Array.isArray(candidate.buttons) ? candidate.buttons : [];
+    const normalizedButtons = rawButtons.filter((button) => button && typeof button === 'object' && !Array.isArray(button))
+      .map((button, index) => {
+        const item = button as Partial<CustomSupportPanelButton> & Record<string, unknown>;
+        const stableId = typeof item.id === 'string' && /^[a-zA-Z0-9_-]{4,20}$/.test(item.id)
+          ? item.id
+          : 'legacy_' + panelId.slice(0, 6) + '_' + (index + 1);
+        const targetType = item.targetType === 'form' && typeof item.formId === 'string' ? 'form' : 'department';
+        const roleIds = Array.isArray(item.allowedRoleIds)
+          ? item.allowedRoleIds.filter((id): id is string => typeof id === 'string' && /^\\d{17,20}$/.test(id)).slice(0, 25)
+          : [];
+        return {
+          id: stableId,
+          targetType,
+          departmentId: typeof item.departmentId === 'string' ? item.departmentId : '',
+          formId: targetType === 'form' && typeof item.formId === 'string' ? item.formId : null,
+          formVersion: targetType === 'form' && Number.isInteger(item.formVersion) ? item.formVersion as number : null,
+          tagId: typeof item.tagId === 'string' ? item.tagId : null,
+          label: typeof item.label === 'string' ? item.label.slice(0, 80) : 'Start Ticket',
+          ...(typeof item.emoji === 'string' && item.emoji ? { emoji: item.emoji.slice(0, 100) } : {}),
+          style: item.style === 'secondary' || item.style === 'success' || item.style === 'danger' ? item.style : 'primary',
+          confirmationMessage: typeof item.confirmationMessage === 'string' && item.confirmationMessage.trim()
+            ? item.confirmationMessage.slice(0, 1000)
+            : null,
+          allowedRoleIds: [...new Set(roleIds)],
+        } satisfies CustomSupportPanelButton;
+      });
+    const panelRoleIds = Array.isArray(candidate.allowedRoleIds)
+      ? candidate.allowedRoleIds.filter((id): id is string => typeof id === 'string' && /^\\d{17,20}$/.test(id)).slice(0, 25)
+      : [];
+    const iconUrl = typeof candidate.iconUrl === 'string' ? candidate.iconUrl : null;
+    const publishedConfig = candidate.publishedConfig && typeof candidate.publishedConfig === 'object'
+      ? candidate.publishedConfig as CustomSupportPanel['publishedConfig']
+      : null;
+    const before = JSON.stringify(candidate);
+    current.guilds[guildId].customPanels[panelId] = {
+      ...candidate,
+      id: typeof candidate.id === 'string' ? candidate.id : panelId,
+      name: typeof candidate.name === 'string' ? candidate.name : 'Custom Panel',
+      title: typeof candidate.title === 'string' ? candidate.title : 'Customer Support',
+      description: typeof candidate.description === 'string' ? candidate.description : '',
+      footer: typeof candidate.footer === 'string' ? candidate.footer : 'ResolveX • Customer Support',
+      color: typeof candidate.color === 'string' ? candidate.color : null,
+      iconUrl,
+      thumbnailUrl: typeof candidate.thumbnailUrl === 'string' ? candidate.thumbnailUrl : null,
+      bannerUrl: typeof candidate.bannerUrl === 'string' ? candidate.bannerUrl : null,
+      allowedRoleIds: [...new Set(panelRoleIds)],
+      buttons: normalizedButtons,
+      publishedChannelId: typeof candidate.publishedChannelId === 'string' ? candidate.publishedChannelId : null,
+      publishedMessageId: typeof candidate.publishedMessageId === 'string' ? candidate.publishedMessageId : null,
+      publishedConfig,
+      createdAt: typeof candidate.createdAt === 'string' ? candidate.createdAt : new Date().toISOString(),
+      updatedAt: typeof candidate.updatedAt === 'string' ? candidate.updatedAt : new Date().toISOString(),
+    };
+    if (before !== JSON.stringify(current.guilds[guildId].customPanels[panelId])) migrated = true;
   }
   if (!Array.isArray(current.guilds[guildId].retiredCategoryIds)) {
     current.guilds[guildId].retiredCategoryIds = [];
