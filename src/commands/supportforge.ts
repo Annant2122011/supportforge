@@ -1532,7 +1532,7 @@ export const data =
               { name: 'Allow tickets with an out-of-hours notice', value: 'allow' },
               { name: 'Restrict new ticket creation', value: 'restrict' },
             )),
-        ),
+        )
         .addSubcommand((subcommand) =>
           subcommand
             .setName('reset')
