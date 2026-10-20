@@ -262,7 +262,7 @@ async function refreshPrivateThreadPanel(
   ticket: PersistedTicket,
   topic: string,
 ): Promise<void> {
-  const config = await getGuildConfig(ticket.guildId);
+  const config = await getGuildConfig(thread.guild.id);
   const embeds = [buildTicketPanelEmbed(thread.guild, thread.name, topic, config)];
   const components = buildPrivateThreadTicketComponents(ticket.status);
   const messageId = typeof ticket.metadata.panelMessageId === 'string' ? ticket.metadata.panelMessageId : null;
@@ -419,7 +419,7 @@ async function performThreadAction(
   };
   if (config.supportCategoryId) {
     void logTicketEvent(guild, config.supportCategoryId, {
-      ticketNumber: ticket.ticketNumber,
+      ticketNumber: ticket.ticketNumber ?? 'unknown',
       ticketChannelId: thread.id,
       event: eventName[action],
       actor: interaction.user.tag,

@@ -286,11 +286,11 @@ export async function handleSettingsSlashCommand(
       }
       const mode = await getTicketWorkspaceMode(guild.id);
       await interaction.editReply(
-        '**Ticket Workspace**\\nCurrent mode: **' + mode + '**\\n' +
+        '**Ticket Workspace**\nCurrent mode: **' + mode + '**\\n' +
         (mode === 'private-threads'
           ? 'New tickets use private threads inside a department workspace. Configure a staff role for each department and grant the bot Manage Threads and Create Private Threads.'
           : 'New tickets use private text channels.') +
-        '\\nExisting tickets are unchanged. Use the Settings channel Ticket Workspace button for visual controls.'
+        '\nExisting tickets are unchanged. Use the Settings channel Ticket Workspace button for visual controls.'
       );
       return;
     }

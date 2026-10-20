@@ -722,7 +722,7 @@ client.on('messageCreate', async (message) => {
     }
     const timestamp = new Date().toISOString();
     const config = await getGuildConfig(message.guild.id);
-    const department = config.departments[ticket.departmentId];
+    const department = ticket.departmentId ? config.departments[ticket.departmentId] : undefined;
     const isStaff = Boolean(department?.staffRoleId && message.member?.roles.cache.has(department.staffRoleId));
     await updatePersistedTicketMetadata(message.channel.id, {
       metadata: {
