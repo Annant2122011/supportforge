@@ -253,8 +253,8 @@ test(
     assert.equal(saved?.metadata.lastActivityAt, closedAt);
 
     const eventTypes = (await events.listTicketEvents(record.id)).map((event) => event.type);
-    assert.deepEqual(eventTypes, ['ticket.created', 'ticket.closed']);
-    assert.equal((await events.listOutbox()).length, 2);
+    assert.deepEqual(eventTypes, ['ticket.created', 'ticket.closed', 'ticket.metadata_changed']);
+    assert.equal((await events.listOutbox()).length, 3);
 
     const duplicateClose = await tickets.closeIfActivityUnchanged(
       record.channelId,
@@ -264,7 +264,7 @@ test(
     );
     assert.equal(duplicateClose, false);
     assert.deepEqual((await events.listTicketEvents(record.id)).map((event) => event.type), eventTypes);
-    assert.equal((await events.listOutbox()).length, 2);
+    assert.equal((await events.listOutbox()).length, 3);
   },
 );
 
