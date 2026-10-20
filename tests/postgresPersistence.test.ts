@@ -187,6 +187,88 @@ test(
 );
 
 test(
+  'PostgreSQL inactivity close rejects stale activity and commits closure with its event/outbox',
+  { skip: !postgresIntegrationEnabled },
+  async () => {
+    await migratePostgres();
+    const pool = getPostgresPool();
+    await pool.query('TRUNCATE TABLE tickets CASCADE');
+
+    const tickets = new PostgresTicketRepository(pool);
+    const events = new PostgresEventRepository(pool);
+    const activityAt = '2026-10-19T12:00:00.000Z';
+    const closedAt = '2026-10-20T12:00:00.000Z';
+    const record: TicketRepositoryRecord = {
+      id: 'postgres-inactivity-ticket',
+      guildId: 'postgres-inactivity-guild',
+      channelId: 'postgres-inactivity-channel',
+      ticketNumber: '45',
+      status: 'open',
+      departmentId: 'billing',
+      tagId: 'refund',
+      ownerId: 'postgres-inactivity-user',
+      priority: 'normal',
+      claimedByIds: [],
+      participantIds: ['postgres-inactivity-user'],
+      metadata: { lastActivityAt: activityAt },
+      createdAt: '2026-10-16T12:00:00.000Z',
+      updatedAt: activityAt,
+      deletedAt: null,
+      deletionReason: null,
+    };
+
+    await tickets.create(record);
+    const staleClose = await tickets.closeIfActivityUnchanged(
+      record.channelId,
+      '2026-10-18T12:00:00.000Z',
+      { metadata: { closedAt, inactivityAutoClosedAt: closedAt } },
+      closedAt,
+    );
+    assert.equal(staleClose, false);
+    assert.equal((await tickets.getByChannelId(record.channelId))?.status, 'open');
+    assert.deepEqual((await events.listTicketEvents(record.id)).map((event) => event.type), ['ticket.created']);
+    assert.equal((await events.listOutbox()).length, 1);
+
+    const closed = await tickets.closeIfActivityUnchanged(
+      record.channelId,
+      activityAt,
+      {
+        metadata: {
+          closedAt,
+          lastActivityAt: closedAt,
+          transcriptId: 'postgres-inactivity-transcript',
+          inactivityAutoClosedAt: closedAt,
+          inactivityAutoCloseAnchorAt: activityAt,
+        },
+      },
+      closedAt,
+      { id: 'supportforge-system', attribution: 'actorKnown', confidence: 'high' },
+    );
+    assert.equal(closed, true);
+
+    const saved = await tickets.getByChannelId(record.channelId);
+    assert.equal(saved?.status, 'closed');
+    assert.equal(saved?.metadata.transcriptId, 'postgres-inactivity-transcript');
+    assert.equal(saved?.metadata.inactivityAutoCloseAnchorAt, activityAt);
+    assert.equal(saved?.metadata.lastActivityAt, closedAt);
+
+    const eventTypes = (await events.listTicketEvents(record.id)).map((event) => event.type);
+    assert.deepEqual(eventTypes, ['ticket.created', 'ticket.closed']);
+    assert.equal((await events.listOutbox()).length, 2);
+
+    const duplicateClose = await tickets.closeIfActivityUnchanged(
+      record.channelId,
+      activityAt,
+      { metadata: { inactivityAutoClosedAt: closedAt } },
+      closedAt,
+    );
+    assert.equal(duplicateClose, false);
+    assert.deepEqual((await events.listTicketEvents(record.id)).map((event) => event.type), eventTypes);
+    assert.equal((await events.listOutbox()).length, 2);
+  },
+);
+
+test(
   'PostgreSQL rolls back ticket state, event history, and outbox when outbox enqueue fails',
   { skip: !postgresIntegrationEnabled },
   async () => {
