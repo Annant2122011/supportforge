@@ -49,7 +49,7 @@ export interface FlagRule {
 }
 
 export const SETTINGS_DASHBOARD_BUTTON_KEYS = [
-  'panel', 'defaults', 'tags', 'usecases', 'reports', 'retention', 'appearance',
+  'panel', 'defaults', 'tags', 'usecases', 'reports', 'retention', 'inactivity', 'appearance',
   'storage', 'rules', 'repair', 'team', 'manual', 'forms', 'refresh', 'reset',
   'theme', 'premium', 'panels', 'dashboard-builder', 'support-hours', 'ticket-workspace',
 ] as const;
@@ -80,6 +80,12 @@ export interface AdvancedGuildSettings {
     visualLineBudget: number;
     messageBudget: number;
     minimumMessagesBeforeMove: number;
+  };
+  /** Explicitly opt-in, restart-safe auto-close policy for idle tickets. */
+  inactivity: {
+    enabled: boolean;
+    idleHours: number;
+    graceHours: number;
   };
   retention: {
     closedDays: number;
@@ -160,6 +166,11 @@ const DEFAULTS: AdvancedGuildSettings = {
     messageBudget: 12,
     minimumMessagesBeforeMove: 6,
   },
+  inactivity: {
+    enabled: false,
+    idleHours: 72,
+    graceHours: 24,
+  },
   retention: {
     closedDays: 180,
     archiveDays: 180,
@@ -211,6 +222,7 @@ function cloneDefaults(): AdvancedGuildSettings {
   return {
     ...DEFAULTS,
     panelActivity: { ...DEFAULTS.panelActivity },
+    inactivity: { ...DEFAULTS.inactivity },
     retention: {
       ...DEFAULTS.retention,
       pendingApprovals: {
@@ -300,6 +312,13 @@ function normalizeExistingSettings(
     panelActivity: {
       ...DEFAULTS.panelActivity,
       ...(settings.panelActivity ?? {}),
+    },
+    inactivity: {
+      ...DEFAULTS.inactivity,
+      ...(settings.inactivity ?? {}),
+      enabled: settings.inactivity?.enabled === true,
+      idleHours: normalizeRetentionDays(settings.inactivity?.idleHours, DEFAULTS.inactivity.idleHours) || DEFAULTS.inactivity.idleHours,
+      graceHours: normalizeRetentionDays(settings.inactivity?.graceHours, DEFAULTS.inactivity.graceHours) || DEFAULTS.inactivity.graceHours,
     },
     retention: {
       ...DEFAULTS.retention,
@@ -518,6 +537,11 @@ export function buildSettingsSummary(
   const tags = Object.values(settings.customTags);
 
   return [
+    '**⏳ Inactivity Automation**',
+    '• Auto-close: ' + (settings.inactivity.enabled ? 'Enabled' : 'Disabled'),
+    '• Warning after: ' + settings.inactivity.idleHours + ' hours',
+    '• Grace period: ' + settings.inactivity.graceHours + ' hours',
+    '',
     '**🎛️ Panel**',
     '• Automatic repositioning: ' +
       (settings.panelActivity.enabled ? 'Enabled' : 'Disabled'),
