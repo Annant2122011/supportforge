@@ -94,7 +94,7 @@ export function buildTicketVisibilityPlan(input: TicketVisibilityPlanInput): Tic
     }
   }
 
-  if (input.staffRoleId && input.staffRoleId !== 'none' && input.roleIds.has(input.staffRoleId)) {
+  if (input.staffRoleId && input.staffRoleId !== 'none' && input.staffRoleId !== everyoneId && input.roleIds.has(input.staffRoleId)) {
     if (input.mode === 'claimed') {
       setOverwrite(input.staffRoleId, [], viewHistorySend);
     } else if (input.mode === 'closed') {
