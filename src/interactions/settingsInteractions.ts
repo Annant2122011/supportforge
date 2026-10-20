@@ -93,6 +93,7 @@ import {
   getEligibleRetentionTickets,
   runRetentionSweepForGuild,
 } from '../services/ticketRetentionService';
+import { clearTicketInactivityWarningsForGuild } from '../services/ticketInactivityService';
 
 import {
   ensureContainer,
