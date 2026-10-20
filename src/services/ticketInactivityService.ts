@@ -434,8 +434,8 @@ export async function sweepTicketInactivityForGuild(
   }
 }
 
-export async function clearTicketInactivityWarningsForGuild(guildId: string): Promise<void> {
-  const records = await getPersistedTicketRecords(guildId);
+export async function clearTicketInactivityWarningsForGuild(guild: Guild): Promise<void> {
+  const records = await getPersistedTicketRecords(guild.id);
   for (const ticket of records) {
     if (!isActiveStatus(ticket.status) || ticket.deletedAt) continue;
     if (
@@ -444,6 +444,28 @@ export async function clearTicketInactivityWarningsForGuild(guildId: string): Pr
       !ticket.metadata.inactivityWarningMessageId
     ) continue;
     try {
+      const channel = await resolveTicketChannel(guild, ticket);
+      if (channel) {
+        const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+        if (messages) {
+          const prefix = WARNING_MARKER_PREFIX + ' | ticket=' + ticket.channelId + ' |';
+          for (const message of messages.values()) {
+            const footer = embedFooter(message);
+            if (message.author.id !== guild.client.user?.id || !footer?.startsWith(prefix)) continue;
+            await message.edit({
+              embeds: [
+                new EmbedBuilder()
+                  .setColor(0x7B8794)
+                  .setTitle('Inactivity auto-close cancelled')
+                  .setDescription('A server administrator changed the inactivity policy. This warning and grace period are cancelled; this message will not trigger automatic closure.')
+                  .setFooter({ text: footer + ' | CANCELLED' })
+                  .setTimestamp(message.createdAt),
+              ],
+              allowedMentions: { parse: [] },
+            }).catch((error) => console.warn('Could not mark an inactivity warning as cancelled:', error));
+          }
+        }
+      }
       await clearWarningMetadata(ticket);
     } catch (error) {
       console.warn('Could not clear inactivity warning for ticket ' + ticket.channelId + ':', error);
