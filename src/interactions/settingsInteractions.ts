@@ -2251,8 +2251,49 @@ export async function handleSettingsInteraction(
       return true;
     }
 
-    if (id === 'sf:settings:support-hours:edit') {
-      const policy = await getSupportHoursPolicy(guild.id, 'guild');
+    if (id.startsWith('sf:settings:support-hours:view:')) {
+      const scope = parseSupportHoursSettingsScope(id.split(':'));
+      await showSupportHoursSettings(interaction, '', scope.scopeType, scope.scopeId);
+      return true;
+    }
+
+    if (id.startsWith('sf:settings:support-hours:scope:') && interaction.isStringSelectMenu()) {
+      const parts = id.split(':');
+      const scopeType = parts[4] === 'department' || parts[4] === 'panel' ? parts[4] : null;
+      const scopeId = interaction.values[0]?.trim();
+      const config = await getGuildConfig(guild.id);
+      const exists = scopeType === 'department'
+        ? Boolean(scopeId && config.departments[scopeId])
+        : scopeType === 'panel'
+          ? Boolean(scopeId && config.customPanels[scopeId])
+          : false;
+      if (!scopeType || !scopeId || !exists) {
+        await reject(interaction, 'That department or ticket panel no longer exists. Refresh the Support Hours view and choose an existing entry.');
+        return true;
+      }
+      await showSupportHoursSettings(interaction, '', scopeType, scopeId);
+      return true;
+    }
+
+    if (id.startsWith('sf:settings:support-hours:page:') && interaction.isButton()) {
+      const parts = id.split(':');
+      const departmentPage = Number(parts[4]);
+      const panelPage = Number(parts[5]);
+      const scope = parseSupportHoursSettingsScope(parts, 6);
+      if (!Number.isInteger(departmentPage) || departmentPage < 0 || !Number.isInteger(panelPage) || panelPage < 0) {
+        await reject(interaction, 'That Support Hours page control has expired. Reopen Support Hours and try again.');
+        return true;
+      }
+      await showSupportHoursSettings(interaction, '', scope.scopeType, scope.scopeId, departmentPage, panelPage);
+      return true;
+    }
+
+    if (id === 'sf:settings:support-hours:edit' || id.startsWith('sf:settings:support-hours:edit:')) {
+      const scope = parseSupportHoursSettingsScope(id.split(':'));
+      const context = supportHoursContext(scope);
+      const local = await getSupportHoursPolicy(guild.id, scope.scopeType, scope.scopeId);
+      const policies = await getSupportHoursPolicies(guild.id);
+      const policy = local ?? resolveEffectiveSupportHoursPolicy(policies, context);
       const timezone = new TextInputBuilder()
         .setCustomId('timezone')
         .setLabel('IANA time zone (e.g. Asia/Kolkata)')
@@ -2268,54 +2309,75 @@ export async function handleSettingsInteraction(
         .setRequired(true)
         .setMaxLength(4000)
         .setValue((policy ? formatSupportHoursWeeklySchedule(policy.weeklySchedule) : SUPPORT_HOURS_DAYS.map((day) => day + '=closed').join('\n')).slice(0, 4000));
-      await openModal(interaction, 'sf:settings:modal:support-hours', 'Edit Support Hours', [timezone, schedule]);
+      await openModal(interaction, 'sf:settings:modal:support-hours:' + scope.scopeType + ':' + (scope.scopeId ?? '-'), 'Edit Support Hours', [timezone, schedule]);
       return true;
     }
 
-    if (id === 'sf:settings:support-hours:toggle') {
-      const current = await getSupportHoursPolicy(guild.id, 'guild');
-      const enabling = !current?.enabled;
-      const base = current ?? createDefaultSupportHoursPolicy('guild');
+    if (id === 'sf:settings:support-hours:toggle' || id.startsWith('sf:settings:support-hours:toggle:')) {
+      const scope = parseSupportHoursSettingsScope(id.split(':'));
+      const context = supportHoursContext(scope);
+      const current = await getSupportHoursPolicy(guild.id, scope.scopeType, scope.scopeId);
+      const policies = await getSupportHoursPolicies(guild.id);
+      const effective = resolveEffectiveSupportHoursPolicy(policies, context);
+      const decision = await evaluateSupportHours(guild.id, context);
+      const enabling = !decision.policyEnabled;
+      const base = current ?? effective ?? createDefaultSupportHoursPolicy(scope.scopeType, scope.scopeId);
       const hasIntervals = SUPPORT_HOURS_DAYS.some((day) => base.weeklySchedule[day].length > 0);
       if (enabling && !hasIntervals) {
-        await showSupportHoursSettings(interaction, 'Add at least one opening interval before enabling enforcement.');
+        await showSupportHoursSettings(interaction, 'Add at least one opening interval before enabling enforcement.', scope.scopeType, scope.scopeId);
         return true;
       }
       await interaction.deferUpdate();
       const saved = await saveSupportHoursPolicy(guild.id, {
         ...base,
-        scopeType: 'guild',
-        scopeId: null,
+        scopeType: scope.scopeType,
+        scopeId: scope.scopeId,
         enabled: enabling,
         updatedBy: interaction.user.id,
       });
       await refreshSettingsChannel(guild);
-      await auditSettingsAction(guild, interaction, 'SUPPORT_HOURS_CHANGED', 'Server default support-hours enforcement ' + (saved.enabled ? 'enabled' : 'disabled') + '; policy version=' + saved.version + '.');
-      await showSupportHoursSettings(interaction, saved.enabled ? '✅ Support-hours enforcement enabled.' : 'Support-hours enforcement disabled.');
+      await auditSettingsAction(guild, interaction, 'SUPPORT_HOURS_CHANGED', 'Support-hours enforcement ' + (saved.enabled ? 'enabled' : 'disabled') + ' for ' + scope.scopeType + (scope.scopeId ? ' ' + scope.scopeId : '') + '; policy version=' + saved.version + '.');
+      await showSupportHoursSettings(interaction, saved.enabled ? '✅ Support-hours enforcement enabled.' : 'Support-hours enforcement disabled.', scope.scopeType, scope.scopeId);
       return true;
     }
 
-    if (id === 'sf:settings:support-hours:behavior') {
-      const current = await getSupportHoursPolicy(guild.id, 'guild');
-      if (!current) {
+    if (id === 'sf:settings:support-hours:behavior' || id.startsWith('sf:settings:support-hours:behavior:')) {
+      const scope = parseSupportHoursSettingsScope(id.split(':'));
+      const current = await getSupportHoursPolicy(guild.id, scope.scopeType, scope.scopeId);
+      const policies = await getSupportHoursPolicies(guild.id);
+      const effective = resolveEffectiveSupportHoursPolicy(policies, supportHoursContext(scope));
+      const base = current ?? effective;
+      if (!base) {
         await reject(interaction, 'Edit and save a weekly schedule first.');
         return true;
       }
       await interaction.deferUpdate();
-      const behavior = current.outsideHoursBehavior === 'allow' ? 'restrict' : 'allow';
-      const saved = await saveSupportHoursPolicy(guild.id, { ...current, outsideHoursBehavior: behavior, updatedBy: interaction.user.id });
+      const behavior = base.outsideHoursBehavior === 'allow' ? 'restrict' : 'allow';
+      const saved = await saveSupportHoursPolicy(guild.id, {
+        ...base,
+        scopeType: scope.scopeType,
+        scopeId: scope.scopeId,
+        outsideHoursBehavior: behavior,
+        updatedBy: interaction.user.id,
+      });
       await refreshSettingsChannel(guild);
-      await auditSettingsAction(guild, interaction, 'SUPPORT_HOURS_CHANGED', 'Server default outside-hours behavior changed to ' + behavior + '; policy version=' + saved.version + '.');
-      await showSupportHoursSettings(interaction, '✅ Outside-hours behavior set to ' + behavior + '.');
+      await auditSettingsAction(guild, interaction, 'SUPPORT_HOURS_CHANGED', 'Outside-hours behavior for ' + scope.scopeType + (scope.scopeId ? ' ' + scope.scopeId : '') + ' changed to ' + behavior + '; policy version=' + saved.version + '.');
+      await showSupportHoursSettings(interaction, '✅ Outside-hours behavior set to ' + behavior + '.', scope.scopeType, scope.scopeId);
       return true;
     }
 
-    if (id === 'sf:settings:support-hours:clear') {
+    if (id === 'sf:settings:support-hours:clear' || id.startsWith('sf:settings:support-hours:clear:')) {
+      const scope = parseSupportHoursSettingsScope(id.split(':'));
       await interaction.deferUpdate();
-      const removed = await deleteSupportHoursPolicy(guild.id, 'guild');
+      const removed = await deleteSupportHoursPolicy(guild.id, scope.scopeType, scope.scopeId);
       await refreshSettingsChannel(guild);
-      if (removed) await auditSettingsAction(guild, interaction, 'SUPPORT_HOURS_CHANGED', 'Removed the server-default support-hours policy; more-specific overrides remain.');
-      await showSupportHoursSettings(interaction, removed ? '✅ Server default removed. More-specific overrides still apply.' : 'No server-default policy existed.');
+      if (removed) await auditSettingsAction(guild, interaction, 'SUPPORT_HOURS_CHANGED', 'Removed the ' + scope.scopeType + (scope.scopeId ? ' ' + scope.scopeId : '') + ' support-hours policy; inherited schedules now apply.');
+      const notice = removed
+        ? scope.scopeType === 'guild'
+          ? '✅ Server default removed. More-specific overrides still apply.'
+          : '✅ Override removed. The inherited schedule now applies.'
+        : 'No support-hours policy existed at this scope.';
+      await showSupportHoursSettings(interaction, notice, scope.scopeType, scope.scopeId);
       return true;
     }
 
