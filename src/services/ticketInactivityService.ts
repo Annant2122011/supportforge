@@ -80,7 +80,9 @@ async function resolveTicketChannel(guild: Guild, ticket: PersistedTicket): Prom
   }
 
   if (channel.type !== ChannelType.GuildText) return null;
-  const topic = channel.topic ?? metadataString(ticket, 'ticketTopic') ?? '';
+  const liveTopic = channel.topic ?? '';
+  const storedTopic = metadataString(ticket, 'ticketTopic') ?? '';
+  const topic = isTicketTopic(liveTopic) ? liveTopic : storedTopic;
   return isTicketTopic(topic) ? channel as TextChannel : null;
 }
 
@@ -160,6 +162,10 @@ async function issueOrRecoverWarning(
 
   await updatePersistedTicketMetadata(ticket.channelId, {
     metadata: {
+      // Persist a baseline for legacy tickets that predate lastActivityAt.
+      // Otherwise updatePersistedTicketMetadata would advance updatedAt and
+      // unintentionally move the activity anchor at warning time.
+      lastActivityAt: metadataString(current, 'lastActivityAt') ? undefined : anchorAt,
       inactivityWarningAnchorAt: anchorAt,
       inactivityWarningDeadlineAt: deadlineAt,
       inactivityWarningMessageId: message.id,
@@ -347,7 +353,8 @@ async function sweepTicket(client: Client, guild: Guild, initial: PersistedTicke
   if (!channel) return;
 
   const decision = evaluateTicketInactivity(ticket, settings, nowMs);
-  if (decision.action === 'skip' || decision.action === 'wait') {
+  if (decision.action === 'skip') return;
+  if (decision.action === 'wait') {
     const storedAnchor = metadataString(ticket, 'inactivityWarningAnchorAt');
     if (storedAnchor && storedAnchor !== decision.anchorAt) {
       await clearWarningMetadata(ticket);
