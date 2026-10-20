@@ -28,6 +28,7 @@ import { projectDurableTicketTopic } from './ticketTopicProjectionService';
 import { buildTicketPanelEmbed } from './ticketPanelService';
 import { logTicketEvent } from './auditLogService';
 import { canPrivateThreadTicketAction, getPrivateThreadTicketActions, normalizeTicketWorkspaceMode, type PrivateThreadTicketAction, type TicketWorkspaceMode } from '../core/domain/privateThreadTicketPolicy';
+import { canPerformTicketAction, isTicketManager } from '../core/domain/ticketAuthorization';
 
 const THREAD_PARENT_PREFIX = 'supportforge:ticket-thread-parent';
 
@@ -254,13 +255,15 @@ async function isDepartmentStaffOrAdmin(
   interaction: ButtonInteraction | ChatInputCommandInteraction,
   staffRoleId: string | undefined,
 ): Promise<boolean> {
-  if (
-    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
-    interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)
-  ) return true;
-  if (!interaction.guild || !staffRoleId) return false;
-  const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-  return Boolean(member?.roles.cache.has(staffRoleId));
+  const member = staffRoleId && interaction.guild
+    ? await interaction.guild.members.fetch(interaction.user.id).catch(() => null)
+    : null;
+  return isTicketManager({
+    actorId: interaction.user.id,
+    isConfiguredStaff: Boolean(staffRoleId && member?.roles.cache.has(staffRoleId)),
+    isAdministrator: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)),
+    canManageGuild: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)),
+  });
 }
 
 export async function refreshPrivateThreadPanel(
@@ -343,13 +346,20 @@ async function performThreadAction(
     ? ticket.metadata.staffRoleId
     : getField(topic, 'staff');
   const staff = await isDepartmentStaffOrAdmin(interaction, staffRoleId);
-  const owner = ticket.ownerId === interaction.user.id;
-  if (!staff && !(action === 'close' && owner)) {
-    throw new Error('Only this department’s configured staff, a server administrator, or the ticket owner closing their own ticket may do that.');
-  }
+  const authorization = {
+    actorId: interaction.user.id,
+    ownerId: ticket.ownerId,
+    isConfiguredStaff: staff && !interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) &&
+      !interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild),
+    isAdministrator: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)),
+    canManageGuild: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)),
+  };
 
   let nextStatus: TicketStatus;
   let claimedByIds = [...ticket.claimedByIds];
+  if (!canPerformTicketAction(authorization, action, ticket.status)) {
+    throw new Error('Only configured department staff/admins may perform that action, except ticket owners may close their own ticket or resume their own pending ticket.');
+  }
   if (!canPrivateThreadTicketAction(ticket.status, action)) {
     throw new Error('That action is not available while this ticket is ' + ticket.status + '.');
   }
@@ -386,11 +396,7 @@ async function performThreadAction(
       break;
   }
 
-  if (thread.archived || thread.locked) {
-    await thread.setArchived(false, 'ResolveX ticket lifecycle update');
-    if (thread.locked) await thread.setLocked(false, 'ResolveX ticket lifecycle update');
-  }
-
+  // Do not unlock a closed ticket before the durable reopen/resume transition commits.
   const now = new Date().toISOString();
   const nextTopic = nextTicketTopic(ticket, topic, nextStatus, now, claimedByIds);
   const nextParticipants = [...new Set([
@@ -411,7 +417,33 @@ async function performThreadAction(
 
   const updated = await getPersistedTicket(thread.id);
   if (!updated) throw new Error('The ticket state was saved, but its updated record could not be reloaded.');
-  await refreshPrivateThreadPanel(thread, updated, nextTopic);
+
+  const synchronizationFailures: string[] = [];
+  try {
+    if (nextStatus === 'closed' || nextStatus === 'archived') {
+      if (!thread.archived) await thread.setArchived(true, 'ResolveX ticket ' + nextStatus);
+      if (!thread.locked) await thread.setLocked(true, 'ResolveX ticket ' + nextStatus + ' read-only protection');
+    } else if (thread.archived || thread.locked) {
+      if (thread.archived) await thread.setArchived(false, 'ResolveX ticket lifecycle update');
+      if (thread.locked) await thread.setLocked(false, 'ResolveX ticket lifecycle update');
+    }
+  } catch (error) {
+    synchronizationFailures.push('thread archive/lock permissions');
+    console.warn('Private-thread state is durable, but archive/lock synchronization will retry through the outbox:', error);
+  }
+
+  try {
+    await refreshPrivateThreadPanel(thread, updated, nextTopic);
+    // Sending a replacement panel can alter Discord's thread archive state.
+    // Reassert read-only closure after the UI reconciliation as a final guard.
+    if (nextStatus === 'closed' || nextStatus === 'archived') {
+      if (!thread.archived) await thread.setArchived(true, 'ResolveX reassert closed ticket state after panel refresh');
+      if (!thread.locked) await thread.setLocked(true, 'ResolveX reassert closed ticket lock after panel refresh');
+    }
+  } catch (error) {
+    synchronizationFailures.push('ticket panel/archive-lock refresh');
+    console.warn('Private-thread state is durable, but panel/archive-lock synchronization will retry through the outbox:', error);
+  }
 
   const config = await getGuildConfig(guild.id);
   const eventName: Record<PrivateThreadTicketAction, string> = {
@@ -435,10 +467,6 @@ async function performThreadAction(
     }).catch((error) => console.warn('Could not write private-thread ticket audit event:', error));
   }
 
-  if (nextStatus === 'closed' || nextStatus === 'archived') {
-    await thread.setArchived(true, 'ResolveX ticket ' + nextStatus);
-    if (nextStatus === 'archived') await thread.setLocked(true, 'ResolveX ticket archived');
-  }
   const text = action === 'claim'
     ? '✅ Ticket claimed.'
     : action === 'unclaim'
@@ -452,10 +480,13 @@ async function performThreadAction(
             : action === 'reopen'
               ? '🔓 Ticket reopened.'
               : '🗄️ Ticket archived.';
+  const synchronizationNotice = synchronizationFailures.length
+    ? '\n\n⚠️ The ticket state is saved, but Discord is still synchronizing: ' + synchronizationFailures.join(', ') + '. The durable outbox will retry.'
+    : '';
   if (interaction.isButton()) {
-    await interaction.editReply({ content: text, components: [] });
+    await interaction.editReply({ content: text + synchronizationNotice, components: [] });
   } else {
-    await interaction.editReply(text);
+    await interaction.editReply(text + synchronizationNotice);
   }
 }
 

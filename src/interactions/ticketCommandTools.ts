@@ -1,6 +1,7 @@
 import type { EventActor } from '../core/events/domainEvents';
 import type { TicketMetadataUpdates } from '../repositories/ticketRepository';
 import { buildTicketVisibilityPlan } from '../core/domain/ticketPermissionPlan';
+import { canPerformTicketAction, isTicketManager, type TicketAuthorizationAction } from '../core/domain/ticketAuthorization';
 
 import {
   ActionRowBuilder,
@@ -155,16 +156,13 @@ async function getTicketContext(
         PermissionFlagsBits.ManageGuild,
       ),
     ),
-    isAuthorized:
-      isStaff ||
-      Boolean(
-        interaction.memberPermissions?.has(
-          PermissionFlagsBits.Administrator,
-        ) ||
-        interaction.memberPermissions?.has(
-          PermissionFlagsBits.ManageGuild,
-        ),
-      ),
+    isAuthorized: isTicketManager({
+      actorId: interaction.user.id,
+      ownerId: getField(topic, 'owner'),
+      isConfiguredStaff: isStaff,
+      isAdministrator: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)),
+      canManageGuild: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)),
+    }),
     ticketNumber:
       getField(topic, 'number') ??
       'Unknown',
@@ -239,6 +237,10 @@ async function syncCommandTicketVisibility(
   const users = (getField(newTopic, 'users') ?? '')
     .split(',').map((id) => id.trim()).filter(Boolean);
   const status = getTicketStatus(newTopic);
+  const botId = context.guild.members.me?.id;
+  if ((status === 'closed' || status === 'archived') && !botId) {
+    throw new Error('Cannot safely apply the closed-ticket ACL until the bot guild member is resolved.');
+  }
   const existing = [...context.channel.permissionOverwrites.cache.values()].map((overwrite) => ({
     id: overwrite.id,
     kind: overwrite.type === 0 ? 'role' as const : 'member' as const,
@@ -253,11 +255,13 @@ async function syncCommandTicketVisibility(
     existing,
     roleIds,
     staffRoleId,
+    everyoneRoleId: context.guild.roles.everyone.id,
+    botId,
     ownerId,
     userIds: users,
-    claimedModeratorIds: status === 'claimed' ? newClaimants : [],
+    claimedModeratorIds: newClaimants,
     formerClaimantIds: oldClaimants,
-    mode: status === 'claimed' ? 'claimed' : 'unclaimed',
+    mode: status === 'closed' || status === 'archived' ? 'closed' : status === 'claimed' ? 'claimed' : 'unclaimed',
   });
 
   const properties: {
@@ -480,14 +484,37 @@ export async function executeTicketCommand(
     );
 
     /*
-     * Only configured department staff or
-     * administrators can manage tickets.
+     * Lifecycle/maintenance commands use the same tested policy as buttons.
+     * Non-lifecycle staff tools still require configured ticket staff or an
+     * elevated manager. Owners may close their own ticket and resume their
+     * own pending ticket, but cannot claim/archive/delete it.
      */
-    if (!context.isAuthorized && !(subcommand === 'close' && context.ownerId === interaction.user.id)) {
+    const authorization = {
+      actorId: interaction.user.id,
+      ownerId: context.ownerId,
+      isConfiguredStaff: context.isStaff,
+      isAdministrator: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)),
+      canManageGuild: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)),
+      canManageChannels: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)),
+    };
+    const policyActions: Record<string, TicketAuthorizationAction | undefined> = {
+      claim: 'claim',
+      unclaim: 'unclaim',
+      pending: 'pending',
+      resume: 'resume',
+      close: 'close',
+      reopen: 'reopen',
+      archive: 'archive',
+      delete: 'delete',
+    };
+    const policyAction = policyActions[subcommand];
+    const authorized = policyAction
+      ? canPerformTicketAction(authorization, policyAction, context.status)
+      : context.isAuthorized;
+    if (!authorized) {
       await interaction.editReply(
-        '❌ Only the configured department staff or an administrator can use ticket management commands.',
+        '❌ Only configured department staff/admins can manage this ticket. Ticket owners may close their own ticket or resume their own pending ticket.',
       );
-
       return;
     }
 
