@@ -1,6 +1,7 @@
 import { PermissionFlagsBits } from 'discord.js';
 
 export type OverwriteKind = 'role' | 'member';
+export type TicketVisibilityMode = 'unclaimed' | 'claimed' | 'closed';
 
 export interface TicketPermissionSnapshot {
   id: string;
@@ -13,12 +14,14 @@ export interface TicketVisibilityPlanInput {
   existing: TicketPermissionSnapshot[];
   roleIds: ReadonlySet<string>;
   staffRoleId?: string | null;
+  everyoneRoleId?: string | null;
+  botId?: string | null;
   ownerId: string;
   userIds: string[];
   claimedModeratorIds: string[];
   formerClaimantIds?: string[];
   removeRoleIds?: string[];
-  mode: 'unclaimed' | 'claimed';
+  mode: TicketVisibilityMode;
 }
 
 export interface TicketVisibilityPlan {
@@ -38,7 +41,7 @@ function canonical(overwrites: TicketPermissionSnapshot[]): string {
   );
 }
 
-/** Build a complete ACL plan so ticket visibility is applied in one request. */
+/** Build one complete ACL plan so all ticket access changes use one channel PATCH. */
 export function buildTicketVisibilityPlan(input: TicketVisibilityPlanInput): TicketVisibilityPlan {
   const next = new Map<string, TicketPermissionSnapshot>(
     input.existing.map((item) => [item.id, { ...item }]),
@@ -53,21 +56,55 @@ export function buildTicketVisibilityPlan(input: TicketVisibilityPlanInput): Tic
     });
   };
 
-  if (
-    input.staffRoleId &&
-    input.staffRoleId !== 'none' &&
-    input.roleIds.has(input.staffRoleId)
-  ) {
-    const textPermissions = [
-      PermissionFlagsBits.ViewChannel,
-      PermissionFlagsBits.SendMessages,
-      PermissionFlagsBits.ReadMessageHistory,
-    ];
-    setOverwrite(
-      input.staffRoleId,
-      input.mode === 'claimed' ? [] : textPermissions,
-      input.mode === 'claimed' ? textPermissions : [],
-    );
+  const everyoneId = input.everyoneRoleId ?? null;
+  const botId = input.botId ?? null;
+  const viewHistorySend = [
+    PermissionFlagsBits.ViewChannel,
+    PermissionFlagsBits.SendMessages,
+    PermissionFlagsBits.ReadMessageHistory,
+  ];
+
+  if (input.mode === 'closed') {
+    const allowedMembers = new Set<string>([
+      input.ownerId,
+      ...input.userIds,
+      ...input.claimedModeratorIds,
+    ]);
+    allowedMembers.delete('');
+
+    // Retain only the @everyone/staff roles, the bot, and current ticket members.
+    for (const overwrite of input.existing) {
+      if (overwrite.id === botId || allowedMembers.has(overwrite.id)) continue;
+      if (overwrite.kind === 'role' && overwrite.id === input.staffRoleId) continue;
+      if (overwrite.kind === 'role' && overwrite.id === everyoneId) continue;
+      next.delete(overwrite.id);
+    }
+
+    if (everyoneId) setOverwrite(everyoneId, [], viewHistorySend);
+    if (botId) {
+      setOverwrite(botId, [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.ManageChannels,
+        PermissionFlagsBits.ManageMessages,
+        PermissionFlagsBits.AttachFiles,
+        PermissionFlagsBits.EmbedLinks,
+      ], []);
+    }
+  }
+
+  if (input.staffRoleId && input.staffRoleId !== 'none' && input.roleIds.has(input.staffRoleId)) {
+    if (input.mode === 'claimed') {
+      setOverwrite(input.staffRoleId, [], viewHistorySend);
+    } else if (input.mode === 'closed') {
+      setOverwrite(input.staffRoleId, [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.ReadMessageHistory,
+      ], [PermissionFlagsBits.SendMessages]);
+    } else {
+      setOverwrite(input.staffRoleId, viewHistorySend, []);
+    }
   }
 
   for (const roleId of input.removeRoleIds ?? []) {
@@ -83,18 +120,28 @@ export function buildTicketVisibilityPlan(input: TicketVisibilityPlanInput): Tic
   const participants = new Set<string>([
     input.ownerId,
     ...input.userIds,
-    ...(input.mode === 'claimed' ? input.claimedModeratorIds : []),
+    ...(input.mode === 'claimed' || input.mode === 'closed' ? input.claimedModeratorIds : []),
   ]);
   participants.delete('');
+  if (botId) participants.delete(botId);
 
-  const memberPermissions = [
-    PermissionFlagsBits.ViewChannel,
-    PermissionFlagsBits.SendMessages,
-    PermissionFlagsBits.ReadMessageHistory,
-    PermissionFlagsBits.AttachFiles,
-    PermissionFlagsBits.EmbedLinks,
-  ];
-  for (const id of participants) setOverwrite(id, memberPermissions, []);
+  if (input.mode === 'closed') {
+    for (const id of participants) {
+      setOverwrite(id, [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.ReadMessageHistory,
+      ], [PermissionFlagsBits.SendMessages]);
+    }
+  } else {
+    const memberPermissions = [
+      PermissionFlagsBits.ViewChannel,
+      PermissionFlagsBits.SendMessages,
+      PermissionFlagsBits.ReadMessageHistory,
+      PermissionFlagsBits.AttachFiles,
+      PermissionFlagsBits.EmbedLinks,
+    ];
+    for (const id of participants) setOverwrite(id, memberPermissions, []);
+  }
 
   const overwrites = [...next.values()].sort((a, b) => a.id.localeCompare(b.id));
   return {

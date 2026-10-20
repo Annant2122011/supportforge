@@ -136,6 +136,7 @@ import {
 } from '../services/ticketPanelService';
 import { getCustomPanel } from '../services/panelBuilderService';
 import { parseCustomPanelInteractionId } from '../core/domain/customPanelInteraction';
+import { canPerformTicketAction, isTicketManager } from '../core/domain/ticketAuthorization';
 import { buildPrivateThreadTicketComponents, createPrivateThreadTicket, handlePrivateThreadTicketButton, registerInitialPrivateThreadTicket } from '../services/privateThreadTicketService';
 import { handlePrivateThreadAuxButton, handlePrivateThreadAuxComponent } from '../services/privateThreadTicketAuxService';
 
@@ -473,14 +474,20 @@ function getStaffContext(
       interaction,
     );
 
+  const authorization = {
+    actorId: interaction.user.id,
+    ownerId,
+    isConfiguredStaff: isStaff,
+    isAdministrator: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)),
+    canManageGuild: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)),
+  };
+
   return {
     ownerId,
     staffRole,
     isStaff,
     isAdmin: admin,
-    authorized:
-      isStaff ||
-      admin,
+    authorized: isTicketManager(authorization),
   };
 }
 
@@ -941,7 +948,7 @@ function buildOpenOverwrites(
 async function applyTicketVisibilityMode(
   channel: TextChannel,
   topic: string,
-  mode: 'unclaimed' | 'claimed',
+  mode: 'unclaimed' | 'claimed' | 'closed',
   formerClaimedBy?: string,
   options?: {
     topic?: string;
@@ -974,6 +981,8 @@ async function applyTicketVisibilityMode(
     existing,
     roleIds,
     staffRoleId,
+    everyoneRoleId: channel.guild.roles.everyone.id,
+    botId: channel.guild.members.me.id,
     ownerId,
     userIds: users,
     claimedModeratorIds: claimedModerators,
@@ -2067,41 +2076,29 @@ async function transition(
         oldTopic,
       );
 
-    /*
-     * Staff/admin-only transitions.
-     */
-    if (
-      (
-        newStatus ===
-          'claimed' ||
-        newStatus ===
-          'pending' ||
-        newStatus ===
-          'reopened' ||
-        newStatus ===
-          'archived'
-      ) &&
-      !staff.authorized
-    ) {
+    const lifecycleAction = newStatus === 'claimed'
+      ? 'claim'
+      : newStatus === 'pending'
+        ? 'pending'
+        : newStatus === 'open'
+          ? 'resume'
+          : newStatus === 'closed'
+            ? 'close'
+            : newStatus === 'reopened'
+              ? 'reopen'
+              : 'archive';
+    const authorization = {
+      actorId: interaction.user.id,
+      ownerId: staff.ownerId,
+      isConfiguredStaff: staff.isStaff,
+      isAdministrator: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)),
+      canManageGuild: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)),
+    };
+    if (!canPerformTicketAction(authorization, lifecycleAction, oldStatus)) {
       await interaction.editReply(
-        '❌ Only configured staff or administrators can perform this action.',
-      );
-      return;
-    }
-
-    /*
-     * Owner may resume their pending ticket.
-     * Staff/admin may also do it.
-     */
-    if (
-      newStatus ===
-        'open' &&
-      !staff.authorized &&
-      staff.ownerId !==
-        interaction.user.id
-    ) {
-      await interaction.editReply(
-        '❌ You are not authorized to resume this ticket.',
+        newStatus === 'open'
+          ? '❌ Only configured staff/admins or the ticket owner resuming their own pending ticket can resume it.'
+          : '❌ Only configured department staff or administrators can perform this action.',
       );
       return;
     }
@@ -2484,24 +2481,21 @@ async function transition(
       }
     } else {
       try {
-        // Closed/archived transitions do not change ticket ACLs, but their
-        // topic, name, and storage category still fit in a single PATCH.
-        await setChannelProperties(
-          channel.id,
+        await applyTicketVisibilityMode(
+          channel,
+          newTopic,
+          'closed',
+          getField(oldTopic, 'claimed_by'),
           {
             topic: newTopic,
-            name: desiredChannelName,
+            channelName: desiredChannelName,
             ...(destinationCategoryId ? { parentId: destinationCategoryId } : {}),
           },
-          new Set<string>(),
-          'Synchronize SupportForge closed/archived ticket channel metadata',
         );
-        channel.topic = newTopic;
-        channel.name = desiredChannelName;
       } catch (error) {
-        sideEffectFailures.push('ticket channel metadata/category/name');
+        sideEffectFailures.push('ticket channel metadata/category/read-only permissions');
         console.warn(
-          '⚠️ Closed/archived ticket channel synchronization is pending/failed; durable state will still be updated:',
+          '⚠️ Closed/archived ticket permissions or metadata are pending/failed; durable state will still be updated:',
           error,
         );
       }
@@ -2755,14 +2749,14 @@ async function closeTicket(
         topic,
       );
 
-    const owner =
-      staff.ownerId ===
-      interaction.user.id;
-
-    if (
-      !owner &&
-      !staff.authorized
-    ) {
+    const closeAuthorization = {
+      actorId: interaction.user.id,
+      ownerId: staff.ownerId,
+      isConfiguredStaff: staff.isStaff,
+      isAdministrator: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)),
+      canManageGuild: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)),
+    };
+    if (!canPerformTicketAction(closeAuthorization, 'close', status)) {
       await interaction.editReply(
         '❌ Only the ticket owner, configured staff, or an administrator can close this ticket.',
       );
@@ -3015,15 +3009,16 @@ async function closeTicket(
 
         try {
           const closedCategory = await ensureClosedCategory(interaction.guild!);
-          await setChannelProperties(
-            channel.id,
+          await applyTicketVisibilityMode(
+            channel,
+            closedTopic,
+            'closed',
+            getField(topic, 'claimed_by'),
             {
               topic: closedTopic,
-              name: closedChannelName,
+              channelName: closedChannelName,
               parentId: closedCategory.id,
             },
-            new Set<string>(),
-            'SupportForge persist closed ticket metadata and storage location',
           );
           channel.topic = closedTopic;
           channel.name = closedChannelName;
@@ -6234,12 +6229,15 @@ async function handleTicketDeletionInteraction(interaction: ButtonInteraction): 
   const department = config.departments[departmentId];
   const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
   const isStaff = Boolean(member && department?.staffRoleId && member.roles.cache.has(department.staffRoleId));
-  const isAdmin = Boolean(
-    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
-    interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ||
-    interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels),
-  );
-  if (!isAdmin && !isStaff) {
+  const canDelete = canPerformTicketAction({
+    actorId: interaction.user.id,
+    ownerId: ticket?.ownerId ?? getField(topic, 'owner'),
+    isConfiguredStaff: isStaff,
+    isAdministrator: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)),
+    canManageGuild: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)),
+    canManageChannels: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)),
+  }, 'delete', ticket?.status ?? getTicketStatus(topic));
+  if (!canDelete) {
     await interaction.editReply('Only configured department staff or administrators with Manage Channels can delete this ticket.');
     return;
   }

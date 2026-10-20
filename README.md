@@ -120,3 +120,7 @@ Ticket and message metadata are stored using the existing Neon/PostgreSQL persis
 
 Private-thread policy tests verify lifecycle controls and that unknown persisted lifecycle values fail closed. The support-hours engine remains shared by both text-channel and private-thread intake paths. Live server acceptance is still required for real channel/thread creation, staff/owner access, permission changes, closure/reopening, deletion recovery and slash-command registration. See [Stage F Part 2 private-thread architecture and acceptance notes](docs/stage-f-part-2-private-threads.md).
 
+
+## Stage G · Part 1: permission and close-lifecycle hardening
+
+Stage G Part 1 centralizes ticket lifecycle authorization, makes closed/archived text tickets read-only, and hardens private-thread close/reopen ordering with durable outbox reconciliation. See [Stage G Part 1 architecture and acceptance notes](docs/stage-g-part-1-permissions-close.md). Stage G Part 2 is reserved for inactivity warnings and restart-safe automated closure; no inactivity auto-close runs as part of Part 1.

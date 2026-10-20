@@ -239,6 +239,10 @@ async function syncCommandTicketVisibility(
   const users = (getField(newTopic, 'users') ?? '')
     .split(',').map((id) => id.trim()).filter(Boolean);
   const status = getTicketStatus(newTopic);
+  const botId = context.guild.members.me?.id;
+  if ((status === 'closed' || status === 'archived') && !botId) {
+    throw new Error('Cannot safely apply the closed-ticket ACL until the bot guild member is resolved.');
+  }
   const existing = [...context.channel.permissionOverwrites.cache.values()].map((overwrite) => ({
     id: overwrite.id,
     kind: overwrite.type === 0 ? 'role' as const : 'member' as const,
@@ -253,11 +257,13 @@ async function syncCommandTicketVisibility(
     existing,
     roleIds,
     staffRoleId,
+    everyoneRoleId: context.guild.roles.everyone.id,
+    botId,
     ownerId,
     userIds: users,
-    claimedModeratorIds: status === 'claimed' ? newClaimants : [],
+    claimedModeratorIds: newClaimants,
     formerClaimantIds: oldClaimants,
-    mode: status === 'claimed' ? 'claimed' : 'unclaimed',
+    mode: status === 'closed' || status === 'archived' ? 'closed' : status === 'claimed' ? 'claimed' : 'unclaimed',
   });
 
   const properties: {
