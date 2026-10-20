@@ -2699,10 +2699,9 @@ export async function handleSettingsInteraction(
       await interaction.deferUpdate();
       await updateAdvancedSettings(guild.id, (settings) => {
         settings.inactivity.enabled = enabled;
+        settings.inactivity.generation = Math.min(2147483647, settings.inactivity.generation + 1);
       });
-      if (!enabled) {
-        await clearTicketInactivityWarningsForGuild(guild.id);
-      }
+      await clearTicketInactivityWarningsForGuild(guild);
       await refreshSettingsChannel(guild);
       await auditSettingsAction(guild, interaction, 'TICKET_INACTIVITY_AUTOMATION_' + (enabled ? 'ENABLED' : 'DISABLED'),
         (enabled ? 'Enabled' : 'Disabled') + ' inactivity auto-close with idle threshold ' +
@@ -3546,7 +3545,9 @@ export async function handleSettingsInteraction(
       await updateAdvancedSettings(guild.id, (settings) => {
         settings.inactivity.idleHours = idleHours;
         settings.inactivity.graceHours = graceHours;
+        settings.inactivity.generation = Math.min(2147483647, settings.inactivity.generation + 1);
       });
+      await clearTicketInactivityWarningsForGuild(guild);
       await refreshSettingsChannel(guild);
       await auditSettingsAction(guild, interaction, 'TICKET_INACTIVITY_THRESHOLDS_CHANGED',
         'Set inactivity warning threshold to ' + idleHours + ' hours and grace period to ' + graceHours + ' hours.');
