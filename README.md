@@ -86,6 +86,7 @@ The Build and SupportForge CI workflows run the TypeScript build, automated test
 - [Ticket archive and recovery behavior](docs/recovery-archive.md)
 - [Slash-command and button parity](docs/interaction-parity.md)
 - [Restore and deployment guide](docs/restore-and-deploy.md)
+- [Stage A–G reverification and remaining acceptance checks](docs/stage-a-to-g-reverification.md)
 
 ## Stage F · Support hours, time zones and private-thread workspaces
 
