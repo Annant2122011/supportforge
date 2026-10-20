@@ -3,7 +3,7 @@
 ## Scope split
 
 - **Part 1 (this increment):** shared support-hours policies, timezone-aware schedule evaluation, Settings-channel editor, slash-command configuration, final ticket-intake enforcement, audit events and unit tests.
-- **Part 2 (deferred):** private-thread ticket workspaces and their Discord resource adapter. No private-thread ticket creation or lifecycle code is included in Part 1.
+- **Part 2 (implemented in a separate increment):** private-thread ticket workspaces, Discord resource adapter, lifecycle controls, auxiliary staff controls and ticket/message recovery hooks. Part 1 remains independently reusable by both workspace modes.
 
 ## Architecture
 
@@ -72,4 +72,4 @@ Automated tests cover:
 - spring-forward nonexistent times and autumn repeated times;
 - the seven-day editor input format.
 
-Before production use, manually verify the schedule UI and ticket-opening flows in a real Discord test server. CI passing is necessary but does not replace Discord API permission/interaction acceptance.
+Before production use, manually verify the schedule UI and ticket-opening flows in a real Discord test server. CI passing is necessary but does not replace Discord API permission/interaction acceptance. For the private-thread increment, see [Stage F Part 2 architecture and acceptance notes](stage-f-part-2-private-threads.md).
