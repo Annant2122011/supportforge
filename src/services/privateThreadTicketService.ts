@@ -263,7 +263,7 @@ async function isDepartmentStaffOrAdmin(
   return Boolean(member?.roles.cache.has(staffRoleId));
 }
 
-async function refreshPrivateThreadPanel(
+export async function refreshPrivateThreadPanel(
   thread: ThreadChannel,
   ticket: PersistedTicket,
   topic: string,
