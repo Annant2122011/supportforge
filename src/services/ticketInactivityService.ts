@@ -206,7 +206,7 @@ async function issueOrRecoverWarning(
   await updatePersistedTicketMetadata(ticket.channelId, {
     metadata: {
       // Establish an explicit stable anchor for legacy rows that predate lastActivityAt.
-      lastActivityAt: metadataString(current, 'lastActivityAt') ? undefined : anchorAt,
+      ...(metadataString(current, 'lastActivityAt') ? {} : { lastActivityAt: anchorAt }),
       inactivityWarningAnchorAt: anchorAt,
       inactivityWarningDeadlineAt: deadlineAt,
       inactivityWarningMessageId: message.id,
