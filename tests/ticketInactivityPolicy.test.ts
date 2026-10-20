@@ -29,7 +29,7 @@ test('inactivity automation is off by default and durations are bounded', () => 
 });
 
 test('warning starts only after the configured idle threshold', () => {
-  assert.deepEqual(evaluateTicketInactivity(activeTicket(), policy, now - 1), {
+  assert.deepEqual(evaluateTicketInactivity(activeTicket(), policy, Date.parse('2026-10-19T11:59:59.999Z')), {
     action: 'wait',
     anchorAt: '2026-10-16T12:00:00.000Z',
     warningAt: Date.parse('2026-10-19T12:00:00.000Z'),
