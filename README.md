@@ -87,9 +87,9 @@ The Build and SupportForge CI workflows run the TypeScript build, automated test
 - [Slash-command and button parity](docs/interaction-parity.md)
 - [Restore and deployment guide](docs/restore-and-deploy.md)
 
-## Stage F · Part 1: support hours and time zones
+## Stage F · Support hours, time zones and private-thread workspaces
 
-Stage F is split into two independent increments. **Part 1** implements the shared support-hours policy and time-zone engine. **Part 2**, intentionally not included here, will add private-thread ticket workspaces.
+Stage F is implemented on this feature branch in two increments: Part 1 provides the shared support-hours/time-zone engine, and Part 2 adds private-thread ticket workspaces and lifecycle controls. The branch still requires integration through the Stage A–E → Stage F pull-request chain and live Discord test-server acceptance before production rollout.
 
 Support-hours policies are stored in the existing Neon-backed JSON-document repository under a separate support-hours document. This avoids coupling schedule rules to guild appearance settings and does not introduce a second database or SQL migration. Policy scopes resolve in this order: **ticket panel → department → server default**. An explicit disabled policy at a more-specific scope disables enforcement there; removing an override restores inheritance.
 
@@ -109,4 +109,14 @@ For a department or panel override, provide scope-id. Use valid IANA time-zone n
 When enforcement is enabled, every supported ticket-entry route checks the effective policy and final ticket submission checks it again. A blocked request receives a closed-hours notice and the next opening time when one can be calculated. Existing tickets and administrator actions are not disabled. Panels stay published when support is closed. Policy mutations and blocked intake are audited.
 
 The schedule engine handles daylight-saving gaps and repeated local times deterministically, uses the same calculation path for status and next-opening time, and is covered by fake-time/unit tests. Live Discord acceptance testing is still required before production rollout. See [Stage F Part 1 architecture and acceptance notes](docs/stage-f-part-1-support-hours.md).
+
+### Part 2: private-thread ticket workspaces
+
+Select the workspace mode using **Settings → Ticket Workspace** or `/supportforge settings ticket-workspace`. It applies only to newly opened tickets. Existing dedicated text-channel tickets remain unchanged. In private-thread mode, ResolveX lazily creates a department-specific parent text channel and opens each new ticket as a private thread under it. The ticket owner is explicitly added; configured department staff and administrators can access tickets through Discord's private-thread permissions. The bot needs permission to view the parent, create/manage private threads, send messages in threads, and read message history. Each department should have a valid staff role configured before enabling this mode.
+
+The private-thread controls support the normal ticket lifecycle (claim, unclaim, pending, resume, close, reopen and archive), along with participant add/remove, staff reassignment, priority, internal notes and staff history. The matching slash-command routes are available inside the private thread as well as the button controls. User-selection actions are bound to the initiating user and exact thread so stale or cross-thread controls fail closed.
+
+Ticket and message metadata are stored using the existing Neon/PostgreSQL persistence and archive services. Confirmed deletion performs durable archival first and requires two confirmations; the deletion-review workflow remains available for accidental deletion recovery. The bot cannot recreate the original Discord channel ID or impersonate historical authors, so recovered messages retain the original channel/user attribution as metadata rather than pretending to be original Discord messages.
+
+Private-thread policy tests verify lifecycle controls and that unknown persisted lifecycle values fail closed. The support-hours engine remains shared by both text-channel and private-thread intake paths. Live server acceptance is still required for real channel/thread creation, staff/owner access, permission changes, closure/reopening, deletion recovery and slash-command registration. See [Stage F Part 2 private-thread architecture and acceptance notes](docs/stage-f-part-2-private-threads.md).
 
