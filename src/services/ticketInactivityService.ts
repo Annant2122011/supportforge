@@ -573,7 +573,7 @@ async function sweepTicket(
         console.warn('Could not cancel a stale inactivity warning for terminal ticket ' + ticket.channelId + ':', error);
       }
       await clearWarningMetadata(ticket).catch((error) => {
-        console.warn('Could not clear stale inactivity metadata for terminal ticket ' + ticket.channelId + ':', error);
+        console.warn('Could not clear stale inactivity metadata for terminal ticket ' + initial.channelId + ':', error);
       });
     }
     return;
