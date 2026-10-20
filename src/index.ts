@@ -729,30 +729,49 @@ client.on('messageCreate', async (message) => {
   // ThreadChannel has no topic and must not flow through the text-only archive
   // adapter. Resolve thread tickets exclusively from their durable Neon row.
   if (message.channel.type === ChannelType.PrivateThread) {
-    const ticket = await getPersistedTicket(message.channel.id).catch(() => undefined);
+    let ticket = await getPersistedTicket(message.channel.id).catch(() => undefined);
     if (!ticket || ticket.guildId !== message.guild.id || ticket.deletedAt || ticket.metadata.workspaceKind !== 'private-thread') return;
+
+    // Persist human activity before archive/network I/O. This narrows the race
+    // in which the inactivity scheduler could otherwise close a ticket while
+    // the messageCreate handler is still copying the message into the archive.
+    if (message.author.bot) {
+      await archiveTicketMessage(message).catch((error) => {
+        console.error('Could not archive private-thread ticket message ' + message.id + ':', error);
+      });
+      return;
+    }
+
+    if (ticket.status !== 'closed' && ticket.status !== 'archived') {
+      const timestamp = message.createdAt.toISOString();
+      const config = await getGuildConfig(message.guild.id);
+      const department = ticket.departmentId ? config.departments[ticket.departmentId] : undefined;
+      const isStaff = Boolean(department?.staffRoleId && message.member?.roles.cache.has(department.staffRoleId));
+      await transitionPersistedTicket(message.channel.id, ticket.status, {
+        metadata: {
+          lastMessageId: message.id,
+          lastMessageAuthorId: message.author.id,
+          lastMessageAuthorType: isStaff ? 'staff' : 'customer',
+          lastActivityAt: timestamp,
+          ...(isStaff ? { lastStaffActivityAt: timestamp } : { lastCustomerMessageAt: timestamp }),
+        },
+      }, {
+        id: message.author.id,
+        attribution: 'actorKnown',
+        confidence: 'high',
+      }, timestamp).catch((error) => {
+        console.warn('Could not persist private-thread ticket activity before archiving:', error);
+      });
+    }
+
     await archiveTicketMessage(message).catch((error) => {
       console.error('Could not archive private-thread ticket message ' + message.id + ':', error);
     });
-    if (message.author.bot) return;
+    ticket = await getPersistedTicket(message.channel.id).catch(() => undefined);
+    if (!ticket || ticket.deletedAt) return;
     if (ticket.status === 'closed' || ticket.status === 'archived') {
       await message.delete().catch((error) => console.warn('Could not remove a message from a closed private-thread ticket:', error));
-      return;
     }
-    const timestamp = new Date().toISOString();
-    const config = await getGuildConfig(message.guild.id);
-    const department = ticket.departmentId ? config.departments[ticket.departmentId] : undefined;
-    const isStaff = Boolean(department?.staffRoleId && message.member?.roles.cache.has(department.staffRoleId));
-    await updatePersistedTicketMetadata(message.channel.id, {
-      metadata: {
-        lastActivityAt: timestamp,
-        ...(isStaff ? { lastStaffActivityAt: timestamp } : { lastCustomerMessageAt: timestamp }),
-      },
-    }, {
-      id: message.author.id,
-      attribution: 'actorKnown',
-      confidence: 'high',
-    }).catch((error) => console.warn('Could not update private-thread ticket activity:', error));
     return;
   }
 
@@ -781,12 +800,60 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
+  const ticketTopic = isTicketTopic(topic);
+  const topicStatus = getTicketStatus(topic);
+  let observedTicket = ticketTopic
+    ? await getPersistedTicket(message.channel.id).catch(() => undefined)
+    : undefined;
+
+  // Record human activity before awaiting archive writes. The inactivity
+  // close transaction checks this durable timestamp and also rechecks the
+  // newest Discord messages immediately before closing.
+  if (
+    ticketTopic &&
+    !message.author.bot &&
+    observedTicket &&
+    !observedTicket.deletedAt &&
+    !['closed', 'archived'].includes(observedTicket.status)
+  ) {
+    const department = observedTicket.departmentId
+      ? guildConfig.departments[observedTicket.departmentId]
+      : undefined;
+    const hasStaffRole = Boolean(
+      department?.staffRoleId &&
+      message.member?.roles.cache.has(department.staffRoleId),
+    );
+    const isOwnerOrParticipant = Boolean(
+      message.author.id === observedTicket.ownerId ||
+      observedTicket.participantIds.includes(message.author.id),
+    );
+    const authorType = hasStaffRole ? 'staff' : isOwnerOrParticipant ? 'customer' : 'unknown';
+    const occurredAt = message.createdAt.toISOString();
+
+    await transitionPersistedTicket(message.channel.id, observedTicket.status, {
+      metadata: {
+        lastMessageId: message.id,
+        lastMessageAuthorId: message.author.id,
+        lastMessageAuthorType: authorType,
+        lastActivityAt: occurredAt,
+        ...(authorType === 'customer' ? { lastCustomerMessageAt: occurredAt } : {}),
+        ...(authorType === 'staff' ? { lastStaffActivityAt: occurredAt } : {}),
+      },
+    }, {
+      id: message.author.id,
+      attribution: 'actorKnown',
+      confidence: 'high',
+    }, occurredAt).catch((error) => {
+      console.error('Could not persist ticket activity before archiving message ' + message.id + ':', error);
+    });
+  }
+
   /*
    * Archive every ticket message (including the bot's initial panel) before
    * applying closed-ticket moderation. A user message removed immediately
    * after sending must still have a durable recovery copy.
    */
-  if (isTicketTopic(topic)) {
+  if (ticketTopic) {
     await archiveTicketMessage(message).catch((error) => {
       console.error('Could not archive message ' + message.id + ' in ticket ' + message.channel.id + ':', error);
     });
@@ -800,13 +867,14 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  if (!isTicketTopic(topic)) {
+  if (!ticketTopic) {
     return;
   }
 
-  const topicStatus = getTicketStatus(topic);
-  const persistedTicket = await getPersistedTicket(message.channel.id);
-  const status = persistedTicket?.status ?? topicStatus;
+  // Re-read state after archive I/O because close/reopen may have committed
+  // while the message was being archived.
+  observedTicket = await getPersistedTicket(message.channel.id).catch(() => undefined);
+  const status = observedTicket?.status ?? topicStatus;
 
   if (
     status === 'closed' ||
@@ -848,56 +916,6 @@ client.on('messageCreate', async (message) => {
     }
 
     return;
-  }
-
-  if (persistedTicket && !persistedTicket.deletedAt) {
-    const department = persistedTicket.departmentId
-      ? guildConfig.departments[persistedTicket.departmentId]
-      : undefined;
-    const hasStaffRole = Boolean(
-      department?.staffRoleId &&
-      message.member?.roles.cache.has(department.staffRoleId),
-    );
-    const isOwnerOrParticipant = Boolean(
-      message.author.id === persistedTicket.ownerId ||
-      persistedTicket.participantIds.includes(message.author.id),
-    );
-    const authorType = hasStaffRole
-      ? 'staff'
-      : isOwnerOrParticipant
-        ? 'customer'
-        : 'unknown';
-    const occurredAt = message.createdAt.toISOString();
-
-    void transitionPersistedTicket(
-      message.channel.id,
-      status,
-      {
-        metadata: {
-          lastMessageId: message.id,
-          lastMessageAuthorId: message.author.id,
-          lastMessageAuthorType: authorType,
-          lastActivityAt: occurredAt,
-          ...(authorType === 'customer'
-            ? { lastCustomerMessageAt: occurredAt }
-            : {}),
-          ...(authorType === 'staff'
-            ? { lastStaffActivityAt: occurredAt }
-            : {}),
-        },
-      },
-      {
-        id: message.author.id,
-        attribution: 'actorKnown',
-        confidence: 'high',
-      },
-      occurredAt,
-    ).catch((error) => {
-      console.error(
-        'SupportForge could not persist ticket message activity for ' + message.channel.id + ':',
-        error,
-      );
-    });
   }
 
   void recordTicketMessageForPanel(message).catch((error) => {
