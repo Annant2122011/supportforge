@@ -434,9 +434,15 @@ async function performThreadAction(
 
   try {
     await refreshPrivateThreadPanel(thread, updated, nextTopic);
+    // Sending a replacement panel can alter Discord's thread archive state.
+    // Reassert read-only closure after the UI reconciliation as a final guard.
+    if (nextStatus === 'closed' || nextStatus === 'archived') {
+      if (!thread.archived) await thread.setArchived(true, 'ResolveX reassert closed ticket state after panel refresh');
+      if (!thread.locked) await thread.setLocked(true, 'ResolveX reassert closed ticket lock after panel refresh');
+    }
   } catch (error) {
-    synchronizationFailures.push('ticket panel refresh');
-    console.warn('Private-thread state is durable, but panel synchronization will retry through the outbox:', error);
+    synchronizationFailures.push('ticket panel/archive-lock refresh');
+    console.warn('Private-thread state is durable, but panel/archive-lock synchronization will retry through the outbox:', error);
   }
 
   const config = await getGuildConfig(guild.id);
