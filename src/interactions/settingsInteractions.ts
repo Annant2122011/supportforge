@@ -70,9 +70,13 @@ import {
   formatSupportHoursInstant,
   formatSupportHoursWeeklySchedule,
   getSupportHoursPolicy,
+  getSupportHoursPolicies,
+  resolveEffectiveSupportHoursPolicy,
   parseSupportHoursWeeklySchedule,
   saveSupportHoursPolicy,
   SUPPORT_HOURS_DAYS,
+  type SupportHoursScopeType,
+  type SupportHoursContext,
 } from '../services/supportHoursService';
 import { normalizeDiscordEmoji } from '../core/domain/discordEmoji';
 import { handleTicketFormSettingsInteraction } from './ticketFormSettingsInteractions';
@@ -785,50 +789,148 @@ async function showPremiumSettings(interaction: SettingsViewInteraction, notice 
 }
 
 
+type SupportHoursSettingsScope = { scopeType: SupportHoursScopeType; scopeId: string | null };
+
+function supportHoursContext(scope: SupportHoursSettingsScope): SupportHoursContext {
+  if (scope.scopeType === 'department') return { departmentId: scope.scopeId ?? undefined };
+  if (scope.scopeType === 'panel') return { panelId: scope.scopeId ?? undefined };
+  return {};
+}
+
+function parseSupportHoursSettingsScope(parts: string[], typeIndex = 4): SupportHoursSettingsScope {
+  const rawType = parts[typeIndex];
+  const scopeType: SupportHoursScopeType =
+    rawType === 'department' || rawType === 'panel' ? rawType : 'guild';
+  const candidate = parts[typeIndex + 1];
+  return { scopeType, scopeId: scopeType === 'guild' || !candidate || candidate === '-' ? null : candidate };
+}
+
+function supportHoursScopedActionId(action: string, scope: SupportHoursSettingsScope): string {
+  return 'sf:settings:support-hours:' + action + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-');
+}
+
 async function showSupportHoursSettings(
   interaction: SettingsViewInteraction,
   notice = '',
+  scopeType: SupportHoursScopeType = 'guild',
+  scopeId: string | null = null,
+  departmentPage = 0,
+  panelPage = 0,
 ): Promise<void> {
   const guild = interaction.guild!;
-  const policy = await getSupportHoursPolicy(guild.id, 'guild');
-  const decision = await evaluateSupportHours(guild.id);
-  const schedule = policy
-    ? formatSupportHoursWeeklySchedule(policy.weeklySchedule)
+  const config = await getGuildConfig(guild.id);
+  const scope = { scopeType, scopeId: scopeType === 'guild' ? null : scopeId };
+  if (scope.scopeType !== 'guild' && !scope.scopeId) {
+    await renderSettingsView(interaction, [new EmbedBuilder().setTitle('🕒 Support Hours').setDescription('Choose a valid department or ticket panel to configure its override.')], [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()),
+    ]);
+    return;
+  }
+
+  const context = supportHoursContext(scope);
+  const [localPolicy, policies] = await Promise.all([
+    getSupportHoursPolicy(guild.id, scope.scopeType, scope.scopeId),
+    getSupportHoursPolicies(guild.id),
+  ]);
+  const effectivePolicy = resolveEffectiveSupportHoursPolicy(policies, context);
+  const decision = await evaluateSupportHours(guild.id, context);
+  const schedule = effectivePolicy
+    ? formatSupportHoursWeeklySchedule(effectivePolicy.weeklySchedule)
     : SUPPORT_HOURS_DAYS.map((day) => day + '=closed').join('\n');
-  const status = !policy
-    ? 'Not configured · ticket creation is unrestricted by the server default'
-    : !policy.enabled
+  const status = !effectivePolicy
+    ? 'Not configured · new ticket creation is unrestricted'
+    : !decision.policyEnabled
       ? 'Enforcement disabled'
       : decision.isOpen
         ? 'OPEN'
-        : policy.outsideHoursBehavior === 'allow'
+        : decision.ticketCreationAllowed
           ? 'CLOSED · new tickets allowed with notice'
           : 'CLOSED · new ticket creation restricted';
+  const scopeLabel = scope.scopeType === 'guild'
+    ? 'Server default'
+    : scope.scopeType === 'department'
+      ? 'Department · ' + (config.departments[scope.scopeId!]?.name ?? scope.scopeId)
+      : 'Ticket panel · ' + scope.scopeId;
+  const inheritance = localPolicy
+    ? 'An override is saved for this scope.'
+    : effectivePolicy
+      ? 'No override is saved here; this scope inherits the ' + effectivePolicy.scopeType + ' schedule. Editing will create an override.'
+      : 'No schedule is configured for this scope.';
+
   const embed = new EmbedBuilder()
     .setTitle('🕒 Support Hours & Time Zone')
     .setDescription(
       (notice ? notice + '\n\n' : '') +
-      'This editor controls the **server-wide default**. Department and individual ticket-panel overrides are available through /supportforge settings support-hours.\n\n' +
+      '**Scope:** ' + scopeLabel + '\n' + inheritance + '\n\n' +
       '**Status:** ' + status + '\n' +
-      '**Time zone:** ' + (policy?.timezone ?? 'Not configured') + '\n' +
-      '**Outside hours:** ' + (policy?.outsideHoursBehavior ?? 'restrict') + '\n' +
-      '**Policy version:** ' + (policy?.version ?? 'Not saved') + '\n\n' +
+      '**Time zone:** ' + (effectivePolicy?.timezone ?? 'Not configured') + '\n' +
+      '**Outside hours:** ' + (effectivePolicy?.outsideHoursBehavior ?? 'restrict') + '\n' +
+      '**Policy version:** ' + (localPolicy?.version !== undefined ? String(localPolicy.version) : effectivePolicy ? String(effectivePolicy.version) + ' (inherited)' : 'Not saved') + '\n\n' +
       '**Weekly schedule**\n' + schedule +
       (decision.nextOpeningAt ? '\n\n**Next opening:** ' + formatSupportHoursInstant(decision.nextOpeningAt, decision.timezone) : '') +
       '\n\nUse 24-hour local times. Daylight-saving transitions are handled by the shared schedule service.',
     );
-  const hasIntervals = Boolean(policy && SUPPORT_HOURS_DAYS.some((day) => policy.weeklySchedule[day].length > 0));
-  await renderSettingsView(interaction, [embed], [
+
+  const hasIntervals = Boolean(effectivePolicy && SUPPORT_HOURS_DAYS.some((day) => effectivePolicy.weeklySchedule[day].length > 0));
+  const currentBehavior = effectivePolicy?.outsideHoursBehavior ?? 'restrict';
+  const rows: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>> = [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:support-hours:edit').setLabel('Edit Weekly Schedule').setEmoji('🗓️').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('sf:settings:support-hours:toggle').setLabel(policy?.enabled ? 'Disable Enforcement' : 'Enable Enforcement').setEmoji(policy?.enabled ? '⏸️' : '▶️').setStyle(policy?.enabled ? ButtonStyle.Danger : ButtonStyle.Success).setDisabled(!policy?.enabled && !hasIntervals),
-      new ButtonBuilder().setCustomId('sf:settings:support-hours:behavior').setLabel(policy?.outsideHoursBehavior === 'allow' ? 'Restrict After Hours' : 'Allow After Hours').setEmoji('🚦').setStyle(ButtonStyle.Secondary).setDisabled(!policy),
+      new ButtonBuilder().setCustomId(supportHoursScopedActionId('edit', scope)).setLabel('Edit Weekly Schedule').setEmoji('🗓️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(supportHoursScopedActionId('toggle', scope)).setLabel(decision.policyEnabled ? 'Disable Enforcement' : 'Enable Enforcement').setEmoji(decision.policyEnabled ? '⏸️' : '▶️').setStyle(decision.policyEnabled ? ButtonStyle.Danger : ButtonStyle.Success).setDisabled(!decision.policyEnabled && !hasIntervals),
+      new ButtonBuilder().setCustomId(supportHoursScopedActionId('behavior', scope)).setLabel(currentBehavior === 'allow' ? 'Restrict After Hours' : 'Allow After Hours').setEmoji('🚦').setStyle(ButtonStyle.Secondary).setDisabled(!effectivePolicy),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:support-hours:clear').setLabel('Clear Server Default').setEmoji('🧹').setStyle(ButtonStyle.Secondary).setDisabled(!policy),
+      new ButtonBuilder().setCustomId(supportHoursScopedActionId('clear', scope)).setLabel(scope.scopeType === 'guild' ? 'Clear Server Default' : 'Clear Override').setEmoji('🧹').setStyle(ButtonStyle.Secondary).setDisabled(!localPolicy),
       backButton(),
     ),
-  ]);
+  ];
+
+  const departments = Object.entries(config.departments ?? {});
+  const panels = Object.keys(config.customPanels ?? {});
+  const departmentPageCount = Math.max(1, Math.ceil(departments.length / 25));
+  const panelPageCount = Math.max(1, Math.ceil(panels.length / 25));
+  departmentPage = Math.min(Math.max(0, departmentPage), departmentPageCount - 1);
+  panelPage = Math.min(Math.max(0, panelPage), panelPageCount - 1);
+
+  if (departments.length) {
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId('sf:settings:support-hours:scope:department')
+      .setPlaceholder('Choose a department override · page ' + (departmentPage + 1) + '/' + departmentPageCount)
+      .addOptions(departments.slice(departmentPage * 25, departmentPage * 25 + 25).map(([id, department]) => ({
+        label: String(department.name || id).slice(0, 100),
+        value: id,
+        description: ('Department ID: ' + id).slice(0, 100),
+      })));
+    rows.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu));
+  }
+  if (panels.length) {
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId('sf:settings:support-hours:scope:panel')
+      .setPlaceholder('Choose a ticket-panel override · page ' + (panelPage + 1) + '/' + panelPageCount)
+      .addOptions(panels.slice(panelPage * 25, panelPage * 25 + 25).map((id) => ({
+        label: ('Panel ' + id).slice(0, 100),
+        value: id,
+        description: ('Ticket panel ID: ' + id).slice(0, 100),
+      })));
+    rows.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu));
+  }
+
+  const pageButtons: ButtonBuilder[] = [];
+  if (departmentPage > 0) {
+    pageButtons.push(new ButtonBuilder().setCustomId('sf:settings:support-hours:page:' + (departmentPage - 1) + ':' + panelPage + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-')).setLabel('Previous Departments').setStyle(ButtonStyle.Secondary));
+  }
+  if (departmentPage + 1 < departmentPageCount) {
+    pageButtons.push(new ButtonBuilder().setCustomId('sf:settings:support-hours:page:' + (departmentPage + 1) + ':' + panelPage + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-')).setLabel('Next Departments').setStyle(ButtonStyle.Secondary));
+  }
+  if (panelPage > 0) {
+    pageButtons.push(new ButtonBuilder().setCustomId('sf:settings:support-hours:page:' + departmentPage + ':' + (panelPage - 1) + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-')).setLabel('Previous Panels').setStyle(ButtonStyle.Secondary));
+  }
+  if (panelPage + 1 < panelPageCount) {
+    pageButtons.push(new ButtonBuilder().setCustomId('sf:settings:support-hours:page:' + departmentPage + ':' + (panelPage + 1) + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-')).setLabel('Next Panels').setStyle(ButtonStyle.Secondary));
+  }
+  if (pageButtons.length) rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(pageButtons));
+
+  await renderSettingsView(interaction, [embed], rows);
 }
 
 async function showTicketWorkspaceSettings(
