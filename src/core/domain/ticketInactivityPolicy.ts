@@ -8,14 +8,57 @@ export interface TicketInactivitySettings {
 
 export interface TicketInactivityState {
   status: TicketStatus;
+  priority?: string | null;
   deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
   metadata: Record<string, unknown>;
 }
 
+export interface HumanActivityCandidate {
+  createdAt: string;
+  messageId: string;
+  authorId: string;
+  authorIsBot: boolean;
+}
+
+export interface LatestHumanActivity {
+  at: string;
+  messageId: string;
+  authorId: string;
+}
+
+/** Find human activity newer than a persisted anchor; bot/system messages never reset inactivity. */
+export function findLatestHumanActivityAfter(
+  anchorAt: string,
+  candidates: readonly HumanActivityCandidate[],
+): LatestHumanActivity | null {
+  const anchorMs = Date.parse(anchorAt);
+  if (!Number.isFinite(anchorMs)) return null;
+
+  let latest: LatestHumanActivity | null = null;
+  let latestMs = anchorMs;
+  for (const candidate of candidates) {
+    if (candidate.authorIsBot) continue;
+    const timestamp = Date.parse(candidate.createdAt);
+    if (!Number.isFinite(timestamp) || timestamp <= anchorMs) continue;
+    if (
+      timestamp > latestMs ||
+      (timestamp === latestMs && candidate.messageId > (latest?.messageId ?? ''))
+    ) {
+      latestMs = timestamp;
+      latest = {
+        at: new Date(timestamp).toISOString(),
+        messageId: candidate.messageId,
+        authorId: candidate.authorId,
+      };
+    }
+  }
+  return latest;
+}
+
 export type TicketInactivityDecision =
-  | { action: 'skip'; reason: 'disabled' | 'deleted' | 'terminal' | 'invalid-anchor' }
+  | { action: 'skip'; reason: 'disabled' | 'deleted' | 'terminal' | 'invalid-anchor' | 'exempt' }
   | { action: 'wait'; anchorAt: string; warningAt: number }
   | { action: 'warn'; anchorAt: string }
   | { action: 'grace'; anchorAt: string; deadlineAt: string }
@@ -62,6 +105,14 @@ export function evaluateTicketInactivity(
   if (!settings.enabled) return { action: 'skip', reason: 'disabled' };
   if (ticket.deletedAt) return { action: 'skip', reason: 'deleted' };
   if (!ACTIVE_INACTIVITY_STATUSES.includes(ticket.status)) return { action: 'skip', reason: 'terminal' };
+  // Critical tickets and explicitly escalated/staff-exempt tickets must never
+  // be closed by inactivity automation.
+  if (
+    ticket.priority === 'critical' ||
+    ticket.metadata.inactivityExempt === true ||
+    ticket.metadata.activeEscalation === true ||
+    ticket.metadata.vip === true
+  ) return { action: 'skip', reason: 'exempt' };
 
   const anchorAt = getTicketInactivityAnchor(ticket);
   if (!anchorAt) return { action: 'skip', reason: 'invalid-anchor' };
