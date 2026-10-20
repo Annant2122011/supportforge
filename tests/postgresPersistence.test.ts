@@ -98,10 +98,9 @@ test(
       },
     );
 
-    assert.equal(
-      (await tickets.getByChannelId(record.channelId))?.priority,
-      'critical',
-    );
+    const afterMetadataUpdate = await tickets.getByChannelId(record.channelId);
+    assert.equal(afterMetadataUpdate?.priority, 'critical');
+    assert.equal(afterMetadataUpdate?.status, 'claimed', 'metadata/activity updates must not replay a stale lifecycle status');
 
     ticketEvents = await events.listTicketEvents(record.id);
     assert.equal(ticketEvents.length, 3);
