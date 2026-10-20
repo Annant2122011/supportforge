@@ -441,6 +441,13 @@ async function autoCloseInactiveTicket(
   fresh = await getPersistedTicket(candidate.channelId);
   if (!isCurrentActiveTicket(fresh, anchorAt)) return;
 
+  // The transcript receipt adds another round-trip between the last check and
+  // the close commit. Check again as late as possible before the PostgreSQL
+  // compare-and-close transaction to narrow that unavoidable Discord/DB gap.
+  if (await guardAgainstUnpersistedHumanActivity(client, channel, fresh, anchorAt, 100, true)) return;
+  fresh = await getPersistedTicket(candidate.channelId);
+  if (!isCurrentActiveTicket(fresh, anchorAt)) return;
+
   const closedAt = new Date().toISOString();
   const closedTopic = fresh.metadata.workspaceKind === 'private-thread'
     ? makeClosedTopic(metadataString(fresh, 'ticketTopic') ?? projectDurableTicketTopic('', fresh), closedAt, transcriptMessage.id)
