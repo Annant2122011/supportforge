@@ -21,7 +21,7 @@ test('Settings dashboard layout preserves server order while retaining every bui
   assert.equal(ids[2], 'sf:settings:dashboard-builder');
   assert.equal(ids.length, SETTINGS_DASHBOARD_BUTTON_KEYS.length);
   assert.equal(new Set(ids).size, ids.length);
-  assert.equal(rows.length, 4);
+  assert.equal(rows.length, Math.ceil(SETTINGS_DASHBOARD_BUTTON_KEYS.length / 5));
   assert.equal(rows.every((row) => row.components.length > 0 && row.components.length <= 5), true);
 });
 

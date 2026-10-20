@@ -464,6 +464,20 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
   );
 });
 
+client.on('threadDelete', async (thread) => {
+  if (thread.type !== ChannelType.PrivateThread) return;
+  const ticket = await getPersistedTicket(thread.id).catch(() => undefined);
+  if (!ticket || ticket.deletedAt || ticket.metadata.workspaceKind !== 'private-thread') return;
+  for (const message of thread.messages.cache.values()) {
+    await archiveTicketMessage(message).catch((error) => {
+      console.warn('Could not archive a cached message before private-thread deletion:', error);
+    });
+  }
+  await recordTicketChannelDeleted(thread).catch((error) => {
+    console.error('Could not record deleted private-thread ticket ' + thread.id + ' for recovery:', error);
+  });
+});
+
 client.on('channelDelete', async (channel) => {
   if (!('guild' in channel)) {
     return;
@@ -715,6 +729,9 @@ client.on('messageCreate', async (message) => {
   if (message.channel.type === ChannelType.PrivateThread) {
     const ticket = await getPersistedTicket(message.channel.id).catch(() => undefined);
     if (!ticket || ticket.guildId !== message.guild.id || ticket.deletedAt || ticket.metadata.workspaceKind !== 'private-thread') return;
+    await archiveTicketMessage(message).catch((error) => {
+      console.error('Could not archive private-thread ticket message ' + message.id + ':', error);
+    });
     if (message.author.bot) return;
     if (ticket.status === 'closed' || ticket.status === 'archived') {
       await message.delete().catch((error) => console.warn('Could not remove a message from a closed private-thread ticket:', error));
