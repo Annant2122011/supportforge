@@ -86,6 +86,8 @@ export interface AdvancedGuildSettings {
     enabled: boolean;
     idleHours: number;
     graceHours: number;
+    /** Increments when policy toggles or thresholds change, invalidating old warning markers. */
+    generation: number;
   };
   retention: {
     closedDays: number;
@@ -170,6 +172,7 @@ const DEFAULTS: AdvancedGuildSettings = {
     enabled: false,
     idleHours: 72,
     graceHours: 24,
+    generation: 1,
   },
   retention: {
     closedDays: 180,
@@ -325,6 +328,7 @@ function normalizeExistingSettings(
       enabled: settings.inactivity?.enabled === true,
       idleHours: normalizeBoundedInteger(settings.inactivity?.idleHours, DEFAULTS.inactivity.idleHours, 1, 720),
       graceHours: normalizeBoundedInteger(settings.inactivity?.graceHours, DEFAULTS.inactivity.graceHours, 1, 168),
+      generation: normalizeBoundedInteger(settings.inactivity?.generation, DEFAULTS.inactivity.generation, 1, 2147483647),
     },
     retention: {
       ...DEFAULTS.retention,
