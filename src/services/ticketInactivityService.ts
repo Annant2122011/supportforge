@@ -407,6 +407,7 @@ async function sweepTicket(
   if (decision.action === 'wait') {
     const storedAnchor = metadataString(ticket, 'inactivityWarningAnchorAt');
     if (storedAnchor && storedAnchor !== decision.anchorAt) {
+      await cancelVisibleWarnings(channel, client, ticket);
       await clearWarningMetadata(ticket);
     }
     return;
@@ -473,6 +474,20 @@ export async function sweepTicketInactivityForGuild(
 ): Promise<void> {
   const records = await getPersistedTicketRecords(guild.id);
   const policy = (await getAdvancedSettings(guild.id)).inactivity;
+  if (!policy.enabled) {
+    for (const ticket of records) {
+      if (!isActiveStatus(ticket.status) || ticket.deletedAt) continue;
+      if (
+        ticket.metadata.inactivityWarningAnchorAt ||
+        ticket.metadata.inactivityWarningDeadlineAt ||
+        ticket.metadata.inactivityWarningMessageId
+      ) {
+        try { await clearWarningMetadata(ticket); }
+        catch (error) { console.warn('Could not clear a disabled inactivity warning for ticket ' + ticket.channelId + ':', error); }
+      }
+    }
+    return;
+  }
   for (const ticket of records) {
     try {
       await sweepTicket(client, guild, ticket, policy, nowMs);
@@ -493,27 +508,7 @@ export async function clearTicketInactivityWarningsForGuild(guild: Guild): Promi
     ) continue;
     try {
       const channel = await resolveTicketChannel(guild, ticket);
-      if (channel) {
-        const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
-        if (messages) {
-          const prefix = WARNING_MARKER_PREFIX + ' | ticket=' + ticket.channelId + ' |';
-          for (const message of messages.values()) {
-            const footer = embedFooter(message);
-            if (message.author.id !== guild.client.user?.id || !footer?.startsWith(prefix)) continue;
-            await message.edit({
-              embeds: [
-                new EmbedBuilder()
-                  .setColor(0x7B8794)
-                  .setTitle('Inactivity auto-close cancelled')
-                  .setDescription('A server administrator changed the inactivity policy. This warning and grace period are cancelled; this message will not trigger automatic closure.')
-                  .setFooter({ text: footer + ' | CANCELLED' })
-                  .setTimestamp(message.createdAt),
-              ],
-              allowedMentions: { parse: [] },
-            }).catch((error) => console.warn('Could not mark an inactivity warning as cancelled:', error));
-          }
-        }
-      }
+      if (channel) await cancelVisibleWarnings(channel, guild.client, ticket);
       await clearWarningMetadata(ticket);
     } catch (error) {
       console.warn('Could not clear inactivity warning for ticket ' + ticket.channelId + ':', error);
