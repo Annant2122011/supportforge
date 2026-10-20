@@ -1545,6 +1545,19 @@ export const data =
         )
         .addSubcommand((subcommand) =>
           subcommand
+            .setName('inactivity')
+            .setDescription('View or configure ticket inactivity auto-close')
+            .addStringOption((option) => option.setName('action').setDescription('Inactivity policy action').setRequired(true).addChoices(
+              { name: 'Show settings', value: 'show' },
+              { name: 'Enable automation', value: 'enable' },
+              { name: 'Disable automation', value: 'disable' },
+              { name: 'Configure thresholds', value: 'configure' },
+            ))
+            .addIntegerOption((option) => option.setName('idle-hours').setDescription('Hours of inactivity before warning (1–720)').setMinValue(1).setMaxValue(720))
+            .addIntegerOption((option) => option.setName('grace-hours').setDescription('Hours after warning before auto-close (1–168)').setMinValue(1).setMaxValue(168)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
             .setName('reset')
             .setDescription('Factory-reset SupportForge after typed confirmation')
             .addStringOption((option) => option.setName('confirmation').setDescription('Type DELETE SUPPORT FORGE exactly').setRequired(true).setMinLength(20).setMaxLength(20))
