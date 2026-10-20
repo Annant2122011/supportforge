@@ -247,7 +247,15 @@ async function transcriptDestination(guild: Guild): Promise<TextChannel> {
   return channel as TextChannel;
 }
 
-async function findTranscriptMessage(channel: TextChannel, marker: string): Promise<Message | null> {
+async function findTranscriptMessage(
+  channel: TextChannel,
+  marker: string,
+  knownMessageId: string | null,
+): Promise<Message | null> {
+  if (knownMessageId) {
+    const known = await channel.messages.fetch(knownMessageId).catch(() => null);
+    if (known && known.content.includes(marker)) return known;
+  }
   const recent = await channel.messages.fetch({ limit: 100 });
   return recent.find((message) => message.content.includes(marker)) ?? null;
 }
@@ -293,7 +301,10 @@ async function autoCloseInactiveTicket(
 
   const destination = await transcriptDestination(guild);
   const marker = transcriptMarker(candidate.channelId, anchorAt);
-  let transcriptMessage = await findTranscriptMessage(destination, marker);
+  const knownTranscriptId = metadataString(fresh, 'inactivityTranscriptAnchorAt') === anchorAt
+    ? metadataString(fresh, 'inactivityTranscriptMessageId')
+    : null;
+  let transcriptMessage = await findTranscriptMessage(destination, marker, knownTranscriptId);
 
   if (!transcriptMessage) {
     const ticketNumber = fresh.ticketNumber ?? 'unknown';
@@ -328,6 +339,18 @@ async function autoCloseInactiveTicket(
     });
   }
 
+  fresh = await getPersistedTicket(candidate.channelId);
+  if (!isCurrentActiveTicket(fresh, anchorAt)) return;
+
+  // Save the upload receipt before the lifecycle commit. If that commit or an
+  // outbox insert fails, a later scheduler pass can fetch this message directly
+  // by ID even after it has fallen outside the transcript channel's recent 100.
+  await updatePersistedTicketMetadata(candidate.channelId, {
+    metadata: {
+      inactivityTranscriptAnchorAt: anchorAt,
+      inactivityTranscriptMessageId: transcriptMessage.id,
+    },
+  }, SYSTEM_ACTOR);
   fresh = await getPersistedTicket(candidate.channelId);
   if (!isCurrentActiveTicket(fresh, anchorAt)) return;
 
