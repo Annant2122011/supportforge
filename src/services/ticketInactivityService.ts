@@ -58,6 +58,39 @@ function warningMarker(channelId: string, anchorAt: string, generation: number):
   return WARNING_MARKER_PREFIX + ' | ticket=' + channelId + ' | activity=' + anchorAt + ' | generation=' + generation;
 }
 
+async function cancelIfInactivityPolicyChanged(
+  client: Client,
+  guild: Guild,
+  channel: InactivityChannel,
+  ticket: PersistedTicket,
+  generation: number,
+  idleHours: number,
+  graceHours: number,
+): Promise<boolean> {
+  const policy = (await getAdvancedSettings(guild.id)).inactivity;
+  if (
+    policy.enabled &&
+    policy.generation === generation &&
+    policy.idleHours === idleHours &&
+    policy.graceHours === graceHours
+  ) return false;
+
+  const current = await getPersistedTicket(ticket.channelId);
+  if (current) {
+    await cancelVisibleWarnings(channel, client, current);
+    if (
+      current.metadata.inactivityWarningAnchorAt ||
+      current.metadata.inactivityWarningDeadlineAt ||
+      current.metadata.inactivityWarningMessageId
+    ) {
+      await clearWarningMetadata(current);
+    }
+  } else {
+    await cancelVisibleWarnings(channel, client, ticket);
+  }
+  return true;
+}
+
 function transcriptMarker(channelId: string, anchorAt: string): string {
   return TRANSCRIPT_MARKER_PREFIX + ': ' + channelId + ':' + anchorAt + ']';
 }
@@ -173,6 +206,7 @@ async function issueOrRecoverWarning(
   graceHours: number,
   generation: number,
 ): Promise<Message | null> {
+  if (await cancelIfInactivityPolicyChanged(client, channel.guild, channel, ticket, generation, idleHours, graceHours)) return null;
   let latestTicket = await getPersistedTicket(ticket.channelId);
   if (!isCurrentActiveTicket(latestTicket, anchorAt)) return null;
   ticket = latestTicket;
@@ -181,6 +215,7 @@ async function issueOrRecoverWarning(
   let message = await findWarningMessage(channel, client, marker, knownId);
 
   if (!message) {
+    if (await cancelIfInactivityPolicyChanged(client, channel.guild, channel, ticket, generation, idleHours, graceHours)) return null;
     latestTicket = await getPersistedTicket(ticket.channelId);
     if (!isCurrentActiveTicket(latestTicket, anchorAt)) return null;
     ticket = latestTicket;
@@ -203,6 +238,7 @@ async function issueOrRecoverWarning(
     await cancelVisibleWarnings(channel, client, ticket);
     return null;
   }
+  if (await cancelIfInactivityPolicyChanged(client, channel.guild, channel, current, generation, idleHours, graceHours)) return null;
 
   await updatePersistedTicketMetadata(ticket.channelId, {
     metadata: {
@@ -222,6 +258,7 @@ async function issueOrRecoverWarning(
     if (committed) await clearWarningMetadata(committed);
     return null;
   }
+  if (await cancelIfInactivityPolicyChanged(client, channel.guild, channel, committed, generation, idleHours, graceHours)) return null;
   return message;
 }
 
