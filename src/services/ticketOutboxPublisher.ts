@@ -240,6 +240,10 @@ export class TicketOutboxPublisher implements OutboxPublisher {
         if (!thread.archived) await thread.setArchived(true, 'ResolveX outbox closed-ticket reconciliation');
         if (!thread.locked) await thread.setLocked(true, 'ResolveX outbox closed-ticket reconciliation');
         await refreshPrivateThreadPanel(thread, ticket, topic);
+        // A missing panel may be recreated by sending a new message. Ensure
+        // that such repair never leaves the durable closed ticket writable.
+        if (!thread.archived) await thread.setArchived(true, 'ResolveX outbox reassert closed ticket after panel refresh');
+        if (!thread.locked) await thread.setLocked(true, 'ResolveX outbox reassert closed ticket lock after panel refresh');
       } else {
         if (thread.archived) await thread.setArchived(false, 'ResolveX outbox active-ticket reconciliation');
         if (thread.locked) await thread.setLocked(false, 'ResolveX outbox active-ticket reconciliation');
