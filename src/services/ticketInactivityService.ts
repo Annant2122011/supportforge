@@ -108,6 +108,41 @@ async function findWarningMessage(
   ) ?? null;
 }
 
+async function cancelVisibleWarnings(
+  channel: InactivityChannel,
+  client: Client,
+  ticket: PersistedTicket,
+): Promise<void> {
+  const prefix = WARNING_MARKER_PREFIX + ' | ticket=' + ticket.channelId + ' |';
+  const candidates = new Map<string, Message>();
+  const knownId = metadataString(ticket, 'inactivityWarningMessageId');
+  if (knownId) {
+    const known = await channel.messages.fetch(knownId).catch(() => null);
+    if (known) candidates.set(known.id, known);
+  }
+  const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+  for (const message of recent?.values() ?? []) candidates.set(message.id, message);
+  for (const message of candidates.values()) {
+    const footer = embedFooter(message);
+    if (
+      message.author.id !== client.user?.id ||
+      !footer?.startsWith(prefix) ||
+      footer.endsWith('| CANCELLED')
+    ) continue;
+    await message.edit({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x7B8794)
+          .setTitle('Inactivity auto-close cancelled')
+          .setDescription('This ticket has received activity or the server inactivity policy changed. The old warning and grace period are cancelled.')
+          .setFooter({ text: footer + ' | CANCELLED' })
+          .setTimestamp(message.createdAt),
+      ],
+      allowedMentions: { parse: [] },
+    }).catch((error) => console.warn('Could not mark an inactivity warning as cancelled:', error));
+  }
+}
+
 function warningEmbed(
   ticket: PersistedTicket,
   idleHours: number,
@@ -136,15 +171,20 @@ async function issueOrRecoverWarning(
   idleHours: number,
   graceHours: number,
   generation: number,
-): Promise<Message> {
+): Promise<Message | null> {
+  let latestTicket = await getPersistedTicket(ticket.channelId);
+  if (!isCurrentActiveTicket(latestTicket, anchorAt)) return null;
+  ticket = latestTicket;
   const marker = warningMarker(ticket.channelId, anchorAt, generation);
   const knownId = metadataString(ticket, 'inactivityWarningMessageId');
   let message = await findWarningMessage(channel, client, marker, knownId);
 
   if (!message) {
-    // Do not persist the warning stage before Discord accepts the warning.
-    // If a crash happens after send but before persistence, the marker search
-    // above recovers the existing message rather than sending duplicates.
+    latestTicket = await getPersistedTicket(ticket.channelId);
+    if (!isCurrentActiveTicket(latestTicket, anchorAt)) return null;
+    ticket = latestTicket;
+    // The marker allows recovery if Discord accepts the send but the process
+    // stops before the warning ID/deadline is persisted to PostgreSQL.
     message = await channel.send({
       content: ticket.ownerId ? '<@' + ticket.ownerId + '>' : undefined,
       embeds: [warningEmbed(ticket, idleHours, graceHours, Date.now() + graceHours * 60 * 60 * 1000, marker)],
@@ -152,27 +192,35 @@ async function issueOrRecoverWarning(
     });
   }
 
-  // Derive grace from the visible warning's Discord creation timestamp. This
-  // keeps the displayed deadline stable across bot restarts and partial writes.
   const deadlineAt = new Date(message.createdTimestamp + graceHours * 60 * 60 * 1000).toISOString();
   await message.edit({
     embeds: [warningEmbed(ticket, idleHours, graceHours, Date.parse(deadlineAt), marker)],
     allowedMentions: { parse: [] },
   });
   const current = await getPersistedTicket(ticket.channelId);
-  if (!isCurrentActiveTicket(current, anchorAt)) return message;
+  if (!isCurrentActiveTicket(current, anchorAt)) {
+    await cancelVisibleWarnings(channel, client, ticket);
+    return null;
+  }
 
   await updatePersistedTicketMetadata(ticket.channelId, {
     metadata: {
-      // Persist a baseline for legacy tickets that predate lastActivityAt.
-      // Otherwise updatePersistedTicketMetadata would advance updatedAt and
-      // unintentionally move the activity anchor at warning time.
+      // Establish an explicit stable anchor for legacy rows that predate lastActivityAt.
       lastActivityAt: metadataString(current, 'lastActivityAt') ? undefined : anchorAt,
       inactivityWarningAnchorAt: anchorAt,
       inactivityWarningDeadlineAt: deadlineAt,
       inactivityWarningMessageId: message.id,
     },
   }, SYSTEM_ACTOR);
+
+  // Catch a reply that committed during the metadata write; the final close
+  // path separately checks the activity anchor atomically under a row lock.
+  const committed = await getPersistedTicket(ticket.channelId);
+  if (!isCurrentActiveTicket(committed, anchorAt)) {
+    await cancelVisibleWarnings(channel, client, ticket);
+    if (committed) await clearWarningMetadata(committed);
+    return null;
+  }
   return message;
 }
 
