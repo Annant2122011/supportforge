@@ -15,6 +15,7 @@ import {
 } from '../core/domain/ticketInactivityPolicy';
 import {
   getAdvancedSettings,
+  type AdvancedGuildSettings,
 } from './advancedSettingsService';
 import { getGuildConfig } from './configService';
 import {
@@ -52,8 +53,8 @@ function metadataString(ticket: PersistedTicket, key: string): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
 }
 
-function warningMarker(channelId: string, anchorAt: string): string {
-  return WARNING_MARKER_PREFIX + ' | ticket=' + channelId + ' | activity=' + anchorAt;
+function warningMarker(channelId: string, anchorAt: string, generation: number): string {
+  return WARNING_MARKER_PREFIX + ' | ticket=' + channelId + ' | activity=' + anchorAt + ' | generation=' + generation;
 }
 
 function transcriptMarker(channelId: string, anchorAt: string): string {
@@ -134,8 +135,9 @@ async function issueOrRecoverWarning(
   anchorAt: string,
   idleHours: number,
   graceHours: number,
+  generation: number,
 ): Promise<Message> {
-  const marker = warningMarker(ticket.channelId, anchorAt);
+  const marker = warningMarker(ticket.channelId, anchorAt, generation);
   const knownId = metadataString(ticket, 'inactivityWarningMessageId');
   let message = await findWarningMessage(channel, client, marker, knownId);
 
@@ -333,21 +335,21 @@ async function autoCloseInactiveTicket(
   }
 }
 
-async function sweepTicket(client: Client, guild: Guild, initial: PersistedTicket, nowMs: number): Promise<void> {
+async function sweepTicket(
+  client: Client,
+  guild: Guild,
+  initial: PersistedTicket,
+  policy: AdvancedGuildSettings['inactivity'],
+  nowMs: number,
+): Promise<void> {
   let ticket = await getPersistedTicket(initial.channelId);
   if (!ticket || ticket.guildId !== guild.id || ticket.deletedAt || !isActiveStatus(ticket.status)) return;
 
-  const settings = normalizeInactivitySettings((await getAdvancedSettings(guild.id)).inactivity);
-  if (!settings.enabled) {
-    if (
-      ticket.metadata.inactivityWarningAnchorAt ||
-      ticket.metadata.inactivityWarningDeadlineAt ||
-      ticket.metadata.inactivityWarningMessageId
-    ) {
-      await clearWarningMetadata(ticket);
-    }
-    return;
-  }
+  const settings = normalizeInactivitySettings(policy);
+  const policyGeneration = Number.isInteger(policy.generation) && policy.generation > 0
+    ? policy.generation
+    : 1;
+  if (!settings.enabled) return;
 
   const channel = await resolveTicketChannel(guild, ticket);
   if (!channel) return;
@@ -371,13 +373,13 @@ async function sweepTicket(client: Client, guild: Guild, initial: PersistedTicke
   }
 
   if (decision.action === 'warn') {
-    await issueOrRecoverWarning(client, channel, ticket, decision.anchorAt, settings.idleHours, settings.graceHours);
+    await issueOrRecoverWarning(client, channel, ticket, decision.anchorAt, settings.idleHours, settings.graceHours, policyGeneration);
     return;
   }
 
   // A grace/close decision is actionable only while the warning message still
   // exists. If someone deletes it, send a replacement and grant a fresh grace.
-  const marker = warningMarker(ticket.channelId, decision.anchorAt);
+  const marker = warningMarker(ticket.channelId, decision.anchorAt, policyGeneration);
   const warning = await findWarningMessage(
     channel,
     client,
@@ -385,7 +387,7 @@ async function sweepTicket(client: Client, guild: Guild, initial: PersistedTicke
     metadataString(ticket, 'inactivityWarningMessageId'),
   );
   if (!warning) {
-    await issueOrRecoverWarning(client, channel, ticket, decision.anchorAt, settings.idleHours, settings.graceHours);
+    await issueOrRecoverWarning(client, channel, ticket, decision.anchorAt, settings.idleHours, settings.graceHours, policyGeneration);
     return;
   }
 
@@ -422,9 +424,10 @@ export async function sweepTicketInactivityForGuild(
   nowMs = Date.now(),
 ): Promise<void> {
   const records = await getPersistedTicketRecords(guild.id);
+  const policy = (await getAdvancedSettings(guild.id)).inactivity;
   for (const ticket of records) {
     try {
-      await sweepTicket(client, guild, ticket, nowMs);
+      await sweepTicket(client, guild, ticket, policy, nowMs);
     } catch (error) {
       console.warn('Ticket inactivity sweep skipped ticket ' + ticket.channelId + ' in guild ' + guild.id + ':', error);
     }
