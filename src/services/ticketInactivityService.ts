@@ -375,6 +375,7 @@ async function autoCloseInactiveTicket(
 ): Promise<void> {
   let fresh = await getPersistedTicket(candidate.channelId);
   if (!isCurrentActiveTicket(fresh, anchorAt)) return;
+  if (await guardAgainstUnpersistedHumanActivity(client, channel, fresh, anchorAt, 100)) return;
 
   const destination = await transcriptDestination(guild);
   const marker = transcriptMarker(candidate.channelId, anchorAt);
@@ -418,6 +419,10 @@ async function autoCloseInactiveTicket(
 
   fresh = await getPersistedTicket(candidate.channelId);
   if (!isCurrentActiveTicket(fresh, anchorAt)) return;
+  // Recheck recent Discord messages after transcript upload and just before the
+  // receipt/close transaction. A late event-handler write must not be the sole
+  // protection against closing a ticket after its owner has just replied.
+  if (await guardAgainstUnpersistedHumanActivity(client, channel, fresh, anchorAt, 100)) return;
 
   // Save the upload receipt before the lifecycle commit. If that commit or an
   // outbox insert fails, a later scheduler pass can fetch this message directly
@@ -503,7 +508,18 @@ async function sweepTicket(
   if (!channel) return;
 
   const decision = evaluateTicketInactivity(ticket, settings, nowMs);
-  if (decision.action === 'skip') return;
+  if (decision.action === 'skip') {
+    if (
+      decision.reason === 'exempt' &&
+      (ticket.metadata.inactivityWarningAnchorAt ||
+        ticket.metadata.inactivityWarningDeadlineAt ||
+        ticket.metadata.inactivityWarningMessageId)
+    ) {
+      await cancelVisibleWarnings(channel, client, ticket);
+      await clearWarningMetadata(ticket);
+    }
+    return;
+  }
   if (decision.action === 'wait') {
     const storedAnchor = metadataString(ticket, 'inactivityWarningAnchorAt');
     if (storedAnchor && storedAnchor !== decision.anchorAt) {
@@ -512,6 +528,8 @@ async function sweepTicket(
     }
     return;
   }
+
+  if (await guardAgainstUnpersistedHumanActivity(client, channel, ticket, decision.anchorAt)) return;
 
   // Do not wake auto-archived threads during their idle wait. Unarchive only
   // when a warning is due or an existing grace period must be checked.
