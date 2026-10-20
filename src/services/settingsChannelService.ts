@@ -264,11 +264,11 @@ export function buildSettingsDashboardEmbed(
 
   const closed =
     settings.retention.closedDays === 0
-      ? 'Unlimited/forever'
+      ? 'No timer (365-day maximum)'
       : settings.retention.closedDays + ' days';
   const archive =
     settings.retention.archiveDays === 0
-      ? 'Unlimited/forever'
+      ? 'No timer (365-day maximum)'
       : settings.retention.archiveDays + ' days';
 
   const claimed = settings.statusCategories.claimedCategoryId
@@ -283,7 +283,7 @@ export function buildSettingsDashboardEmbed(
     .setColor(getThemeColor(theme))
     .setDescription(
       ((settings.settingsDashboard.description || 'Configure your server ticket system, support panels and retention policies.') +
-        '\\n\\nButton-driven configuration • actions are audited. Use **Refresh** to re-read the latest saved configuration.').slice(0, 3900),
+        '\n\nButton-driven configuration • actions are audited. Use **Refresh** to re-read the latest saved configuration.').slice(0, 3900),
     )
     .addFields(
       {
@@ -323,6 +323,20 @@ export function buildSettingsDashboardEmbed(
         inline: true,
       },
       {
+        name: '⏳ Inactivity automation',
+        value: (settings.inactivity.enabled ? '🟢 Enabled' : '⚪ Disabled') +
+          '\nWarn after: **' + settings.inactivity.idleHours + ' h**' +
+          '\nGrace period: **' + settings.inactivity.graceHours + ' h**',
+        inline: true,
+      },
+      {
+        name: '🧵 Ticket workspace',
+        value: settings.ticketWorkspace.mode === 'private-threads'
+          ? 'Private threads'
+          : 'Private text channels',
+        inline: true,
+      },
+      {
         name: '🎨 Appearance',
         value: 'Panel title: **' + settings.appearance.panelTitle.slice(0, 80) + '**',
         inline: true,
@@ -356,6 +370,12 @@ export function buildSettingsDashboardEmbed(
           closed +
           '; Archived – ' +
           archive +
+          '\n' +
+          '**Inactivity automation**: ' +
+          (settings.inactivity.enabled ? 'Enabled' : 'Disabled') +
+          '; warn after ' + settings.inactivity.idleHours + ' hours; grace ' + settings.inactivity.graceHours + ' hours' +
+          '\n' +
+          '**Ticket workspace**: ' + settings.ticketWorkspace.mode +
           '\n' +
           '**Optional status categories**: Claimed tickets – ' +
           claimed +
