@@ -535,6 +535,7 @@ async function replyError(
     | ButtonInteraction
     | ChatInputCommandInteraction
     | StringSelectMenuInteraction
+    | UserSelectMenuInteraction
     | ModalSubmitInteraction,
   content: string,
 ): Promise<void> {
@@ -1489,7 +1490,7 @@ async function createTicket(
               ),
             ],
             components: ticketChannel.type === ChannelType.PrivateThread
-              ? buildPrivateThreadTicketComponents('open')
+              ? buildPrivateThreadTicketComponents('open', ticketChannel.id)
               : buildTicketPanelComponents('open', topic),
           });
 
