@@ -4810,3 +4810,17 @@ The setup command provisions/repairs the Support Forge container, Open category,
 - Reusable templates can be saved, listed, applied to create a new form, and deleted without modifying forms or historical submissions already created from them.
 - Form definitions and immutable versions, wizard sessions, submission drafts, answer snapshots, ticket associations, and creation leases are stored in Neon/PostgreSQL migrations. No SQLite persistence path is introduced.
 - CI on the Stage A/D branch completed the TypeScript build, automated tests, and database verification successfully after the interaction/build fixes.
+
+
+---
+
+# 82. STAGE A–G REVERIFICATION (20 OCTOBER 2026)
+
+A consolidated source review is tracked in [docs/stage-a-to-g-reverification.md](docs/stage-a-to-g-reverification.md).
+
+- Stages A–G have substantial code and automated coverage on the current stacked feature branches, but their pull requests are not yet integrated into `main`.
+- The Settings dashboard has been regrouped around the ticket workflow. Only an untouched legacy default layout is automatically migrated; customized per-server ordering is preserved.
+- F-032 Inactivity Auto-Close is **BUILT / PARTIAL**, not production-accepted. Core warning/grace/transcript/compare-and-close behavior exists; exemption configuration UI and live-guild acceptance remain incomplete.
+- Message activity writes use metadata-only persistence to avoid re-applying an earlier lifecycle status from an asynchronous message handler.
+- The inactivity close path rechecks the latest policy generation and recent human activity around transcript work and before the final PostgreSQL compare-and-close transaction.
+- CI results must be recorded from the final review commit and do not substitute for validating role permissions, rate limits, transcript access, and restore behavior in a controlled Discord test guild.
