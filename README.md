@@ -93,7 +93,7 @@ Stage F is implemented on this feature branch in two increments: Part 1 provides
 
 Support-hours policies are stored in the existing Neon-backed JSON-document repository under a separate support-hours document. This avoids coupling schedule rules to guild appearance settings and does not introduce a second database or SQL migration. Policy scopes resolve in this order: **ticket panel → department → server default**. An explicit disabled policy at a more-specific scope disables enforcement there; removing an override restores inheritance.
 
-The Settings channel now has a **Support Hours** button for editing the server-default weekly schedule. The equivalent slash-command group supports server, department and panel scopes:
+The Settings channel now has a **Support Hours** button with department and ticket-panel scope selectors, weekly schedule editing, timezone, enforcement, outside-hours behavior and clear-override controls. The selectors paginate when a server has more than 25 departments or panels. The equivalent slash-command group supports the same server, department and panel scopes:
 
 - /supportforge settings support-hours action:show scope:guild
 - /supportforge settings support-hours action:set-timezone scope:guild timezone:Asia/Kolkata
