@@ -312,6 +312,132 @@ test(
   },
 );
 
+
+test(
+  'PostgreSQL prevents concurrent pending ticket-button deletion intents for one channel',
+  { skip: !postgresIntegrationEnabled },
+  async () => {
+    await migratePostgres();
+    const pool = getPostgresPool();
+    await pool.query('TRUNCATE TABLE tickets CASCADE');
+
+    const record: TicketRepositoryRecord = {
+      id: 'postgres-delete-race-ticket',
+      guildId: 'postgres-delete-race-guild',
+      channelId: 'postgres-delete-race-channel',
+      ticketNumber: '77',
+      status: 'open',
+      departmentId: 'billing',
+      tagId: 'refund',
+      ownerId: 'postgres-delete-race-owner',
+      priority: 'normal',
+      claimedByIds: [],
+      participantIds: ['postgres-delete-race-owner'],
+      metadata: {},
+      createdAt: '2026-10-18T12:00:00.000Z',
+      updatedAt: '2026-10-18T12:00:00.000Z',
+      deletedAt: null,
+      deletionReason: null,
+    };
+    await new PostgresTicketRepository(pool).create(record);
+
+    const insertIntent = (id: string) => pool.query(
+      'INSERT INTO ticket_recovery_events ' +
+        '(id,ticket_id,guild_id,original_channel_id,source,status,intent,actor_id,actor_name,actor_attribution,confirmation_stage,metadata) ' +
+        'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)',
+      [
+        id,
+        record.id,
+        record.guildId,
+        record.channelId,
+        'ticket_button',
+        'pending',
+        'intentional',
+        'postgres-delete-race-actor',
+        'Test actor',
+        'actorKnown',
+        2,
+        JSON.stringify({ channelIdAtDeletion: record.channelId }),
+      ],
+    );
+
+    await insertIntent('postgres-delete-race-intent-1');
+    await assert.rejects(
+      insertIntent('postgres-delete-race-intent-2'),
+      (error: unknown) =>
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        (error as { code?: unknown }).code === '23505',
+    );
+  },
+);
+
+test(
+  'PostgreSQL recovery replay ledger deduplicates completed original messages',
+  { skip: !postgresIntegrationEnabled },
+  async () => {
+    await migratePostgres();
+    const pool = getPostgresPool();
+    await pool.query('TRUNCATE TABLE tickets CASCADE');
+
+    const record: TicketRepositoryRecord = {
+      id: 'postgres-replay-ledger-ticket',
+      guildId: 'postgres-replay-ledger-guild',
+      channelId: 'postgres-replay-ledger-channel',
+      ticketNumber: '78',
+      status: 'open',
+      departmentId: 'billing',
+      tagId: 'refund',
+      ownerId: 'postgres-replay-ledger-owner',
+      priority: 'normal',
+      claimedByIds: [],
+      participantIds: ['postgres-replay-ledger-owner'],
+      metadata: {},
+      createdAt: '2026-10-18T12:00:00.000Z',
+      updatedAt: '2026-10-18T12:00:00.000Z',
+      deletedAt: null,
+      deletionReason: null,
+    };
+    await new PostgresTicketRepository(pool).create(record);
+    await pool.query(
+      'INSERT INTO ticket_recovery_events (id,ticket_id,guild_id,original_channel_id,source,status,intent,actor_id,actor_name,actor_attribution,confirmation_stage,metadata) ' +
+        'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)',
+      [
+        'postgres-replay-ledger-event',
+        record.id,
+        record.guildId,
+        record.channelId,
+        'discord_native',
+        'restoring',
+        'unknown',
+        'unknown',
+        'Test actor',
+        'actorUnknown',
+        0,
+        JSON.stringify({ channelIdAtDeletion: record.channelId }),
+      ],
+    );
+
+    await pool.query(
+      'INSERT INTO ticket_recovery_replay_items (recovery_event_id,original_message_id,status) VALUES ($1,$2,$3) ' +
+        'ON CONFLICT (recovery_event_id,original_message_id) DO NOTHING',
+      ['postgres-replay-ledger-event', 'original-message-1', 'completed'],
+    );
+    await pool.query(
+      'INSERT INTO ticket_recovery_replay_items (recovery_event_id,original_message_id,status) VALUES ($1,$2,$3) ' +
+        'ON CONFLICT (recovery_event_id,original_message_id) DO NOTHING',
+      ['postgres-replay-ledger-event', 'original-message-1', 'completed'],
+    );
+
+    const saved = await pool.query(
+      'SELECT original_message_id FROM ticket_recovery_replay_items WHERE recovery_event_id=$1',
+      ['postgres-replay-ledger-event'],
+    );
+    assert.deepEqual(saved.rows.map((row: { original_message_id: string }) => row.original_message_id), ['original-message-1']);
+  },
+);
+
 test.after(async () => {
   if (!postgresIntegrationEnabled) return;
 

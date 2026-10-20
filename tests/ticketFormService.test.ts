@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  buildQuickTicketFormFields,
   getTicketFormStepCount,
   getVisibleTicketFormFields,
   parseTicketFormFields,
@@ -122,6 +123,46 @@ test('conditional fields are shown only when earlier-step conditions match', () 
   );
 });
 
+test('empty multi-select answers do not reveal negative conditional fields', () => {
+  const fields = parseTicketFormFields([
+    { id: 'issues', label: 'Issue types', type: 'multi_select', required: false, choices: ['Billing', 'Technical'], step: 1 },
+    {
+      id: 'billing_details',
+      label: 'Billing details',
+      type: 'short_text',
+      required: true,
+      step: 2,
+      condition: { fieldId: 'issues', operator: 'not_contains', value: 'Billing' },
+    },
+  ]);
+
+  assert.deepEqual(getVisibleTicketFormFields(fields, 2, { issues: [] }), []);
+  assert.deepEqual(getVisibleTicketFormFields(fields, 2, { issues: ['Technical'] }).map((field) => field.id), ['billing_details']);
+  assert.deepEqual(getVisibleTicketFormFields(fields, 2, { issues: ['Billing'] }), []);
+});
+
+test('does not require hidden conditional fields and ignores injected hidden answers', () => {
+  const fields = parseTicketFormFields([
+    { id: 'reason', label: 'Reason', type: 'dropdown', required: true, choices: ['Question', 'Refund'], step: 1 },
+    { id: 'refund_details', label: 'Refund details', type: 'short_text', required: true, step: 2,
+      condition: { fieldId: 'reason', operator: 'equals', value: 'Refund' } },
+  ]);
+
+  assert.deepEqual(validateTicketFormAnswers(fields, { reason: 'Question' }), { reason: 'Question' });
+  assert.deepEqual(
+    validateTicketFormAnswers(fields, { reason: 'Question', refund_details: 'injected hidden value' }),
+    { reason: 'Question' },
+  );
+  assert.throws(
+    () => validateTicketFormAnswers(fields, { reason: 'Refund' }),
+    /Refund details.*is required/,
+  );
+  assert.deepEqual(
+    validateTicketFormAnswers(fields, { reason: 'Refund', refund_details: 'Order was cancelled' }),
+    { reason: 'Refund', refund_details: 'Order was cancelled' },
+  );
+});
+
 test('validates text patterns and numeric boundaries server-side', () => {
   const fields = parseTicketFormFields([
     { id: 'order', label: 'Order code', type: 'short_text', required: true, pattern: '^[A-Z]{2}-[0-9]+$' },
@@ -197,4 +238,14 @@ test('validates real uploaded attachment size, MIME type and source host', () =>
   assert.throws(() => validateTicketFormAnswers(fields, { evidence: [{ ...file, size: 2048 }] }), /no larger than 1 KiB/);
   assert.throws(() => validateTicketFormAnswers(fields, { evidence: [{ ...file, contentType: 'application/x-msdownload' }] }), /file type .* is not allowed/);
   assert.throws(() => validateTicketFormAnswers(fields, { evidence: [{ ...file, url: 'https://example.com/evidence.png' }] }), /trusted Discord attachment host/);
+});
+
+
+test('guided form builder creates valid readable text questions without JSON authoring', () => {
+  const fields = buildQuickTicketFormFields([' Order ID ', 'What happened?', 'Order ID']);
+  assert.deepEqual(fields.map((field) => field.label), ['Order ID', 'What happened?', 'Order ID']);
+  assert.deepEqual(fields.map((field) => field.id), ['order_id', 'what_happened', 'order_id_3']);
+  assert.ok(fields.every((field) => field.type === 'short_text' && field.required && field.step === 1));
+  assert.throws(() => buildQuickTicketFormFields(['']), /one to three/);
+  assert.throws(() => buildQuickTicketFormFields(['x'.repeat(46)]), /45 characters or fewer/);
 });

@@ -416,6 +416,50 @@ export function parseTicketFormFields(input: string | unknown): TicketFormField[
   return fields;
 }
 
+/**
+ * Create a simple text-question schema without forcing administrators to write
+ * JSON. Advanced forms can still use the full schema editor.
+ */
+export function buildQuickTicketFormFields(questionLabels: string[]): TicketFormField[] {
+  const labels = questionLabels
+    .map((label) => typeof label === 'string' ? label.trim().replace(/\s+/g, ' ') : '')
+    .filter(Boolean);
+
+  if (labels.length < 1 || labels.length > 3) {
+    throw new Error('The guided builder needs one to three question labels.');
+  }
+
+  const usedIds = new Set<string>();
+  const fields = labels.map((label, index): TicketFormField => {
+    if (label.length > 45) throw new Error('Question labels must be 45 characters or fewer.');
+    let baseId = label.normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 28);
+    if (!baseId || !/^[a-z]/.test(baseId)) baseId = ('question_' + baseId).slice(0, 28);
+
+    let id = baseId;
+    let suffixNumber = index + 1;
+    while (usedIds.has(id)) {
+      const suffix = '_' + suffixNumber++;
+      id = baseId.slice(0, 28 - suffix.length) + suffix;
+    }
+    usedIds.add(id);
+
+    return {
+      id,
+      label,
+      type: 'short_text',
+      required: true,
+      placeholder: ('Enter ' + label).slice(0, 100),
+      step: 1,
+    };
+  });
+  return parseTicketFormFields(fields);
+}
+
 function normalizedConditionString(value: string): string {
   return value.trim().toLocaleLowerCase('en-US');
 }
@@ -425,7 +469,12 @@ function conditionMatches(condition: TicketFormCondition, answers: Record<string
   // A missing/hidden controller can never make a conditional field visible,
   // including for negative operators. This prevents skipped parent steps
   // accidentally revealing downstream questions.
-  if (observed === undefined || observed === null || observed === '') return false;
+  if (
+    observed === undefined ||
+    observed === null ||
+    observed === '' ||
+    (Array.isArray(observed) && observed.length === 0)
+  ) return false;
 
   const expected = condition.value;
   const equal = (): boolean => {
@@ -494,7 +543,11 @@ export function validateTicketFormAnswers(
   rawAnswers: Record<string, unknown>,
 ): Record<string, unknown> {
   const answers: Record<string, unknown> = {};
-  for (const field of fields) {
+  // Conditions depend on earlier steps, not schema array order. Normalize each
+  // step in order and ignore values submitted for fields the user was not shown.
+  const orderedFields = [...fields].sort((left, right) => left.step - right.step);
+  for (const field of orderedFields) {
+    if (field.condition && !conditionMatches(field.condition, answers)) continue;
     const raw = rawAnswers[field.id];
     const blank = raw === undefined || raw === null ||
       (typeof raw === 'string' && raw.trim().length === 0) ||

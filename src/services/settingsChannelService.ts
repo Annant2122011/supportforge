@@ -9,22 +9,26 @@ import {
   type TextChannel,
 } from 'discord.js';
 
-import { getGuildConfig } from './configService';
+import { getGuildConfig, type GuildTheme } from './configService';
+import { getThemeColor, getThemeDefinition } from './uiThemeService';
 import {
   getAdvancedSettings,
+  SETTINGS_DASHBOARD_BUTTON_KEYS,
+  type SettingsDashboardButtonKey,
 } from './advancedSettingsService';
 import { ensureChannelPurposeMessage } from './channelPurposeService';
 import { logSystemEvent } from './auditLogService';
 import { setChannelTopic } from './discordChannelService';
 
 const SETTINGS_TOPIC_PREFIX = 'supportforge:settings';
-const SETTINGS_TITLE = '⚙️ SupportForge Settings';
+const SETTINGS_TITLE = '⚙️ ResolveX Settings';
 
 function settingsButton(
   customId: string,
   label: string,
   style = ButtonStyle.Secondary,
   emoji?: string,
+  disabled = false,
 ): ButtonBuilder {
   const button = new ButtonBuilder()
     .setCustomId(customId)
@@ -32,32 +36,66 @@ function settingsButton(
     .setStyle(style);
 
   if (emoji) button.setEmoji(emoji);
+  if (disabled) button.setDisabled(true);
   return button;
 }
 
-export function buildSettingsDashboardComponents(): ActionRowBuilder<ButtonBuilder>[] {
-  return [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      settingsButton('sf:settings:panel', 'Panel', ButtonStyle.Primary, '🎛️'),
-      settingsButton('sf:settings:defaults', 'Ticket Defaults', ButtonStyle.Secondary, '🎟️'),
-      settingsButton('sf:settings:tags', 'Tags / Departments', ButtonStyle.Secondary, '🏷️'),
-      settingsButton('sf:settings:usecases', 'Use Cases', ButtonStyle.Secondary, '🧩'),
-      settingsButton('sf:settings:reports', 'Safety & Reports', ButtonStyle.Secondary, '🚩'),
-    ),
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      settingsButton('sf:settings:retention', 'Retention', ButtonStyle.Secondary, '🧹'),
-      settingsButton('sf:settings:appearance', 'Appearance', ButtonStyle.Secondary, '🎨'),
-      settingsButton('sf:settings:storage', 'Storage', ButtonStyle.Secondary, '🗄️'),
-      settingsButton('sf:settings:rules', 'Rules & Roles', ButtonStyle.Secondary, '🎨'),
-      settingsButton('sf:settings:repair', 'Repair System', ButtonStyle.Secondary, '🛠️'),
-    ),
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      settingsButton('sf:settings:team', 'Team & Voice', ButtonStyle.Secondary, '👥'),
-      settingsButton('sf:settings:manual', 'Manual', ButtonStyle.Secondary, '📖'),
-      settingsButton('sf:settings:refresh', 'Refresh', ButtonStyle.Secondary, '🔄'),
-      settingsButton('sf:settings:reset', 'Delete Everything', ButtonStyle.Danger, '🚨'),
-    ),
-  ];
+const SETTINGS_DASHBOARD_BUTTONS: Record<SettingsDashboardButtonKey, {
+  customId: string;
+  label: string;
+  style: ButtonStyle;
+  emoji: string;
+}> = {
+  panel: { customId: 'sf:settings:panel', label: 'Panel Automation', style: ButtonStyle.Primary, emoji: '🎛️' },
+  defaults: { customId: 'sf:settings:defaults', label: 'Ticket Defaults', style: ButtonStyle.Secondary, emoji: '🎟️' },
+  tags: { customId: 'sf:settings:tags', label: 'Tags / Departments', style: ButtonStyle.Secondary, emoji: '🏷️' },
+  usecases: { customId: 'sf:settings:usecases', label: 'Use Cases', style: ButtonStyle.Secondary, emoji: '🧩' },
+  reports: { customId: 'sf:settings:reports', label: 'Safety & Reports', style: ButtonStyle.Secondary, emoji: '🚩' },
+  retention: { customId: 'sf:settings:retention', label: 'Retention', style: ButtonStyle.Secondary, emoji: '🧹' },
+  appearance: { customId: 'sf:settings:appearance', label: 'Public Panel', style: ButtonStyle.Secondary, emoji: '🎨' },
+  storage: { customId: 'sf:settings:storage', label: 'Storage', style: ButtonStyle.Secondary, emoji: '🗄️' },
+  rules: { customId: 'sf:settings:rules', label: 'Rules & Roles', style: ButtonStyle.Secondary, emoji: '🛡️' },
+  repair: { customId: 'sf:settings:repair', label: 'Repair System', style: ButtonStyle.Secondary, emoji: '🛠️' },
+  team: { customId: 'sf:settings:team', label: 'Team & Voice', style: ButtonStyle.Secondary, emoji: '👥' },
+  manual: { customId: 'sf:settings:manual', label: 'Manual', style: ButtonStyle.Secondary, emoji: '📖' },
+  forms: { customId: 'sf:settings:forms:home', label: 'Ticket Forms', style: ButtonStyle.Primary, emoji: '🧾' },
+  refresh: { customId: 'sf:settings:refresh', label: 'Refresh', style: ButtonStyle.Secondary, emoji: '🔄' },
+  reset: { customId: 'sf:settings:reset', label: 'Delete Everything', style: ButtonStyle.Danger, emoji: '🚨' },
+  theme: { customId: 'sf:settings:theme', label: 'Server Theme', style: ButtonStyle.Primary, emoji: '🌈' },
+  premium: { customId: 'sf:settings:premium', label: 'Premium & Demo', style: ButtonStyle.Secondary, emoji: '💎' },
+  panels: { customId: 'sf:settings:panels:home', label: 'Ticket Panels', style: ButtonStyle.Primary, emoji: '🧱' },
+  'dashboard-builder': { customId: 'sf:settings:dashboard-builder', label: 'Settings Layout', style: ButtonStyle.Primary, emoji: '🧰' },
+};
+
+/** Per-server order is customizable, but every built-in control remains available. */
+export function buildSettingsDashboardComponents(
+  settings?: Awaited<ReturnType<typeof getAdvancedSettings>>,
+  disabled = false,
+): ActionRowBuilder<ButtonBuilder>[] {
+  const requested = settings?.settingsDashboard?.buttonOrder ?? [...SETTINGS_DASHBOARD_BUTTON_KEYS];
+  const order: SettingsDashboardButtonKey[] = [];
+  for (const key of requested) {
+    if ((SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(key) && !order.includes(key)) {
+      order.push(key as SettingsDashboardButtonKey);
+    }
+  }
+  for (const key of SETTINGS_DASHBOARD_BUTTON_KEYS) {
+    if (!order.includes(key)) order.push(key);
+  }
+  const buttons = order.map((key) => {
+    const item = SETTINGS_DASHBOARD_BUTTONS[key];
+    const customization = settings?.settingsDashboard?.buttonCustomizations?.[key];
+    const label = customization?.label ?? item.label;
+    const emoji = customization ? customization.emoji ?? undefined : item.emoji;
+    // Semantic styles are intentionally not editable: delete stays destructive,
+    // and navigation/recovery actions retain the built-in safe styling.
+    return settingsButton(item.customId, label, item.style, emoji, disabled);
+  });
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  for (let index = 0; index < buttons.length; index += 5) {
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(buttons.slice(index, index + 5)));
+  }
+  return rows;
 }
 
 export async function ensureSettingsChannel(
@@ -216,8 +254,10 @@ export function buildSettingsDashboardEmbed(
   settings: Awaited<ReturnType<typeof getAdvancedSettings>>,
   departmentCount: number,
   tagCount: number,
+  theme: GuildTheme = 'midnight',
 ): EmbedBuilder {
   const priorityRoleCount = Object.keys(settings.priorityRoles).length;
+  const themeInfo = getThemeDefinition(theme);
 
   const closed =
     settings.retention.closedDays === 0
@@ -236,11 +276,11 @@ export function buildSettingsDashboardEmbed(
     : 'Not configured';
 
   return new EmbedBuilder()
-    .setTitle(SETTINGS_TITLE)
+    .setTitle(settings.settingsDashboard.title || SETTINGS_TITLE)
+    .setColor(getThemeColor(theme))
     .setDescription(
-      'Administrative control center for SupportForge.\n' +
-        'Button-driven configuration • saved actions are audited with administrator + timestamp.\n' +
-        'Use **Refresh** to re-read the latest persisted configuration.',
+      ((settings.settingsDashboard.description || 'Configure your server ticket system, support panels and retention policies.') +
+        '\\n\\nButton-driven configuration • actions are audited. Use **Refresh** to re-read the latest saved configuration.').slice(0, 3900),
     )
     .addFields(
       {
@@ -282,7 +322,12 @@ export function buildSettingsDashboardEmbed(
       {
         name: '🎨 Appearance',
         value: 'Panel title: **' + settings.appearance.panelTitle.slice(0, 80) + '**',
-        inline: false,
+        inline: true,
+      },
+      {
+        name: '🌈 Server theme',
+        value: '**' + themeInfo.label + '**\n' + themeInfo.description,
+        inline: true,
       },
       {
         name: '📋 Configuration snapshot',
@@ -317,7 +362,8 @@ export function buildSettingsDashboardEmbed(
       },
     )
     .setFooter({
-      text: 'SupportForge • Advanced Ticket Configuration',
+      // Stable suffix lets cleanup find this dashboard when a server customizes its visible footer.
+      text: (settings.settingsDashboard.footer || 'Settings for this server').slice(0, 1600) + ' • ResolveX Settings Dashboard • ' + themeInfo.label + ' theme',
     })
     .setTimestamp();
 }
@@ -333,7 +379,9 @@ function isSettingsDashboardMessage(message: {
 
   return message.embeds.some(
     (embed) =>
+      embed.footer?.text?.includes('ResolveX Settings Dashboard') ||
       embed.title === SETTINGS_TITLE ||
+      embed.title === '⚙️ SupportForge Settings' ||
       embed.footer?.text?.startsWith('SupportForge • Advanced Ticket Configuration'),
   );
 }
@@ -361,7 +409,7 @@ function isLegacySmallSettingsDashboard(message: {
 }): boolean {
   return message.embeds.some(
     (embed) =>
-      embed.title === SETTINGS_TITLE &&
+      (embed.title === SETTINGS_TITLE || embed.title === '⚙️ SupportForge Settings') &&
       embed.footer?.text?.startsWith('SupportForge • Select a section to configure it'),
   );
 }
@@ -408,6 +456,7 @@ async function refreshSettingsDashboard(
     resolvedSettings,
     departmentCount,
     tagCount,
+    config.theme,
   );
 
   const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
@@ -430,7 +479,7 @@ async function refreshSettingsDashboard(
   if (dashboard) {
     await dashboard.edit({
       embeds: [embed],
-      components: buildSettingsDashboardComponents(),
+      components: buildSettingsDashboardComponents(resolvedSettings),
     });
 
     /*
@@ -449,7 +498,7 @@ async function refreshSettingsDashboard(
   } else {
     await channel.send({
       embeds: [embed],
-      components: buildSettingsDashboardComponents(),
+      components: buildSettingsDashboardComponents(settings),
     });
   }
 
@@ -546,7 +595,7 @@ export async function restoreSettingsChannelToBottom(guild: Guild): Promise<void
           ),
         ),
       ],
-      components: buildSettingsDashboardComponents(),
+      components: buildSettingsDashboardComponents(resolvedSettings),
     });
   } else {
     await channel.send({
@@ -560,7 +609,7 @@ export async function restoreSettingsChannelToBottom(guild: Guild): Promise<void
           ),
         ),
       ],
-      components: buildSettingsDashboardComponents(),
+      components: buildSettingsDashboardComponents(settings),
     });
   }
 

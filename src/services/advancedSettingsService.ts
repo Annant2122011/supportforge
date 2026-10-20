@@ -1,4 +1,5 @@
 import type { Guild } from 'discord.js';
+import { normalizeDiscordEmoji } from '../core/domain/discordEmoji';
 import { getJsonDocument, setJsonDocument } from './jsonDocumentPersistenceService';
 
 export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent' | 'critical';
@@ -47,6 +48,28 @@ export interface FlagRule {
   updatedAt: string;
 }
 
+export const SETTINGS_DASHBOARD_BUTTON_KEYS = [
+  'panel', 'defaults', 'tags', 'usecases', 'reports', 'retention', 'appearance',
+  'storage', 'rules', 'repair', 'team', 'manual', 'forms', 'refresh', 'reset',
+  'theme', 'premium', 'panels', 'dashboard-builder',
+] as const;
+
+export type SettingsDashboardButtonKey = (typeof SETTINGS_DASHBOARD_BUTTON_KEYS)[number];
+
+export interface SettingsDashboardButtonCustomization {
+  label: string;
+  /** Null intentionally removes the default emoji. */
+  emoji: string | null;
+}
+
+export interface SettingsDashboardSettings {
+  title: string;
+  description: string;
+  footer: string;
+  buttonOrder: SettingsDashboardButtonKey[];
+  buttonCustomizations: Partial<Record<SettingsDashboardButtonKey, SettingsDashboardButtonCustomization>>;
+}
+
 export interface AdvancedGuildSettings {
   version: 5;
   settingsChannelId: string | null;
@@ -77,6 +100,8 @@ export interface AdvancedGuildSettings {
     panelDescription: string;
     panelFooter: string;
   };
+  /** Per-server Settings-channel branding and button order; essential controls are never hidden. */
+  settingsDashboard: SettingsDashboardSettings;
   ticketDefaults: {
     priority: TicketPriority;
     maxClaimedModerators: number;
@@ -153,6 +178,13 @@ const DEFAULTS: AdvancedGuildSettings = {
       'Click a department button below to open a private support ticket.',
     panelFooter: 'SupportForge • Professional Ticket System',
   },
+  settingsDashboard: {
+    title: '⚙️ ResolveX Settings',
+    description: 'Configure your server’s ticket system, support panels and retention policies.',
+    footer: 'ResolveX • Settings Dashboard',
+    buttonOrder: [...SETTINGS_DASHBOARD_BUTTON_KEYS],
+    buttonCustomizations: {},
+  },
   ticketDefaults: {
     priority: 'normal',
     maxClaimedModerators: 2,
@@ -184,6 +216,11 @@ function cloneDefaults(): AdvancedGuildSettings {
     },
     statusCategories: { ...DEFAULTS.statusCategories },
     appearance: { ...DEFAULTS.appearance },
+    settingsDashboard: {
+      ...DEFAULTS.settingsDashboard,
+      buttonOrder: [...DEFAULTS.settingsDashboard.buttonOrder],
+      buttonCustomizations: {},
+    },
     ticketDefaults: { ...DEFAULTS.ticketDefaults },
     reports: {
       ...DEFAULTS.reports,
@@ -284,6 +321,50 @@ function normalizeExistingSettings(
       ...DEFAULTS.appearance,
       ...(settings.appearance ?? {}),
     },
+    settingsDashboard: (() => {
+      const saved = settings.settingsDashboard;
+      const rawOrder = Array.isArray(saved?.buttonOrder) ? saved.buttonOrder : [];
+      const validOrder = rawOrder.filter((key): key is SettingsDashboardButtonKey =>
+        typeof key === 'string' && (SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(key),
+      );
+      const uniqueOrder = [...new Set(validOrder)];
+      for (const key of SETTINGS_DASHBOARD_BUTTON_KEYS) {
+        if (!uniqueOrder.includes(key)) uniqueOrder.push(key);
+      }
+      const text = (value: unknown, fallback: string, max: number): string =>
+        typeof value === 'string' ? value.trim().slice(0, max) : fallback;
+      const rawCustomizations = saved?.buttonCustomizations && typeof saved.buttonCustomizations === 'object' &&
+        !Array.isArray(saved.buttonCustomizations)
+        ? saved.buttonCustomizations as Record<string, unknown>
+        : {};
+      const buttonCustomizations: SettingsDashboardSettings['buttonCustomizations'] = {};
+      for (const key of SETTINGS_DASHBOARD_BUTTON_KEYS) {
+        const candidate = rawCustomizations[key];
+        if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue;
+        const value = candidate as Record<string, unknown>;
+        const label = text(value.label, '', 80);
+        let emoji: string | null;
+        if (value.emoji === null) {
+          emoji = null;
+        } else {
+          try {
+            emoji = normalizeDiscordEmoji(value.emoji, 'Settings dashboard button emoji') ?? null;
+          } catch {
+            // Bad legacy customization must not prevent the Settings dashboard
+            // from rendering after a restart.
+            continue;
+          }
+        }
+        if (label) buttonCustomizations[key] = { label, emoji };
+      }
+      return {
+        title: text(saved?.title, DEFAULTS.settingsDashboard.title, 256) || DEFAULTS.settingsDashboard.title,
+        description: text(saved?.description, DEFAULTS.settingsDashboard.description, 4000),
+        footer: text(saved?.footer, DEFAULTS.settingsDashboard.footer, 2048) || DEFAULTS.settingsDashboard.footer,
+        buttonOrder: uniqueOrder,
+        buttonCustomizations,
+      };
+    })(),
     ticketDefaults: {
       ...DEFAULTS.ticketDefaults,
       ...(settings.ticketDefaults ?? {}),

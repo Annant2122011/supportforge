@@ -19,6 +19,7 @@ import {
   TextInputBuilder,
   TextInputStyle,
   type ButtonInteraction,
+  type ChatInputCommandInteraction,
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
   type TextChannel,
@@ -30,6 +31,7 @@ import {
   getTier,
   isPremiumOrHigher,
   type DepartmentConfig,
+  type CustomSupportPanelButton,
   updateGuildConfig,
 } from '../services/configService';
 
@@ -55,6 +57,7 @@ import {
 
 import { resetPanelActivity } from '../services/panelActivityService';
 import { getAdvancedSettings, type TicketPriority } from '../services/advancedSettingsService';
+import { getThemeColor } from '../services/uiThemeService';
 import { ensureDepartmentCategory } from '../services/departmentCategoryService';
 import { endTicketVoiceMode, startTicketVoiceMode, syncTicketVoiceParticipants } from '../services/voiceModeService';
 import { getUserFlagCount, isTicketCreationRestricted, recordReport } from '../services/reportService';
@@ -72,8 +75,10 @@ import {
 } from '../services/ticketPersistenceService';
 
 import {
+  ensureAuditDeveloperInfrastructure,
   getTicketAuditHistory,
   logTicketEvent,
+  logSystemEvent,
 } from '../services/auditLogService';
 import {
   TICKET_FORM_MODAL_TTL_MS,
@@ -99,6 +104,12 @@ import {
 } from '../services/ticketCreationLeaseService';
 
 import {
+  archiveTicketChannelForRecovery,
+  beginTicketButtonDeletion,
+  cancelTicketButtonDeletion,
+} from '../services/ticketArchiveService';
+
+import {
   TICKET_PREFIX,
   getField,
   getTicketStatus,
@@ -116,6 +127,8 @@ import {
   moveTicketPanelToBottom,
   queueTicketChannelRename,
 } from '../services/ticketPanelService';
+import { getCustomPanel } from '../services/panelBuilderService';
+import { parseCustomPanelInteractionId } from '../core/domain/customPanelInteraction';
 
 function parseTicketPriority(value: string): TicketPriority | null {
   return value === 'low' ||
@@ -358,6 +371,7 @@ function clearRuntimeTicketState(
 function isAdmin(
   interaction:
     | ButtonInteraction
+    | ChatInputCommandInteraction
     | StringSelectMenuInteraction
     | ModalSubmitInteraction,
 ): boolean {
@@ -372,7 +386,7 @@ function isAdmin(
 }
 
 function interactionActor(
-  interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
+  interaction: ButtonInteraction | ChatInputCommandInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
 ): {
   id: string;
   attribution: 'actorKnown';
@@ -399,6 +413,7 @@ async function getEffectiveTicketTopic(
 function getStaffContext(
   interaction:
     | ButtonInteraction
+    | ChatInputCommandInteraction
     | StringSelectMenuInteraction
     | ModalSubmitInteraction,
   topic: string,
@@ -482,7 +497,7 @@ function isUnknownMessageError(error: unknown): boolean {
 }
 
 async function editReplyOrFollowUp(
-  interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
+  interaction: ButtonInteraction | ChatInputCommandInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
   content: string,
 ): Promise<void> {
   try {
@@ -509,6 +524,7 @@ async function editReplyOrFollowUp(
 async function replyError(
   interaction:
     | ButtonInteraction
+    | ChatInputCommandInteraction
     | StringSelectMenuInteraction
     | ModalSubmitInteraction,
   content: string,
@@ -553,6 +569,7 @@ async function replyError(
 async function safeDeferReply(
   interaction:
     | ButtonInteraction
+    | ChatInputCommandInteraction
     | StringSelectMenuInteraction
     | ModalSubmitInteraction,
 ): Promise<boolean> {
@@ -1473,6 +1490,7 @@ async function createTicket(
       );
 
       const requestEmbed = new EmbedBuilder()
+        .setColor(getThemeColor(config.theme))
         .setTitle('📨 Support Request')
         .setDescription(cleanDescription)
         .addFields(
@@ -1528,6 +1546,7 @@ async function createTicket(
             allowedMentions: { parse: [] },
             embeds: [
               new EmbedBuilder()
+                .setColor(getThemeColor(config.theme))
                 .setTitle('📋 Ticket Form Answers' + (pageCount > 1 ? ' • ' + (page + 1) + '/' + pageCount : ''))
                 .setDescription('Form **' + selectedForm.name.slice(0, 80) + '** • version ' + selectedForm.version)
                 .addFields(pageFields),
@@ -1640,9 +1659,11 @@ async function createTicket(
           error,
         );
 
+        const recoveryThemeColor = getThemeColor((await getGuildConfig(guild.id)).theme);
         await ticketChannel.send({
           embeds: [
             new EmbedBuilder()
+              .setColor(recoveryThemeColor)
               .setTitle('⚠️ SupportForge Ticket Recovery')
               .setDescription(
                 'The ticket channel was created successfully, but one initialization step did not complete. The ticket has **not** been deleted. An administrator can use **Repair System** or refresh the ticket panel to complete recovery.',
@@ -1827,7 +1848,7 @@ async function unclaimModerator(interaction: ButtonInteraction): Promise<void> {
 /* -------------------------------------------------------------------------- */
 
 async function transition(
-  interaction: ButtonInteraction,
+  interaction: ButtonInteraction | ChatInputCommandInteraction,
   newStatus: TicketStatus,
 ): Promise<void> {
   if (!(await safeDeferReply(interaction))) {
@@ -1914,7 +1935,7 @@ async function transition(
      */
     if (
       oldStatus === newStatus &&
-      !(newStatus === 'claimed' && interaction.customId === 'ticket:claim')
+      !(newStatus === 'claimed' && 'customId' in interaction && interaction.customId === 'ticket:claim')
     ) {
       await interaction.editReply(
         `ℹ️ This ticket is already **${capitalize(newStatus)}**.`,
@@ -1923,7 +1944,7 @@ async function transition(
     }
 
     if (
-      !(newStatus === 'claimed' && interaction.customId === 'ticket:claim' && oldStatus === 'claimed')
+      !(newStatus === 'claimed' && 'customId' in interaction && interaction.customId === 'ticket:claim' && oldStatus === 'claimed')
     ) {
       assertTicketStatusTransition(oldStatus, newStatus);
     }
@@ -2529,7 +2550,7 @@ async function transition(
 /* -------------------------------------------------------------------------- */
 
 async function closeTicket(
-  interaction: ButtonInteraction,
+  interaction: ButtonInteraction | ChatInputCommandInteraction,
 ): Promise<void> {
   if (!(await safeDeferReply(interaction))) {
     return;
@@ -3022,6 +3043,66 @@ async function closeTicket(
 /* Ticket creation modal                                                      */
 /* -------------------------------------------------------------------------- */
 
+export async function showTicketCreationModalFromCommand(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  // A slash command can open a modal directly only before it is deferred.
+  // This gives ticket creation a real slash-command entry point while reusing
+  // the same versioned-form and modal-submit pipeline as the panel button.
+  if (!interaction.guild) {
+    await interaction.reply({ content: 'Ticket creation must be used inside a server.', flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const guild = interaction.guild;
+  const departmentId = interaction.options.getString('department-id', true).trim();
+  const tagId = interaction.options.getString('tag-id', true).trim();
+
+  try {
+    // Do not perform database/network work before showModal(): Discord's
+    // initial interaction acknowledgement window is short. The modal-submit
+    // handler revalidates the department and tag before creating anything.
+    const cachedForm = getCachedActiveTicketFormForRouting(guild.id, departmentId, tagId);
+    if (!cachedForm.ready) {
+      await interaction.reply({ content: 'Ticket forms are still loading. Please try again in a moment.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    if (cachedForm.form) {
+      const expiresAt = Date.now() + TICKET_FORM_MODAL_TTL_MS;
+      const sessionId = randomBytes(10).toString('base64url');
+      await interaction.showModal(buildTicketFormModal(cachedForm.form, tagId, expiresAt, sessionId, 1, {}));
+      return;
+    }
+
+    const modal = new ModalBuilder()
+      .setCustomId('ticket:modal:' + departmentId + ':' + tagId)
+      .setTitle('Support Request');
+    const subjectInput = new TextInputBuilder()
+      .setCustomId('subject')
+      .setPlaceholder('Briefly describe your issue')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true)
+      .setMaxLength(100);
+    const descriptionInput = new TextInputBuilder()
+      .setCustomId('description')
+      .setPlaceholder('Keep paragraphs and bullet points as written.')
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(true)
+      .setMaxLength(4000);
+    modal.addLabelComponents(
+      new LabelBuilder().setLabel('What do you need help with?').setTextInputComponent(subjectInput),
+      new LabelBuilder().setLabel('Describe your issue').setDescription('Up to 4,000 characters').setTextInputComponent(descriptionInput),
+    );
+    await interaction.showModal(modal);
+  } catch (error) {
+    console.error('Failed to open ticket creation modal from slash command:', error);
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.reply({ content: 'SupportForge could not open the ticket form. Please try again.', flags: MessageFlags.Ephemeral }).catch(() => undefined);
+    }
+  }
+}
+
 async function showTicketTagSelector(
   interaction: ButtonInteraction,
   departmentId: string,
@@ -3228,6 +3309,7 @@ function buildTicketFormModal(
     labels.push(
       new LabelBuilder()
         .setLabel('What do you need help with?')
+        .setDescription('A short title helps the support team scan your request.')
         .setTextInputComponent(
           new TextInputBuilder()
             .setCustomId('subject')
@@ -3238,7 +3320,7 @@ function buildTicketFormModal(
         ),
       new LabelBuilder()
         .setLabel('Describe your issue')
-        .setDescription('Up to 4,000 characters')
+        .setDescription('Required • Up to 4,000 characters')
         .setTextInputComponent(
           new TextInputBuilder()
             .setCustomId('description')
@@ -3253,7 +3335,8 @@ function buildTicketFormModal(
   for (const field of getVisibleTicketFormFields(form.fields, step, priorAnswers)) {
     const customId = 'form_' + field.id;
     const label = new LabelBuilder().setLabel(field.label.slice(0, 45));
-    if (field.placeholder) label.setDescription(field.placeholder.slice(0, 100));
+    const fieldGuidance = [field.required ? 'Required' : 'Optional', field.placeholder].filter(Boolean).join(' • ');
+    if (fieldGuidance) label.setDescription(fieldGuidance.slice(0, 100));
 
     switch (field.type) {
       case 'dropdown': {
@@ -3417,10 +3500,11 @@ async function showTicketCreationModal(
     const labels: LabelBuilder[] = [
       new LabelBuilder()
         .setLabel('What do you need help with?')
+        .setDescription('A short title helps the support team scan your request.')
         .setTextInputComponent(subjectInput),
       new LabelBuilder()
         .setLabel('Describe your issue')
-        .setDescription('Up to 4,000 characters')
+        .setDescription('Required • Up to 4,000 characters')
         .setTextInputComponent(descriptionInput),
     ];
 
@@ -4158,9 +4242,15 @@ async function showTicketHistory(
     const recent = events.slice(-20).reverse();
 
     if (!recent.length) {
-      await interaction.editReply(
-        '📜 **Ticket #' + ticketNumber + ' History**\n\nNo audit events have been recorded for this ticket yet.',
-      );
+      const historyThemeColor = getThemeColor((await getGuildConfig(interaction.guild.id)).theme);
+      await interaction.editReply({
+        content: '',
+        embeds: [new EmbedBuilder()
+          .setColor(historyThemeColor)
+          .setTitle('📜 Ticket #' + ticketNumber + ' History')
+          .setDescription('No audit events have been recorded for this ticket yet.')
+          .setFooter({ text: 'Ticket activity will appear here as events are recorded.' })],
+      });
       return;
     }
 
@@ -4196,8 +4286,10 @@ async function showTicketHistory(
     }
     if (current) chunks.push(current);
 
+    const historyThemeColor = getThemeColor((await getGuildConfig(interaction.guild.id)).theme);
     const embeds = chunks.slice(0, 2).map((chunk, index) =>
       new EmbedBuilder()
+        .setColor(historyThemeColor)
         .setTitle(
           index === 0
             ? '📜 Ticket #' + ticketNumber + ' History'
@@ -4216,7 +4308,8 @@ async function showTicketHistory(
 
 async function renderDepartmentSelector(interaction: ButtonInteraction | StringSelectMenuInteraction, page = 0): Promise<void> {
   if (!interaction.replied && !interaction.deferred) {
-    await interaction.deferUpdate();
+    if (interaction.isButton()) await interaction.deferUpdate();
+    else await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   }
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) { await replyError(interaction, '❌ This action can only be used inside a ticket.'); return; }
   const channel = interaction.channel as TextChannel;
@@ -4234,6 +4327,140 @@ async function renderDepartmentSelector(interaction: ButtonInteraction | StringS
   );
   const payload = { content: '📂 **Choose a department**\nThe department controls the Discord category and staff routing. Tags belong to the department and never create categories.', components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu), nav] };
   if (interaction.replied || interaction.deferred) await interaction.editReply(payload); else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
+}
+
+export async function executeTicketReportCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (!(await safeDeferReply(interaction))) return;
+  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
+    await replyError(interaction, 'Reporting must be run inside an active SupportForge ticket.');
+    return;
+  }
+  const channel = interaction.channel as TextChannel;
+  const topic = await getEffectiveTicketTopic(channel, channel.topic ?? '');
+  const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
+  if (!isTicketTopic(topic) || !isActiveTicketStatus(status)) {
+    await replyError(interaction, 'Reporting is only available inside an active SupportForge ticket.');
+    return;
+  }
+  const staff = getStaffContext(interaction, topic);
+  if (!staff.authorized) {
+    await replyError(interaction, 'Only configured staff or administrators can submit a report.');
+    return;
+  }
+  const target = interaction.options.getUser('target', true);
+  const categoryInput = interaction.options.getString('category-id', true).trim();
+  const subcategoryInput = interaction.options.getString('subcategory-id', true).trim();
+  const description = interaction.options.getString('description') ?? '';
+  const flagged = interaction.options.getBoolean('flag', true);
+  const reportSettings = await getAdvancedSettings(interaction.guild.id);
+  const selectedCategory = Object.values(reportSettings.reports.categories).find((item) =>
+    item.id.toLowerCase() === categoryInput.toLowerCase() || item.name.toLowerCase() === categoryInput.toLowerCase());
+  const selectedSubcategory = selectedCategory
+    ? Object.values(selectedCategory.subcategories).find((item) =>
+        item.id.toLowerCase() === subcategoryInput.toLowerCase() || item.name.toLowerCase() === subcategoryInput.toLowerCase())
+    : undefined;
+  if (!selectedCategory || !selectedSubcategory) {
+    await replyError(interaction, 'Report category/subcategory not found. Enter the configured name or ID shown in Settings → Reports.');
+    return;
+  }
+  const categoryId = selectedCategory.id;
+  const subcategoryId = selectedSubcategory.id;
+  const participants = new Set([
+    getField(topic, 'owner'),
+    ...(getField(topic, 'users') ?? '').split(',').filter(Boolean),
+    ...(getField(topic, 'claimed_by') ?? '').split(',').filter(Boolean),
+  ].filter((id): id is string => Boolean(id)));
+  if (!participants.has(target.id)) {
+    await replyError(interaction, 'The target must be a participant in this ticket.');
+    return;
+  }
+  if (target.id === interaction.user.id) {
+    await replyError(interaction, 'You cannot report yourself.');
+    return;
+  }
+  try {
+    const result = await recordReport(interaction.guild, {
+      targetUserId: target.id,
+      reporterUserId: interaction.user.id,
+      reporterName: interaction.user.tag,
+      categoryId,
+      subcategoryId,
+      description,
+      flagged,
+      channelId: channel.id,
+      ticketNumber: getField(topic, 'number') ?? 'unknown',
+    });
+    const config = await getGuildConfig(interaction.guild.id);
+    if (config.supportCategoryId) {
+      await logTicketEvent(interaction.guild, config.supportCategoryId, {
+        ticketNumber: getField(topic, 'number') ?? 'unknown',
+        event: 'ticket_report_submitted',
+        actor: interaction.user.tag,
+        actorId: interaction.user.id,
+        actorName: interaction.user.tag,
+        detail: 'Report ' + result.report.id + ' submitted for <@' + target.id + '>; category=' + result.report.categoryName + '; subcategory=' + result.report.subcategoryName + '; ' + (flagged ? 'flagged' : 'record-only') + '.',
+      }).catch(() => undefined);
+    }
+    await interaction.editReply(
+      'Report **' + result.report.id + '** recorded for <@' + target.id + '>. Category: **' + result.report.categoryName + ' → ' + result.report.subcategoryName + '**. Mode: **' + (flagged ? 'Flag violation' : 'Record only') + '**. Current flag count: **' + result.flagCount + '**.' +
+      (result.appliedRules.length ? '\\nAutomatic rules reached: ' + result.appliedRules.map((rule) => rule.action).join(', ') + '.' : ''),
+    );
+  } catch (error) {
+    await replyError(interaction, error instanceof Error ? error.message : 'The report could not be recorded.');
+  }
+}
+
+export async function executeTicketVoiceCommand(
+  interaction: ChatInputCommandInteraction,
+  action: 'start' | 'end' | 'join',
+): Promise<void> {
+  if (!(await safeDeferReply(interaction))) return;
+  if (action === 'start') return handleTicketVoiceStart(interaction);
+  if (action === 'end') return handleTicketVoiceEnd(interaction);
+  return handleTicketVoiceJoin(interaction);
+}
+
+export async function executeTicketRoutingCommand(
+  interaction: ChatInputCommandInteraction,
+  mode: 'department' | 'tag',
+): Promise<void> {
+  if (!(await safeDeferReply(interaction))) return;
+  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
+    await replyError(interaction, 'This command must be used inside a SupportForge ticket channel.');
+    return;
+  }
+  const channel = interaction.channel as TextChannel;
+  const topic = await getEffectiveTicketTopic(channel, channel.topic ?? '');
+  const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
+  if (!isTicketTopic(topic) || !isActiveTicketStatus(status)) {
+    await replyError(interaction, 'Only active SupportForge tickets can be rerouted.');
+    return;
+  }
+  const staff = getStaffContext(interaction, topic);
+  if (!staff.authorized) {
+    await replyError(interaction, 'Only configured staff or administrators can change ticket routing.');
+    return;
+  }
+  const config = await getGuildConfig(interaction.guild.id);
+  const requestedDepartmentId = interaction.options.getString('department-id');
+  const requestedTagId = interaction.options.getString('tag-id');
+  const currentDepartmentId = getField(topic, 'department');
+  const departmentId = mode === 'department' ? requestedDepartmentId : currentDepartmentId;
+  const department = departmentId ? config.departments[departmentId] : undefined;
+  if (!department) {
+    await replyError(interaction, mode === 'department'
+      ? 'Department ID not found. Use /supportforge form list to view department IDs.'
+      : 'The current ticket department could not be resolved.');
+    return;
+  }
+  const tagId = mode === 'tag'
+    ? requestedTagId
+    : requestedTagId ?? (department.tags[getField(topic, 'tags') ?? ''] ? getField(topic, 'tags')! : Object.keys(department.tags)[0]);
+  if (!tagId || !department.tags[tagId]) {
+    await replyError(interaction, 'Tag ID is not valid for that department. Use /supportforge form list to view department and tag IDs.');
+    return;
+  }
+  await applyTicketRouting(interaction, department, tagId, status, topic);
 }
 
 async function changeTicketDepartment(interaction: StringSelectMenuInteraction): Promise<void> {
@@ -4290,7 +4517,7 @@ async function renderRoutingTagSelector(interaction: ButtonInteraction | StringS
   if (interaction.replied || interaction.deferred) await interaction.editReply(payload); else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
 }
 
-async function applyTicketRouting(interaction: StringSelectMenuInteraction, department: DepartmentConfig, tagId: string, status: TicketStatus, topic: string): Promise<void> {
+async function applyTicketRouting(interaction: StringSelectMenuInteraction | ChatInputCommandInteraction, department: DepartmentConfig, tagId: string, status: TicketStatus, topic: string): Promise<void> {
   const channel = interaction.channel as TextChannel;
   const config = await getGuildConfig(interaction.guild!.id);
   const oldDepartmentId = getField(topic, 'department');
@@ -4571,9 +4798,10 @@ async function applyTicketPriority(
 }
 
 
-async function handleTicketVoiceStart(interaction: ButtonInteraction): Promise<void> {
+async function handleTicketVoiceStart(interaction: ButtonInteraction | ChatInputCommandInteraction): Promise<void> {
   if (!interaction.replied && !interaction.deferred) {
-    await interaction.deferUpdate();
+    if (interaction.isButton()) await interaction.deferUpdate();
+    else await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   }
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
     await replyError(interaction, '❌ Voice mode is only available inside a ticket.');
@@ -4601,9 +4829,11 @@ async function handleTicketVoiceStart(interaction: ButtonInteraction): Promise<v
     channel.topic = result.topic;
     const ticketNumber = getField(result.topic, 'number') ?? 'unknown';
     await updateMainMessage(channel, getField(result.topic, 'message'), status, result.topic);
+    const voiceThemeColor = getThemeColor((await getGuildConfig(interaction.guild.id)).theme);
     await channel.send({
       embeds: [
         new EmbedBuilder()
+          .setColor(voiceThemeColor)
           .setTitle('🎙️ Private Voice Mode Active')
           .setDescription('A private voice room has been created for this ticket. Only the ticket owner and assigned moderators can connect. The room capacity is sized for the configured moderator limit plus the customer, and screen sharing is enabled.')
           .addFields({ name: 'Voice channel', value: result.voiceChannel.toString() })
@@ -4634,9 +4864,10 @@ async function handleTicketVoiceStart(interaction: ButtonInteraction): Promise<v
   }
 }
 
-async function handleTicketVoiceEnd(interaction: ButtonInteraction): Promise<void> {
+async function handleTicketVoiceEnd(interaction: ButtonInteraction | ChatInputCommandInteraction): Promise<void> {
   if (!interaction.replied && !interaction.deferred) {
-    await interaction.deferUpdate();
+    if (interaction.isButton()) await interaction.deferUpdate();
+    else await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   }
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
     await replyError(interaction, '❌ Voice mode is only available inside a ticket.');
@@ -4659,9 +4890,11 @@ async function handleTicketVoiceEnd(interaction: ButtonInteraction): Promise<voi
     const newTopic = await endTicketVoiceMode(interaction.guild, channel, topic, status, 'SupportForge voice mode ended');
     channel.topic = newTopic;
     await updateMainMessage(channel, getField(newTopic, 'message'), status, newTopic);
+    const voiceEndThemeColor = getThemeColor((await getGuildConfig(interaction.guild.id)).theme);
     await channel.send({
       embeds: [
         new EmbedBuilder()
+          .setColor(voiceEndThemeColor)
           .setTitle('🔚 Private Voice Mode Ended')
           .setDescription('The temporary private voice room has been removed. This ticket is back to normal text mode.')
           .setTimestamp(),
@@ -4684,8 +4917,11 @@ async function handleTicketVoiceEnd(interaction: ButtonInteraction): Promise<voi
   }
 }
 
-async function handleTicketVoiceJoin(interaction: ButtonInteraction): Promise<void> {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+async function handleTicketVoiceJoin(interaction: ButtonInteraction | ChatInputCommandInteraction): Promise<void> {
+  if (!interaction.replied && !interaction.deferred) {
+    if (interaction.isButton()) await interaction.deferUpdate();
+    else await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  }
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
     await interaction.editReply('❌ Voice mode is only available inside a ticket.');
     return;
@@ -4818,6 +5054,9 @@ async function handlePanelButton(
             : '')
         : 'No ticket departments configured.';
 
+      pageEmbed.setColor(getThemeColor((await getGuildConfig(interaction.guild.id)).theme));
+      pageEmbed.setTitle(pageSettings.appearance.panelTitle);
+      pageEmbed.setFooter({ text: pageSettings.appearance.panelFooter });
       pageEmbed.setDescription(
         `Welcome to **${interaction.guild.name}** support.\n\n` +
           pageSettings.appearance.panelDescription + '\n\n' +
@@ -5116,6 +5355,10 @@ async function handlePanelButton(
     id ===
       'ticket:panel:add-user' ||
     id ===
+      'ticket:panel:remove-user' ||
+    id ===
+      'ticket:panel:reassign' ||
+    id ===
       'ticket:panel:priority' ||
     id ===
       'ticket:panel:department' ||
@@ -5128,44 +5371,41 @@ async function handlePanelButton(
       new ModalBuilder();
 
     if (
-      id ===
-      'ticket:panel:add-user'
+      id === 'ticket:panel:add-user' ||
+      id === 'ticket:panel:remove-user' ||
+      id === 'ticket:panel:reassign'
     ) {
+      const removingUser = id === 'ticket:panel:remove-user';
+      const reassigningUser = id === 'ticket:panel:reassign';
       modal
         .setCustomId(
-          'ticket:panel-modal:add-user',
+          reassigningUser ? 'ticket:panel-modal:reassign' :
+            removingUser ? 'ticket:panel-modal:remove-user' : 'ticket:panel-modal:add-user',
         )
         .setTitle(
-          'Add User to Ticket',
+          reassigningUser ? 'Reassign Ticket' :
+            removingUser ? 'Remove User from Ticket' : 'Add User to Ticket',
         );
 
-      const input =
-        new TextInputBuilder()
-          .setCustomId(
-            'user',
-          )
-          .setLabel(
-            'User ID or mention',
-          )
-          .setPlaceholder(
-            '123456789012345678 or @user',
-          )
-          .setStyle(
-            TextInputStyle.Short,
-          )
-          .setRequired(
-            true,
-          )
-          .setMaxLength(
-            100,
-          );
+      const input = new TextInputBuilder()
+        .setCustomId('user')
+        .setLabel(reassigningUser ? 'New assigned staff ID or mention' : 'User ID or mention')
+        .setPlaceholder('123456789012345678 or @user')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(100);
 
-      modal.addComponents(
-        new ActionRowBuilder<TextInputBuilder>()
-          .addComponents(
-            input,
-          ),
-      );
+      modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
+      if (reassigningUser) {
+        const reason = new TextInputBuilder()
+          .setCustomId('reason')
+          .setLabel('Reason (optional)')
+          .setPlaceholder('Brief reason for reassignment')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(false)
+          .setMaxLength(500);
+        modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(reason));
+      }
     } else if (id === 'ticket:panel:department') {
       if (!interaction.replied && !interaction.deferred) {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -5344,9 +5584,12 @@ async function handlePanelModal(
     /* ---------------------------------------------------------------------- */
 
     if (
-      id ===
-      'ticket:panel-modal:add-user'
+      id === 'ticket:panel-modal:add-user' ||
+      id === 'ticket:panel-modal:remove-user' ||
+      id === 'ticket:panel-modal:reassign'
     ) {
+      const removingUser = id === 'ticket:panel-modal:remove-user';
+      const reassigningUser = id === 'ticket:panel-modal:reassign';
       const raw =
         interaction.fields
           .getTextInputValue(
@@ -5364,6 +5607,87 @@ async function handlePanelModal(
         return;
       }
 
+      if (reassigningUser) {
+        if (state.status === 'pending') {
+          await interaction.editReply('❌ Resume this ticket before reassigning it.');
+          return;
+        }
+        if (!['open', 'claimed', 'reopened'].includes(state.status)) {
+          await interaction.editReply('❌ Only an open or claimed ticket can be reassigned.');
+          return;
+        }
+
+        const staffRoleId = getField(state.topic, 'staff');
+        if (!staffRoleId || staffRoleId === 'none') {
+          await interaction.editReply('❌ This ticket has no configured department staff role, so reassignment cannot be validated safely.');
+          return;
+        }
+        const targetMember = await channel.guild.members.fetch(userId).catch(() => null);
+        if (!targetMember) {
+          await interaction.editReply('❌ That user could not be found in this server.');
+          return;
+        }
+        if (!targetMember.roles.cache.has(staffRoleId)) {
+          await interaction.editReply('❌ That user is not part of this ticket department’s staff role.');
+          return;
+        }
+        const currentAssignees = (getField(state.topic, 'claimed_by') ?? '').split(',').map((value) => value.trim()).filter(Boolean);
+        if (currentAssignees.length === 1 && currentAssignees[0] === userId) {
+          await interaction.editReply('ℹ️ This ticket is already assigned to that staff member.');
+          return;
+        }
+
+        const now = new Date().toISOString();
+        let reassignedTopic = setField(setField(setField(state.topic, 'status', 'claimed'), 'claimed_by', userId), 'claimed_at', now);
+        reassignedTopic = setField(reassignedTopic, 'assigned_at', now);
+        reassignedTopic = setField(reassignedTopic, 'updated_at', now);
+        if (currentAssignees.length) {
+          reassignedTopic = setField(reassignedTopic, 'previous_assignee', currentAssignees.join(','));
+        } else {
+          reassignedTopic = removeField(reassignedTopic, 'previous_assignee');
+        }
+        reassignedTopic = removeField(reassignedTopic, 'pending_since');
+
+        await transitionPersistedTicket(
+          channel.id,
+          'claimed',
+          {
+            claimedByIds: [userId],
+            metadata: { lastActivityAt: now, lastStaffActivityAt: now },
+          },
+          interactionActor(interaction),
+          now,
+        );
+        try {
+          await applyTicketVisibilityMode(channel, reassignedTopic, 'claimed', userId, { topic: reassignedTopic });
+        } catch (error) {
+          console.warn('Ticket reassignment was saved durably, but Discord permissions/topic synchronization is pending:', error);
+        }
+        channel.topic = reassignedTopic;
+        updateRuntimeTicketState(channel, reassignedTopic, 'claimed');
+        await updateMainMessage(channel, getField(reassignedTopic, 'message'), 'claimed', reassignedTopic);
+
+        const reason = interaction.fields.getTextInputValue('reason').trim();
+        const before = currentAssignees.length ? currentAssignees.map((id) => '<@' + id + '>').join(', ') : 'unassigned';
+        await channel.send('🔄 Ticket #' + (getField(reassignedTopic, 'number') ?? 'unknown') +
+          ' was reassigned from ' + before + ' to <@' + userId + '> by ' + interaction.user.tag +
+          (reason ? '\nReason: ' + reason : ''));
+
+        const config = await getGuildConfig(channel.guild.id);
+        if (config.supportCategoryId) {
+          await logTicketEvent(channel.guild, config.supportCategoryId, {
+            ticketNumber: getField(reassignedTopic, 'number') ?? 'unknown',
+            event: 'ticket_reassigned',
+            actor: interaction.user.tag,
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Reassigned ticket to <@' + userId + '>.' + (reason ? ' Reason: ' + reason : ''),
+          });
+        }
+        await interaction.editReply('✅ Ticket was reassigned to <@' + userId + '>.');
+        return;
+      }
+
       const users =
         (
           getField(
@@ -5377,24 +5701,29 @@ async function handlePanelModal(
           )
           .filter(Boolean);
 
-      if (
-        users.includes(
-          userId,
-        )
-      ) {
-        await interaction.editReply(
-          'ℹ️ That user is already on this ticket.',
-        );
+      const ticketOwnerId = getField(state.topic, 'owner');
+      if (removingUser && userId === ticketOwnerId) {
+        await interaction.editReply('❌ You cannot remove the ticket owner.');
         return;
       }
 
-      users.push(
-        userId,
-      );
+      const alreadyOnTicket = users.includes(userId);
+      if (removingUser && !alreadyOnTicket) {
+        await interaction.editReply('ℹ️ That user is not explicitly added to this ticket.');
+        return;
+      }
+      if (!removingUser && alreadyOnTicket) {
+        await interaction.editReply('ℹ️ That user is already on this ticket.');
+        return;
+      }
+
+      const nextUsers = removingUser
+        ? users.filter((id) => id !== userId)
+        : [...users, userId];
 
       const transitionAt = new Date().toISOString();
       newTopic = setField(
-        setField(newTopic, 'users', users.join(',')),
+        setField(newTopic, 'users', nextUsers.join(',')),
         'updated_at',
         transitionAt,
       );
@@ -5404,7 +5733,7 @@ async function handlePanelModal(
         channel.id,
         state.status,
         {
-          participantIds: [...new Set([...(ownerId ? [ownerId] : []), ...users])],
+          participantIds: [...new Set([...(ownerId ? [ownerId] : []), ...nextUsers])],
           metadata: {
             lastActivityAt: transitionAt,
             lastStaffActivityAt: transitionAt,
@@ -5433,7 +5762,9 @@ async function handlePanelModal(
       updateRuntimeTicketState(channel, newTopic, state.status);
 
       await interaction.editReply(
-        `✅ <@${userId}> has been added to the ticket.`,
+        removingUser
+          ? `✅ <@${userId}> has been removed from the ticket.`
+          : `✅ <@${userId}> has been added to the ticket.`,
       );
 
       const userConfig = await getGuildConfig(channel.guild.id);
@@ -5443,11 +5774,11 @@ async function handlePanelModal(
           userConfig.supportCategoryId,
           {
             ticketNumber: getField(channel.topic ?? '', 'number') ?? 'unknown',
-            event: 'ticket_user_added',
+            event: removingUser ? 'ticket_user_removed' : 'ticket_user_added',
             actor: interaction.user.tag,
             actorId: interaction.user.id,
             actorName: interaction.user.tag,
-            detail: 'Added user <@' + userId + '> to the ticket.',
+            detail: (removingUser ? 'Removed user <@' : 'Added user <@') + userId + '> from the ticket.',
           },
         );
       }
@@ -5481,9 +5812,11 @@ async function handlePanelModal(
         return;
       }
 
+      const noteThemeColor = getThemeColor((await getGuildConfig(channel.guild.id)).theme);
       await channel.send({
           embeds: [
             new EmbedBuilder()
+              .setColor(noteThemeColor)
               .setTitle(
                 '📝 Internal Note',
               )
@@ -5571,8 +5904,387 @@ function capitalize(
 }
 
 /* -------------------------------------------------------------------------- */
+/* Published custom-panel routing                                              */
+/* -------------------------------------------------------------------------- */
+
+function interactionRoleIds(interaction: ButtonInteraction): Set<string> {
+  const member = interaction.member;
+  if (!member || !('roles' in member)) return new Set();
+  const roles = member.roles;
+  if (Array.isArray(roles)) return new Set(roles);
+  if ('cache' in roles) return new Set(roles.cache.keys());
+  return new Set();
+}
+
+function hasRequiredPanelAccess(
+  interaction: ButtonInteraction,
+  panelRoleIds: string[],
+  buttonRoleIds: string[],
+): boolean {
+  if (
+    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)
+  ) return true;
+  const roles = interactionRoleIds(interaction);
+  const panelAllows = panelRoleIds.length === 0 || panelRoleIds.some((roleId) => roles.has(roleId));
+  const buttonAllows = buttonRoleIds.length === 0 || buttonRoleIds.some((roleId) => roles.has(roleId));
+  return panelAllows && buttonAllows;
+}
+
+async function startCustomPanelTarget(
+  interaction: ButtonInteraction,
+  button: CustomSupportPanelButton,
+): Promise<void> {
+  if (!interaction.guild) {
+    await replyError(interaction, 'This support panel can only be used inside a server.');
+    return;
+  }
+
+  if (button.targetType === 'form') {
+    if (!button.formId || !button.formVersion || !button.tagId) {
+      await replyError(interaction, 'This form button is incomplete. Ask an administrator to repair and republish the panel.');
+      return;
+    }
+    const cached = getCachedActiveTicketFormById(
+      interaction.guild.id,
+      button.formId,
+      button.formVersion,
+      button.tagId,
+    );
+    if (!cached.ready) {
+      await replyError(interaction, 'Ticket forms are still loading. Please try again in a moment.');
+      return;
+    }
+    if (!cached.form) {
+      await replyError(interaction, 'This panel points to a form version that was changed or deactivated. Ask an administrator to edit and republish the panel.');
+      return;
+    }
+    const expiresAt = Date.now() + TICKET_FORM_MODAL_TTL_MS;
+    const sessionId = randomBytes(10).toString('base64url');
+    await interaction.showModal(
+      buildTicketFormModal(cached.form, button.tagId, expiresAt, sessionId, 1, {}),
+    );
+    return;
+  }
+
+  if (!button.departmentId) {
+    await replyError(interaction, 'This panel button has no department target. Ask an administrator to repair the panel.');
+    return;
+  }
+  if (button.tagId) {
+    await showTicketCreationModal(interaction, button.departmentId, button.tagId);
+  } else {
+    await showTicketTagSelector(interaction, button.departmentId);
+  }
+}
+
+async function handleCustomPanelEntry(interaction: ButtonInteraction): Promise<void> {
+  if (!interaction.guild) {
+    await replyError(interaction, 'Custom support panels only work inside a server.');
+    return;
+  }
+
+  const parsed = parseCustomPanelInteractionId(interaction.customId);
+  if (!parsed) {
+    await replyError(interaction, 'This panel button is malformed or outdated. Refresh the support panel and try again.');
+    return;
+  }
+  const { action, panelId, buttonId, sourceMessageId, promptOwnerId } = parsed;
+  const isConfirm = action === 'confirm';
+  const isCancel = action === 'cancel';
+
+  // Confirmation controls live on an ephemeral response, not the public panel.
+  // They are valid only for the initiating user and currently published source.
+  if (isConfirm || isCancel) {
+    if (
+      interaction.user.id !== promptOwnerId ||
+      !interaction.message.flags.has(MessageFlags.Ephemeral)
+    ) {
+      await replyError(interaction, 'This confirmation belongs to another user or is not a valid private prompt.');
+      return;
+    }
+  }
+
+  // Cancellation is non-destructive and should remain available even if the
+  // panel was unpublished or the user's role changed while the prompt was open.
+  if (isCancel) {
+    await interaction.update({
+      content: 'Ticket request cancelled. No ticket was created.',
+      embeds: [],
+      components: [],
+    }).catch(() => undefined);
+    return;
+  }
+
+  const panel = await getCustomPanel(interaction.guild.id, panelId);
+  if (!panel || !panel.publishedConfig || !panel.publishedMessageId || !panel.publishedChannelId) {
+    await replyError(interaction, 'This panel is no longer published. Ask an administrator to publish the current draft.');
+    return;
+  }
+  const livePanel = panel.publishedConfig;
+  const sourceIsCurrent = isConfirm || isCancel
+    ? sourceMessageId === panel.publishedMessageId
+    : interaction.message.id === panel.publishedMessageId;
+  if (!sourceIsCurrent || interaction.channelId !== panel.publishedChannelId) {
+    await replyError(interaction, 'This is an old or copied panel button. Use the current published support panel instead.');
+    return;
+  }
+
+  const button = livePanel.buttons.find((candidate) => candidate.id === buttonId);
+  if (!button) {
+    await replyError(interaction, 'This button belongs to an older panel revision. The administrator must republish the current panel.');
+    return;
+  }
+  if (!hasRequiredPanelAccess(interaction, livePanel.allowedRoleIds ?? [], button.allowedRoleIds ?? [])) {
+    await replyError(interaction, 'You do not have a role allowed to use this support-panel option.');
+    return;
+  }
+
+  if (!isConfirm && button.confirmationMessage) {
+    const confirmation = new EmbedBuilder()
+      .setColor(getThemeColor((await getGuildConfig(interaction.guild.id)).theme))
+      .setTitle('Confirm support request')
+      .setDescription(button.confirmationMessage.slice(0, 4096))
+      .setFooter({ text: 'ResolveX • No ticket is created until you confirm' });
+    const confirmationPrefix = 'ticket:custom:';
+    await interaction.reply({
+      embeds: [confirmation],
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId(confirmationPrefix + 'confirm:' + panelId + ':' + buttonId + ':' + panel.publishedMessageId + ':' + interaction.user.id)
+            .setLabel('Continue')
+            .setEmoji('🎫')
+            .setStyle(ButtonStyle.Success),
+          new ButtonBuilder()
+            .setCustomId(confirmationPrefix + 'cancel:' + panelId + ':' + buttonId + ':' + panel.publishedMessageId + ':' + interaction.user.id)
+            .setLabel('Cancel')
+            .setEmoji('↩️')
+            .setStyle(ButtonStyle.Secondary),
+        ),
+      ],
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  try {
+    // A confirm click is accepted only after the private prompt owner, source
+    // public message, published snapshot, role restrictions and target have
+    // all been revalidated. The action then reuses the normal ticket flow.
+    await startCustomPanelTarget(interaction, button);
+  } catch (error) {
+    console.error('Custom support-panel route failed:', error);
+    await replyError(interaction, 'ResolveX could not open this ticket request. Please try again or use another support-panel option.');
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /* Main interaction router                                                    */
 /* -------------------------------------------------------------------------- */
+
+export async function executeTicketLifecycleCommand(
+  interaction: ChatInputCommandInteraction,
+  action: 'close' | 'reopen',
+): Promise<void> {
+  // Slash commands execute the lifecycle transition directly. They must not
+  // depend on a second interaction with a panel button to finish the action.
+  if (action === 'close') {
+    await closeTicket(interaction);
+    return;
+  }
+  await transition(interaction, 'reopened');
+}
+
+
+async function handleTicketDeletionInteraction(interaction: ButtonInteraction): Promise<void> {
+  const confirmationAction =
+    interaction.customId === 'ticket:delete:confirm-one' ||
+    interaction.customId === 'ticket:delete:confirm-two' ||
+    interaction.customId === 'ticket:delete:cancel';
+  if (confirmationAction) {
+    // Update the existing ephemeral confirmation instead of creating another
+    // reply. This disables stale confirmation buttons and prevents duplicate
+    // destructive operations from old copies of the same prompt.
+    try {
+      await interaction.deferUpdate();
+    } catch (error) {
+      console.warn('Could not acknowledge ticket deletion confirmation:', error);
+      return;
+    }
+  } else if (!(await safeDeferReply(interaction))) {
+    return;
+  }
+  if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
+    await interaction.editReply('This deletion control only works inside a ticket channel.');
+    return;
+  }
+
+  const channel = interaction.channel as TextChannel;
+  const topic = channel.topic ?? '';
+  if (!isTicketTopic(topic)) {
+    await interaction.editReply('This channel is not a managed ResolveX ticket.');
+    return;
+  }
+
+  const config = await getGuildConfig(interaction.guild.id);
+  const ticket = await getPersistedTicket(channel.id);
+  const departmentId = ticket?.departmentId ?? getField(topic, 'department') ?? '';
+  const department = config.departments[departmentId];
+  const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+  const isStaff = Boolean(member && department?.staffRoleId && member.roles.cache.has(department.staffRoleId));
+  const isAdmin = Boolean(
+    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels),
+  );
+  if (!isAdmin && !isStaff) {
+    await interaction.editReply('Only configured department staff or administrators with Manage Channels can delete this ticket.');
+    return;
+  }
+
+  const color = getThemeColor(config.theme);
+  const cancel = new ButtonBuilder()
+    .setCustomId('ticket:delete:cancel')
+    .setLabel('Cancel')
+    .setEmoji('↩️')
+    .setStyle(ButtonStyle.Secondary);
+
+  if (interaction.customId === 'ticket:delete:cancel') {
+    await interaction.editReply({
+      embeds: [new EmbedBuilder().setColor(color).setTitle('Ticket deletion cancelled').setDescription('The ticket channel and its archived messages were left unchanged.')],
+      components: [],
+    });
+    return;
+  }
+
+  if (interaction.customId === 'ticket:delete:start') {
+    await interaction.editReply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(color)
+          .setTitle('⚠️ Confirm ticket deletion · Step 1 of 2')
+          .setDescription(
+            'You are about to delete **#' + (ticket?.ticketNumber ?? getField(topic, 'number') ?? 'unknown') +
+            '**. ResolveX will archive the available conversation and then delete this channel. This action removes the current channel URL and cannot be undone in place.',
+          )
+          .setFooter({ text: 'ResolveX • Two-step deletion protection' }),
+      ],
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId('ticket:delete:confirm-one').setLabel('Confirm step 1 of 2').setEmoji('⚠️').setStyle(ButtonStyle.Danger),
+          cancel,
+        ),
+      ],
+    });
+    return;
+  }
+
+  if (interaction.customId === 'ticket:delete:confirm-one') {
+    await interaction.editReply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(color)
+          .setTitle('🚨 Final confirmation · Step 2 of 2')
+          .setDescription(
+            'This is the second confirmation. ResolveX will finish archiving the ticket history before deleting the channel. If archival fails, deletion will be cancelled. A separate deletion-review record will be created.',
+          )
+          .setFooter({ text: 'ResolveX • Final confirmation required' }),
+      ],
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId('ticket:delete:confirm-two').setLabel('Delete ticket permanently').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+          cancel,
+        ),
+      ],
+    });
+    return;
+  }
+
+  if (interaction.customId !== 'ticket:delete:confirm-two') {
+    await interaction.editReply('This deletion confirmation is no longer recognized. Reopen the ticket panel and start again.');
+    return;
+  }
+
+  let intentRecorded = false;
+  let channelDeleted = false;
+  try {
+    await interaction.editReply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(color)
+          .setTitle('📦 Preparing ticket archive')
+          .setDescription('ResolveX is saving message history, edits, attachment metadata and accessible attachment files before deletion. The channel will remain if archival cannot finish.')
+          .setFooter({ text: 'ResolveX • Durable recovery' }),
+      ],
+      components: [],
+    });
+
+    await archiveTicketChannelForRecovery(channel);
+
+    const supportCategoryId = config.supportCategoryId;
+    const ticketNumber = ticket?.ticketNumber ?? getField(topic, 'number') ?? 'unknown';
+    if (supportCategoryId) {
+      // Write the audit trail before deletion. The durable pending intent is
+      // then created immediately before the Discord delete request so a stale
+      // intent is less likely to misclassify a later native deletion.
+      await ensureAuditDeveloperInfrastructure(interaction.guild, supportCategoryId);
+      await logTicketEvent(interaction.guild, supportCategoryId, {
+        ticketNumber,
+        ticketChannelId: channel.id,
+        event: 'TICKET_DELETE_BUTTON_CONFIRMED',
+        actor: interaction.user.tag,
+        actorId: interaction.user.id,
+        actorName: interaction.user.tag,
+        detail: 'Ticket deletion completed the two-confirmation flow. A separate Settings review will ask whether this deletion was a mistake.',
+      });
+      await logSystemEvent(
+        interaction.guild,
+        supportCategoryId,
+        'TICKET_DELETE_BUTTON_CONFIRMED',
+        'Ticket #' + ticketNumber + ' deletion initiated through the ticket button by ' + interaction.user.tag + ' (' + interaction.user.id + '). Confirmation count: 2. Channel ID: ' + channel.id,
+      );
+    }
+
+    // Neon intent is durable before the destructive Discord API call.
+    await beginTicketButtonDeletion(channel, interaction.user.id, interaction.user.tag);
+    intentRecorded = true;
+    await channel.delete('ResolveX ticket Delete button; actor ' + interaction.user.id + '; two confirmations completed');
+    channelDeleted = true;
+  } catch (error) {
+    if (intentRecorded && !channelDeleted) {
+      await cancelTicketButtonDeletion(channel.id).catch(() => undefined);
+    }
+    const detail = error instanceof Error ? error.message : 'Unknown deletion error.';
+    console.error('ResolveX ticket-button deletion failed:', error);
+    await interaction.editReply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(color)
+          .setTitle('❌ Ticket deletion did not complete')
+          .setDescription(detail.slice(0, 3500) + '\n\nThe ticket channel was not intentionally deleted by ResolveX. Check the archive and bot permissions before retrying.')
+          .setFooter({ text: 'ResolveX • Database and channel state are preserved where possible' }),
+      ],
+      components: [],
+    }).catch(() => undefined);
+    return;
+  }
+
+  // The delete endpoint has succeeded. A missing interaction response must not
+  // retroactively misreport a successful deletion as a failed operation.
+  await interaction.editReply({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(color)
+        .setTitle('✅ Ticket channel deleted')
+        .setDescription('The channel was deleted after the durable archive step. Open **Settings → Repair System → Ticket Deletion Review** to answer “Was this ticket deleted by mistake?” The original channel ID and recovered-message attribution remain in the archive.')
+        .setFooter({ text: 'ResolveX • The replacement channel will have a new ID and URL if restored.' }),
+    ],
+    components: [],
+  }).catch((error) => {
+    console.warn('Ticket channel deletion succeeded, but the ephemeral confirmation could not be edited:', error instanceof Error ? error.message : 'unknown interaction response failure');
+  });
+}
 
 export async function handleTicketInteraction(
   interaction:
@@ -5581,6 +6293,10 @@ export async function handleTicketInteraction(
     | ModalSubmitInteraction,
 ): Promise<void> {
   try {
+    if (interaction.isButton() && interaction.customId.startsWith('ticket:delete:')) {
+      await handleTicketDeletionInteraction(interaction);
+      return;
+    }
     const routingComponentRoute = classifyTicketRoutingComponent(interaction.customId);
     /*
      * Move/Restore is allowed to perform several Discord API operations,
@@ -5673,6 +6389,14 @@ export async function handleTicketInteraction(
     if (
       interaction.isButton()
     ) {
+      // Custom-panel buttons bind to immutable published snapshots. This keeps
+      // unpublished edits from changing the meaning of buttons already visible
+      // to customers.
+      if (interaction.customId.startsWith('ticket:custom:')) {
+        await handleCustomPanelEntry(interaction);
+        return;
+      }
+
       /*
        * Department ticket creation buttons.
        *

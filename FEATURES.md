@@ -275,12 +275,24 @@ Discord bot, guild configuration, department configuration.
 
 ## F-002 — Custom Panel Builder
 
-**Status:** `PLANNED`  
+**Status:** `BUILT / PARTIAL`  
 **Priority:** `P1`
 
 ### Purpose
 
 Turn the generated Support Center into a true configurable panel builder rather than a mostly fixed bot-generated message.
+
+### Current implementation checkpoint (ResolveX Stage E)
+
+The Discord implementation supports multiple saved public ticket panels in the Neon-backed guild configuration document. Administrators can build and edit drafts through **Settings → Ticket Panels**, without writing JSON for routine work, and through the matching `/supportforge panel` command family. The visual builder supports panel name/title/instructions, accent color, author icon, thumbnail and banner URLs; up to 25 ordered buttons; public channel selection; private disabled preview; reordering; target changes; role restrictions; optional per-button confirmation text; and a confirmed delete flow. Button label, emoji, style and target can be managed independently.
+
+Each button can target either an existing department ticket flow (optional pinned tag or customer tag selection) or a specific active ticket form pinned to a version and concrete tag. All launches enter the existing validated ticket creation/form pipeline. Role rules at panel and button level are combined; server administrators can always use the controls. Custom component IDs are stable per button, rotated when its target changes, and accepted only from the exact current published message/channel. Confirmation prompts are ephemeral and bound to both their initiating user and the source published message.
+
+The public panel and its published configuration are separate from its editable draft. Draft edits do not change what currently published buttons mean. Publishing posts a replacement, persists the new published snapshot and channel/message pointers, and only then attempts to retire the old message. If saving fails after Discord accepts the replacement, the bot attempts to delete the unregistered new message and preserve the prior live panel. A leftover old message after cleanup failure is visibly reported and its controls are rejected as stale. Deleting a panel removes the saved definition and known published message, never tickets created from it.
+
+The **Settings channel itself** has a separate server-specific dashboard builder. Administrators can customize its title, description, footer, navigation button order, each navigation button's label and emoji, and preview the disabled layout. The builder always retains every built-in feature control, including repair, refresh and destructive reset; presentation customization cannot hide or change their semantic button styles. The current order and presentation are persisted in the existing Neon-backed advanced-settings document.
+
+Remaining F-002 scope: arbitrary pluggable workflow definitions beyond the supported department/form target types; native custom icon uploads rather than an icon URL; optional richer layout primitives beyond Discord's button grid; and live acceptance in a real test guild. Discord's button UI remains constrained to five rows and 25 components per message.
 
 ### Configuration fields
 
@@ -788,7 +800,7 @@ This becomes essential once the project moves into a real database.
 
 ## F-015 — Advanced Ticket Forms
 
-**Status:** `IMPLEMENTED — GitHub verification pending`  
+**Status:** `IMPLEMENTED — CI verified; live Discord acceptance pending`  
 **Priority:** `P1`
 
 ### Delivered behavior
@@ -804,7 +816,7 @@ This becomes essential once the project moves into a real database.
 
 ## F-016 — Conditional Form Fields
 
-**Status:** `IMPLEMENTED — GitHub verification pending`  
+**Status:** `IMPLEMENTED — CI verified; live Discord acceptance pending`  
 **Priority:** `P1`
 
 A field may contain a `step` number from 1 through 10 and a `condition` object, for example:
@@ -833,7 +845,7 @@ A field may contain a `step` number from 1 through 10 and a `condition` object, 
 
 ## F-017 — Form Templates
 
-**Status:** `IMPLEMENTED — GitHub verification pending`  
+**Status:** `IMPLEMENTED — CI verified; live Discord acceptance pending`  
 **Priority:** `P2`
 
 - `/supportforge form template-save` stores a validated schema as a server-scoped reusable template.

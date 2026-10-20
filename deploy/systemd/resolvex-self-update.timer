@@ -1,0 +1,12 @@
+[Unit]
+Description=Check GitHub for new ResolveX commits
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=2min
+RandomizedDelaySec=20s
+Persistent=true
+Unit=resolvex-self-update.service
+
+[Install]
+WantedBy=timers.target

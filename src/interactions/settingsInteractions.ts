@@ -10,6 +10,7 @@ import {
   PermissionFlagsBits,
   StringSelectMenuBuilder,
   StringSelectMenuInteraction,
+  RoleSelectMenuInteraction,
   TextInputBuilder,
   TextInputStyle,
   type Guild,
@@ -18,6 +19,9 @@ import {
 
 import {
   getGuildConfig,
+  getTier,
+  setTier,
+  tierLabel,
   newDepartmentId,
   newTagId,
   updateGuildConfig,
@@ -26,6 +30,8 @@ import {
 import {
   getAdvancedSettings,
   updateAdvancedSettings,
+  SETTINGS_DASHBOARD_BUTTON_KEYS,
+  type SettingsDashboardButtonKey,
   type TicketPriority,
 } from '../services/advancedSettingsService';
 
@@ -48,11 +54,24 @@ import {
   ensureAllDepartmentCategories,
 } from '../services/departmentCategoryService';
 
-import { logSettingsEvent } from '../services/auditLogService';
-import { getField, getTicketStatus, isTicketTopic, setField } from '../services/ticketStateService';
-import { setChannelPermissionOverwrite, setChannelTopic } from '../services/discordChannelService';
-import { getPersistedTicket, getPersistedTicketStatus, registerTicket } from '../services/ticketPersistenceService';
+import { ensureAuditDeveloperInfrastructure, logSettingsEvent, refreshAuditPanelTheme, logTicketEvent, logSystemEvent } from '../services/auditLogService';
+import { requestGitHubDeployment } from '../services/updateService';
+import { getField, getTicketStatus, setField } from '../services/ticketStateService';
+import { migrateDepartmentStaffRole } from '../services/departmentStaffRoleService';
+import { getPersistedTicket, getPersistedTicketById, getPersistedTicketStatus } from '../services/ticketPersistenceService';
 import { performFactoryReset } from '../services/factoryResetService';
+import { addUseCasePreset, USE_CASE_PRESETS } from '../services/useCasePresetService';
+import { enforcePriorityRoleHierarchy } from '../services/priorityRoleService';
+import { UI_THEMES, getThemeColor, getThemeDefinition, isGuildTheme } from '../services/uiThemeService';
+import { normalizeDiscordEmoji } from '../core/domain/discordEmoji';
+import { handleTicketFormSettingsInteraction } from './ticketFormSettingsInteractions';
+import { handleCustomPanelSettingsInteraction } from './customPanelSettingsInteractions';
+import {
+  answerTicketDeletionReview,
+  listTicketRecoveryCandidates,
+  restoreArchivedTicket,
+  type TicketRecoveryCandidate,
+} from '../services/ticketArchiveService';
 import {
   approveRetentionDeletion,
   declineRetentionDeletion,
@@ -65,13 +84,15 @@ import {
   ensurePanelChannel,
   ensureTranscriptChannel,
   syncPanel,
+  runSupportForgeSetup,
+  runSupportForgeRepair,
 } from '../commands/supportforge';
 
 const SETTINGS_TOPIC_PREFIX = 'supportforge:settings';
 
 type SettingsViewInteraction = ButtonInteraction | StringSelectMenuInteraction;
 
-function isAdministrator(interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction): boolean {
+function isAdministrator(interaction: ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction | ModalSubmitInteraction): boolean {
   return Boolean(
     interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
       interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild),
@@ -86,7 +107,7 @@ const PRIORITY_ROLE_DEFINITIONS: Record<TicketPriority, { label: string; emoji: 
   critical: { label: 'Critical', emoji: '🟣', color: 0x9b59b6 },
 };
 
-async function isDepartmentStaff(interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction): Promise<boolean> {
+async function isDepartmentStaff(interaction: ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction | ModalSubmitInteraction): Promise<boolean> {
   const guild = interaction.guild;
   if (!guild) return false;
   const roleIds = new Set(
@@ -98,103 +119,6 @@ async function isDepartmentStaff(interaction: ButtonInteraction | StringSelectMe
   const member = await guild.members.fetch(interaction.user.id).catch(() => null);
   return Boolean(member?.roles.cache.some((role) => roleIds.has(role.id)));
 };
-
-async function migrateDepartmentStaffRole(
-  guild: Guild,
-  departmentId: string,
-  oldRoleId: string | null,
-  newRoleId: string | null,
-): Promise<void> {
-  if (oldRoleId === newRoleId) return;
-
-  const config = await getGuildConfig(guild.id);
-  const department = config.departments[departmentId];
-  const category = department?.categoryId
-    ? guild.channels.cache.get(department.categoryId)
-    : null;
-
-  if (category?.type === ChannelType.GuildCategory) {
-    if (oldRoleId) {
-      await setChannelPermissionOverwrite(
-        category.id,
-        oldRoleId,
-        [],
-        [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
-        0,
-        'SupportForge remove previous department staff role access',
-      ).catch((error) => console.warn('⚠️ Could not remove previous department role from category:', error));
-    }
-    if (newRoleId) {
-      await setChannelPermissionOverwrite(
-        category.id,
-        newRoleId,
-        [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
-        [],
-        0,
-        'SupportForge grant new department staff role access',
-      ).catch((error) => console.warn('⚠️ Could not grant new department role to category:', error));
-    }
-  }
-
-  for (const channel of guild.channels.cache.values()) {
-    if (
-      channel.type !== ChannelType.GuildText ||
-      !channel.topic?.startsWith('supportforge:ticket') ||
-      getField(channel.topic, 'department') !== departmentId
-    ) {
-      continue;
-    }
-
-    const topic = channel.topic;
-    const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
-    const nextTopic = setField(topic, 'staff', newRoleId ?? 'none');
-
-    if (oldRoleId && oldRoleId !== newRoleId) {
-      await setChannelPermissionOverwrite(
-        channel.id,
-        oldRoleId,
-        [],
-        [],
-        0,
-        'SupportForge clear previous department staff ticket override',
-      ).catch((error) => console.warn('⚠️ Could not clear old department role on ticket ' + channel.id + ':', error));
-    }
-
-    if (newRoleId) {
-      const claimed = status === 'claimed';
-      await setChannelPermissionOverwrite(
-        channel.id,
-        newRoleId,
-        claimed
-          ? []
-          : [
-              PermissionFlagsBits.ViewChannel,
-              PermissionFlagsBits.SendMessages,
-              PermissionFlagsBits.ReadMessageHistory,
-            ],
-        claimed
-          ? [
-              PermissionFlagsBits.ViewChannel,
-              PermissionFlagsBits.SendMessages,
-              PermissionFlagsBits.ReadMessageHistory,
-            ]
-          : [],
-        0,
-        claimed
-          ? 'SupportForge hide claimed ticket from new department staff role'
-          : 'SupportForge grant new department staff ticket access',
-      ).catch((error) => console.warn('⚠️ Could not synchronize new department staff access on ticket ' + channel.id + ':', error));
-    }
-
-    await setChannelTopic(
-      channel.id,
-      nextTopic,
-      'SupportForge migrate department staff role metadata',
-    ).catch((error) => console.warn('⚠️ Could not update staff metadata on ticket ' + channel.id + ':', error));
-
-    channel.topic = nextTopic;
-  }
-}
 
 function manualQuickEmbed(): EmbedBuilder {
   return new EmbedBuilder()
@@ -265,98 +189,19 @@ function priorityRoleLabel(priority: TicketPriority): string {
   return PRIORITY_ROLE_DEFINITIONS[priority].label;
 }
 
-const pendingResetAuditChoice = new Map<string, boolean>();
-
-const PRIORITY_ROLE_ORDER: TicketPriority[] = [
-  'critical',
-  'urgent',
-  'high',
-  'normal',
-  'low',
-];
-
-/**
- * Keep SupportForge priority roles together at the top of the role hierarchy
- * that the bot can manage. Higher priority always receives the higher Discord
- * role position, regardless of the order in which roles were created.
- */
-async function enforcePriorityRoleHierarchy(guild: Guild): Promise<void> {
-  const settings = await getAdvancedSettings(guild.id);
-  const configured = PRIORITY_ROLE_ORDER.flatMap((priority) => {
-    const roleId = settings.priorityRoles[priority];
-    const role = roleId ? guild.roles.cache.get(roleId) : undefined;
-
-    return roleId && role && !role.managed
-      ? [{ priority, role }]
-      : [];
-  });
-
-  if (configured.length === 0) return;
-
-  const botMember =
-    guild.members.me ??
-    await guild.members.fetchMe().catch(() => null);
-
-  const botHighestRole = botMember?.roles.highest;
-  if (!botHighestRole) {
-    console.warn('⚠️ SupportForge could not determine its highest role; priority role ordering was skipped.');
-    return;
-  }
-
-  /*
-   * Discord only lets a bot manage roles below its highest role. A hierarchy
-   * preference must never make the underlying priority-rule creation fail.
-   * Skip roles the bot cannot edit and treat a Discord 50013 as a warning.
-   */
-  const manageable = configured.filter(
-    (entry) =>
-      entry.role.editable &&
-      entry.role.position < botHighestRole.position,
-  );
-
-  if (manageable.length === 0) return;
-
-  const highestTargetPosition = botHighestRole.position - 1;
-  const lowestTargetPosition =
-    highestTargetPosition - manageable.length + 1;
-
-  if (lowestTargetPosition < 1) {
-    console.warn(
-      '⚠️ Not enough manageable role positions below the SupportForge bot role; priority role ordering was skipped.',
-    );
-    return;
-  }
-
-  const positions = manageable.map((entry, index) => ({
-    role: entry.role.id,
-    position: highestTargetPosition - index,
-  }));
-
-  try {
-    await guild.roles.setPositions(positions);
-    await guild.roles.fetch();
-  } catch (error) {
-    console.warn(
-      '⚠️ Could not reorder SupportForge priority roles. Role creation/deletion will continue normally:',
-      error,
-    );
-  }
-}
-
 function findPriorityRole(
   guild: Guild,
   _priority: TicketPriority,
   configuredRoleId?: string,
 ) {
-  /*
-   * A role name is not ownership proof. Only a persisted role ID identifies a
-   * SupportForge-managed priority role, so an unrelated role with a matching
-   * display name can never be deleted or treated as configured infrastructure.
-   */
+  // A matching display name is not ownership proof. Only the saved role ID
+  // identifies a SupportForge-managed priority role.
   if (!configuredRoleId) return undefined;
   const configured = guild.roles.cache.get(configuredRoleId);
   return configured && !configured.managed ? configured : undefined;
 }
+
+const pendingResetAuditChoice = new Map<string, boolean>();
 
 async function showManual(interaction: SettingsViewInteraction): Promise<void> {
   await renderSettingsView(interaction, [
@@ -627,12 +472,12 @@ async function deletePriorityRole(
     );
   }
 }
-function isSettingsChannel(interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction): boolean {
+function isSettingsChannel(interaction: ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction | ModalSubmitInteraction): boolean {
   return interaction.channel?.type === ChannelType.GuildText &&
     Boolean(interaction.channel.topic?.startsWith(SETTINGS_TOPIC_PREFIX));
 }
 
-async function reject(interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction, content: string): Promise<void> {
+async function reject(interaction: ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction | ModalSubmitInteraction, content: string): Promise<void> {
   if (interaction.replied || interaction.deferred) {
     await interaction.editReply(content).catch(() => undefined);
     return;
@@ -694,7 +539,9 @@ async function renderSettingsView(
   embeds: EmbedBuilder[],
   components: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>>,
 ): Promise<void> {
-  const payload = { embeds, components };
+  const config = await getGuildConfig(interaction.guild!.id);
+  const themedEmbeds = embeds.map((embed) => embed.setColor(getThemeColor(config.theme)));
+  const payload = { embeds: themedEmbeds, components };
 
   if (interaction.replied || interaction.deferred) {
     await interaction.editReply(payload);
@@ -715,7 +562,7 @@ async function renderSettingsView(
 
 async function auditSettingsAction(
   guild: Guild,
-  interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
+  interaction: ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction | ModalSubmitInteraction,
   action: string,
   detail: string,
 ): Promise<void> {
@@ -746,10 +593,182 @@ async function showHome(interaction: SettingsViewInteraction): Promise<void> {
           (total, department) => total + Object.keys(department.tags ?? {}).length,
           0,
         ),
+        config.theme,
       ),
     ],
-    buildSettingsDashboardComponents(),
+    buildSettingsDashboardComponents(settings),
   );
+}
+
+const SETTINGS_LAYOUT_PREFIX = 'sf:settings:dashboard-builder';
+
+const SETTINGS_LAYOUT_LABELS: Record<SettingsDashboardButtonKey, string> = {
+  panel: 'Panel Automation',
+  defaults: 'Ticket Defaults',
+  tags: 'Tags / Departments',
+  usecases: 'Use Cases',
+  reports: 'Safety & Reports',
+  retention: 'Retention',
+  appearance: 'Public Panel Appearance',
+  storage: 'Storage',
+  rules: 'Rules & Roles',
+  repair: 'Repair System',
+  team: 'Team & Voice',
+  manual: 'Staff Manual',
+  forms: 'Ticket Forms',
+  refresh: 'Refresh',
+  reset: 'Delete Everything',
+  theme: 'Server Theme',
+  premium: 'Premium & Demo',
+  panels: 'Ticket Panels',
+  'dashboard-builder': 'Settings Layout',
+};
+
+const SETTINGS_LAYOUT_DEFAULT_EMOJIS: Record<SettingsDashboardButtonKey, string> = {
+  panel: '🎛️', defaults: '🎟️', tags: '🏷️', usecases: '🧩', reports: '🚩',
+  retention: '🧹', appearance: '🎨', storage: '🗄️', rules: '🛡️', repair: '🛠️',
+  team: '👥', manual: '📖', forms: '🧾', refresh: '🔄', reset: '🚨', theme: '🌈',
+  premium: '💎', panels: '🧱', 'dashboard-builder': '🧰',
+};
+
+function effectiveSettingsLayoutLabel(
+  settings: Awaited<ReturnType<typeof getAdvancedSettings>>,
+  key: SettingsDashboardButtonKey,
+): string {
+  return settings.settingsDashboard.buttonCustomizations[key]?.label ?? SETTINGS_LAYOUT_LABELS[key];
+}
+
+function effectiveSettingsLayoutEmoji(
+  settings: Awaited<ReturnType<typeof getAdvancedSettings>>,
+  key: SettingsDashboardButtonKey,
+): string {
+  const custom = settings.settingsDashboard.buttonCustomizations[key];
+  return custom ? (custom.emoji ?? '') : SETTINGS_LAYOUT_DEFAULT_EMOJIS[key];
+}
+
+
+function settingsButtonOrder(settings: Awaited<ReturnType<typeof getAdvancedSettings>>): SettingsDashboardButtonKey[] {
+  const valid: SettingsDashboardButtonKey[] = [];
+  for (const candidate of settings.settingsDashboard.buttonOrder) {
+    if ((SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(candidate) && !valid.includes(candidate)) {
+      valid.push(candidate);
+    }
+  }
+  for (const candidate of SETTINGS_DASHBOARD_BUTTON_KEYS) {
+    if (!valid.includes(candidate)) valid.push(candidate);
+  }
+  return valid;
+}
+
+async function showSettingsDashboardBuilder(
+  interaction: SettingsViewInteraction,
+  notice = '',
+): Promise<void> {
+  const guildId = interaction.guild!.id;
+  const settings = await getAdvancedSettings(guildId);
+  const config = await getGuildConfig(guildId);
+  const order = settingsButtonOrder(settings);
+  const orderText = order.map((key, index) => (index + 1) + '. ' + (effectiveSettingsLayoutEmoji(settings, key) ? effectiveSettingsLayoutEmoji(settings, key) + ' ' : '') + effectiveSettingsLayoutLabel(settings, key)).join('\n');
+  const chooser = new StringSelectMenuBuilder()
+    .setCustomId(SETTINGS_LAYOUT_PREFIX + ':reorder-select')
+    .setPlaceholder('Choose a control to move up or down')
+    .addOptions(order.map((key) => ({
+      label: effectiveSettingsLayoutLabel(settings, key).slice(0, 100),
+      value: key,
+      description: 'Current position ' + (order.indexOf(key) + 1) + ' of ' + order.length,
+      default: key === order[0],
+    })));
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('🧰 Settings Dashboard Builder')
+      .setDescription(
+        (notice ? notice + '\n\n' : '') +
+        'Customize the **Settings channel itself** for this server. Change its heading, description, footer, control order, per-control labels and emojis. Edits save immediately; Preview shows the saved layout with disabled controls. This changes only the Settings dashboard, not the public ticket panel.\n\n' +
+        '**Title:** ' + settings.settingsDashboard.title + '\n' +
+        '**Description:** ' + (settings.settingsDashboard.description || 'No description') + '\n' +
+        '**Footer:** ' + settings.settingsDashboard.footer + '\n\n' +
+        '**Control order**\n' + orderText +
+        '\n\nSafety rule: all built-in controls remain available. Reordering cannot hide repair, refresh or Delete Everything.',
+      ),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':edit').setLabel('Edit Branding').setEmoji('🎨').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':preview').setLabel('Preview').setEmoji('👁️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':reset-order').setLabel('Reset Layout').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+      backButton(),
+    ),
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(chooser),
+  ]);
+}
+
+async function showSettingsDashboardOrder(
+  interaction: SettingsViewInteraction,
+  key: SettingsDashboardButtonKey,
+): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const order = settingsButtonOrder(settings);
+  const index = order.indexOf(key);
+  if (index < 0) throw new Error('That Settings control no longer exists.');
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('Reorder Settings Control')
+      .setDescription(
+        '**Selected:** ' + (effectiveSettingsLayoutEmoji(settings, key) ? effectiveSettingsLayoutEmoji(settings, key) + ' ' : '') + effectiveSettingsLayoutLabel(settings, key) + '\n' +
+        '**Current position:** ' + (index + 1) + ' of ' + order.length + '\n' +
+        '**Emoji:** ' + (effectiveSettingsLayoutEmoji(settings, key) || 'None') + '\n\n' +
+        'Moving this item changes the order of buttons on the persistent Settings dashboard for this server. It does not remove or disable the selected feature.',
+      ),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':up:' + key).setLabel('Move Up').setEmoji('⬆️').setStyle(ButtonStyle.Secondary).setDisabled(index === 0),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':down:' + key).setLabel('Move Down').setEmoji('⬇️').setStyle(ButtonStyle.Secondary).setDisabled(index === order.length - 1),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':customize:' + key).setLabel('Customize Label / Emoji').setEmoji('✏️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':preview').setLabel('Preview').setEmoji('👁️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel('Layout Builder').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+    ),
+  ]);
+}
+
+async function showSettingsDashboardPreview(interaction: SettingsViewInteraction): Promise<void> {
+  const guildId = interaction.guild!.id;
+  const settings = await getAdvancedSettings(guildId);
+  const config = await getGuildConfig(guildId);
+  const departmentCount = Object.keys(config.departments).length;
+  const tagCount = Object.values(config.departments).reduce(
+    (total, department) => total + Object.keys(department.tags ?? {}).length,
+    0,
+  );
+  const preview = buildSettingsDashboardEmbed(settings, departmentCount, tagCount, config.theme)
+    .addFields({ name: 'Preview only', value: 'These controls are disabled. Saving the builder changes the persistent Settings dashboard for this server.' });
+  await renderSettingsView(interaction, [preview], [
+    ...buildSettingsDashboardComponents(settings, true),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel('Return to Layout Builder').setEmoji('↩️').setStyle(ButtonStyle.Primary),
+    ),
+  ]);
+}
+
+async function showPremiumSettings(interaction: SettingsViewInteraction, notice = ''): Promise<void> {
+  const tier = await getTier(interaction.guild!.id);
+  const next = tier === 'free' ? 'premium-demo' : tier === 'premium-demo' ? 'pro-demo' : 'free';
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('💎 Premium & Feature Demo')
+      .setDescription(
+        (notice ? notice + '\\n\\n' : '') +
+        'Current tier: **' + tierLabel(tier) + '**. Premium and Pro are demo entitlements for preview only, not real billing. ' +
+        'This control cycles Free → Premium Demo → Pro Demo → Free.',
+      ),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId('sf:settings:premium:toggle')
+        .setLabel('Switch to ' + tierLabel(next))
+        .setEmoji('🔁')
+        .setStyle(ButtonStyle.Primary),
+      backButton(),
+    ),
+  ]);
 }
 
 async function showPanelSettings(interaction: ButtonInteraction): Promise<void> {
@@ -1273,40 +1292,38 @@ async function showAppearance(interaction: ButtonInteraction): Promise<void> {
   ]);
 }
 
-const USE_CASE_PRESETS: Record<string, { name: string; emoji: string; tags: string[] }> = {
-  'technical-support': {
-    name: 'Technical Support', emoji: '🛠️',
-    tags: ['Bug Report', 'Error Message', 'Performance Issue', 'Installation', 'Configuration', 'Integration', 'Feature Request', 'Compatibility'],
-  },
-  sales: {
-    name: 'Sales', emoji: '💼',
-    tags: ['Pricing', 'Plan Comparison', 'Quote Request', 'Product Demo', 'Enterprise Inquiry', 'Volume Discount', 'Purchase Assistance', 'Upgrade Inquiry'],
-  },
-  'account-access': {
-    name: 'Account & Access', emoji: '🔐',
-    tags: ['Login Issue', 'Password Reset', 'Email Change', 'Two-Factor Authentication', 'Account Verification', 'Account Recovery', 'Permission Issue', 'Account Deletion'],
-  },
-  partnerships: {
-    name: 'Partnerships', emoji: '🤝',
-    tags: ['Partnership Proposal', 'Affiliate Program', 'Integration Proposal', 'Reseller Inquiry', 'Co-Marketing', 'Sponsorship', 'API Collaboration', 'Business Development'],
-  },
-  'reports-abuse': {
-    name: 'Reports & Abuse', emoji: '🚩',
-    tags: ['Harassment', 'Spam', 'Scam Attempt', 'Impersonation', 'Malicious Content', 'Terms Violation', 'Privacy Concern', 'Appeal'],
-  },
-  'refunds-returns': {
-    name: 'Refunds & Returns', emoji: '↩️',
-    tags: ['Refund Request', 'Return Request', 'Duplicate Charge', 'Billing Error', 'Cancel Order', 'Missing Refund', 'Damaged Item', 'Exchange Request'],
-  },
-  'product-support': {
-    name: 'Product Support', emoji: '📦',
-    tags: ['Product Question', 'Setup Assistance', 'Feature Guidance', 'Product Defect', 'Compatibility', 'Warranty Claim', 'Replacement Request', 'Documentation'],
-  },
-  'vip-support': {
-    name: 'VIP Support', emoji: '⭐',
-    tags: ['Priority Escalation', 'Service Outage', 'Executive Request', 'Dedicated Assistance', 'SLA Concern', 'Critical Business Impact', 'Account Review', 'Renewal Assistance'],
-  },
-};
+async function showThemeSettings(
+  interaction: SettingsViewInteraction,
+  notice = '',
+): Promise<void> {
+  const config = await getGuildConfig(interaction.guild!.id);
+  const active = getThemeDefinition(config.theme);
+  const chooser = new StringSelectMenuBuilder()
+    .setCustomId('sf:settings:theme:select')
+    .setPlaceholder('Choose a visual theme for this server')
+    .addOptions(UI_THEMES.map((theme) => ({
+      label: theme.label,
+      value: theme.id,
+      description: theme.description,
+      default: theme.id === config.theme,
+    })));
+
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('🌈 Server Theme')
+      .setDescription(
+        (notice ? notice + '\n\n' : '') +
+        'Give this server its own visual identity. The selected palette is saved in this server’s configuration and does not affect other servers. It accents the public support panel, Settings dashboard, and Ticket Forms screens. Discord’s native controls retain their built-in style.'
+      )
+      .addFields(
+        { name: 'Active palette', value: '**' + active.label + '**\n' + active.description, inline: true },
+        { name: 'Preview', value: active.preview, inline: true },
+      ),
+  ], [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(chooser),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()),
+  ]);
+}
 
 async function showUseCases(interaction: ButtonInteraction): Promise<void> {
   const presets = Object.entries(USE_CASE_PRESETS);
@@ -1436,8 +1453,285 @@ async function openModal(
   }
 }
 
+
+type TicketRecoveryInteraction = ButtonInteraction | StringSelectMenuInteraction;
+const RECOVERY_PAGE_SIZE = 20;
+
+async function recoveryEmbed(guild: Guild, title: string, description: string): Promise<EmbedBuilder> {
+  const config = await getGuildConfig(guild.id);
+  return new EmbedBuilder()
+    .setColor(getThemeColor(config.theme))
+    .setTitle(title.slice(0, 256))
+    .setDescription((description || 'Use the controls below to continue.').slice(0, 3900))
+    .setFooter({ text: getThemeDefinition(config.theme).label + ' theme • ResolveX Ticket Recovery' })
+    .setTimestamp();
+}
+
+async function ensureRecoveryReply(interaction: TicketRecoveryInteraction): Promise<void> {
+  if (interaction.deferred || interaction.replied) return;
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+}
+
+function recoveryButton(id: string, label: string, style: ButtonStyle = ButtonStyle.Secondary, emoji?: string, disabled = false): ButtonBuilder {
+  const result = new ButtonBuilder().setCustomId(id).setLabel(label).setStyle(style).setDisabled(disabled);
+  if (emoji) result.setEmoji(emoji);
+  return result;
+}
+
+function recoverySelect(candidates: TicketRecoveryCandidate[], source: 'discord_native' | 'ticket_button'): ActionRowBuilder<StringSelectMenuBuilder> | null {
+  if (!candidates.length) return null;
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId(source === 'discord_native' ? 'sf:settings:recovery:channels:pick' : 'sf:settings:recovery:review:pick')
+    .setPlaceholder(source === 'discord_native' ? 'Choose a channel to restore' : 'Choose a deletion to review')
+    .addOptions(candidates.slice(0, 25).map((item) => ({
+      label: ('Ticket #' + item.ticketNumber).slice(0, 100),
+      value: item.ticketId,
+      description: (item.messageCount + ' archived messages • owner ' + item.ownerId).slice(0, 100),
+    })));
+  return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu);
+}
+
+async function showRecoveryCandidates(
+  interaction: TicketRecoveryInteraction,
+  source: 'discord_native' | 'ticket_button',
+  requestedPage = 1,
+): Promise<void> {
+  await ensureRecoveryReply(interaction);
+  const guild = interaction.guild;
+  if (!guild) {
+    await interaction.editReply('Ticket recovery must be opened inside a server.');
+    return;
+  }
+
+  const all = await listTicketRecoveryCandidates(guild.id, source);
+  const pages = Math.max(1, Math.ceil(all.length / RECOVERY_PAGE_SIZE));
+  const page = Math.min(Math.max(1, requestedPage), pages);
+  const candidates = all.slice((page - 1) * RECOVERY_PAGE_SIZE, page * RECOVERY_PAGE_SIZE);
+  const native = source === 'discord_native';
+  const rows: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>> = [];
+  const select = recoverySelect(candidates, source);
+  if (select) rows.push(select);
+  if (pages > 1) {
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      recoveryButton('sf:settings:recovery:' + (native ? 'channels' : 'review') + ':page:' + (page - 1), 'Previous', ButtonStyle.Secondary, '◀️', page <= 1),
+      recoveryButton('sf:settings:recovery:' + (native ? 'channels' : 'review') + ':page:' + (page + 1), 'Next', ButtonStyle.Secondary, '▶️', page >= pages),
+      recoveryButton('sf:settings:repair:back', 'Repair System', ButtonStyle.Secondary, '↩️'),
+    ));
+  } else {
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      recoveryButton('sf:settings:repair:back', 'Repair System', ButtonStyle.Secondary, '↩️'),
+    ));
+  }
+
+  const lines = candidates.map((item) =>
+    '• **Ticket #' + item.ticketNumber + '** • ' + item.messageCount + ' archived message(s) • original channel ID: ' + item.originalChannelId +
+    (item.accidentalAnswer === 'yes' ? ' • **marked accidental, ready to restore**' : ''),
+  );
+  const description = native
+    ? (all.length ? 'Native Discord deletions only. These records never enter the ticket-button accidental-deletion review.\\n\\n' : 'No native Discord channel deletions are currently available for restoration.\\n\\n')
+    : (all.length ? 'Ticket-button deletions only. Choose a record to answer the question or restore a ticket already marked as accidental.\\n\\n' : 'No ticket-button deletions are awaiting review or accidental-deletion recovery.\\n\\n');
+  const embed = await recoveryEmbed(
+    guild,
+    native ? '♻️ Restore Channel' : '🛡️ Ticket Deletion Review',
+    description + (lines.length ? lines.join('\\n') : 'Nothing to display on this page.') + '\\n\\nPage ' + page + ' / ' + pages,
+  );
+  await interaction.editReply({ content: '', embeds: [embed], components: rows });
+}
+
+async function showRecoveryCandidateDetail(
+  interaction: TicketRecoveryInteraction,
+  ticketId: string,
+  source: 'discord_native' | 'ticket_button',
+): Promise<void> {
+  await ensureRecoveryReply(interaction);
+  const guild = interaction.guild;
+  if (!guild) {
+    await interaction.editReply('Ticket recovery must be opened inside a server.');
+    return;
+  }
+  const item = (await listTicketRecoveryCandidates(guild.id, source)).find((candidate) => candidate.ticketId === ticketId);
+  if (!item) {
+    await interaction.editReply({
+      content: '',
+      embeds: [await recoveryEmbed(guild, 'Recovery record no longer available', 'Refresh the recovery list. The record may already have been restored or reviewed.')],
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:' + (source === 'discord_native' ? 'channels' : 'review'), 'Back to list', ButtonStyle.Secondary, '↩️'))],
+    });
+    return;
+  }
+
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  if (source === 'discord_native') {
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      recoveryButton('sf:settings:recovery:channels:restore:' + ticketId, 'Restore Channel', ButtonStyle.Success, '♻️'),
+      recoveryButton('sf:settings:recovery:channels', 'Back to list', ButtonStyle.Secondary, '↩️'),
+    ));
+  } else if (item.accidentalAnswer === 'yes') {
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      recoveryButton('sf:settings:recovery:review:restore:' + ticketId, 'Restore Ticket', ButtonStyle.Success, '♻️'),
+      recoveryButton('sf:settings:recovery:review', 'Back to list', ButtonStyle.Secondary, '↩️'),
+    ));
+  } else {
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      recoveryButton('sf:settings:recovery:review:answer:' + ticketId + ':yes', 'Yes, deleted by mistake', ButtonStyle.Success, '✅'),
+      recoveryButton('sf:settings:recovery:review:answer:' + ticketId + ':no', 'No, intentional', ButtonStyle.Danger, '🛑'),
+      recoveryButton('sf:settings:recovery:review', 'Back', ButtonStyle.Secondary, '↩️'),
+    ));
+  }
+
+  const text = source === 'discord_native'
+    ? 'This channel was deleted outside the ResolveX ticket Delete button. Native deletion is recorded separately and does not trigger the accidental-deletion question.'
+    : item.accidentalAnswer === 'yes'
+      ? 'Review answer: **Yes, it was deleted by mistake.** This ticket is eligible for restoration through this review workflow.'
+      : 'Was this ticket deleted by mistake?\\n\\nOriginal channel ID: ' + item.originalChannelId +
+        '\\nTicket creator ID: ' + item.ownerId +
+        '\\nArchived messages: ' + item.messageCount +
+        '\\n\\nYour answer will be saved in Neon and logged in both the ticket audit stream and developer/system audit stream.';
+  const embed = await recoveryEmbed(guild, (source === 'discord_native' ? '♻️ Restore Channel' : '🛡️ Ticket Deletion Review') + ' • Ticket #' + item.ticketNumber, text);
+  await interaction.editReply({ content: '', embeds: [embed], components: rows });
+}
+
+async function handleTicketRecoveryInteraction(interaction: TicketRecoveryInteraction): Promise<boolean> {
+  const id = interaction.customId;
+  if (!id.startsWith('sf:settings:recovery:')) return false;
+  const guild = interaction.guild;
+  if (!guild) return true;
+
+  if (id === 'sf:settings:recovery:channels') {
+    await showRecoveryCandidates(interaction, 'discord_native');
+    return true;
+  }
+  if (id.startsWith('sf:settings:recovery:channels:page:')) {
+    await showRecoveryCandidates(interaction, 'discord_native', Number(id.slice('sf:settings:recovery:channels:page:'.length)) || 1);
+    return true;
+  }
+  if (id === 'sf:settings:recovery:channels:pick' && interaction.isStringSelectMenu()) {
+    const selected = interaction.values[0];
+    if (selected) await showRecoveryCandidateDetail(interaction, selected, 'discord_native');
+    return true;
+  }
+  if (id.startsWith('sf:settings:recovery:channels:restore:')) {
+    await ensureRecoveryReply(interaction);
+    const ticketId = id.slice('sf:settings:recovery:channels:restore:'.length);
+    try {
+      const restored = await restoreArchivedTicket(guild, ticketId, 'discord_native');
+      const config = await getGuildConfig(guild.id);
+      const ticket = await getPersistedTicketById(ticketId);
+      if (config.supportCategoryId) {
+        await ensureAuditDeveloperInfrastructure(guild, config.supportCategoryId);
+        await logTicketEvent(guild, config.supportCategoryId, {
+          ticketNumber: restored.ticketNumber,
+          ticketChannelId: ticket?.channelId ?? restored.channelId,
+          event: 'TICKET_RESTORED_AFTER_NATIVE_DELETION',
+          actorId: interaction.user.id,
+          actor: interaction.user.tag,
+          actorName: interaction.user.tag,
+          detail: 'Restored into new channel ' + restored.channelId + '; replayed ' + restored.restoredMessages + ' archived messages; failed messages=' + restored.failedMessages + '.',
+        });
+        await logSystemEvent(guild, config.supportCategoryId, 'TICKET_NATIVE_DELETION_RECOVERED',
+          'Moderator ' + interaction.user.tag + ' restored ticket #' + restored.ticketNumber + ' from native Discord deletion. New channel ID: ' + restored.channelId + '. Replayed messages: ' + restored.restoredMessages + '. Failed messages: ' + restored.failedMessages + '.');
+      }
+      const embed = await recoveryEmbed(guild, '✅ Ticket channel restored', 'Ticket #' + restored.ticketNumber + ' now exists in ' + '<#' + restored.channelId + '> with new channel ID ' + restored.channelId + ' and a new URL.\\n\\nReplayed messages: **' + restored.restoredMessages + '**\\nMessages that failed to replay: **' + restored.failedMessages + '**\\n\\nArchived author/channel/message IDs are included in each recovery message. The bot does not impersonate original users.');
+      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:channels', 'Back to Restore Channel', ButtonStyle.Secondary, '↩️'))] });
+    } catch (error) {
+      const embed = await recoveryEmbed(guild, '❌ Ticket recovery failed', error instanceof Error ? error.message : 'Unknown recovery error.');
+      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:channels', 'Back to Restore Channel', ButtonStyle.Secondary, '↩️'))] });
+    }
+    return true;
+  }
+
+  if (id === 'sf:settings:recovery:review') {
+    await showRecoveryCandidates(interaction, 'ticket_button');
+    return true;
+  }
+  if (id.startsWith('sf:settings:recovery:review:page:')) {
+    await showRecoveryCandidates(interaction, 'ticket_button', Number(id.slice('sf:settings:recovery:review:page:'.length)) || 1);
+    return true;
+  }
+  if (id === 'sf:settings:recovery:review:pick' && interaction.isStringSelectMenu()) {
+    const selected = interaction.values[0];
+    if (selected) await showRecoveryCandidateDetail(interaction, selected, 'ticket_button');
+    return true;
+  }
+  if (id.startsWith('sf:settings:recovery:review:answer:')) {
+    await ensureRecoveryReply(interaction);
+    const parts = id.slice('sf:settings:recovery:review:answer:'.length).split(':');
+    const ticketId = parts[0] ?? '';
+    const answer = parts[1] === 'yes' ? 'yes' : parts[1] === 'no' ? 'no' : null;
+    if (!answer) {
+      await interaction.editReply('Invalid deletion-review answer.');
+      return true;
+    }
+    try {
+      const ticket = await getPersistedTicketById(ticketId);
+      if (!ticket || ticket.guildId !== guild.id) throw new Error('Ticket deletion review belongs to a different server or no longer exists.');
+      const result = await answerTicketDeletionReview(ticketId, answer, interaction.user.id, interaction.user.tag);
+      const config = await getGuildConfig(guild.id);
+      const eventName = answer === 'yes' ? 'TICKET_DELETION_MARKED_ACCIDENTAL' : 'TICKET_DELETION_MARKED_INTENTIONAL';
+      const detail = 'Answer to “Was this ticket deleted by mistake?”: ' + (answer === 'yes' ? 'YES, deleted by mistake.' : 'NO, deletion was intentional.') +
+        ' Reviewer: ' + interaction.user.tag + ' (' + interaction.user.id + '). Original channel ID: ' + result.originalChannelId + '.';
+      if (config.supportCategoryId) {
+        await ensureAuditDeveloperInfrastructure(guild, config.supportCategoryId);
+        await logTicketEvent(guild, config.supportCategoryId, {
+          ticketNumber: result.ticketNumber,
+          ticketChannelId: ticket?.channelId ?? result.originalChannelId,
+          event: eventName,
+          actorId: interaction.user.id,
+          actor: interaction.user.tag,
+          actorName: interaction.user.tag,
+          detail,
+        });
+        await logSystemEvent(guild, config.supportCategoryId, 'DEVELOPER_' + eventName, detail);
+      }
+      if (answer === 'yes') {
+        await showRecoveryCandidateDetail(interaction, ticketId, 'ticket_button');
+      } else {
+        const embed = await recoveryEmbed(guild, '✅ Deletion review saved', 'The answer was recorded as **No, this deletion was intentional**. The response, reviewer ID and timestamp were written to the ticket audit stream and developer/system audit stream. This ticket will not appear in the accidental-deletion restoration path.');
+        await interaction.editReply({
+          content: '',
+          embeds: [embed],
+          components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:review', 'Back to Ticket Deletion Review', ButtonStyle.Secondary, '↩️'))],
+        });
+      }
+    } catch (error) {
+      const embed = await recoveryEmbed(guild, '❌ Could not save deletion review', error instanceof Error ? error.message : 'Unknown review error.');
+      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:review', 'Back to review list', ButtonStyle.Secondary, '↩️'))] });
+    }
+    return true;
+  }
+  if (id.startsWith('sf:settings:recovery:review:restore:')) {
+    await ensureRecoveryReply(interaction);
+    const ticketId = id.slice('sf:settings:recovery:review:restore:'.length);
+    try {
+      const restored = await restoreArchivedTicket(guild, ticketId, 'ticket_button');
+      const config = await getGuildConfig(guild.id);
+      const ticket = await getPersistedTicketById(ticketId);
+      if (config.supportCategoryId) {
+        await ensureAuditDeveloperInfrastructure(guild, config.supportCategoryId);
+        await logTicketEvent(guild, config.supportCategoryId, {
+          ticketNumber: restored.ticketNumber,
+          ticketChannelId: ticket?.channelId ?? restored.channelId,
+          event: 'TICKET_RESTORED_AFTER_ACCIDENTAL_BUTTON_DELETION',
+          actorId: interaction.user.id,
+          actor: interaction.user.tag,
+          actorName: interaction.user.tag,
+          detail: 'Moderator restored a ticket-button deletion marked accidental. Replacement channel ' + restored.channelId + '; replayed messages=' + restored.restoredMessages + '; failed=' + restored.failedMessages + '.',
+        });
+        await logSystemEvent(guild, config.supportCategoryId, 'TICKET_ACCIDENTAL_DELETION_RECOVERED',
+          'Moderator ' + interaction.user.tag + ' restored ticket #' + restored.ticketNumber + ' after marking its ticket-button deletion accidental. New channel ID: ' + restored.channelId + '.');
+      }
+      const embed = await recoveryEmbed(guild, '✅ Accidentally deleted ticket restored', 'Ticket #' + restored.ticketNumber + ' is available in ' + '<#' + restored.channelId + '>.\\n\\nReplayed messages: **' + restored.restoredMessages + '**\\nMessages that failed to replay: **' + restored.failedMessages + '**\\n\\nThe new channel has a new ID and URL. Recovery messages clearly show their original user and channel IDs.');
+      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:review', 'Back to Ticket Deletion Review', ButtonStyle.Secondary, '↩️'))] });
+    } catch (error) {
+      const embed = await recoveryEmbed(guild, '❌ Ticket recovery failed', error instanceof Error ? error.message : 'Unknown recovery error.');
+      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:review', 'Back to Ticket Deletion Review', ButtonStyle.Secondary, '↩️'))] });
+    }
+    return true;
+  }
+  return true;
+}
+
 export async function handleSettingsInteraction(
-  interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
+  interaction: ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction | ModalSubmitInteraction,
 ): Promise<boolean> {
   if (!interaction.guild) return false;
 
@@ -1446,12 +1740,12 @@ export async function handleSettingsInteraction(
    * authorization/configuration lookups because Discord expires unacknowledged
    * component interactions after a few seconds.
    */
-  if (interaction.isStringSelectMenu()) {
+  if ((interaction.isStringSelectMenu() || interaction.isRoleSelectMenu()) && !interaction.customId.startsWith('sf:settings:recovery:')) {
     await interaction.deferUpdate().catch(() => undefined);
   }
 
   if (
-    (interaction.isButton() || interaction.isStringSelectMenu() || interaction.isModalSubmit()) &&
+    (interaction.isButton() || interaction.isStringSelectMenu() || interaction.isRoleSelectMenu() || interaction.isModalSubmit()) &&
     (interaction.customId.startsWith('sf:settings:'))
   ) {
     if (!isSettingsChannel(interaction)) {
@@ -1478,6 +1772,51 @@ export async function handleSettingsInteraction(
 
   const guild = interaction.guild;
 
+  if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('sf:settings:recovery:')) {
+    return await handleTicketRecoveryInteraction(interaction);
+  }
+
+  if (
+    (interaction.isButton() || interaction.isStringSelectMenu() || interaction.isModalSubmit()) &&
+    interaction.customId.startsWith('sf:settings:forms:')
+  ) {
+    return await handleTicketFormSettingsInteraction(interaction);
+  }
+
+  if (interaction.customId.startsWith('sf:settings:panels:')) {
+    return await handleCustomPanelSettingsInteraction(interaction);
+  }
+
+  if (interaction.isStringSelectMenu() && interaction.customId === 'sf:settings:theme:select') {
+    const selectedTheme = interaction.values[0];
+    if (!isGuildTheme(selectedTheme)) {
+      await reject(interaction, '❌ That theme selection is not supported.');
+      return true;
+    }
+
+    const before = (await getGuildConfig(guild.id)).theme;
+    if (before !== selectedTheme) {
+      await updateGuildConfig(guild.id, (current) => {
+        current.theme = selectedTheme;
+      });
+      await syncPanel(guild);
+      await refreshSettingsChannel(guild);
+      await refreshAuditPanelTheme(guild);
+      await auditSettingsAction(
+        guild,
+        interaction,
+        'SERVER_THEME_CHANGED',
+        'Changed the server UI theme from ' + getThemeDefinition(before).label + ' to ' + getThemeDefinition(selectedTheme).label + '.',
+      );
+    }
+
+    await showThemeSettings(
+      interaction,
+      '✅ Theme set to **' + getThemeDefinition(selectedTheme).label + '** for this server.',
+    );
+    return true;
+  }
+
   if (interaction.isStringSelectMenu() && interaction.customId.startsWith('sf:settings:reports:subcategory:pick:')) {
     const categoryId = interaction.customId.slice('sf:settings:reports:subcategory:pick:'.length);
     const subcategoryId = interaction.values[0];
@@ -1496,6 +1835,11 @@ export async function handleSettingsInteraction(
 
   if (interaction.isButton()) {
     const id = interaction.customId;
+
+    if (id === 'sf:settings:repair:back') {
+      await showRepairSystem(interaction);
+      return true;
+    }
 
     if (id === 'sf:settings:home') {
       await restoreSettingsHome(interaction);
@@ -1575,6 +1919,109 @@ export async function handleSettingsInteraction(
         'SETTINGS_REFRESH',
         'Settings dashboard refreshed and the current dashboard message was replaced with the latest persisted configuration.',
       );
+      return true;
+    }
+
+    if (id === 'sf:settings:premium') {
+      await showPremiumSettings(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:premium:toggle') {
+      const current = await getTier(guild.id);
+      const next = current === 'free' ? 'premium-demo' : current === 'premium-demo' ? 'pro-demo' : 'free';
+      await setTier(guild.id, next);
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'TIER_CHANGED', 'Tier changed from ' + tierLabel(current) + ' to ' + tierLabel(next) + '.');
+      await showPremiumSettings(interaction, '✅ Tier changed: **' + tierLabel(current) + '** → **' + tierLabel(next) + '**.');
+      return true;
+    }
+
+    if (id === SETTINGS_LAYOUT_PREFIX || id === SETTINGS_LAYOUT_PREFIX + ':home') {
+      await showSettingsDashboardBuilder(interaction);
+      return true;
+    }
+
+    if (id.startsWith(SETTINGS_LAYOUT_PREFIX + ':customize:')) {
+      const rawKey = id.slice((SETTINGS_LAYOUT_PREFIX + ':customize:').length);
+      if (!(SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(rawKey)) {
+        await reject(interaction, 'That Settings control is not supported.');
+        return true;
+      }
+      const key = rawKey as SettingsDashboardButtonKey;
+      const settings = await getAdvancedSettings(guild.id);
+      const saved = settings.settingsDashboard.buttonCustomizations[key];
+      const label = new TextInputBuilder()
+        .setCustomId('label')
+        .setLabel('Button label (type default to reset)')
+        .setStyle(TextInputStyle.Short)
+        .setMaxLength(80)
+        .setRequired(true)
+        .setValue((saved?.label ?? SETTINGS_LAYOUT_LABELS[key]).slice(0, 80));
+      const emoji = new TextInputBuilder()
+        .setCustomId('emoji')
+        .setLabel('Emoji (type none to remove)')
+        .setStyle(TextInputStyle.Short)
+        .setMaxLength(100)
+        .setRequired(false)
+        .setPlaceholder(SETTINGS_LAYOUT_DEFAULT_EMOJIS[key]);
+      emoji.setValue(saved ? (saved.emoji ?? 'none') : SETTINGS_LAYOUT_DEFAULT_EMOJIS[key]);
+      await openModal(interaction, 'sf:settings:modal:dashboard-button:' + key, 'Customize Settings Button', [label, emoji]);
+      return true;
+    }
+
+    if (id === SETTINGS_LAYOUT_PREFIX + ':edit') {
+      const settings = await getAdvancedSettings(guild.id);
+      const description = new TextInputBuilder().setCustomId('description').setLabel('Dashboard description').setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setRequired(false);
+      if (settings.settingsDashboard.description) description.setValue(settings.settingsDashboard.description.slice(0, 4000));
+      const footer = new TextInputBuilder().setCustomId('footer').setLabel('Dashboard footer').setStyle(TextInputStyle.Short).setMaxLength(1800).setRequired(false).setValue(settings.settingsDashboard.footer.slice(0, 1800));
+      await openModal(interaction, 'sf:settings:modal:dashboard-builder', 'Settings Dashboard Branding', [
+        new TextInputBuilder().setCustomId('title').setLabel('Dashboard title').setStyle(TextInputStyle.Short).setMaxLength(256).setRequired(true).setValue(settings.settingsDashboard.title.slice(0, 256)),
+        description,
+        footer,
+      ]);
+      return true;
+    }
+
+    if (id === SETTINGS_LAYOUT_PREFIX + ':preview') {
+      await showSettingsDashboardPreview(interaction);
+      return true;
+    }
+
+    if (id === SETTINGS_LAYOUT_PREFIX + ':reset-order') {
+      await interaction.deferUpdate();
+      await updateAdvancedSettings(guild.id, (settings) => {
+        settings.settingsDashboard.title = '⚙️ ResolveX Settings';
+        settings.settingsDashboard.description = 'Configure your server’s ticket system, support panels and retention policies.';
+        settings.settingsDashboard.footer = 'ResolveX • Settings Dashboard';
+        settings.settingsDashboard.buttonOrder = [...SETTINGS_DASHBOARD_BUTTON_KEYS];
+        settings.settingsDashboard.buttonCustomizations = {};
+      });
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'SETTINGS_DASHBOARD_LAYOUT_RESET', 'Reset the per-server Settings dashboard branding, order, labels and emojis.');
+      await showSettingsDashboardBuilder(interaction, '✅ The default Settings dashboard branding, order, labels and emojis have been restored.');
+      return true;
+    }
+
+    if (id.startsWith(SETTINGS_LAYOUT_PREFIX + ':up:') || id.startsWith(SETTINGS_LAYOUT_PREFIX + ':down:')) {
+      const movingUp = id.startsWith(SETTINGS_LAYOUT_PREFIX + ':up:');
+      const key = id.slice((SETTINGS_LAYOUT_PREFIX + (movingUp ? ':up:' : ':down:')).length);
+      if (!(SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(key)) {
+        await reject(interaction, 'That Settings control is not supported.');
+        return true;
+      }
+      await interaction.deferUpdate();
+      await updateAdvancedSettings(guild.id, (settings) => {
+        const order = settingsButtonOrder(settings);
+        const currentIndex = order.indexOf(key as SettingsDashboardButtonKey);
+        const targetIndex = currentIndex + (movingUp ? -1 : 1);
+        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= order.length) return;
+        [order[currentIndex], order[targetIndex]] = [order[targetIndex]!, order[currentIndex]!];
+        settings.settingsDashboard.buttonOrder = order;
+      });
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'SETTINGS_DASHBOARD_ORDER_CHANGED', 'Moved ' + SETTINGS_LAYOUT_LABELS[key as SettingsDashboardButtonKey] + ' ' + (movingUp ? 'up' : 'down') + ' in the Settings dashboard.');
+      await showSettingsDashboardOrder(interaction, key as SettingsDashboardButtonKey);
       return true;
     }
 
@@ -1871,6 +2318,11 @@ export async function handleSettingsInteraction(
       return true;
     }
 
+    if (id === 'sf:settings:theme') {
+      await showThemeSettings(interaction);
+      return true;
+    }
+
     if (id === 'sf:settings:appearance:edit') {
       const settings = await getAdvancedSettings(guild.id);
       await openModal(interaction, 'sf:settings:modal:appearance', 'Panel Appearance', [
@@ -1888,50 +2340,23 @@ export async function handleSettingsInteraction(
 
     if (id.startsWith('sf:settings:usecases:add:')) {
       const key = id.slice('sf:settings:usecases:add:'.length);
-      const preset = USE_CASE_PRESETS[key];
-      if (!preset) {
-        await reject(interaction, '❌ Unknown support use case.');
-        return true;
-      }
-      const { name, tags: starterTags } = preset;
-
-      const config = await getGuildConfig(guild.id);
-      if (Object.values(config.departments).some((department) => department.name.toLowerCase() === name.toLowerCase())) {
-        await reject(interaction, 'ℹ️ **' + name + '** is already configured.');
-        return true;
-      }
-
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const departmentId = newDepartmentId();
-      const now = new Date().toISOString();
-      const tags = Object.fromEntries(
-        starterTags.map((tagName) => {
-          const tagId = newTagId();
-          return [tagId, { id: tagId, name: tagName, createdAt: now }];
-        }),
-      );
-      await updateGuildConfig(guild.id, (current) => {
-        current.departments[departmentId] = {
-          id: departmentId,
-          name,
-          staffRoleId: null,
-          categoryId: null,
-          tags,
-          createdAt: now,
-        };
-      });
-
-      await syncPanel(guild);
-      await refreshSettingsChannel(guild);
-      await interaction.editReply({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle('✅ Use Case Added')
-            .setDescription('Added **' + name + '** with ' + starterTags.length + ' starter tags: ' + starterTags.join(', ') + '. Its Discord category will be created when the first ticket is opened in this department.'),
-        ],
-        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
-      });
-      await auditSettingsAction(guild, interaction, 'USE_CASE_ADDED', 'Added use case department ' + name + ' with ' + starterTags.length + ' starter tags. Its Discord category will be provisioned when the first ticket is created.');
+      try {
+        const added = await addUseCasePreset(guild.id, key);
+        await syncPanel(guild);
+        await refreshSettingsChannel(guild);
+        await interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle('✅ Use Case Added')
+              .setDescription('Added **' + added.name + '** with ' + added.tagNames.length + ' starter tags: ' + added.tagNames.join(', ') + '. Its Discord category will be created when the first ticket is opened in this department.'),
+          ],
+          components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+        });
+        await auditSettingsAction(guild, interaction, 'USE_CASE_ADDED', 'Added use case department ' + added.name + ' with ' + added.tagNames.length + ' starter tags. Its Discord category will be provisioned when the first ticket is created.');
+      } catch (error) {
+        await interaction.editReply('❌ ' + (error instanceof Error ? error.message : 'Could not add that use case.')).catch(() => undefined);
+      }
       return true;
     }
 
@@ -2120,6 +2545,59 @@ export async function handleSettingsInteraction(
       return true;
     }
 
+    if (id === 'sf:settings:setup' || id === 'sf:settings:restore' || id === 'sf:settings:setup-restore') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        const restoreMode = id !== 'sf:settings:setup';
+        const result = await runSupportForgeSetup(guild, restoreMode);
+        await interaction.editReply(
+          '✅ **SupportForge ' + (restoreMode ? 'restored' : 'setup/repair completed') + ' successfully.**\n\n' +
+          'Container: <#' + result.supportCategoryId + '>\n' +
+          'Department categories: **' + result.departmentCount + '**\n' +
+          (result.legacyOpenCategoryId ? 'Legacy Open bucket: <#' + result.legacyOpenCategoryId + '>\n' : '') +
+          'The support panel, audit channel, Settings, transcripts, and department categories were checked and repaired.'
+        );
+      } catch (error) {
+        await interaction.editReply('❌ SupportForge could not complete setup/restore: ' + (error instanceof Error ? error.message : 'Unknown error.'));
+      }
+      return true;
+    }
+
+    if (id === 'sf:settings:repair:all') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        const result = await runSupportForgeRepair(guild);
+        const deployment = await requestGitHubDeployment().catch((error) => ({
+          requested: false,
+          reason: error instanceof Error ? error.message : 'GitHub deployment request failed.',
+        }));
+        await refreshSettingsChannel(guild);
+        const repairThemeColor = getThemeColor((await getGuildConfig(guild.id)).theme);
+        await interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(repairThemeColor)
+              .setTitle('🛡️ Restore & Update • Complete')
+              .setDescription(
+                'The existing PostgreSQL-backed configuration and ticket records were retained. SupportForge has reconciled its managed categories, core channels, settings, transcript archive, audit panel, support panel, and department categories.\n\n' +
+                'Recovered missing ticket records from surviving channel metadata: **' + result.recoveredTickets + '**.\n\n' +
+                (deployment.requested
+                  ? '🚀 **Code deployment queued.** ' + deployment.reason
+                  : '⚠️ **Discord recovery completed, but code deployment was not queued.** ' + deployment.reason),
+              )
+              .setFooter({ text: 'Deleted Discord messages cannot be recreated by the Discord API.' })
+              .setTimestamp(),
+          ],
+          components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
+        });
+        await auditSettingsAction(guild, interaction, 'RESTORE_AND_UPDATE', 'Reconciled SupportForge infrastructure; deployment requested=' + deployment.requested + '; recovered ticket records=' + result.recoveredTickets + '.');
+      } catch (error) {
+        console.error('❌ Restore & Update failed:', error);
+        await interaction.editReply('❌ Restore & Update stopped before completion: ' + (error instanceof Error ? error.message : 'Unknown error. Existing database records were not intentionally reset.'));
+      }
+      return true;
+    }
+
     if (id === 'sf:settings:repair:normal') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
@@ -2167,6 +2645,15 @@ export async function handleSettingsInteraction(
   }
 
   if (interaction.isStringSelectMenu()) {
+    if (interaction.customId === SETTINGS_LAYOUT_PREFIX + ':reorder-select') {
+      const key = interaction.values[0];
+      if (!key || !(SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(key)) {
+        await reject(interaction, 'Choose a valid Settings control to reorder.');
+        return true;
+      }
+      await showSettingsDashboardOrder(interaction, key as SettingsDashboardButtonKey);
+      return true;
+    }
     if (interaction.customId === 'sf:settings:tags:remove:select') {
       const departmentId = interaction.values[0];
       const config = await getGuildConfig(guild.id);
@@ -2701,6 +3188,86 @@ export async function handleSettingsInteraction(
       return true;
     }
 
+    if (interaction.customId.startsWith('sf:settings:modal:dashboard-button:')) {
+      const rawKey = interaction.customId.slice('sf:settings:modal:dashboard-button:'.length);
+      if (!(SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(rawKey)) {
+        await reject(interaction, 'That Settings control is not supported.');
+        return true;
+      }
+      const key = rawKey as SettingsDashboardButtonKey;
+      const submittedLabel = interaction.fields.getTextInputValue('label').trim();
+      const submittedEmoji = interaction.fields.getTextInputValue('emoji').trim();
+      if (!submittedLabel || submittedLabel.length > 80) {
+        await reject(interaction, 'Button label must contain 1–80 characters.');
+        return true;
+      }
+      const label = submittedLabel.toLowerCase() === 'default'
+        ? SETTINGS_LAYOUT_LABELS[key]
+        : submittedLabel;
+      let emoji: string | null;
+      if (submittedEmoji.toLowerCase() === 'none') {
+        emoji = null;
+      } else if (submittedEmoji.toLowerCase() === 'default' || !submittedEmoji) {
+        emoji = SETTINGS_LAYOUT_DEFAULT_EMOJIS[key];
+      } else {
+        try {
+          emoji = normalizeDiscordEmoji(submittedEmoji, 'Settings button emoji') ?? null;
+        } catch (error) {
+          await reject(interaction, error instanceof Error ? error.message : 'Enter a valid Unicode or Discord custom emoji.');
+          return true;
+        }
+      }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await updateAdvancedSettings(guild.id, (settings) => {
+        if (label === SETTINGS_LAYOUT_LABELS[key] && emoji === SETTINGS_LAYOUT_DEFAULT_EMOJIS[key]) {
+          delete settings.settingsDashboard.buttonCustomizations[key];
+        } else {
+          settings.settingsDashboard.buttonCustomizations[key] = { label, emoji };
+        }
+      });
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'SETTINGS_DASHBOARD_BUTTON_CUSTOMIZED', 'Customized the label or emoji for Settings control "' + SETTINGS_LAYOUT_LABELS[key] + '".');
+      await interaction.editReply({
+        content: '✅ Settings control updated. The persistent dashboard has been refreshed.',
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel('Return to Settings Layout').setEmoji('🧰').setStyle(ButtonStyle.Primary),
+          backButton(),
+        )],
+      });
+      return true;
+    }
+
+    if (interaction.customId === 'sf:settings:modal:dashboard-builder') {
+      const title = interaction.fields.getTextInputValue('title').trim();
+      const description = interaction.fields.getTextInputValue('description').trim();
+      const footer = interaction.fields.getTextInputValue('footer').trim();
+      if (!title) {
+        await reject(interaction, 'Dashboard title cannot be empty.');
+        return true;
+      }
+      if (title.length > 256 || description.length > 4000 || footer.length > 1800) {
+        await reject(interaction, 'Dashboard title, description or footer exceeds the supported Discord limit.');
+        return true;
+      }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await updateAdvancedSettings(guild.id, (settings) => {
+        settings.settingsDashboard.title = title;
+        // Empty description intentionally falls back to the built-in helper text.
+        settings.settingsDashboard.description = description;
+        settings.settingsDashboard.footer = footer || 'ResolveX • Settings Dashboard';
+      });
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'SETTINGS_DASHBOARD_BRANDING_CHANGED', 'Updated the per-server Settings dashboard title, description or footer.');
+      await interaction.editReply({
+        content: '✅ Settings dashboard branding saved and refreshed for this server.',
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel('Open Layout Builder').setEmoji('🧰').setStyle(ButtonStyle.Primary),
+          backButton(),
+        )],
+      });
+      return true;
+    }
+
     if (interaction.customId === 'sf:settings:modal:appearance') {
       const title = interaction.fields.getTextInputValue('title').trim();
       const description = interaction.fields.getTextInputValue('description').trim();
@@ -2736,19 +3303,25 @@ async function showHomeAfterUpdate(interaction: ButtonInteraction): Promise<void
 }
 
 async function showRepairSystem(interaction: ButtonInteraction): Promise<void> {
+  const themeColor = getThemeColor((await getGuildConfig(interaction.guild!.id)).theme);
   await renderSettingsView(
     interaction,
     [
       new EmbedBuilder()
+        .setColor(themeColor)
         .setTitle('🛠️ Repair System')
         .setDescription(
-          'SupportForge can repair its managed infrastructure without resetting ticket data. ' +
-          'Normal Repair checks the main container, panel, transcript, settings channel, and explicitly routed department categories. ' +
-          'Storage Repair only verifies the Closed and Archive storage categories.',
+          'ResolveX repairs managed infrastructure without resetting Neon data. Restore & Update reconciles Discord infrastructure and requests a GitHub Actions deployment. Automatic pushes to main and the independent server watchdog deploy code without requiring this button. ' +
+          'Restore Channel handles native Discord channel deletions; Ticket Deletion Review handles only ticket-button deletions and their accidental-deletion question. Normal Repair checks infrastructure without deploying code. Storage Repair verifies the Closed and Archive storage categories.',
         ),
     ],
     [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId('sf:settings:repair:all')
+          .setLabel('Restore & Update')
+          .setEmoji('🚀')
+          .setStyle(ButtonStyle.Success),
         new ButtonBuilder()
           .setCustomId('sf:settings:repair:normal')
           .setLabel('Normal Repair')
@@ -2759,6 +3332,28 @@ async function showRepairSystem(interaction: ButtonInteraction): Promise<void> {
           .setLabel('Storage Repair')
           .setEmoji('🗄️')
           .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId('sf:settings:setup')
+          .setLabel('Setup')
+          .setEmoji('🧭')
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId('sf:settings:restore')
+          .setLabel('Restore')
+          .setEmoji('♻️')
+          .setStyle(ButtonStyle.Secondary),
+      ),
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId('sf:settings:recovery:channels')
+          .setLabel('Restore Channel')
+          .setEmoji('♻️')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId('sf:settings:recovery:review')
+          .setLabel('Ticket Deletion Review')
+          .setEmoji('🛡️')
+          .setStyle(ButtonStyle.Primary),
         backButton(),
       ),
     ],
@@ -2766,85 +3361,8 @@ async function showRepairSystem(interaction: ButtonInteraction): Promise<void> {
 }
 
 async function normalRepair(guild: Guild): Promise<number> {
-  const supportCategory = await ensureContainer(guild);
-  await ensureTranscriptChannel(guild, supportCategory.id);
-  await ensurePanelChannel(guild, supportCategory.id);
-  await ensureSettingsChannel(guild, supportCategory.id);
-
-  /*
-   * PostgreSQL is the source of truth when a ticket record exists. If a
-   * partial creation or manual DB repair left a SupportForge channel without
-   * a row, use its validated legacy topic only to reconstruct the missing
-   * record. Never overwrite an existing durable row from a Discord topic.
-   */
-  let recoveredTickets = 0;
-  for (const channel of guild.channels.cache.values()) {
-    if (channel.type !== ChannelType.GuildText || !isTicketTopic(channel.topic ?? '')) continue;
-    const topic = channel.topic ?? '';
-    const persisted = await getPersistedTicket(channel.id);
-    if (persisted) continue;
-
-    const ownerId = getField(topic, 'owner');
-    const departmentId = getField(topic, 'department');
-    const ticketNumber = getField(topic, 'number');
-    if (!ownerId || !departmentId || !ticketNumber || !/^\d{1,12}$/.test(ticketNumber)) {
-      console.warn('Skipping durable ticket recovery for malformed SupportForge topic on channel ' + channel.id + '.');
-      continue;
-    }
-
-    const priorityValue = getField(topic, 'priority');
-    const priority: TicketPriority =
-      priorityValue === 'low' || priorityValue === 'normal' || priorityValue === 'high' ||
-      priorityValue === 'urgent' || priorityValue === 'critical'
-        ? priorityValue
-        : 'normal';
-    const parseIds = (key: string): string[] =>
-      (getField(topic, key) ?? '').split(',').map((value) => value.trim()).filter((value) => /^\d{17,20}$/.test(value));
-    const claimedByIds = parseIds('claimed_by');
-    const participantIds = Array.from(new Set([ownerId, ...parseIds('users'), ...claimedByIds]));
-    const rawCreatedAt = getField(topic, 'opened_at');
-    const parsedCreatedAt = rawCreatedAt ? new Date(rawCreatedAt) : new Date(channel.createdTimestamp);
-    const createdAt = Number.isNaN(parsedCreatedAt.getTime())
-      ? new Date(channel.createdTimestamp).toISOString()
-      : parsedCreatedAt.toISOString();
-    const rawUpdatedAt = getField(topic, 'updated_at');
-    const parsedUpdatedAt = rawUpdatedAt ? new Date(rawUpdatedAt) : parsedCreatedAt;
-    const lastActivityAt = Number.isNaN(parsedUpdatedAt.getTime())
-      ? createdAt
-      : parsedUpdatedAt.toISOString();
-
-    await registerTicket(
-      channel.id,
-      {
-        guildId: guild.id,
-        status: getTicketStatus(topic),
-        ticketNumber,
-        departmentId,
-        tagId: getField(topic, 'tag') ?? getField(topic, 'tags') ?? '',
-        ownerId,
-        priority,
-        createdAt,
-        claimedByIds,
-        participantIds,
-        metadata: {
-          lastActivityAt,
-          recoveredFromChannelTopic: true,
-          panelMessageId: getField(topic, 'message') ?? null,
-          formSubmissionInteractionId: getField(topic, 'form_submission') ?? null,
-        },
-      },
-      {
-        id: 'system',
-        attribution: 'actorUnknown',
-        confidence: 'none',
-      },
-    );
-    recoveredTickets += 1;
-  }
-
-  await ensureAllDepartmentCategories(guild);
-  await syncPanel(guild);
-  return recoveredTickets;
+  const result = await runSupportForgeRepair(guild);
+  return result.recoveredTickets;
 }
 
 async function storageRepair(guild: Guild): Promise<void> {

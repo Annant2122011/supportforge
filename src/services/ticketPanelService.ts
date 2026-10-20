@@ -103,6 +103,13 @@ export function buildTicketPanelComponents(
   topic = '',
 ): ActionRowBuilder<ButtonBuilder>[] {
   const lifecycle = new ActionRowBuilder<ButtonBuilder>();
+  const deleteControls = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId('ticket:delete:start')
+      .setLabel('Delete Ticket')
+      .setEmoji('🗑️')
+      .setStyle(ButtonStyle.Danger),
+  );
 
   if (status === 'open' || status === 'reopened') {
     lifecycle.addComponents(
@@ -143,15 +150,15 @@ export function buildTicketPanelComponents(
       tools.addComponents(
         new ButtonBuilder().setCustomId('ticket:panel:history').setLabel('History').setEmoji('📜').setStyle(ButtonStyle.Secondary),
       );
-      return [lifecycle, tools];
+      return [lifecycle, tools, deleteControls];
     }
 
     tools.addComponents(
       new ButtonBuilder().setCustomId('ticket:panel:add-user').setLabel('Add User').setEmoji('👥').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('ticket:panel:remove-user').setLabel('Remove User').setEmoji('➖').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('ticket:panel:priority').setLabel('Priority').setEmoji('⚡').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('ticket:panel:department').setLabel('Department').setEmoji('📂').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('ticket:panel:tag').setLabel('Tag').setEmoji('🏷️').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('ticket:panel:note').setLabel('Note').setEmoji('📝').setStyle(ButtonStyle.Secondary),
     );
   }
 
@@ -190,15 +197,22 @@ export function buildTicketPanelComponents(
       }
     }
 
-    const safety = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    const positioning = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId('ticket:panel:reassign')
+        .setLabel('Reassign')
+        .setEmoji('🔄')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('ticket:panel:note')
+        .setLabel('Internal Note')
+        .setEmoji('📝')
+        .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId('ticket:panel:report')
         .setLabel('Report User')
         .setEmoji('🛡️')
         .setStyle(ButtonStyle.Primary),
-    );
-
-    const positioning = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId('ticket:panel:move-bottom')
         .setLabel('Move Controls Here')
@@ -212,11 +226,11 @@ export function buildTicketPanelComponents(
     );
 
     return voiceControls.components.length
-      ? [lifecycle, tools, voiceControls, safety, positioning]
-      : [lifecycle, tools, safety, positioning];
+      ? [lifecycle, tools, voiceControls, positioning, deleteControls]
+      : [lifecycle, tools, positioning, deleteControls];
   }
 
-  return status === 'archived' ? [lifecycle] : [lifecycle, tools];
+  return status === 'archived' ? [lifecycle, deleteControls] : [lifecycle, tools, deleteControls];
 }
 
 

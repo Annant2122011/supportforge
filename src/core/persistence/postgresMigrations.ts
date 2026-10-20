@@ -318,8 +318,168 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
-];
+  {
+    id: 9,
+    name: 'create_durable_ticket_message_archive_and_recovery',
+    up: async (db) => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS ticket_channel_archive (
+          ticket_id TEXT PRIMARY KEY REFERENCES tickets(id) ON DELETE CASCADE,
+          guild_id TEXT NOT NULL,
+          original_channel_id TEXT NOT NULL,
+          channel_name TEXT NOT NULL,
+          topic TEXT NOT NULL DEFAULT '',
+          parent_id TEXT,
+          parent_name TEXT,
+          permission_overwrites JSONB NOT NULL DEFAULT '[]'::JSONB,
+          channel_type INTEGER NOT NULL DEFAULT 0,
+          position INTEGER NOT NULL DEFAULT 0,
+          nsfw BOOLEAN NOT NULL DEFAULT FALSE,
+          rate_limit_per_user INTEGER NOT NULL DEFAULT 0,
+          backfill_cursor TEXT,
+          backfill_complete BOOLEAN NOT NULL DEFAULT FALSE,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
 
+        CREATE INDEX IF NOT EXISTS idx_ticket_channel_archive_guild
+          ON ticket_channel_archive (guild_id, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS ticket_message_archive (
+          message_id TEXT PRIMARY KEY,
+          ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+          guild_id TEXT NOT NULL,
+          original_channel_id TEXT NOT NULL,
+          author_id TEXT NOT NULL,
+          author_username TEXT NOT NULL,
+          author_display_name TEXT NOT NULL,
+          author_avatar_url TEXT,
+          content TEXT NOT NULL DEFAULT '',
+          created_at TIMESTAMPTZ NOT NULL,
+          edited_at TIMESTAMPTZ,
+          deleted_at TIMESTAMPTZ,
+          is_bot BOOLEAN NOT NULL DEFAULT FALSE,
+          message_type INTEGER NOT NULL DEFAULT 0,
+          embeds JSONB NOT NULL DEFAULT '[]'::JSONB,
+          components JSONB NOT NULL DEFAULT '[]'::JSONB,
+          attachments JSONB NOT NULL DEFAULT '[]'::JSONB,
+          edit_history JSONB NOT NULL DEFAULT '[]'::JSONB,
+          metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ticket_message_archive_ticket_time
+          ON ticket_message_archive (ticket_id, created_at, message_id);
+
+        CREATE INDEX IF NOT EXISTS idx_ticket_message_archive_channel_time
+          ON ticket_message_archive (original_channel_id, created_at);
+
+        CREATE TABLE IF NOT EXISTS ticket_message_archive_attachments (
+          attachment_id TEXT PRIMARY KEY,
+          message_id TEXT NOT NULL REFERENCES ticket_message_archive(message_id) ON DELETE CASCADE,
+          guild_id TEXT NOT NULL,
+          original_filename TEXT NOT NULL,
+          content_type TEXT,
+          size_bytes BIGINT NOT NULL DEFAULT 0,
+          source_url TEXT NOT NULL,
+          archived_bytes BYTEA,
+          archive_status TEXT NOT NULL DEFAULT 'pending',
+          archive_error TEXT,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ticket_archive_attachments_message
+          ON ticket_message_archive_attachments (message_id);
+
+        CREATE TABLE IF NOT EXISTS ticket_recovery_events (
+          id TEXT PRIMARY KEY,
+          ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+          guild_id TEXT NOT NULL,
+          original_channel_id TEXT NOT NULL,
+          replacement_channel_id TEXT,
+          source TEXT NOT NULL,
+          status TEXT NOT NULL,
+          intent TEXT NOT NULL DEFAULT 'unknown',
+          actor_id TEXT NOT NULL DEFAULT 'unknown',
+          actor_name TEXT NOT NULL DEFAULT 'Unknown actor',
+          actor_attribution TEXT NOT NULL DEFAULT 'actorUnknown',
+          confirmation_stage INTEGER NOT NULL DEFAULT 0,
+          accidental_answer TEXT,
+          answered_by TEXT,
+          answered_by_name TEXT,
+          answer_timestamp TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          resolved_at TIMESTAMPTZ,
+          metadata JSONB NOT NULL DEFAULT '{}'::JSONB
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ticket_recovery_events_latest
+          ON ticket_recovery_events (guild_id, source, ticket_id, created_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_ticket_recovery_events_unresolved
+          ON ticket_recovery_events (guild_id, source, status, created_at DESC);
+      `);
+    },
+  },
+  {
+    id: 10,
+    name: 'prevent_duplicate_pending_ticket_button_deletions',
+    up: async (db) => {
+      // Repair any duplicate pending intents written by older bot versions before
+      // enforcing one in-flight destructive operation per actual Discord channel.
+      await db.query(`
+        WITH ranked AS (
+          SELECT id,
+            ROW_NUMBER() OVER (
+              PARTITION BY guild_id, metadata->>'channelIdAtDeletion'
+              ORDER BY created_at DESC, id DESC
+            ) AS sequence
+          FROM ticket_recovery_events
+          WHERE source = 'ticket_button'
+            AND status = 'pending'
+            AND NULLIF(metadata->>'channelIdAtDeletion', '') IS NOT NULL
+        )
+        UPDATE ticket_recovery_events AS events
+        SET status = 'cancelled',
+            updated_at = NOW(),
+            resolved_at = COALESCE(events.resolved_at, NOW()),
+            metadata = events.metadata || jsonb_build_object(
+              'cancelReason', 'superseded_duplicate_pending_deletion_intent'
+            )
+        FROM ranked
+        WHERE ranked.id = events.id
+          AND ranked.sequence > 1;
+      `);
+
+      await db.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_ticket_recovery_pending_button_channel
+        ON ticket_recovery_events (guild_id, (metadata->>'channelIdAtDeletion'))
+        WHERE source = 'ticket_button'
+          AND status = 'pending'
+          AND NULLIF(metadata->>'channelIdAtDeletion', '') IS NOT NULL;
+      `);
+    },
+  },
+  {
+    id: 11,
+    name: 'add_idempotent_ticket_recovery_replay_ledger',
+    up: async (db) => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS ticket_recovery_replay_items (
+          recovery_event_id TEXT NOT NULL REFERENCES ticket_recovery_events(id) ON DELETE CASCADE,
+          original_message_id TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'completed'
+            CHECK (status IN ('completed')),
+          replayed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (recovery_event_id, original_message_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ticket_recovery_replay_items_message
+          ON ticket_recovery_replay_items (original_message_id);
+      `);
+    },
+  },
+];
 export async function runPostgresMigrations(
   db: TransactionExecutor,
 ): Promise<void> {

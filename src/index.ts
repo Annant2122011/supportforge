@@ -7,10 +7,11 @@ import {
   EmbedBuilder,
   GatewayIntentBits,
   MessageFlags,
+  Partials,
   RESTEvents,
 } from 'discord.js';
 
-import { execute } from './commands/supportforge';
+import { execute, runSupportForgeRepair } from './commands/supportforge';
 import {
   handleTicketInteraction,
 } from './interactions/ticketInteractions';
@@ -24,7 +25,6 @@ import {
   getPersistedTicket,
   getPersistedTicketStatus,
   transitionPersistedTicket,
-  markPersistedTicketDeleted,
 } from './services/ticketPersistenceService';
 
 import { getGuildConfig } from './services/configService';
@@ -60,6 +60,13 @@ import { startOutboxProcessor } from './core/events/outboxProcessor';
 import { TicketOutboxPublisher } from './services/ticketOutboxPublisher';
 import { configureDiscordChannelRest } from './services/discordChannelService';
 import { refreshActiveTicketFormCache, startTicketFormCacheRefresh, startTicketFormSubmissionRecovery } from './services/ticketFormService';
+import {
+  archiveTicketChannelSnapshot,
+  archiveTicketMessage,
+  markArchivedTicketMessageDeleted,
+  recordTicketChannelDeleted,
+  startTicketArchiveBackfill,
+} from './services/ticketArchiveService';
 
 const token = process.env.DISCORD_TOKEN;
 
@@ -91,6 +98,9 @@ async function initializeAndLogin(): Promise<void> {
 }
 
 const client = new Client({
+  // Partial message payloads allow deletion/edit events for uncached Discord
+  // messages to update the durable archive rather than silently disappearing.
+  partials: [Partials.Channel, Partials.Message],
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
@@ -145,6 +155,7 @@ client.once('clientReady', (readyClient) => {
   startTicketFormSubmissionRecovery(client);
   startAuditDailySummaryScheduler(client);
   startSupportForgeUpdateMonitor(client);
+  void startTicketArchiveBackfill(client);
   /*
    * Run startup repairs sequentially across guilds. Parallel channel/role
    * repairs create avoidable REST bursts on larger bot installations.
@@ -155,6 +166,30 @@ client.once('clientReady', (readyClient) => {
         await removeLegacyCustomCommands(guild);
       } catch (error) {
         console.warn('⚠️ Legacy settings command cleanup failed for guild ' + guild.id + ':', error);
+      }
+
+      // Deployment changes the running code, but configured server messages and
+      // categories must be reconciled by domain services after startup. Do not
+      // auto-create a complete support setup in brand-new/unconfigured guilds.
+      try {
+        const config = await getGuildConfig(guild.id);
+        const previouslyConfigured = Boolean(
+          config.supportCategoryId ||
+          config.panelChannelId ||
+          config.panelMessageId ||
+          config.auditChannelId ||
+          config.auditDevChannelId ||
+          Object.keys(config.departments ?? {}).length > 0
+        );
+        if (!previouslyConfigured) continue;
+
+        const result = await runSupportForgeRepair(guild);
+        console.info(
+          '✅ ResolveX startup reconciliation completed for guild ' + guild.id +
+          '; recovered ' + result.recoveredTickets + ' ticket record(s).',
+        );
+      } catch (error) {
+        console.warn('⚠️ ResolveX startup reconciliation failed for guild ' + guild.id + '; the next repair/startup can retry:', error);
       }
     }
   })();
@@ -312,6 +347,12 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
   const oldGuildChannel = oldChannel as GuildBasedChannel;
   const newGuildChannel = newChannel as GuildBasedChannel;
 
+  if (newGuildChannel.type === ChannelType.GuildText && isTicketTopic(newGuildChannel.topic ?? '')) {
+    void archiveTicketChannelSnapshot(newGuildChannel).catch((error) => {
+      console.warn('Could not snapshot updated ticket channel ' + newGuildChannel.id + ':', error);
+    });
+  }
+
   const oldManaged = await isSupportForgeManagedChannel(
     newGuildChannel.guild,
     oldGuildChannel,
@@ -426,34 +467,38 @@ client.on('channelDelete', async (channel) => {
   }
 
   const guildChannel = channel as GuildBasedChannel;
-
+  const deletedTicketTopic =
+    guildChannel.type === ChannelType.GuildText
+      ? guildChannel.topic ?? ''
+      : '';
+  const persistedTicketBeforeDelete = guildChannel.type === ChannelType.GuildText
+    ? await getPersistedTicket(guildChannel.id).catch(() => undefined)
+    : undefined;
+  const deletedIsTicket =
+    (guildChannel.type === ChannelType.GuildText && isTicketTopic(deletedTicketTopic)) ||
+    Boolean(persistedTicketBeforeDelete && persistedTicketBeforeDelete.guildId === guildChannel.guild.id);
   const managed = await isSupportForgeManagedChannel(
     guildChannel.guild,
     guildChannel,
   );
 
-  if (!managed) return;
+  // Ticket metadata is the deletion classifier fallback even if a category or
+  // another management marker was removed before this Discord event arrived.
+  if (!managed && !deletedIsTicket) return;
 
-  const deletedTicketTopic =
-    guildChannel.type === ChannelType.GuildText
-      ? guildChannel.topic ?? ''
-      : '';
-
-  if (isTicketTopic(deletedTicketTopic)) {
+  if (deletedIsTicket) {
     clearPanelActivity(guildChannel.id);
     clearTicketRenameState(guildChannel.id);
     clearVoiceTopicRetryState(guildChannel.id);
 
     /*
-     * Manual ticket deletion must update durable lifecycle storage and remove
-     * any temporary voice room owned by the deleted ticket.
+     * The archive service matches a pre-recorded two-confirmation ticket
+     * deletion intent. If there is no such intent, this is classified as a
+     * native Discord deletion and belongs under Restore Channel.
      */
-    await markPersistedTicketDeleted(
-      guildChannel.id,
-      'SupportForge ticket channel deleted',
-    ).catch((error) => {
+    await recordTicketChannelDeleted(guildChannel as TextChannel).catch((error) => {
       console.warn(
-        `⚠️ Could not mark deleted ticket ${guildChannel.id} in persistent storage:`,
+        'Could not classify/store deleted ticket channel ' + guildChannel.id + ':',
         error,
       );
     });
@@ -611,6 +656,12 @@ function formatExactMessageContent(content: string): string {
 }
 
 client.on('messageDelete', (message) => {
+  if (message.guild && message.channel.type === ChannelType.GuildText) {
+    void markArchivedTicketMessageDeleted(message.guild.id, message.channel.id, message.id).catch((error) => {
+      console.warn('Could not record a deleted ticket message in the archive:', error);
+    });
+  }
+
   if (message.channel.type !== ChannelType.GuildText || message.author?.id !== client.user?.id) return;
 
   const purposeWasDeleted = message.embeds.some((embed) =>
@@ -631,6 +682,26 @@ client.on('messageDelete', (message) => {
     );
   });
   if (auditPanelWasDeleted) invalidateAuditChannelPanel(message.channel.id);
+});
+
+client.on('messageDeleteBulk', (messages) => {
+  for (const message of messages.values()) {
+    if (!message.guild || message.channel.type !== ChannelType.GuildText) continue;
+    void markArchivedTicketMessageDeleted(message.guild.id, message.channel.id, message.id).catch((error) => {
+      console.warn('Could not record a bulk-deleted ticket message in the archive:', error);
+    });
+  }
+});
+
+client.on('messageUpdate', (oldMessage, newMessage) => {
+  if (newMessage.partial) {
+    void newMessage.fetch()
+      .then((message) => archiveTicketMessage(message))
+      .catch((error) => console.warn('Could not fetch edited message for ticket archive:', error));
+    return;
+  }
+  void archiveTicketMessage(newMessage)
+    .catch((error) => console.warn('Could not archive an edited ticket message:', error));
 });
 
 client.on('messageCreate', async (message) => {
@@ -662,6 +733,17 @@ client.on('messageCreate', async (message) => {
       });
     }
     return;
+  }
+
+  /*
+   * Archive every ticket message (including the bot's initial panel) before
+   * applying closed-ticket moderation. A user message removed immediately
+   * after sending must still have a durable recovery copy.
+   */
+  if (isTicketTopic(topic)) {
+    await archiveTicketMessage(message).catch((error) => {
+      console.error('Could not archive message ' + message.id + ' in ticket ' + message.channel.id + ':', error);
+    });
   }
 
   /*
@@ -804,6 +886,7 @@ client.on(
       if (
         interaction.isButton() ||
         interaction.isStringSelectMenu() ||
+        interaction.isRoleSelectMenu() ||
         interaction.isModalSubmit()
       ) {
         if (interaction.customId.startsWith('sf:audit:') && interaction.isButton()) {
