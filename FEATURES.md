@@ -1233,38 +1233,25 @@ Merged tickets should become historical records that point to the master ticket 
 
 ## F-032 — Inactivity Auto-Close
 
-**Status:** `PLANNED`  
+**Status:** `BUILT / PARTIAL`  
 **Priority:** `P1`
 
-### Example
+### Implemented core
 
-```text
-Day 7:
-No customer response → warning
+- Per-server automation is opt-in and disabled by default.
+- Administrators can view, enable, disable, and configure thresholds through both the Settings dashboard and `/supportforge settings inactivity`.
+- Idle warning threshold is bounded to 1–720 hours; the warning grace period is bounded to 1–168 hours.
+- A restart-safe five-minute scheduler stores warning markers, policy generation, deadlines, and transcript receipts in the existing Neon/PostgreSQL ticket metadata.
+- A visible warning is sent before closure. New human activity cancels the old grace period; the scheduler also checks recent Discord history to protect against delayed activity-event persistence.
+- Transcript creation/upload precedes closure. The final PostgreSQL transaction compares the expected activity anchor under a row lock and commits the lifecycle event and outbox intent atomically.
+- Critical tickets and tickets marked with `vip`, `activeEscalation`, or `inactivityExempt` metadata are excluded. Missing transcript access and uncertain channel/history checks fail safe.
+- Warning and closure operations use stable markers/receipts to recover after restarts and avoid repeating a successful external action unnecessarily.
 
-Day 10:
-Still inactive → auto-close
-```
+### Remaining partial scope
 
-### Exemptions
-
-Possible exemptions:
-
-- Critical tickets
-- VIP tickets
-- staff-marked exemption
-- active escalation
-- certain departments
-
-### Requirements
-
-- warning before closure
-- configurable thresholds
-- audit event
-- transcript generation before closure
-- no duplicate automated actions
-
-This likely requires a background worker for reliable production behavior.
+- No administrator UI yet configures VIP, escalation, or per-department inactivity exemptions. Those are recognized only when represented by the supported durable metadata / priority values.
+- Discord delivery and Neon commits cannot form one distributed transaction; recovery markers and reconciliation reduce duplicate effects but do not provide mathematical exactly-once delivery.
+- The scheduler, permissions, transcript access, real warning presentation and race behavior still require live Discord test-guild acceptance. CI passing alone does not qualify this feature as production-accepted.
 
 ---
 
