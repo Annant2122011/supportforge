@@ -959,6 +959,7 @@ client.on(
         if (
           interaction.isButton() ||
           interaction.isStringSelectMenu() ||
+          interaction.isUserSelectMenu() ||
           interaction.isModalSubmit()
         ) {
           await handleTicketInteraction(interaction);
