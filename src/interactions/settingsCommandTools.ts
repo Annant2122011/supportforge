@@ -294,8 +294,9 @@ export async function handleSettingsSlashCommand(
           if (mode === 'disable') settings.inactivity.enabled = false;
           if (idleHours !== null) settings.inactivity.idleHours = idleHours;
           if (graceHours !== null) settings.inactivity.graceHours = graceHours;
+          settings.inactivity.generation = Math.min(2147483647, settings.inactivity.generation + 1);
         });
-        if (mode === 'disable') await clearTicketInactivityWarningsForGuild(guild.id);
+        await clearTicketInactivityWarningsForGuild(guild);
         await refreshSettingsChannel(guild);
         const savedPolicy = (await getAdvancedSettings(guild.id)).inactivity;
         audit('TICKET_INACTIVITY_' + mode.toUpperCase(),
