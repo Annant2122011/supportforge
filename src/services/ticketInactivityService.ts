@@ -250,6 +250,7 @@ async function guardAgainstUnpersistedHumanActivity(
   ticket: PersistedTicket,
   anchorAt: string,
   maxMessages = MAX_ACTIVITY_GUARD_MESSAGES,
+  recentWindowOnly = false,
 ): Promise<boolean> {
   const anchorMs = Date.parse(anchorAt);
   if (!Number.isFinite(anchorMs)) return true;
@@ -283,13 +284,17 @@ async function guardAgainstUnpersistedHumanActivity(
         metadata: { lastActivityAt: activity.at },
       }, SYSTEM_ACTOR);
       const updated = await getPersistedTicket(ticket.channelId);
-      if (updated && (
-        updated.metadata.inactivityWarningAnchorAt ||
-        updated.metadata.inactivityWarningDeadlineAt ||
-        updated.metadata.inactivityWarningMessageId
-      )) {
+      if (updated) {
         await cancelVisibleWarnings(channel, client, updated);
-        await clearWarningMetadata(updated);
+        if (
+          updated.metadata.inactivityWarningAnchorAt ||
+          updated.metadata.inactivityWarningDeadlineAt ||
+          updated.metadata.inactivityWarningMessageId
+        ) {
+          await clearWarningMetadata(updated);
+        }
+      } else {
+        await cancelVisibleWarnings(channel, client, current);
       }
       return true;
     }
@@ -308,7 +313,7 @@ async function guardAgainstUnpersistedHumanActivity(
 
   // false means we proved no human reply newer than the anchor exists. True
   // means a reply was found or we hit the history cap and must fail closed.
-  return !reachedAnchor;
+  return recentWindowOnly ? false : !reachedAnchor;
 }
 
 async function transcriptDestination(guild: Guild): Promise<TextChannel> {
@@ -375,7 +380,7 @@ async function autoCloseInactiveTicket(
 ): Promise<void> {
   let fresh = await getPersistedTicket(candidate.channelId);
   if (!isCurrentActiveTicket(fresh, anchorAt)) return;
-  if (await guardAgainstUnpersistedHumanActivity(client, channel, fresh, anchorAt, 100)) return;
+  if (await guardAgainstUnpersistedHumanActivity(client, channel, fresh, anchorAt, 100, true)) return;
 
   const destination = await transcriptDestination(guild);
   const marker = transcriptMarker(candidate.channelId, anchorAt);
@@ -422,7 +427,7 @@ async function autoCloseInactiveTicket(
   // Recheck recent Discord messages after transcript upload and just before the
   // receipt/close transaction. A late event-handler write must not be the sole
   // protection against closing a ticket after its owner has just replied.
-  if (await guardAgainstUnpersistedHumanActivity(client, channel, fresh, anchorAt, 100)) return;
+  if (await guardAgainstUnpersistedHumanActivity(client, channel, fresh, anchorAt, 100, true)) return;
 
   // Save the upload receipt before the lifecycle commit. If that commit or an
   // outbox insert fails, a later scheduler pass can fetch this message directly
