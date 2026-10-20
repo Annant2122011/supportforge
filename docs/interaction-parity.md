@@ -20,7 +20,7 @@ SupportForge exposes two independent entry points for each major feature: slash 
 | Ticket reports | `/supportforge ticket report` | Ticket panel Report workflow |
 | Ticket panel position | `/supportforge ticket panel/move-panel` | Ticket panel move/restore controls |
 | Settings and panel behavior | `/supportforge settings overview/theme/panel/defaults/team/retention/appearance` | Settings dashboard controls, including per-server Theme and the visual Settings Layout builder for title/description/footer, navigation order, labels and emojis |
-| Ticket inactivity automation | `/supportforge settings inactivity action:show/enable/disable/configure` | Settings → Inactivity Automation → Enable/Disable / Edit Thresholds | Both routes update the same per-server policy; automation remains disabled by default. |
+| Ticket inactivity automation | `/supportforge settings inactivity action:show/enable/disable/configure` | Settings → Inactivity Automation → Enable/Disable / Edit Thresholds (automation is disabled by default) |
 | Report intake and categories | `/supportforge settings reports/report-categories/report-rules/report-subcategory-add/report-subcategory-edit/report-subcategory-remove` | Settings → Reports controls |
 | Retention review and action | `/supportforge settings retention-action` | Settings → Retention review/approval controls |
 | Storage and infrastructure repair | `/supportforge settings storage action:status/claimed/pending/repair`, `/supportforge settings repair/refresh` | Settings → Repair System and Storage controls |
