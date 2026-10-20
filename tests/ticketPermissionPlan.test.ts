@@ -74,3 +74,22 @@ test('identical ACL requests do not require a channel mutation', () => {
   });
   assert.equal(plan.changed, false);
 });
+
+
+test('an invalid @everyone staff-role configuration cannot grant all members ticket access', () => {
+  const plan = buildTicketVisibilityPlan({
+    existing: base,
+    roleIds: roles,
+    staffRoleId: 'everyone-role',
+    everyoneRoleId: 'everyone-role',
+    botId: 'bot',
+    ownerId: 'owner',
+    userIds: [],
+    claimedModeratorIds: [],
+    mode: 'unclaimed',
+  });
+  const everyone = plan.overwrites.find((entry) => entry.id === 'everyone-role')!;
+  assert.equal(BigInt(everyone.allow) & PermissionFlagsBits.ViewChannel, 0n);
+  assert.equal(BigInt(everyone.deny) & PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ViewChannel);
+  assert.equal(BigInt(everyone.deny) & PermissionFlagsBits.SendMessages, PermissionFlagsBits.SendMessages);
+});
