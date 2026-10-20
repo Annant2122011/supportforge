@@ -24,7 +24,6 @@ import {
 import {
   getPersistedTicket,
   getPersistedTicketStatus,
-  transitionPersistedTicket,
   updatePersistedTicketMetadata,
 } from './services/ticketPersistenceService';
 
@@ -747,7 +746,7 @@ client.on('messageCreate', async (message) => {
       const config = await getGuildConfig(message.guild.id);
       const department = ticket.departmentId ? config.departments[ticket.departmentId] : undefined;
       const isStaff = Boolean(department?.staffRoleId && message.member?.roles.cache.has(department.staffRoleId));
-      await transitionPersistedTicket(message.channel.id, ticket.status, {
+      await updatePersistedTicketMetadata(message.channel.id, {
         metadata: {
           lastMessageId: message.id,
           lastMessageAuthorId: message.author.id,
@@ -759,7 +758,7 @@ client.on('messageCreate', async (message) => {
         id: message.author.id,
         attribution: 'actorKnown',
         confidence: 'high',
-      }, timestamp).catch((error) => {
+      }).catch((error) => {
         console.warn('Could not persist private-thread ticket activity before archiving:', error);
       });
     }
@@ -830,7 +829,7 @@ client.on('messageCreate', async (message) => {
     const authorType = hasStaffRole ? 'staff' : isOwnerOrParticipant ? 'customer' : 'unknown';
     const occurredAt = message.createdAt.toISOString();
 
-    await transitionPersistedTicket(message.channel.id, observedTicket.status, {
+    await updatePersistedTicketMetadata(message.channel.id, {
       metadata: {
         lastMessageId: message.id,
         lastMessageAuthorId: message.author.id,
@@ -843,7 +842,7 @@ client.on('messageCreate', async (message) => {
       id: message.author.id,
       attribution: 'actorKnown',
       confidence: 'high',
-    }, occurredAt).catch((error) => {
+    }).catch((error) => {
       console.error('Could not persist ticket activity before archiving message ' + message.id + ':', error);
     });
   }
