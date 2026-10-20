@@ -940,7 +940,19 @@ client.on(
         }
 
         if (interaction.customId.startsWith('sf:settings:')) {
-          await handleSettingsInteraction(interaction);
+          if (
+            interaction.isButton() ||
+            interaction.isStringSelectMenu() ||
+            interaction.isRoleSelectMenu() ||
+            interaction.isModalSubmit()
+          ) {
+            await handleSettingsInteraction(interaction);
+          } else {
+            await interaction.reply({
+              content: 'This Settings control is not supported for this interaction type.',
+              flags: MessageFlags.Ephemeral,
+            }).catch(() => undefined);
+          }
           return;
         }
 
