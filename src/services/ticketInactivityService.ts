@@ -414,9 +414,11 @@ async function autoCloseInactiveTicket(
   anchorAt: string,
   idleHours: number,
   graceHours: number,
+  policyGeneration: number,
 ): Promise<void> {
   let fresh = await getPersistedTicket(candidate.channelId);
   if (!isCurrentActiveTicket(fresh, anchorAt)) return;
+  if (await cancelIfInactivityPolicyChanged(client, guild, channel, fresh, policyGeneration, idleHours, graceHours)) return;
   if (await guardAgainstUnpersistedHumanActivity(client, channel, fresh, anchorAt, 100, true)) return;
 
   const destination = await transcriptDestination(guild);
@@ -451,6 +453,7 @@ async function autoCloseInactiveTicket(
     // uploading it, so an in-progress customer reply prevents a stale close.
     fresh = await getPersistedTicket(candidate.channelId);
     if (!isCurrentActiveTicket(fresh, anchorAt)) return;
+    if (await cancelIfInactivityPolicyChanged(client, guild, channel, fresh, policyGeneration, idleHours, graceHours)) return;
 
     transcriptMessage = await destination.send({
       content: '📄 Automatic inactivity transcript for ticket **#' + ticketNumber + '**. ' + marker,
@@ -461,6 +464,7 @@ async function autoCloseInactiveTicket(
 
   fresh = await getPersistedTicket(candidate.channelId);
   if (!isCurrentActiveTicket(fresh, anchorAt)) return;
+  if (await cancelIfInactivityPolicyChanged(client, guild, channel, fresh, policyGeneration, idleHours, graceHours)) return;
   // Recheck recent Discord messages after transcript upload and just before the
   // receipt/close transaction. A late event-handler write must not be the sole
   // protection against closing a ticket after its owner has just replied.
@@ -477,6 +481,7 @@ async function autoCloseInactiveTicket(
   }, SYSTEM_ACTOR);
   fresh = await getPersistedTicket(candidate.channelId);
   if (!isCurrentActiveTicket(fresh, anchorAt)) return;
+  if (await cancelIfInactivityPolicyChanged(client, guild, channel, fresh, policyGeneration, idleHours, graceHours)) return;
 
   // The transcript receipt adds another round-trip between the last check and
   // the close commit. Check again as late as possible before the PostgreSQL
@@ -484,6 +489,11 @@ async function autoCloseInactiveTicket(
   if (await guardAgainstUnpersistedHumanActivity(client, channel, fresh, anchorAt, 100, true)) return;
   fresh = await getPersistedTicket(candidate.channelId);
   if (!isCurrentActiveTicket(fresh, anchorAt)) return;
+
+  // Final policy-generation check immediately before building and committing
+  // the close request. The settings document and ticket row cannot share a
+  // cross-document transaction, so this is the narrowest practical window.
+  if (await cancelIfInactivityPolicyChanged(client, guild, channel, fresh, policyGeneration, idleHours, graceHours)) return;
 
   const closedAt = new Date().toISOString();
   const closedTopic = fresh.metadata.workspaceKind === 'private-thread'
@@ -653,7 +663,7 @@ async function sweepTicket(
   // this comparison atomically under a row lock.
   const fresh = await getPersistedTicket(ticket.channelId);
   if (!isCurrentActiveTicket(fresh, decision.anchorAt)) return;
-  await autoCloseInactiveTicket(client, guild, channel, fresh, decision.anchorAt, settings.idleHours, settings.graceHours);
+  await autoCloseInactiveTicket(client, guild, channel, fresh, decision.anchorAt, settings.idleHours, settings.graceHours, policyGeneration);
 }
 
 export async function sweepTicketInactivityForGuild(
