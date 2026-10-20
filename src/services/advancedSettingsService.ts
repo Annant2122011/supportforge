@@ -69,6 +69,26 @@ const LEGACY_DEFAULT_SETTINGS_BUTTON_ORDER = [
   'theme', 'premium', 'panels', 'dashboard-builder', 'support-hours', 'ticket-workspace',
 ] as const;
 
+export function normalizeSettingsDashboardButtonOrder(rawOrderInput: unknown): SettingsDashboardButtonKey[] {
+  const rawOrder = Array.isArray(rawOrderInput) ? rawOrderInput : [];
+  const validOrder = rawOrder.filter((key): key is SettingsDashboardButtonKey =>
+    typeof key === 'string' && (SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(key),
+  );
+  const uniqueOrder = [...new Set(validOrder)];
+  const isUncustomizedLegacyDefault =
+    rawOrder.length === LEGACY_DEFAULT_SETTINGS_BUTTON_ORDER.length &&
+    rawOrder.every((key, index) => key === LEGACY_DEFAULT_SETTINGS_BUTTON_ORDER[index]);
+  // Upgrade only the exact legacy default. A server's custom order is
+  // user data and must never be silently rearranged by a UI upgrade.
+  const normalizedOrder: SettingsDashboardButtonKey[] = isUncustomizedLegacyDefault
+    ? [...SETTINGS_DASHBOARD_BUTTON_KEYS]
+    : uniqueOrder;
+  for (const key of SETTINGS_DASHBOARD_BUTTON_KEYS) {
+    if (!normalizedOrder.includes(key)) normalizedOrder.push(key);
+  }
+  return normalizedOrder;
+}
+
 export type SettingsDashboardButtonKey = (typeof SETTINGS_DASHBOARD_BUTTON_KEYS)[number];
 
 export interface SettingsDashboardButtonCustomization {
@@ -375,21 +395,7 @@ function normalizeExistingSettings(
     settingsDashboard: (() => {
       const saved = settings.settingsDashboard;
       const rawOrder = Array.isArray(saved?.buttonOrder) ? saved.buttonOrder : [];
-      const validOrder = rawOrder.filter((key): key is SettingsDashboardButtonKey =>
-        typeof key === 'string' && (SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(key),
-      );
-      const uniqueOrder = [...new Set(validOrder)];
-      const isUncustomizedLegacyDefault =
-        rawOrder.length === LEGACY_DEFAULT_SETTINGS_BUTTON_ORDER.length &&
-        rawOrder.every((key, index) => key === LEGACY_DEFAULT_SETTINGS_BUTTON_ORDER[index]);
-      // Upgrade only the exact legacy default. A server's custom order is
-      // user data and must never be silently rearranged by a UI upgrade.
-      const normalizedOrder: SettingsDashboardButtonKey[] = isUncustomizedLegacyDefault
-        ? [...SETTINGS_DASHBOARD_BUTTON_KEYS]
-        : uniqueOrder;
-      for (const key of SETTINGS_DASHBOARD_BUTTON_KEYS) {
-        if (!normalizedOrder.includes(key)) normalizedOrder.push(key);
-      }
+      const normalizedOrder = normalizeSettingsDashboardButtonOrder(rawOrder);
       const text = (value: unknown, fallback: string, max: number): string =>
         typeof value === 'string' ? value.trim().slice(0, max) : fallback;
       const rawCustomizations = saved?.buttonCustomizations && typeof saved.buttonCustomizations === 'object' &&
