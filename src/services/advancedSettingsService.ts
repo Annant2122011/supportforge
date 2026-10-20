@@ -302,6 +302,12 @@ function normalizeRetentionDays(value: unknown, fallback: number): number {
   return Math.min(365, Math.max(0, parsed));
 }
 
+function normalizeBoundedInteger(value: unknown, fallback: number, minimum: number, maximum: number): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) return fallback;
+  return Math.min(maximum, Math.max(minimum, parsed));
+}
+
 function normalizeExistingSettings(
   settings: Partial<AdvancedGuildSettings>,
 ): AdvancedGuildSettings {
@@ -317,8 +323,8 @@ function normalizeExistingSettings(
       ...DEFAULTS.inactivity,
       ...(settings.inactivity ?? {}),
       enabled: settings.inactivity?.enabled === true,
-      idleHours: normalizeRetentionDays(settings.inactivity?.idleHours, DEFAULTS.inactivity.idleHours) || DEFAULTS.inactivity.idleHours,
-      graceHours: normalizeRetentionDays(settings.inactivity?.graceHours, DEFAULTS.inactivity.graceHours) || DEFAULTS.inactivity.graceHours,
+      idleHours: normalizeBoundedInteger(settings.inactivity?.idleHours, DEFAULTS.inactivity.idleHours, 1, 720),
+      graceHours: normalizeBoundedInteger(settings.inactivity?.graceHours, DEFAULTS.inactivity.graceHours, 1, 168),
     },
     retention: {
       ...DEFAULTS.retention,
