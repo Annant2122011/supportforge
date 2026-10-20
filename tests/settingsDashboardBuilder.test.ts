@@ -3,6 +3,7 @@ import { ButtonStyle } from 'discord.js';
 import test from 'node:test';
 import {
   SETTINGS_DASHBOARD_BUTTON_KEYS,
+  normalizeSettingsDashboardButtonOrder,
   type AdvancedGuildSettings,
 } from '../src/services/advancedSettingsService';
 import {
@@ -125,4 +126,23 @@ test('Settings dashboard summarizes inactivity/workspace policy and explains ret
     field.name === '🧹 Retention' && field.value.includes('No timer (365-day maximum)'),
   ));
   assert.equal(embed.fields?.some((field) => field.value.includes('Unlimited/forever')), false);
+});
+
+
+test('Settings layout migration groups the untouched legacy default but preserves customized order', () => {
+  const legacyDefault = [
+    'panel', 'defaults', 'tags', 'usecases', 'reports', 'retention', 'appearance',
+    'storage', 'rules', 'repair', 'team', 'manual', 'forms', 'refresh', 'reset',
+    'theme', 'premium', 'panels', 'dashboard-builder', 'support-hours', 'ticket-workspace',
+  ];
+  assert.deepEqual(
+    normalizeSettingsDashboardButtonOrder(legacyDefault),
+    [...SETTINGS_DASHBOARD_BUTTON_KEYS],
+  );
+
+  const customOrder = ['reset', 'repair', 'forms', 'panel'];
+  const migratedCustom = normalizeSettingsDashboardButtonOrder(customOrder);
+  assert.deepEqual(migratedCustom.slice(0, customOrder.length), customOrder);
+  assert.equal(migratedCustom.length, SETTINGS_DASHBOARD_BUTTON_KEYS.length);
+  assert.equal(new Set(migratedCustom).size, SETTINGS_DASHBOARD_BUTTON_KEYS.length);
 });
