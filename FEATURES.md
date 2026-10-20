@@ -4823,4 +4823,5 @@ A consolidated source review is tracked in [docs/stage-a-to-g-reverification.md]
 - F-032 Inactivity Auto-Close is **BUILT / PARTIAL**, not production-accepted. Core warning/grace/transcript/compare-and-close behavior exists; exemption configuration UI and live-guild acceptance remain incomplete.
 - Message activity writes use metadata-only persistence to avoid re-applying an earlier lifecycle status from an asynchronous message handler.
 - The inactivity close path rechecks the latest policy generation and recent human activity around transcript work and before the final PostgreSQL compare-and-close transaction.
-- CI results must be recorded from the final review commit and do not substitute for validating role permissions, rate limits, transcript access, and restore behavior in a controlled Discord test guild.
+- Final second-round CI passed on review head `bdbd80ae9ee90120c7427324201f00fabbd3a5e1`? See [run #1197](https://github.com/Annant2122011/supportforge/actions/runs/39399683798): TypeScript build passed, **117 tests passed / 0 failed**, and PostgreSQL verification passed.
+- CI does not substitute for validating role permissions, rate limits, transcript access, and restore behavior in a controlled Discord test guild.
