@@ -22,6 +22,7 @@ import {
 
 import { getAdvancedSettings, type TicketPriority } from '../services/advancedSettingsService';
 import { executePrivateThreadTicketCommand } from '../services/privateThreadTicketService';
+import { executePrivateThreadAuxCommand } from '../services/privateThreadTicketAuxService';
 import { projectDurableTicketTopic } from '../services/ticketTopicProjectionService';
 import { getThemeColor } from '../services/uiThemeService';
 
@@ -464,6 +465,8 @@ export async function executeTicketCommand(
   try {
     const subcommand = interaction.options.getSubcommand();
     if (interaction.channel?.type === ChannelType.PrivateThread) {
+      const auxHandled = await executePrivateThreadAuxCommand(interaction, subcommand);
+      if (auxHandled) return;
       const handled = await executePrivateThreadTicketCommand(interaction, subcommand);
       if (handled) return;
     }

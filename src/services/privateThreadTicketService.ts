@@ -206,10 +206,10 @@ export async function createPrivateThreadTicket(
   return { thread, parent };
 }
 
-export function buildPrivateThreadTicketComponents(status: TicketStatus): ActionRowBuilder<ButtonBuilder>[] {
+export function buildPrivateThreadTicketComponents(status: TicketStatus, threadId: string): ActionRowBuilder<ButtonBuilder>[] {
   const actions = getPrivateThreadTicketActions(status);
   const labels: Record<PrivateThreadTicketAction, { label: string; emoji: string; style: ButtonStyle }> = {
-    claim: { label: 'Claim', emoji: '🙋', style: ButtonStyle.Success },
+    claim: { label: 'Claim / Join', emoji: '🙋', style: ButtonStyle.Success },
     unclaim: { label: 'Unclaim', emoji: '↩️', style: ButtonStyle.Secondary },
     pending: { label: 'Pending', emoji: '⏳', style: ButtonStyle.Secondary },
     resume: { label: 'Resume', emoji: '▶️', style: ButtonStyle.Success },
@@ -217,20 +217,26 @@ export function buildPrivateThreadTicketComponents(status: TicketStatus): Action
     reopen: { label: 'Reopen', emoji: '🔓', style: ButtonStyle.Success },
     archive: { label: 'Archive', emoji: '🗄️', style: ButtonStyle.Secondary },
   };
-  const buttons = actions.map((action) => new ButtonBuilder()
-    .setCustomId('ticket:thread:' + action)
-    .setLabel(labels[action].label)
-    .setEmoji(labels[action].emoji)
-    .setStyle(labels[action].style));
+  const lifecycle = actions.map((action) => new ButtonBuilder()
+    .setCustomId('ticket:thread:' + action + ':' + threadId)
+    .setLabel(labels[action].label).setEmoji(labels[action].emoji).setStyle(labels[action].style));
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  for (let index = 0; index < buttons.length; index += 5) {
-    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(buttons.slice(index, index + 5)));
-  }
-  if (!rows.length) {
-    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('ticket:thread:archived').setLabel('Archived').setEmoji('🗄️').setStyle(ButtonStyle.Secondary).setDisabled(true),
-    ));
-  }
+  if (lifecycle.length) rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(lifecycle));
+  else rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('ticket:thread:archived:' + threadId).setLabel('Archived').setEmoji('🗄️').setStyle(ButtonStyle.Secondary).setDisabled(true),
+  ));
+  const mutable = status !== 'closed' && status !== 'archived';
+  rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('ticket:thread:add-user:' + threadId).setLabel('Add User').setEmoji('➕').setStyle(ButtonStyle.Secondary).setDisabled(!mutable),
+    new ButtonBuilder().setCustomId('ticket:thread:remove-user:' + threadId).setLabel('Remove User').setEmoji('➖').setStyle(ButtonStyle.Secondary).setDisabled(!mutable),
+    new ButtonBuilder().setCustomId('ticket:thread:priority:' + threadId).setLabel('Priority').setEmoji('🎯').setStyle(ButtonStyle.Secondary).setDisabled(!mutable),
+    new ButtonBuilder().setCustomId('ticket:thread:note:' + threadId).setLabel('Internal Note').setEmoji('📝').setStyle(ButtonStyle.Secondary).setDisabled(!mutable),
+    new ButtonBuilder().setCustomId('ticket:thread:history:' + threadId).setLabel('History').setEmoji('📜').setStyle(ButtonStyle.Secondary),
+  ));
+  rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('ticket:thread:reassign:' + threadId).setLabel('Reassign').setEmoji('👥').setStyle(ButtonStyle.Primary).setDisabled(!mutable),
+    new ButtonBuilder().setCustomId('ticket:thread:delete:' + threadId).setLabel('Delete Ticket').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+  ));
   return rows;
 }
 
@@ -264,7 +270,7 @@ async function refreshPrivateThreadPanel(
 ): Promise<void> {
   const config = await getGuildConfig(thread.guild.id);
   const embeds = [buildTicketPanelEmbed(thread.guild, thread.name, topic, config)];
-  const components = buildPrivateThreadTicketComponents(ticket.status);
+  const components = buildPrivateThreadTicketComponents(ticket.status, thread.id);
   const messageId = typeof ticket.metadata.panelMessageId === 'string' ? ticket.metadata.panelMessageId : null;
   let panel = messageId
     ? await thread.messages.fetch(messageId).catch(() => null)
@@ -455,7 +461,13 @@ async function performThreadAction(
 
 export async function handlePrivateThreadTicketButton(interaction: ButtonInteraction): Promise<boolean> {
   if (!interaction.customId.startsWith('ticket:thread:')) return false;
-  const rawAction = interaction.customId.slice('ticket:thread:'.length);
+  const parts = interaction.customId.split(':');
+  const rawAction = parts[2] ?? '';
+  const sourceThreadId = parts[3];
+  if (!sourceThreadId || interaction.channel?.type !== ChannelType.PrivateThread || interaction.channel.id !== sourceThreadId) {
+    await interaction.reply({ content: 'This ticket control is stale or belongs to a different thread.', flags: MessageFlags.Ephemeral }).catch(() => undefined);
+    return true;
+  }
   if (!['claim', 'unclaim', 'pending', 'resume', 'close', 'reopen', 'archive'].includes(rawAction)) {
     await interaction.reply({ content: 'This ticket control is no longer available.', flags: MessageFlags.Ephemeral }).catch(() => undefined);
     return true;

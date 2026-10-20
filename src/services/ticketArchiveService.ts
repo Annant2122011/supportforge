@@ -499,7 +499,7 @@ export async function archiveTicketChannelForRecovery(channel: TextChannel): Pro
 }
 
 export async function beginTicketButtonDeletion(
-  channel: TextChannel,
+  channel: TextChannel | ThreadChannel,
   actorId: string,
   actorName: string,
 ): Promise<void> {

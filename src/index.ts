@@ -930,6 +930,7 @@ client.on(
       if (
         interaction.isButton() ||
         interaction.isStringSelectMenu() ||
+        interaction.isUserSelectMenu() ||
         interaction.isRoleSelectMenu() ||
         interaction.isModalSubmit()
       ) {

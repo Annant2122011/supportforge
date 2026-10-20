@@ -22,6 +22,7 @@ import {
   type ChatInputCommandInteraction,
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
+  type UserSelectMenuInteraction,
   type TextChannel,
   type ThreadChannel,
 } from 'discord.js';
@@ -136,6 +137,7 @@ import {
 import { getCustomPanel } from '../services/panelBuilderService';
 import { parseCustomPanelInteractionId } from '../core/domain/customPanelInteraction';
 import { buildPrivateThreadTicketComponents, createPrivateThreadTicket, handlePrivateThreadTicketButton, registerInitialPrivateThreadTicket } from '../services/privateThreadTicketService';
+import { handlePrivateThreadAuxButton, handlePrivateThreadAuxComponent } from '../services/privateThreadTicketAuxService';
 
 function parseTicketPriority(value: string): TicketPriority | null {
   return value === 'low' ||
@@ -6388,11 +6390,17 @@ export async function handleTicketInteraction(
   interaction:
     | ButtonInteraction
     | StringSelectMenuInteraction
+    | UserSelectMenuInteraction
     | ModalSubmitInteraction,
 ): Promise<void> {
   try {
-    if (interaction.isButton() && interaction.customId.startsWith('ticket:thread:')) {
-      await handlePrivateThreadTicketButton(interaction);
+    if (interaction.customId.startsWith('ticket:thread:')) {
+      if (interaction.isButton()) {
+        const handled = await handlePrivateThreadAuxButton(interaction);
+        if (!handled) await handlePrivateThreadTicketButton(interaction);
+      } else {
+        await handlePrivateThreadAuxComponent(interaction);
+      }
       return;
     }
     if (interaction.isButton() && interaction.customId.startsWith('ticket:delete:')) {

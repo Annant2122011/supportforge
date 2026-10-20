@@ -13,7 +13,7 @@ export function getPrivateThreadTicketActions(status: TicketStatus): readonly Pr
     case 'reopened':
       return ['claim', 'pending', 'close'];
     case 'claimed':
-      return ['unclaim', 'pending', 'close'];
+      return ['claim', 'unclaim', 'pending', 'close'];
     case 'pending':
       return ['resume', 'close'];
     case 'closed':
