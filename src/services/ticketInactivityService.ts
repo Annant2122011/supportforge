@@ -10,6 +10,7 @@ import {
 
 import {
   evaluateTicketInactivity,
+  findLatestHumanActivityAfter,
   getTicketInactivityAnchor,
   normalizeInactivitySettings,
 } from '../core/domain/ticketInactivityPolicy';
@@ -232,6 +233,82 @@ async function clearWarningMetadata(ticket: PersistedTicket): Promise<void> {
       inactivityWarningMessageId: null,
     },
   }, SYSTEM_ACTOR);
+}
+
+const MAX_ACTIVITY_GUARD_MESSAGES = 1_000;
+
+/**
+ * Reconcile the persisted activity cursor against recent Discord history before
+ * creating a warning or closing. A messageCreate handler may be delayed behind
+ * archive I/O or a database retry, so PostgreSQL alone is not enough to prove
+ * that nobody has just replied. If the history window cannot be checked back
+ * to the anchor within the safety cap, automation pauses instead of guessing.
+ */
+async function guardAgainstUnpersistedHumanActivity(
+  client: Client,
+  channel: InactivityChannel,
+  ticket: PersistedTicket,
+  anchorAt: string,
+  maxMessages = MAX_ACTIVITY_GUARD_MESSAGES,
+): Promise<boolean> {
+  const anchorMs = Date.parse(anchorAt);
+  if (!Number.isFinite(anchorMs)) return true;
+
+  let before: string | undefined;
+  let scanned = 0;
+  let reachedAnchor = false;
+
+  while (scanned < maxMessages) {
+    const batch = await channel.messages.fetch({
+      limit: Math.min(100, maxMessages - scanned),
+      ...(before ? { before } : {}),
+    });
+    if (batch.size === 0) {
+      reachedAnchor = true;
+      break;
+    }
+
+    const activity = findLatestHumanActivityAfter(anchorAt, [...batch.values()].map((message) => ({
+      createdAt: message.createdAt.toISOString(),
+      messageId: message.id,
+      authorId: message.author.id,
+      authorIsBot: message.author.bot || Boolean(message.webhookId),
+    })));
+
+    if (activity) {
+      const current = await getPersistedTicket(ticket.channelId);
+      if (!isCurrentActiveTicket(current, anchorAt)) return true;
+
+      await updatePersistedTicketMetadata(ticket.channelId, {
+        metadata: { lastActivityAt: activity.at },
+      }, SYSTEM_ACTOR);
+      const updated = await getPersistedTicket(ticket.channelId);
+      if (updated && (
+        updated.metadata.inactivityWarningAnchorAt ||
+        updated.metadata.inactivityWarningDeadlineAt ||
+        updated.metadata.inactivityWarningMessageId
+      )) {
+        await cancelVisibleWarnings(channel, client, updated);
+        await clearWarningMetadata(updated);
+      }
+      return true;
+    }
+
+    scanned += batch.size;
+    const oldest = [...batch.values()].reduce((previous, current) =>
+      previous.createdTimestamp <= current.createdTimestamp ? previous : current,
+    );
+    if (oldest.createdTimestamp <= anchorMs || batch.size < 100) {
+      reachedAnchor = true;
+      break;
+    }
+
+    before = oldest.id;
+  }
+
+  // false means we proved no human reply newer than the anchor exists. True
+  // means a reply was found or we hit the history cap and must fail closed.
+  return !reachedAnchor;
 }
 
 async function transcriptDestination(guild: Guild): Promise<TextChannel> {
