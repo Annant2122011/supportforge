@@ -49,9 +49,13 @@ export interface FlagRule {
 }
 
 export const SETTINGS_DASHBOARD_BUTTON_KEYS = [
-  'panel', 'defaults', 'tags', 'usecases', 'reports', 'retention', 'inactivity', 'appearance',
-  'storage', 'rules', 'repair', 'team', 'manual', 'forms', 'refresh', 'reset',
-  'theme', 'premium', 'panels', 'dashboard-builder', 'support-hours', 'ticket-workspace',
+  // Core ticket experience first, then routing and server policy.
+  'panel', 'panels', 'forms', 'defaults', 'tags',
+  'usecases', 'support-hours', 'ticket-workspace', 'inactivity', 'reports',
+  // Appearance/team operations, then recovery and administration.
+  'team', 'retention', 'appearance', 'theme', 'dashboard-builder',
+  'storage', 'rules', 'repair', 'premium', 'manual',
+  'refresh', 'reset',
 ] as const;
 
 export type SettingsDashboardButtonKey = (typeof SETTINGS_DASHBOARD_BUTTON_KEYS)[number];
