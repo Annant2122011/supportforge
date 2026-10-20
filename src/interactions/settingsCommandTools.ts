@@ -16,6 +16,7 @@ import { addUseCasePreset } from '../services/useCasePresetService';
 import { performFactoryReset } from '../services/factoryResetService';
 import { logSettingsEvent, refreshAuditPanelTheme } from '../services/auditLogService';
 import { approveRetentionDeletion, declineRetentionDeletion, getEligibleRetentionTickets } from '../services/ticketRetentionService';
+import { clearTicketInactivityWarningsForGuild } from '../services/ticketInactivityService';
 import { migrateDepartmentStaffRole } from '../services/departmentStaffRoleService';
 import { enforcePriorityRoleHierarchy } from '../services/priorityRoleService';
 import { getThemeColor, getThemeDefinition, isGuildTheme } from '../services/uiThemeService';
@@ -269,6 +270,46 @@ export async function handleSettingsSlashCommand(
         '**Panel Appearance**\nTitle: ' + settings.appearance.panelTitle +
         '\nDescription: ' + settings.appearance.panelDescription +
         '\nFooter: ' + settings.appearance.panelFooter
+      );
+      return;
+    }
+
+    if (action === 'inactivity') {
+      const mode = interaction.options.getString('action', true);
+      const idleHours = interaction.options.getInteger('idle-hours');
+      const graceHours = interaction.options.getInteger('grace-hours');
+      if (!['show', 'enable', 'disable', 'configure'].includes(mode)) {
+        throw new Error('Choose show, enable, disable, or configure.');
+      }
+      if ((idleHours !== null && (idleHours < 1 || idleHours > 720)) ||
+          (graceHours !== null && (graceHours < 1 || graceHours > 168))) {
+        throw new Error('Idle hours must be 1–720 and grace hours must be 1–168.');
+      }
+      if (mode === 'configure' && idleHours === null && graceHours === null) {
+        throw new Error('Supply idle-hours, grace-hours, or both when configuring the inactivity policy.');
+      }
+      if (mode === 'enable' || mode === 'disable' || mode === 'configure') {
+        await updateAdvancedSettings(guild.id, (settings) => {
+          if (mode === 'enable') settings.inactivity.enabled = true;
+          if (mode === 'disable') settings.inactivity.enabled = false;
+          if (idleHours !== null) settings.inactivity.idleHours = idleHours;
+          if (graceHours !== null) settings.inactivity.graceHours = graceHours;
+        });
+        if (mode === 'disable') await clearTicketInactivityWarningsForGuild(guild.id);
+        await refreshSettingsChannel(guild);
+        const savedPolicy = (await getAdvancedSettings(guild.id)).inactivity;
+        audit('TICKET_INACTIVITY_' + mode.toUpperCase(),
+          'Inactivity auto-close ' + mode + '; idleHours=' + savedPolicy.idleHours +
+          '; graceHours=' + savedPolicy.graceHours + '.');
+      }
+      const inactivity = (await getAdvancedSettings(guild.id)).inactivity;
+      await interaction.editReply(
+        '**Ticket Inactivity Automation**\n' +
+        'Status: **' + (inactivity.enabled ? 'Enabled' : 'Disabled') + '**\n' +
+        'Warning threshold: **' + inactivity.idleHours + ' idle hours**\n' +
+        'Grace period: **' + inactivity.graceHours + ' additional hours**\n\n' +
+        'Automation is opt-in. Warnings persist across restarts; closure requires a saved transcript and an unchanged activity timestamp.\n' +
+        'Use /supportforge settings inactivity action:configure with idle-hours and/or grace-hours to update thresholds.'
       );
       return;
     }
