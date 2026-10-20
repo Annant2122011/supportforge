@@ -3425,8 +3425,13 @@ export async function handleSettingsInteraction(
       return true;
     }
 
-    if (interaction.customId === 'sf:settings:modal:support-hours') {
+    if (
+      interaction.customId === 'sf:settings:modal:support-hours' ||
+      interaction.customId.startsWith('sf:settings:modal:support-hours:')
+    ) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const scope = parseSupportHoursSettingsScope(interaction.customId.split(':'), 4);
+      const context = supportHoursContext(scope);
       const timezone = interaction.fields.getTextInputValue('timezone').trim();
       const scheduleText = interaction.fields.getTextInputValue('schedule');
       let weeklySchedule: ReturnType<typeof parseSupportHoursWeeklySchedule>;
@@ -3436,22 +3441,27 @@ export async function handleSettingsInteraction(
         await reject(interaction, error instanceof Error ? error.message : 'The weekly schedule is invalid.');
         return true;
       }
-      const current = await getSupportHoursPolicy(guild.id, 'guild');
+      const current = await getSupportHoursPolicy(guild.id, scope.scopeType, scope.scopeId);
+      const policies = await getSupportHoursPolicies(guild.id);
+      const effective = resolveEffectiveSupportHoursPolicy(policies, context);
       try {
         const saved = await saveSupportHoursPolicy(guild.id, {
-          ...(current ?? createDefaultSupportHoursPolicy('guild')),
-          scopeType: 'guild',
-          scopeId: null,
+          ...(current ?? effective ?? createDefaultSupportHoursPolicy(scope.scopeType, scope.scopeId)),
+          scopeType: scope.scopeType,
+          scopeId: scope.scopeId,
           timezone,
           weeklySchedule,
           updatedBy: interaction.user.id,
         });
         await refreshSettingsChannel(guild);
-        await auditSettingsAction(guild, interaction, 'SUPPORT_HOURS_CHANGED', 'Updated server-default weekly schedule in ' + saved.timezone + '; policy version=' + saved.version + '.');
+        const scopeLabel = scope.scopeType === 'guild'
+          ? 'server-default'
+          : scope.scopeType + ' ' + scope.scopeId;
+        await auditSettingsAction(guild, interaction, 'SUPPORT_HOURS_CHANGED', 'Updated ' + scopeLabel + ' weekly schedule in ' + saved.timezone + '; policy version=' + saved.version + '.');
         await interaction.editReply({
-          content: '✅ Server-default support schedule saved. Enforcement is ' + (saved.enabled ? 'enabled' : 'disabled') + '. Use the Support Hours panel to enable or review it.',
+          content: '✅ ' + scopeLabel.charAt(0).toUpperCase() + scopeLabel.slice(1) + ' support schedule saved. Enforcement is ' + (saved.enabled ? 'enabled' : 'disabled') + '.',
           components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-            new ButtonBuilder().setCustomId('sf:settings:support-hours').setLabel('Open Support Hours').setEmoji('🕒').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('sf:settings:support-hours:view:' + scope.scopeType + ':' + (scope.scopeId ?? '-')).setLabel('Open Support Hours').setEmoji('🕒').setStyle(ButtonStyle.Primary),
             backButton(),
           )],
         });
