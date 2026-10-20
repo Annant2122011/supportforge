@@ -1535,6 +1535,16 @@ export const data =
         )
         .addSubcommand((subcommand) =>
           subcommand
+            .setName('ticket-workspace')
+            .setDescription('Choose the resource type used for new tickets')
+            .addStringOption((option) => option.setName('action').setDescription('Show or change the ticket workspace mode').setRequired(true).addChoices(
+              { name: 'Show current mode', value: 'show' },
+              { name: 'Use private text channels', value: 'text-channels' },
+              { name: 'Use private threads', value: 'private-threads' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
             .setName('reset')
             .setDescription('Factory-reset SupportForge after typed confirmation')
             .addStringOption((option) => option.setName('confirmation').setDescription('Type DELETE SUPPORT FORGE exactly').setRequired(true).setMinLength(20).setMaxLength(20))

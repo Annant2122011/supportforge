@@ -9,6 +9,7 @@ import {
 
 import { getGuildConfig, newTagId, updateGuildConfig } from '../services/configService';
 import { getAdvancedSettings, updateAdvancedSettings, type TicketPriority } from '../services/advancedSettingsService';
+import { getTicketWorkspaceMode, setTicketWorkspaceMode } from '../services/privateThreadTicketService';
 import { ensureArchiveCategory, ensureClosedCategory, ensureOptionalStatusCategory, getOptionalStatusCategory } from '../services/ticketStorageService';
 import { refreshSettingsChannel } from '../services/settingsChannelService';
 import { addUseCasePreset } from '../services/useCasePresetService';
@@ -268,6 +269,28 @@ export async function handleSettingsSlashCommand(
         '**Panel Appearance**\nTitle: ' + settings.appearance.panelTitle +
         '\nDescription: ' + settings.appearance.panelDescription +
         '\nFooter: ' + settings.appearance.panelFooter
+      );
+      return;
+    }
+
+    if (action === 'ticket-workspace') {
+      const requested = interaction.options.getString('action', true);
+      if (requested !== 'show' && requested !== 'text-channels' && requested !== 'private-threads') {
+        throw new Error('Choose show, text-channels, or private-threads.');
+      }
+      const before = await getTicketWorkspaceMode(guild.id);
+      if (requested !== 'show') {
+        await setTicketWorkspaceMode(guild.id, requested);
+        await refreshSettingsChannel(guild);
+        audit('TICKET_WORKSPACE_MODE_CHANGED', 'Changed ticket workspace mode from ' + before + ' to ' + requested + '. Existing tickets were not migrated.');
+      }
+      const mode = await getTicketWorkspaceMode(guild.id);
+      await interaction.editReply(
+        '**Ticket Workspace**\\nCurrent mode: **' + mode + '**\\n' +
+        (mode === 'private-threads'
+          ? 'New tickets use private threads inside a department workspace. Configure a staff role for each department and grant the bot Manage Threads and Create Private Threads.'
+          : 'New tickets use private text channels.') +
+        '\\nExisting tickets are unchanged. Use the Settings channel Ticket Workspace button for visual controls.'
       );
       return;
     }

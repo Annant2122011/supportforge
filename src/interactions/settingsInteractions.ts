@@ -634,13 +634,14 @@ const SETTINGS_LAYOUT_LABELS: Record<SettingsDashboardButtonKey, string> = {
   panels: 'Ticket Panels',
   'dashboard-builder': 'Settings Layout',
   'support-hours': 'Support Hours',
+  'ticket-workspace': 'Ticket Workspace',
 };
 
 const SETTINGS_LAYOUT_DEFAULT_EMOJIS: Record<SettingsDashboardButtonKey, string> = {
   panel: '🎛️', defaults: '🎟️', tags: '🏷️', usecases: '🧩', reports: '🚩',
   retention: '🧹', appearance: '🎨', storage: '🗄️', rules: '🛡️', repair: '🛠️',
   team: '👥', manual: '📖', forms: '🧾', refresh: '🔄', reset: '🚨', theme: '🌈',
-  premium: '💎', panels: '🧱', 'dashboard-builder': '🧰', 'support-hours': '🕒',
+  premium: '💎', panels: '🧱', 'dashboard-builder': '🧰', 'support-hours': '🕒', 'ticket-workspace': '🧵',
 };
 
 function effectiveSettingsLayoutLabel(
@@ -825,6 +826,43 @@ async function showSupportHoursSettings(
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId('sf:settings:support-hours:clear').setLabel('Clear Server Default').setEmoji('🧹').setStyle(ButtonStyle.Secondary).setDisabled(!policy),
+      backButton(),
+    ),
+  ]);
+}
+
+async function showTicketWorkspaceSettings(
+  interaction: SettingsViewInteraction,
+  notice = '',
+): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const privateThreads = settings.ticketWorkspace.mode === 'private-threads';
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('🧵 Ticket Workspace')
+      .setDescription(
+        (notice ? notice + '\n\n' : '') +
+        '**Current mode:** ' + (privateThreads ? 'Private threads' : 'Dedicated text channels') + '\n\n' +
+        (privateThreads
+          ? 'Each new ticket is a private thread under its department workspace. Only the ticket owner, the department staff with access to that workspace, administrators, and the bot can read the conversation. The parent is read-only to normal members; other customers cannot see this thread. Department staff roles must be configured for staff access.'
+          : 'Each new ticket is a private text channel, using the existing permission-overwrite model.') +
+        '\n\n**Scope:** This setting affects new tickets only. Existing tickets keep their current resource type. The parent workspace for a private-thread department is created lazily when its next ticket is opened.' +
+        '\n\nPrivate threads require the bot to have Manage Threads, Create Private Threads, View Channel and Send Messages in Threads. If setup fails, ticket creation is stopped rather than falling back to a less-private channel.',
+      ),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId('sf:settings:ticket-workspace:set:text-channels')
+        .setLabel('Use Text Channels')
+        .setEmoji('📁')
+        .setStyle(privateThreads ? ButtonStyle.Secondary : ButtonStyle.Success)
+        .setDisabled(!privateThreads),
+      new ButtonBuilder()
+        .setCustomId('sf:settings:ticket-workspace:set:private-threads')
+        .setLabel('Use Private Threads')
+        .setEmoji('🧵')
+        .setStyle(privateThreads ? ButtonStyle.Success : ButtonStyle.Secondary)
+        .setDisabled(privateThreads),
       backButton(),
     ),
   ]);
@@ -2081,6 +2119,28 @@ export async function handleSettingsInteraction(
       await refreshSettingsChannel(guild);
       await auditSettingsAction(guild, interaction, 'SETTINGS_DASHBOARD_ORDER_CHANGED', 'Moved ' + SETTINGS_LAYOUT_LABELS[key as SettingsDashboardButtonKey] + ' ' + (movingUp ? 'up' : 'down') + ' in the Settings dashboard.');
       await showSettingsDashboardOrder(interaction, key as SettingsDashboardButtonKey);
+      return true;
+    }
+
+    if (id === 'sf:settings:ticket-workspace') {
+      await showTicketWorkspaceSettings(interaction);
+      return true;
+    }
+
+    if (id.startsWith('sf:settings:ticket-workspace:set:')) {
+      const mode = id.slice('sf:settings:ticket-workspace:set:'.length);
+      if (mode !== 'text-channels' && mode !== 'private-threads') {
+        await reject(interaction, 'That ticket workspace mode is not supported.');
+        return true;
+      }
+      const previous = (await getAdvancedSettings(guild.id)).ticketWorkspace.mode;
+      await interaction.deferUpdate();
+      await updateAdvancedSettings(guild.id, (current) => {
+        current.ticketWorkspace.mode = mode;
+      });
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'TICKET_WORKSPACE_MODE_CHANGED', 'Changed ticket workspace mode from ' + previous + ' to ' + mode + '. Existing tickets were not migrated.');
+      await showTicketWorkspaceSettings(interaction, '✅ New tickets will use **' + (mode === 'private-threads' ? 'private threads' : 'dedicated text channels') + '**. Existing tickets are unchanged.');
       return true;
     }
 

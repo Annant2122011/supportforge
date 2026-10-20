@@ -51,7 +51,7 @@ export interface FlagRule {
 export const SETTINGS_DASHBOARD_BUTTON_KEYS = [
   'panel', 'defaults', 'tags', 'usecases', 'reports', 'retention', 'appearance',
   'storage', 'rules', 'repair', 'team', 'manual', 'forms', 'refresh', 'reset',
-  'theme', 'premium', 'panels', 'dashboard-builder', 'support-hours',
+  'theme', 'premium', 'panels', 'dashboard-builder', 'support-hours', 'ticket-workspace',
 ] as const;
 
 export type SettingsDashboardButtonKey = (typeof SETTINGS_DASHBOARD_BUTTON_KEYS)[number];
@@ -100,6 +100,8 @@ export interface AdvancedGuildSettings {
     panelDescription: string;
     panelFooter: string;
   };
+  /** Per-server ticket resource choice; text channels remain the backward-compatible default. */
+  ticketWorkspace: { mode: 'text-channels' | 'private-threads' };
   /** Per-server Settings-channel branding and button order; essential controls are never hidden. */
   settingsDashboard: SettingsDashboardSettings;
   ticketDefaults: {
@@ -178,6 +180,7 @@ const DEFAULTS: AdvancedGuildSettings = {
       'Click a department button below to open a private support ticket.',
     panelFooter: 'SupportForge • Professional Ticket System',
   },
+  ticketWorkspace: { mode: 'text-channels' },
   settingsDashboard: {
     title: '⚙️ ResolveX Settings',
     description: 'Configure your server’s ticket system, support panels and retention policies.',
@@ -221,6 +224,7 @@ function cloneDefaults(): AdvancedGuildSettings {
       buttonOrder: [...DEFAULTS.settingsDashboard.buttonOrder],
       buttonCustomizations: {},
     },
+    ticketWorkspace: { ...DEFAULTS.ticketWorkspace },
     ticketDefaults: { ...DEFAULTS.ticketDefaults },
     reports: {
       ...DEFAULTS.reports,
@@ -320,6 +324,9 @@ function normalizeExistingSettings(
     appearance: {
       ...DEFAULTS.appearance,
       ...(settings.appearance ?? {}),
+    },
+    ticketWorkspace: {
+      mode: settings.ticketWorkspace?.mode === 'private-threads' ? 'private-threads' : 'text-channels',
     },
     settingsDashboard: (() => {
       const saved = settings.settingsDashboard;
