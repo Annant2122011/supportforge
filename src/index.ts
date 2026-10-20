@@ -25,6 +25,7 @@ import {
   getPersistedTicket,
   getPersistedTicketStatus,
   transitionPersistedTicket,
+  updatePersistedTicketMetadata,
 } from './services/ticketPersistenceService';
 
 import { getGuildConfig } from './services/configService';
@@ -707,12 +708,36 @@ client.on('messageUpdate', (oldMessage, newMessage) => {
 });
 
 client.on('messageCreate', async (message) => {
-  if (
-    !message.guild ||
-    message.channel.type !== ChannelType.GuildText
-  ) {
+  if (!message.guild) return;
+
+  // ThreadChannel has no topic and must not flow through the text-only archive
+  // adapter. Resolve thread tickets exclusively from their durable Neon row.
+  if (message.channel.type === ChannelType.PrivateThread) {
+    const ticket = await getPersistedTicket(message.channel.id).catch(() => undefined);
+    if (!ticket || ticket.guildId !== message.guild.id || ticket.deletedAt || ticket.metadata.workspaceKind !== 'private-thread') return;
+    if (message.author.bot) return;
+    if (ticket.status === 'closed' || ticket.status === 'archived') {
+      await message.delete().catch((error) => console.warn('Could not remove a message from a closed private-thread ticket:', error));
+      return;
+    }
+    const timestamp = new Date().toISOString();
+    const config = await getGuildConfig(message.guild.id);
+    const department = config.departments[ticket.departmentId];
+    const isStaff = Boolean(department?.staffRoleId && message.member?.roles.cache.has(department.staffRoleId));
+    await updatePersistedTicketMetadata(message.channel.id, {
+      metadata: {
+        lastActivityAt: timestamp,
+        ...(isStaff ? { lastStaffActivityAt: timestamp } : { lastCustomerMessageAt: timestamp }),
+      },
+    }, {
+      id: message.author.id,
+      attribution: 'actorKnown',
+      confidence: 'high',
+    }).catch((error) => console.warn('Could not update private-thread ticket activity:', error));
     return;
   }
+
+  if (message.channel.type !== ChannelType.GuildText) return;
 
   const topic = message.channel.topic ?? '';
   const guildConfig = await getGuildConfig(message.guild.id);

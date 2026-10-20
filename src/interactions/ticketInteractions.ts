@@ -23,6 +23,7 @@ import {
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
   type TextChannel,
+  type ThreadChannel,
 } from 'discord.js';
 
 import {
@@ -134,6 +135,7 @@ import {
 } from '../services/ticketPanelService';
 import { getCustomPanel } from '../services/panelBuilderService';
 import { parseCustomPanelInteractionId } from '../core/domain/customPanelInteraction';
+import { buildPrivateThreadTicketComponents, createPrivateThreadTicket, handlePrivateThreadTicketButton, registerInitialPrivateThreadTicket } from '../services/privateThreadTicketService';
 
 function parseTicketPriority(value: string): TicketPriority | null {
   return value === 'low' ||
@@ -1110,6 +1112,7 @@ async function createTicket(
 
   let ticketChannel:
     | TextChannel
+    | ThreadChannel
     | undefined;
   let creationLease: string | null = null;
   let selectedForm: TicketFormVersion | undefined;
@@ -1248,7 +1251,7 @@ async function createTicket(
      * retained only as a compatibility fallback for legacy tickets that were
      * created before durable ticket persistence existed.
      */
-    let existing: TextChannel | undefined;
+    let existing: TextChannel | ThreadChannel | undefined;
 
     const persistedCandidates = await findActivePersistedTickets(
       guild.id,
@@ -1264,6 +1267,14 @@ async function createTicket(
       if (
         channel?.type === ChannelType.GuildText &&
         isTicketTopic(channel.topic ?? '')
+      ) {
+        existing = channel;
+        break;
+      }
+      if (
+        channel?.type === ChannelType.PrivateThread &&
+        candidate.metadata.workspaceKind === 'private-thread' &&
+        candidate.guildId === guild.id
       ) {
         existing = channel;
         break;
@@ -1418,25 +1429,44 @@ async function createTicket(
         guild.roles.everyone.id,
       );
 
+    let threadParentChannelId: string | null = null;
     try {
-      ticketChannel =
-        (await guild.channels.create({
-            name:
-              getTicketChannelName(
-                String(number).padStart(4, '0'),
-                'open',
-                advancedSettings.ticketDefaults.priority,
-              ),
-            type:
-              ChannelType.GuildText,
-            parent:
-              auditParentCategoryId,
-            topic,
-            permissionOverwrites:
-              overwrites,
-            reason:
-              `SupportForge ticket #${number}`,
-          })) as TextChannel;
+      if (advancedSettings.ticketWorkspace.mode === 'private-threads') {
+        const created = await createPrivateThreadTicket(
+          guild,
+          department,
+          String(number),
+          cleanSubject,
+          interaction.user.id,
+        );
+        ticketChannel = created.thread;
+        threadParentChannelId = created.parent.id;
+        await registerInitialPrivateThreadTicket(guild.id, created.thread, {
+          ticketNumber: String(number),
+          departmentId,
+          tagId,
+          ownerId: interaction.user.id,
+          priority: advancedSettings.ticketDefaults.priority,
+          createdAt: now,
+          staffRoleId: department.staffRoleId,
+          ticketTopic: topic,
+          threadParentChannelId: created.parent.id,
+          subject: cleanSubject,
+        });
+      } else {
+        ticketChannel = await guild.channels.create({
+          name: getTicketChannelName(
+            String(number).padStart(4, '0'),
+            'open',
+            advancedSettings.ticketDefaults.priority,
+          ),
+          type: ChannelType.GuildText,
+          parent: auditParentCategoryId,
+          topic,
+          permissionOverwrites: overwrites,
+          reason: `SupportForge ticket #${number}`,
+        }) as TextChannel;
+      }
 
       if (formDraftRecorded) {
         await setTicketFormSubmissionChannel(formRoute?.submissionId ?? interaction.id, ticketChannel.id).catch((error) => {
@@ -1456,11 +1486,9 @@ async function createTicket(
                 config,
               ),
             ],
-            components:
-              buildTicketPanelComponents(
-                'open',
-                topic,
-              ),
+            components: ticketChannel.type === ChannelType.PrivateThread
+              ? buildPrivateThreadTicketComponents('open')
+              : buildTicketPanelComponents('open', topic),
           });
 
       const finalTopic =
@@ -1475,29 +1503,34 @@ async function createTicket(
        * native REST timeout must not make a successfully created ticket fail.
        * The full topic is still kept in runtime state for this process.
        */
-      try {
-        await setChannelTopic(
-          ticketChannel.id,
-          finalTopic,
-          'Ticket topic initialization',
-        );
-      } catch (error) {
-        console.warn(
-          '⚠️ Ticket topic initialization timed out or failed; keeping the ticket and scheduling a retry:',
-          error,
-        );
-
-        // Durable ticket registration emits an outbox event after this catch.
-        // The worker reconciles the topic with bounded, rate-limit-aware retry policy.
+      if (ticketChannel.type === ChannelType.GuildText) {
+        try {
+          await setChannelTopic(
+            ticketChannel.id,
+            finalTopic,
+            'Ticket topic initialization',
+          );
+        } catch (error) {
+          console.warn(
+            '⚠️ Ticket topic initialization timed out or failed; keeping the ticket and scheduling a retry:',
+            error,
+          );
+        }
+        ticketChannel.topic = finalTopic;
+        updateRuntimeTicketState(ticketChannel, finalTopic, 'open');
+      } else {
+        await updatePersistedTicketMetadata(ticketChannel.id, {
+          metadata: {
+            ticketTopic: finalTopic,
+            panelMessageId: panel.id,
+            panelChannelId: panel.channelId,
+          },
+        }, {
+          id: interaction.user.id,
+          attribution: 'actorKnown',
+          confidence: 'high',
+        });
       }
-
-      ticketChannel.topic = finalTopic;
-
-      updateRuntimeTicketState(
-        ticketChannel,
-        finalTopic,
-        'open',
-      );
 
       await registerTicket(
         ticketChannel.id,
@@ -1521,7 +1554,12 @@ async function createTicket(
             openedAt: now,
             lastActivityAt: now,
             lastCustomerMessageAt: now,
-            ticketChannelType: 'text',
+            ticketChannelType: ticketChannel.type === ChannelType.PrivateThread ? 'private-thread' : 'text',
+            ...(ticketChannel.type === ChannelType.PrivateThread ? {
+              workspaceKind: 'private-thread',
+              threadParentChannelId,
+              ticketTopic: finalTopic,
+            } : {}),
             ...(selectedForm ? {
               formSubmissionInteractionId: formRoute?.submissionId ?? interaction.id,
               formId: selectedForm.id,
@@ -1632,25 +1670,20 @@ async function createTicket(
         });
       }
 
-      let departmentCategoryName = department.name;
-      try {
-        // At this point the ticket channel, panel, customer request, and
-        // durable ticket record all exist. Only now may the department
-        // category be created or repaired.
-        const departmentCategory = await ensureDepartmentCategory(guild, department);
-        departmentCategoryName = departmentCategory.name;
-
-        // ensureDepartmentCategory reconciles all active tickets into the
-        // category, including this new ticket. This avoids a second redundant
-        // channel PATCH and lets the shared REST queue handle rate limits.
-      } catch (categoryError) {
-        // Preserve the ticket even if category provisioning fails. It remains
-        // in the main SupportForge category and can be reconciled by setup.
-        console.warn(
-          '⚠️ Ticket #' + number +
-            ' was created successfully, but department category provisioning is pending:',
-          categoryError,
-        );
+      let departmentCategoryName = advancedSettings.ticketWorkspace.mode === 'private-threads'
+        ? 'private thread workspace for ' + department.name
+        : department.name;
+      if (ticketChannel.type === ChannelType.GuildText) {
+        try {
+          const departmentCategory = await ensureDepartmentCategory(guild, department);
+          departmentCategoryName = departmentCategory.name;
+        } catch (categoryError) {
+          console.warn(
+            '⚠️ Ticket #' + number +
+              ' was created successfully, but department category provisioning is pending:',
+            categoryError,
+          );
+        }
       }
 
       await interaction.editReply({
@@ -1702,7 +1735,7 @@ async function createTicket(
        */
       if (ticketChannel) {
         console.error(
-          `⚠️ Ticket #${getField(ticketChannel.topic ?? '', 'number') ?? 'unknown'} was created but initialization did not complete. The channel has been preserved for recovery.`,
+          `⚠️ Ticket #${getField(ticketChannel.type === ChannelType.GuildText ? (ticketChannel.topic ?? '') : topic, 'number') ?? 'unknown'} was created but initialization did not complete. The channel/thread has been preserved for recovery.`,
           error,
         );
 
@@ -6358,6 +6391,10 @@ export async function handleTicketInteraction(
     | ModalSubmitInteraction,
 ): Promise<void> {
   try {
+    if (interaction.isButton() && interaction.customId.startsWith('ticket:thread:')) {
+      await handlePrivateThreadTicketButton(interaction);
+      return;
+    }
     if (interaction.isButton() && interaction.customId.startsWith('ticket:delete:')) {
       await handleTicketDeletionInteraction(interaction);
       return;
