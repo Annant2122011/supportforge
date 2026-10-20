@@ -675,19 +675,22 @@ export async function sweepTicketInactivityForGuild(
   const policy = (await getAdvancedSettings(guild.id)).inactivity;
   if (!policy.enabled) {
     for (const ticket of records) {
-      if (ticket.deletedAt || !isActiveStatus(ticket.status)) continue;
       if (
         !ticket.metadata.inactivityWarningAnchorAt &&
         !ticket.metadata.inactivityWarningDeadlineAt &&
         !ticket.metadata.inactivityWarningMessageId
       ) continue;
       try {
-        const channel = await resolveTicketChannel(guild, ticket);
+        const channel = ticket.deletedAt
+          ? null
+          : await resolveTicketChannel(guild, ticket).catch(() => null);
         if (channel) await cancelVisibleWarnings(channel, client, ticket);
-        await clearWarningMetadata(ticket);
       } catch (error) {
-        console.warn('Could not clear a disabled inactivity warning for ticket ' + ticket.channelId + ':', error);
+        console.warn('Could not cancel a disabled inactivity warning for ticket ' + ticket.channelId + ':', error);
       }
+      await clearWarningMetadata(ticket).catch((error) => {
+        console.warn('Could not clear disabled inactivity metadata for ticket ' + ticket.channelId + ':', error);
+      });
     }
     return;
   }
@@ -703,19 +706,22 @@ export async function sweepTicketInactivityForGuild(
 export async function clearTicketInactivityWarningsForGuild(guild: Guild): Promise<void> {
   const records = await getPersistedTicketRecords(guild.id);
   for (const ticket of records) {
-    if (!isActiveStatus(ticket.status) || ticket.deletedAt) continue;
     if (
       !ticket.metadata.inactivityWarningAnchorAt &&
       !ticket.metadata.inactivityWarningDeadlineAt &&
       !ticket.metadata.inactivityWarningMessageId
     ) continue;
     try {
-      const channel = await resolveTicketChannel(guild, ticket);
+      const channel = ticket.deletedAt
+        ? null
+        : await resolveTicketChannel(guild, ticket).catch(() => null);
       if (channel) await cancelVisibleWarnings(channel, guild.client, ticket);
-      await clearWarningMetadata(ticket);
     } catch (error) {
-      console.warn('Could not clear inactivity warning for ticket ' + ticket.channelId + ':', error);
+      console.warn('Could not cancel inactivity warning for ticket ' + ticket.channelId + ':', error);
     }
+    await clearWarningMetadata(ticket).catch((error) => {
+      console.warn('Could not clear inactivity metadata for ticket ' + ticket.channelId + ':', error);
+    });
   }
 }
 
