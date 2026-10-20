@@ -639,6 +639,7 @@ const SETTINGS_LAYOUT_LABELS: Record<SettingsDashboardButtonKey, string> = {
   'dashboard-builder': 'Settings Layout',
   'support-hours': 'Support Hours',
   'ticket-workspace': 'Ticket Workspace',
+  inactivity: 'Inactivity Automation',
 };
 
 const SETTINGS_LAYOUT_DEFAULT_EMOJIS: Record<SettingsDashboardButtonKey, string> = {
@@ -646,6 +647,7 @@ const SETTINGS_LAYOUT_DEFAULT_EMOJIS: Record<SettingsDashboardButtonKey, string>
   retention: '🧹', appearance: '🎨', storage: '🗄️', rules: '🛡️', repair: '🛠️',
   team: '👥', manual: '📖', forms: '🧾', refresh: '🔄', reset: '🚨', theme: '🌈',
   premium: '💎', panels: '🧱', 'dashboard-builder': '🧰', 'support-hours': '🕒', 'ticket-workspace': '🧵',
+  inactivity: '⏳',
 };
 
 function effectiveSettingsLayoutLabel(
@@ -1466,6 +1468,32 @@ async function showRetention(interaction: ButtonInteraction): Promise<void> {
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId('sf:settings:retention:edit').setLabel('Edit Retention').setEmoji('🕒').setStyle(ButtonStyle.Primary),
+      backButton(),
+    ),
+  ]);
+}
+
+async function showInactivitySettings(interaction: SettingsViewInteraction, notice = ''): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('⏳ Ticket Inactivity Automation')
+      .setDescription(
+        (notice ? notice + '\n\n' : '') +
+        'When enabled, active tickets with no recorded activity receive a visible warning. If nobody replies during the grace period, ResolveX creates or reuses a transcript and closes the ticket. Any new activity resets the warning. The scheduler and deadlines survive restarts.\n\n' +
+        '**Status:** ' + (settings.inactivity.enabled ? '🟢 Enabled' : '⚪ Disabled') + '\n' +
+        '**Warn after:** ' + settings.inactivity.idleHours + ' hours without activity\n' +
+        '**Grace after warning:** ' + settings.inactivity.graceHours + ' hours\n\n' +
+        'Automation is opt-in for each server. Closure is skipped if transcript delivery is unavailable or the ticket receives new activity.'
+      ),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId('sf:settings:inactivity:' + (settings.inactivity.enabled ? 'disable' : 'enable'))
+        .setLabel(settings.inactivity.enabled ? 'Disable Automation' : 'Enable Automation')
+        .setEmoji(settings.inactivity.enabled ? '⏸️' : '▶️')
+        .setStyle(settings.inactivity.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sf:settings:inactivity:edit').setLabel('Edit Thresholds').setEmoji('🕒').setStyle(ButtonStyle.Primary),
       backButton(),
     ),
   ]);
@@ -2660,6 +2688,40 @@ export async function handleSettingsInteraction(
       return true;
     }
 
+    if (id === 'sf:settings:inactivity') {
+      await showInactivitySettings(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:inactivity:enable' || id === 'sf:settings:inactivity:disable') {
+      const enabled = id.endsWith(':enable');
+      await interaction.deferUpdate();
+      await updateAdvancedSettings(guild.id, (settings) => {
+        settings.inactivity.enabled = enabled;
+      });
+      if (!enabled) {
+        await clearTicketInactivityWarningsForGuild(guild.id);
+      }
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'TICKET_INACTIVITY_AUTOMATION_' + (enabled ? 'ENABLED' : 'DISABLED'),
+        (enabled ? 'Enabled' : 'Disabled') + ' inactivity auto-close with idle threshold ' +
+        (await getAdvancedSettings(guild.id)).inactivity.idleHours + ' hours and grace period ' +
+        (await getAdvancedSettings(guild.id)).inactivity.graceHours + ' hours.');
+      await showInactivitySettings(interaction, enabled
+        ? '✅ Inactivity automation is enabled.'
+        : '✅ Inactivity automation is disabled and outstanding grace periods were cleared.');
+      return true;
+    }
+
+    if (id === 'sf:settings:inactivity:edit') {
+      const settings = await getAdvancedSettings(guild.id);
+      await openModal(interaction, 'sf:settings:modal:inactivity', 'Ticket Inactivity', [
+        new TextInputBuilder().setCustomId('idle').setLabel('Idle hours before warning (1–720)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.inactivity.idleHours)),
+        new TextInputBuilder().setCustomId('grace').setLabel('Grace hours after warning (1–168)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.inactivity.graceHours)),
+      ]);
+      return true;
+    }
+
     if (id === 'sf:settings:retention:edit') {
       const settings = await getAdvancedSettings(guild.id);
       await openModal(interaction, 'sf:settings:modal:retention', 'Ticket Retention', [
@@ -3468,6 +3530,32 @@ export async function handleSettingsInteraction(
       } catch (error) {
         await reject(interaction, error instanceof Error ? error.message : 'Could not save that support-hours schedule.');
       }
+      return true;
+    }
+
+    if (interaction.customId === 'sf:settings:modal:inactivity') {
+      const idleHours = Number(interaction.fields.getTextInputValue('idle'));
+      const graceHours = Number(interaction.fields.getTextInputValue('grace'));
+      if (!Number.isInteger(idleHours) || idleHours < 1 || idleHours > 720 ||
+          !Number.isInteger(graceHours) || graceHours < 1 || graceHours > 168) {
+        await reject(interaction, 'Idle time must be 1–720 whole hours and grace time must be 1–168 whole hours.');
+        return true;
+      }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await updateAdvancedSettings(guild.id, (settings) => {
+        settings.inactivity.idleHours = idleHours;
+        settings.inactivity.graceHours = graceHours;
+      });
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'TICKET_INACTIVITY_THRESHOLDS_CHANGED',
+        'Set inactivity warning threshold to ' + idleHours + ' hours and grace period to ' + graceHours + ' hours.');
+      await interaction.editReply({
+        content: '✅ Inactivity thresholds saved: warn after ' + idleHours + ' idle hours, then allow ' + graceHours + ' additional hours before closing.',
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId('sf:settings:inactivity').setLabel('Open Inactivity Settings').setEmoji('⏳').setStyle(ButtonStyle.Primary),
+          backButton(),
+        )],
+      });
       return true;
     }
 
