@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   evaluateTicketInactivity,
+  findLatestHumanActivityAfter,
   getTicketInactivityAnchor,
   normalizeInactivitySettings,
   type TicketInactivityState,
@@ -70,6 +71,36 @@ test('deleted and terminal tickets can never be auto-closed', () => {
   assert.equal(evaluateTicketInactivity(activeTicket({ deletedAt: now.toString() }), policy, now).action, 'skip');
   assert.equal(evaluateTicketInactivity(activeTicket({ status: 'closed' }), policy, now).action, 'skip');
   assert.equal(evaluateTicketInactivity(activeTicket({ status: 'archived' }), policy, now).action, 'skip');
+});
+
+test('critical, VIP, active-escalation and staff-exempt tickets are excluded from auto-close', () => {
+  assert.deepEqual(evaluateTicketInactivity(activeTicket({ priority: 'critical' }), policy, now), {
+    action: 'skip',
+    reason: 'exempt',
+  });
+  assert.equal(evaluateTicketInactivity(activeTicket({ metadata: { inactivityExempt: true } }), policy, now).action, 'skip');
+  assert.equal(evaluateTicketInactivity(activeTicket({ metadata: { activeEscalation: true } }), policy, now).action, 'skip');
+  assert.equal(evaluateTicketInactivity(activeTicket({ metadata: { vip: true } }), policy, now).action, 'skip');
+});
+
+test('recent-activity guard chooses only the newest human message strictly after the anchor', () => {
+  assert.deepEqual(findLatestHumanActivityAfter('2026-10-16T12:00:00.000Z', [
+    { createdAt: '2026-10-17T12:00:00.000Z', messageId: 'old', authorId: 'human-old', authorIsBot: false },
+    { createdAt: '2026-10-20T11:00:00.000Z', messageId: 'bot', authorId: 'bot', authorIsBot: true },
+    { createdAt: '2026-10-20T10:00:00.000Z', messageId: 'human-1', authorId: 'human-1', authorIsBot: false },
+    { createdAt: '2026-10-20T11:30:00.000Z', messageId: 'human-2', authorId: 'human-2', authorIsBot: false },
+    { createdAt: 'invalid', messageId: 'bad', authorId: 'bad', authorIsBot: false },
+  ]), {
+    at: '2026-10-20T11:30:00.000Z',
+    messageId: 'human-2',
+    authorId: 'human-2',
+  });
+  assert.equal(findLatestHumanActivityAfter('invalid', [
+    { createdAt: '2026-10-20T11:30:00.000Z', messageId: 'human', authorId: 'human', authorIsBot: false },
+  ]), null);
+  assert.equal(findLatestHumanActivityAfter('2026-10-20T11:30:00.000Z', [
+    { createdAt: '2026-10-20T11:30:00.000Z', messageId: 'same', authorId: 'human', authorIsBot: false },
+  ]), null);
 });
 
 test('invalid timestamps fall back to the next durable timestamp or skip safely', () => {
