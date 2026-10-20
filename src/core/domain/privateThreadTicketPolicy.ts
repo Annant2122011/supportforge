@@ -20,6 +20,10 @@ export function getPrivateThreadTicketActions(status: TicketStatus): readonly Pr
       return ['reopen', 'archive'];
     case 'archived':
       return [];
+    default:
+      // Persisted state can outlive a code version. Unknown values must not
+      // expose controls or make canPrivateThreadTicketAction throw at runtime.
+      return [];
   }
 }
 
