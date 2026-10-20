@@ -124,3 +124,8 @@ Private-thread policy tests verify lifecycle controls and that unknown persisted
 ## Stage G · Part 1: permission and close-lifecycle hardening
 
 Stage G Part 1 centralizes ticket lifecycle authorization, makes closed/archived text tickets read-only, and hardens private-thread close/reopen ordering with durable outbox reconciliation. See [Stage G Part 1 architecture and acceptance notes](docs/stage-g-part-1-permissions-close.md). Stage G Part 2 is reserved for inactivity warnings and restart-safe automated closure; no inactivity auto-close runs as part of Part 1.
+
+
+## Stage G Part 2: Ticket inactivity automation
+
+Stage G Part 2 adds opt-in, per-server inactivity warnings and automatic closure with a grace period. It uses durable PostgreSQL activity metadata, recovers warning state after restarts, requires transcript delivery, and atomically rejects closure if activity changes. The default is disabled; administrators can manage it with the Settings dashboard's **Inactivity Automation** controls or `/supportforge settings inactivity`. See [the Stage G Part 2 design and acceptance checklist](docs/stage-g-part-2-inactivity.md).
