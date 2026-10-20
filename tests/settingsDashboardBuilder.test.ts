@@ -5,7 +5,10 @@ import {
   SETTINGS_DASHBOARD_BUTTON_KEYS,
   type AdvancedGuildSettings,
 } from '../src/services/advancedSettingsService';
-import { buildSettingsDashboardComponents } from '../src/services/settingsChannelService';
+import {
+  buildSettingsDashboardComponents,
+  buildSettingsDashboardEmbed,
+} from '../src/services/settingsChannelService';
 
 test('Settings dashboard layout preserves server order while retaining every built-in control', () => {
   const partial = {
@@ -20,6 +23,7 @@ test('Settings dashboard layout preserves server order while retaining every bui
   assert.equal(ids[1], 'sf:settings:repair');
   assert.equal(ids[2], 'sf:settings:dashboard-builder');
   assert.equal(ids.length, SETTINGS_DASHBOARD_BUTTON_KEYS.length);
+  assert.ok(ids.includes('sf:settings:inactivity'));
   assert.equal(new Set(ids).size, ids.length);
   assert.equal(rows.length, Math.ceil(SETTINGS_DASHBOARD_BUTTON_KEYS.length / 5));
   assert.equal(rows.every((row) => row.components.length > 0 && row.components.length <= 5), true);
@@ -77,4 +81,48 @@ test('Settings dashboard custom labels and emojis override presentation but keep
   assert.equal(repair?.data.label, 'System Tools');
   assert.equal(repair?.data.emoji?.name, '🧰');
   assert.equal(buttons.length, SETTINGS_DASHBOARD_BUTTON_KEYS.length);
+});
+
+
+test('Settings dashboard summarizes inactivity/workspace policy and explains retention limits', () => {
+  const partial = {
+    settingsDashboard: {
+      title: 'ResolveX Settings',
+      description: 'Server settings',
+      footer: 'ResolveX',
+    },
+    priorityRoles: {},
+    retention: { closedDays: 0, archiveDays: 7 },
+    statusCategories: { claimedCategoryId: null, pendingCategoryId: null },
+    panelActivity: {
+      enabled: true,
+      visualLineBudget: 18,
+      messageBudget: 12,
+      minimumMessagesBeforeMove: 6,
+    },
+    ticketDefaults: { priority: 'normal', maxClaimedModerators: 2 },
+    inactivity: { enabled: true, idleHours: 72, graceHours: 24, generation: 1 },
+    ticketWorkspace: { mode: 'private-threads' },
+    appearance: {
+      panelTitle: 'Support center',
+      panelDescription: 'Open a support ticket.',
+      panelFooter: 'ResolveX',
+    },
+  } as unknown as AdvancedGuildSettings;
+
+  const embed = buildSettingsDashboardEmbed(partial, 3, 8, 'midnight').toJSON();
+  assert.ok(embed.description?.includes('\n\nButton-driven configuration'));
+  assert.ok(embed.fields?.some((field) =>
+    field.name === '⏳ Inactivity automation' &&
+    field.value.includes('Enabled') &&
+    field.value.includes('72 h') &&
+    field.value.includes('24 h'),
+  ));
+  assert.ok(embed.fields?.some((field) =>
+    field.name === '🧵 Ticket workspace' && field.value === 'Private threads',
+  ));
+  assert.ok(embed.fields?.some((field) =>
+    field.name === '🧹 Retention' && field.value.includes('No timer (365-day maximum)'),
+  ));
+  assert.equal(embed.fields?.some((field) => field.value.includes('Unlimited/forever')), false);
 });
