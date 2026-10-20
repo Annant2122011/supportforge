@@ -25,7 +25,7 @@ import {
   type PersistedTicket,
 } from './ticketPersistenceService';
 import { generateTranscript } from './transcriptService';
-import { isTicketTopic, setField } from './ticketStateService';
+import { getField, isTicketTopic, setField } from './ticketStateService';
 import { projectDurableTicketTopic } from './ticketTopicProjectionService';
 import { refreshPrivateThreadPanel } from './privateThreadTicketService';
 import { logTicketEvent } from './auditLogService';
@@ -122,7 +122,7 @@ function warningEmbed(
       'Any new message resets this timer. If you still need support, please reply here.',
     )
     .setFooter({ text: marker })
-    .setTimestamp();
+    .setTimestamp(new Date(deadlineMs - graceHours * 60 * 60 * 1000));
 }
 
 async function issueOrRecoverWarning(
@@ -196,7 +196,7 @@ async function findTranscriptMessage(channel: TextChannel, marker: string): Prom
   return recent.find((message) => message.content.includes(marker)) ?? null;
 }
 
-function makeClosedTopic(ticket: PersistedTicket, topic: string, closedAt: string, transcriptId: string): string {
+function makeClosedTopic(topic: string, closedAt: string, transcriptId: string): string {
   let result = setField(topic, 'status', 'closed');
   result = setField(result, 'closed_at', closedAt);
   result = setField(result, 'transcript_id', transcriptId);
@@ -241,16 +241,18 @@ async function autoCloseInactiveTicket(
 
   if (!transcriptMessage) {
     const ticketNumber = fresh.ticketNumber ?? 'unknown';
-    const metadataTopic = metadataString(fresh, 'ticketTopic');
-    const openedAtRaw = metadataTopic
-      ? /(?:^|\\s)opened_at=([^\\s]*)/.exec(metadataTopic)?.[1]
-      : undefined;
+    const metadataTopic = metadataString(fresh, 'ticketTopic')
+      ?? (channel.type === ChannelType.GuildText ? channel.topic ?? '' : '');
+    const openedAtRaw = metadataString(fresh, 'openedAt') ?? getField(metadataTopic, 'opened_at');
     const openedAtParsed = openedAtRaw ? new Date(openedAtRaw) : new Date(fresh.createdAt);
     const openedAt = Number.isNaN(openedAtParsed.getTime()) ? new Date(fresh.createdAt) : openedAtParsed;
+    const rawSubject = metadataString(fresh, 'subject') ?? getField(metadataTopic, 'subject') ?? 'Support request';
+    let subject = rawSubject;
+    try { subject = decodeURIComponent(rawSubject); } catch { /* retain legacy unescaped value */ }
     const transcript = await generateTranscript({
       channel,
       ticketNumber,
-      subject: metadataTopic ? /(?:^|\\s)subject=([^\\s]*)/.exec(metadataTopic)?.[1] ?? 'Support request' : 'Support request',
+      subject,
       ownerId: fresh.ownerId ?? 'unknown',
       ownerName: fresh.ownerId ? '<@' + fresh.ownerId + '>' : 'Unknown owner',
       closedBy: 'ResolveX inactivity automation',
@@ -275,7 +277,7 @@ async function autoCloseInactiveTicket(
 
   const closedAt = new Date().toISOString();
   const closedTopic = fresh.metadata.workspaceKind === 'private-thread'
-    ? makeClosedTopic(fresh, metadataString(fresh, 'ticketTopic') ?? projectDurableTicketTopic('', fresh), closedAt, transcriptMessage.id)
+    ? makeClosedTopic(metadataString(fresh, 'ticketTopic') ?? projectDurableTicketTopic('', fresh), closedAt, transcriptMessage.id)
     : null;
   const metadata: Record<string, unknown> = {
     closedAt,
@@ -344,14 +346,6 @@ async function sweepTicket(client: Client, guild: Guild, initial: PersistedTicke
   const channel = await resolveTicketChannel(guild, ticket);
   if (!channel) return;
 
-  // Never wake an unexpectedly locked private thread for automation. An
-  // administrator may have locked it deliberately; fail closed instead.
-  if (channel.type === ChannelType.PrivateThread) {
-    const thread = channel as ThreadChannel;
-    if (thread.locked) return;
-    if (thread.archived) await thread.setArchived(false, 'ResolveX inactivity warning/check');
-  }
-
   const decision = evaluateTicketInactivity(ticket, settings, nowMs);
   if (decision.action === 'skip' || decision.action === 'wait') {
     const storedAnchor = metadataString(ticket, 'inactivityWarningAnchorAt');
@@ -359,6 +353,14 @@ async function sweepTicket(client: Client, guild: Guild, initial: PersistedTicke
       await clearWarningMetadata(ticket);
     }
     return;
+  }
+
+  // Do not wake auto-archived threads during their idle wait. Unarchive only
+  // when a warning is due or an existing grace period must be checked.
+  if (channel.type === ChannelType.PrivateThread) {
+    const thread = channel as ThreadChannel;
+    if (thread.locked) return;
+    if (thread.archived) await thread.setArchived(false, 'ResolveX inactivity warning/check');
   }
 
   if (decision.action === 'warn') {
