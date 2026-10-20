@@ -49,7 +49,7 @@ This is intake enforcement, not an inactivity-closure engine or SLA implementati
 
 ## Configuration
 
-The Settings-channel Support Hours button edits the guild-default time zone and complete seven-day schedule, can enable/disable enforcement, and can switch outside-hours behavior. More-specific policies use /supportforge settings support-hours:
+The Settings-channel Support Hours button edits the server-default, department and panel scopes using paged selectors. It edits the time zone and complete seven-day schedule, enables/disables enforcement, switches outside-hours behavior, and clears an override to restore inheritance. The equivalent /supportforge settings support-hours commands provide the same scope/actions:
 
 - show
 - set-timezone
