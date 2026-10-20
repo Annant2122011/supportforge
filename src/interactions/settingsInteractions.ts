@@ -2260,7 +2260,7 @@ export async function handleSettingsInteraction(
     if (id.startsWith('sf:settings:support-hours:scope:') && interaction.isStringSelectMenu()) {
       const parts = id.split(':');
       const scopeType = parts[4] === 'department' || parts[4] === 'panel' ? parts[4] : null;
-      const scopeId = interaction.values[0]?.trim();
+      const scopeId = (interaction as StringSelectMenuInteraction).values[0]?.trim();
       const config = await getGuildConfig(guild.id);
       const exists = scopeType === 'department'
         ? Boolean(scopeId && config.departments[scopeId])
