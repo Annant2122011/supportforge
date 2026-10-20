@@ -58,6 +58,17 @@ export const SETTINGS_DASHBOARD_BUTTON_KEYS = [
   'refresh', 'reset',
 ] as const;
 
+/**
+ * Exact pre-inactivity default order persisted by older releases. Only this
+ * untouched default migrates to the new grouped layout; any custom ordering
+ * is preserved and newly introduced buttons are appended safely.
+ */
+const LEGACY_DEFAULT_SETTINGS_BUTTON_ORDER = [
+  'panel', 'defaults', 'tags', 'usecases', 'reports', 'retention', 'appearance',
+  'storage', 'rules', 'repair', 'team', 'manual', 'forms', 'refresh', 'reset',
+  'theme', 'premium', 'panels', 'dashboard-builder', 'support-hours', 'ticket-workspace',
+] as const;
+
 export type SettingsDashboardButtonKey = (typeof SETTINGS_DASHBOARD_BUTTON_KEYS)[number];
 
 export interface SettingsDashboardButtonCustomization {
@@ -368,8 +379,16 @@ function normalizeExistingSettings(
         typeof key === 'string' && (SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(key),
       );
       const uniqueOrder = [...new Set(validOrder)];
+      const isUncustomizedLegacyDefault =
+        rawOrder.length === LEGACY_DEFAULT_SETTINGS_BUTTON_ORDER.length &&
+        rawOrder.every((key, index) => key === LEGACY_DEFAULT_SETTINGS_BUTTON_ORDER[index]);
+      // Upgrade only the exact legacy default. A server's custom order is
+      // user data and must never be silently rearranged by a UI upgrade.
+      const normalizedOrder: SettingsDashboardButtonKey[] = isUncustomizedLegacyDefault
+        ? [...SETTINGS_DASHBOARD_BUTTON_KEYS]
+        : uniqueOrder;
       for (const key of SETTINGS_DASHBOARD_BUTTON_KEYS) {
-        if (!uniqueOrder.includes(key)) uniqueOrder.push(key);
+        if (!normalizedOrder.includes(key)) normalizedOrder.push(key);
       }
       const text = (value: unknown, fallback: string, max: number): string =>
         typeof value === 'string' ? value.trim().slice(0, max) : fallback;
@@ -401,7 +420,7 @@ function normalizeExistingSettings(
         title: text(saved?.title, DEFAULTS.settingsDashboard.title, 256) || DEFAULTS.settingsDashboard.title,
         description: text(saved?.description, DEFAULTS.settingsDashboard.description, 4000),
         footer: text(saved?.footer, DEFAULTS.settingsDashboard.footer, 2048) || DEFAULTS.settingsDashboard.footer,
-        buttonOrder: uniqueOrder,
+        buttonOrder: normalizedOrder,
         buttonCustomizations,
       };
     })(),
