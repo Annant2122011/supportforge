@@ -45,7 +45,9 @@ The source and requirements were reviewed from Stage A through Stage G against `
 - Master feature status and slash-command/button-parity documentation cross-checked against current source.
 - Added tests cover policy exemptions, recent human activity selection, Settings dashboard summaries, default-layout migration, and preservation of custom layout order.
 - PostgreSQL integration suite asserts that a stale activity anchor cannot close a ticket and that a valid close commits lifecycle/metadata events and outbox work.
-- Latest GitHub Actions result for this review branch will be recorded here after the final second-round build/test/database verification completes.
+- Final second-round GitHub Actions run on review head `bdbd80ae9ee90120e47e8275c47948ae62976116`: [run #1197](https://github.com/Annant2122011/supportforge/actions/runs/39399683798) — Build passed; **117 tests passed, 0 failed**; PostgreSQL verification passed.
+- The first review CI pass caught a genuine TypeScript narrowing error in terminal-warning cleanup. The code was corrected to use the stable channel ID in the asynchronous error callback, and the full build/test/database workflow then passed.
+- The second pass also caught a malformed three-column/extra-cell entry in the interaction-parity table. The table row was corrected, and run #1197 passed on the corrected documentation head.
 
 ## Live acceptance still required
 
