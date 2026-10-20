@@ -52,6 +52,7 @@ const SETTINGS_DASHBOARD_BUTTONS: Record<SettingsDashboardButtonKey, {
   usecases: { customId: 'sf:settings:usecases', label: 'Use Cases', style: ButtonStyle.Secondary, emoji: '🧩' },
   reports: { customId: 'sf:settings:reports', label: 'Safety & Reports', style: ButtonStyle.Secondary, emoji: '🚩' },
   retention: { customId: 'sf:settings:retention', label: 'Retention', style: ButtonStyle.Secondary, emoji: '🧹' },
+  inactivity: { customId: 'sf:settings:inactivity', label: 'Inactivity Automation', style: ButtonStyle.Primary, emoji: '⏳' },
   appearance: { customId: 'sf:settings:appearance', label: 'Public Panel', style: ButtonStyle.Secondary, emoji: '🎨' },
   storage: { customId: 'sf:settings:storage', label: 'Storage', style: ButtonStyle.Secondary, emoji: '🗄️' },
   rules: { customId: 'sf:settings:rules', label: 'Rules & Roles', style: ButtonStyle.Secondary, emoji: '🛡️' },
