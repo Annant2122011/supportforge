@@ -297,6 +297,8 @@ function roleRestrictedButtons(
   return rows;
 }
 
+const QUERYFIXR_ICON_URL = 'https://i.ibb.co/fdRDWXbH/3v-OKZCYL0-Rqkdu-OQ4t-PKA-Xt-Cc-OQu-N-Picsart-Ai-Image-Enhancer.png';
+
 export function buildCustomPanelEmbed(
   inputPanel: CustomSupportPanel,
   guildName: string,
@@ -315,7 +317,7 @@ export function buildCustomPanelEmbed(
     .setFooter({ text: view.footer || 'QueryFixr • Customer Support' })
     .setAuthor({
       name: guildName + ' • QueryFixr Support',
-      ...(view.iconUrl ? { iconURL: view.iconUrl } : {}),
+      iconURL: view.iconUrl || QUERYFIXR_ICON_URL,
     })
     .setTimestamp(new Date(panel.updatedAt));
   if (view.thumbnailUrl) embed.setThumbnail(view.thumbnailUrl);
