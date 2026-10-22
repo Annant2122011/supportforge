@@ -1,4 +1,4 @@
-# ResolveX Stages A–G Reverification Record
+# QueryFixr Stages A–G Reverification Record
 
 **Review date:** 20 October 2026  
 **Review branch:** `feature/stage-a-to-g-audit-ui`  
@@ -25,7 +25,7 @@ The source and requirements were reviewed from Stage A through Stage G against `
 - Added a recent-human-message reconciliation check around inactivity warnings and the close path. The sweep scans recent Discord history against the saved activity anchor; it refuses to act if history cannot be checked back to the anchor within its safety cap. Additional checks run around transcript upload and immediately before the compare-and-close operation.
 - Revalidates the inactivity policy generation before warning delivery and at multiple close checkpoints. A scheduler run holding an old enabled policy will cancel its warning/close attempt after an administrator changes the policy.
 - Clears and visibly cancels inactivity warnings when a ticket is manually closed/archived, when automation is disabled, when activity restarts the timer, or when the ticket becomes exempt.
-- Exempts critical tickets, tickets marked by supported durable `vip`, `activeEscalation`, or `inactivityExempt` metadata, tickets in configured exempt departments, and tickets whose owner or assigned staff holds a configured exempt role. The Settings dashboard and `/supportforge settings inactivity` both expose the role/department controls.
+- Exempts critical tickets, tickets marked by supported durable `vip`, `activeEscalation`, or `inactivityExempt` metadata, tickets in configured exempt departments, and tickets whose owner or assigned staff holds a configured exempt role. The Settings dashboard and `/qf settings inactivity` both expose the role/department controls.
 - Adds PostgreSQL regression coverage that metadata updates preserve lifecycle status, alongside the existing compare-and-close/stale-anchor integration coverage.
 - Reconciles the Settings dashboard summary with the implemented inactivity policy and workspace mode; changes the misleading retention label from “Unlimited/forever” to “No timer (365-day maximum)”.
 - Groups Settings controls by workflow. An exact untouched legacy default order migrates to the grouped layout; custom server order is preserved.
@@ -45,7 +45,7 @@ The source and requirements were reviewed from Stage A through Stage G against `
 - Master feature status and slash-command/button-parity documentation cross-checked against current source.
 - Added tests cover policy exemptions, recent human activity selection, Settings dashboard summaries, default-layout migration, and preservation of custom layout order.
 - PostgreSQL integration suite asserts that a stale activity anchor cannot close a ticket and that a valid close commits lifecycle/metadata events and outbox work.
-- Final second-round GitHub Actions run on review head `bdbd80ae9ee90120e47e8275c47948ae62976116`: [run #1197](https://github.com/Annant2122011/supportforge/actions/runs/39399683798) — Build passed; **117 tests passed, 0 failed**; PostgreSQL verification passed.
+- Final second-round GitHub Actions run on review head `bdbd80ae9ee90120e47e8275c47948ae62976116`: [run #1197](https://github.com/Annant2122011/qf/actions/runs/39399683798) — Build passed; **117 tests passed, 0 failed**; PostgreSQL verification passed.
 - The first review CI pass caught a genuine TypeScript narrowing error in terminal-warning cleanup. The code was corrected to use the stable channel ID in the asynchronous error callback, and the full build/test/database workflow then passed.
 - The second pass also caught a malformed three-column/extra-cell entry in the interaction-parity table. The table row was corrected, and run #1197 passed on the corrected documentation head.
 
