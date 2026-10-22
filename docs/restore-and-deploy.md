@@ -1,6 +1,6 @@
 # Restore & Update
 
-SupportForge has two related but separate recovery jobs:
+ResolvX has two related but separate recovery jobs:
 
 1. **Discord infrastructure recovery** runs from the existing Neon PostgreSQL-backed configuration and ticket records. It recreates missing managed core categories/channels where possible, reconciles the support/settings/audit/transcript panels, repairs department categories based on both live ticket channels and durable ticket rows, and recovers ticket records from surviving channel metadata.
 2. **Code deployment** runs in GitHub Actions, not inside the Discord bot process. The bot requests the deployment workflow using a repository-scoped GitHub token. Pushes to `main` also trigger the same workflow automatically.
@@ -9,13 +9,13 @@ The combined **Settings → Repair System → Restore & Update** button performs
 
 ## Required GitHub Actions repository secrets
 
-This workflow targets an existing Linux server running SupportForge as a systemd service. Add these repository secrets under **Settings → Secrets and variables → Actions**:
+This workflow targets an existing Linux server running ResolvX as a systemd service. Add these repository secrets under **Settings → Secrets and variables → Actions**:
 
 - `DEPLOY_HOST`: server hostname or IP
 - `DEPLOY_USER`: SSH account used for deployment
 - `DEPLOY_SSH_KEY`: private key for that account
 - `DEPLOY_KNOWN_HOSTS`: verified SSH host-key line(s) for the server (do not blindly trust an unverified `ssh-keyscan` result)
-- `DEPLOY_PATH`: path to the existing SupportForge Git clone on the server
+- `DEPLOY_PATH`: path to the existing ResolvX Git clone on the server
 - `DEPLOY_SERVICE_NAME`: systemd unit name for the bot
 - `DEPLOY_PORT`: optional SSH port; defaults to 22
 
@@ -37,14 +37,14 @@ After this workflow is merged into `main` and the secrets are set:
 - It updates the existing server checkout, installs dependencies, builds TypeScript, runs PostgreSQL migrations and verification, then restarts the service.
 - If deployment fails, the workflow attempts to restore the prior source commit and restart the service. This is a source rollback, not a database backup; take normal Neon backups and keep migrations backward-compatible.
 - SSH host-key checking is strict. Configure a verified `DEPLOY_KNOWN_HOSTS` value.
-- Discord does not provide an undelete API for deleted channels, categories, or messages. SupportForge can create replacement managed infrastructure and update saved references, but deleted message history cannot be recreated unless it was separately archived. A deleted ticket channel's old snowflake cannot be resurrected.
+- Discord does not provide an undelete API for deleted channels, categories, or messages. ResolvX can create replacement managed infrastructure and update saved references, but deleted message history cannot be recreated unless it was separately archived. A deleted ticket channel's old snowflake cannot be resurrected.
 - If the bot host is not a Linux systemd server, adapt the workflow's remote deployment step to the actual host platform before enabling it. Do not add a shell command executor to the bot itself.
 - Neon PostgreSQL remains the authoritative database. This feature does not reset ticket or configuration data and does not introduce SQLite.
 
 
 ## Hybrid automatic updates (GitHub trigger + server watchdog)
 
-ResolveX has three coordinated safeguards:
+ResolvX has three coordinated safeguards:
 
 1. The existing GitHub Actions workflow deploys when a commit reaches main.
 2. The bot's commit monitor requests a deployment workflow run when it detects a newer main commit, if GITHUB_DEPLOY_TOKEN is configured. This is a fallback trigger, not a substitute for server deployment.
@@ -76,7 +76,7 @@ The checked-in systemd files are templates. Edit them for the actual host before
 6. Configure the GitHub Actions deployment secrets listed above. Put GITHUB_DEPLOY_TOKEN in the bot server's secret environment only if you want the bot monitor's optional dispatch fallback; the push workflow and watchdog do not depend on that bot token.
 7. Keep the bot .env out of Git. Set TICKET_ARCHIVE_MAX_ATTACHMENT_BYTES to a limit that fits the Neon storage budget. Take Neon backups and monitor archive growth.
 
-The current workflow and watchdog target Linux + systemd. If ResolveX runs on Windows, a container platform, or a managed host without SSH/systemd, this deployment template must be adapted to that host instead of enabling it as-is. Do not run the bot's deployed repository from a developer's working tree.
+The current workflow and watchdog target Linux + systemd. If ResolvX runs on Windows, a container platform, or a managed host without SSH/systemd, this deployment template must be adapted to that host instead of enabling it as-is. Do not run the bot's deployed repository from a developer's working tree.
 
 ### Ticket archive rollout
 
