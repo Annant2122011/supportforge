@@ -17,6 +17,8 @@ import { performFactoryReset } from '../services/factoryResetService';
 import { logSettingsEvent, refreshAuditPanelTheme } from '../services/auditLogService';
 import { approveRetentionDeletion, declineRetentionDeletion, getEligibleRetentionTickets } from '../services/ticketRetentionService';
 import { clearTicketInactivityWarningsForGuild } from '../services/ticketInactivityService';
+import { getLocaleLabel, isSupportedLocale } from '../i18n/localeRegistry';
+import { translate } from '../i18n/translationService';
 import { migrateDepartmentStaffRole } from '../services/departmentStaffRoleService';
 import { enforcePriorityRoleHierarchy } from '../services/priorityRoleService';
 import { getThemeColor, getThemeDefinition, isGuildTheme } from '../services/uiThemeService';
@@ -68,6 +70,28 @@ export async function handleSettingsSlashCommand(
   };
 
   try {
+    if (action === 'language') {
+      const selected = interaction.options.getString('locale');
+      const current = await getAdvancedSettings(guild.id);
+      if (!selected) {
+        await interaction.editReply(
+          translate(current.locale, 'settings.locale.current', { locale: getLocaleLabel(current.locale) }),
+        );
+        return;
+      }
+      if (!isSupportedLocale(selected)) {
+        await interaction.editReply(translate(current.locale, 'settings.locale.unknown'));
+        return;
+      }
+      await updateAdvancedSettings(guild.id, (settings) => { settings.locale = selected; });
+      await refreshSettingsChannel(guild);
+      audit('SERVER_LANGUAGE_CHANGED', 'Changed the server language to ' + selected + ' (' + getLocaleLabel(selected) + ').');
+      await interaction.editReply(
+        translate(selected, 'settings.locale.saved', { locale: getLocaleLabel(selected) }),
+      );
+      return;
+    }
+
     if (action === 'overview') {
       const settings = await getAdvancedSettings(guild.id);
       const departments = Object.values(config.departments);
