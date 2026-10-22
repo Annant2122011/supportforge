@@ -394,7 +394,7 @@ async function main(): Promise<void> {
     const documentSnapshots = documents.map(rowDocumentSnapshot);
 
     console.log('────────────────────────────────────────────');
-    console.log('SupportForge SQLite → Neon PostgreSQL migration');
+    console.log('ResolvX SQLite → Neon PostgreSQL migration');
     console.log('────────────────────────────────────────────');
     console.log(`Source: ${sqlitePath}`);
     console.log(`Tickets: ${tickets.length}`);
@@ -423,7 +423,7 @@ async function main(): Promise<void> {
       });
 
       client.on('error', (error) => {
-        console.error('❌ SupportForge PostgreSQL dry-run connection error:', error);
+        console.error('❌ ResolvX PostgreSQL dry-run connection error:', error);
       });
 
       await client.connect();
@@ -487,7 +487,7 @@ async function main(): Promise<void> {
     });
 
     client.on('error', (error) => {
-      console.error('❌ SupportForge PostgreSQL migration connection error:', error);
+      console.error('❌ ResolvX PostgreSQL migration connection error:', error);
     });
 
     await client.connect();
