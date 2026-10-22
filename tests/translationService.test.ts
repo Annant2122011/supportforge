@@ -63,7 +63,7 @@ test('new locales translate the expanded common and ticket vocabulary', () => {
 
 test('unknown locale values safely fall back to canonical English', () => {
   assert.equal(
-    translate('zh-CN', 'ticket.created.title', { ticketNumber: 42 }),
+    translate('xx-YY', 'ticket.created.title', { ticketNumber: 42 }),
     'Ticket #42 created',
   );
   assert.equal(
