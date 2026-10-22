@@ -183,6 +183,46 @@ export async function transitionPersistedTicket(
   );
 }
 
+/**
+ * Close an active ticket only if its activity has not changed since the
+ * inactivity warning was issued. PostgreSQL implementations compare the
+ * anchor under a row lock, atomically with the lifecycle/outbox transaction.
+ */
+export async function closePersistedTicketIfActivityUnchanged(
+  channelId: string,
+  expectedActivityAnchorAt: string,
+  updates: TicketMetadataUpdates,
+  actor?: EventActor,
+  updatedAt = new Date().toISOString(),
+): Promise<boolean> {
+  const repository = await getRepository();
+  if (repository.closeIfActivityUnchanged) {
+    return repository.closeIfActivityUnchanged(
+      channelId,
+      expectedActivityAnchorAt,
+      updates,
+      updatedAt,
+      actor,
+    );
+  }
+
+  // Legacy repository fallback is only retained for explicit migration/test
+  // use. Live ResolveX defaults to PostgreSQL and takes the atomic path above.
+  const current = await repository.getByChannelId(channelId);
+  if (!current || current.deletedAt || !['open', 'claimed', 'pending', 'reopened'].includes(current.status)) return false;
+  const canonical = (value: unknown): string | null => {
+    if (typeof value !== 'string') return null;
+    const timestamp = Date.parse(value);
+    return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+  };
+  const anchor = canonical(current.metadata.lastActivityAt)
+    ?? canonical(current.updatedAt)
+    ?? canonical(current.createdAt);
+  if (!anchor || anchor !== canonical(expectedActivityAnchorAt)) return false;
+  await repository.transitionStatusAndMetadata(channelId, 'closed', updates, updatedAt, actor);
+  return true;
+}
+
 export async function updatePersistedTicketMetadata(
   channelId: string,
   updates: Partial<

@@ -3,6 +3,7 @@ import {
   type Embed,
   type Message,
   type TextChannel,
+  type ThreadChannel,
 } from 'discord.js';
 
 const MAX_MESSAGES = 10000;
@@ -476,7 +477,7 @@ function renderMessage(
 /* -------------------------------------------------------------------------- */
 
 async function fetchMessages(
-  channel: TextChannel,
+  channel: TextChannel | ThreadChannel,
 ): Promise<{
   messages: Message[];
   limited: boolean;
@@ -602,7 +603,7 @@ async function fetchMessages(
 
 export async function generateTranscript(
   options: {
-    channel: TextChannel;
+    channel: TextChannel | ThreadChannel;
     ticketNumber: string;
     subject: string;
     ownerId: string;

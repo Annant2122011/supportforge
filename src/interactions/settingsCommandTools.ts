@@ -9,15 +9,32 @@ import {
 
 import { getGuildConfig, newTagId, updateGuildConfig } from '../services/configService';
 import { getAdvancedSettings, updateAdvancedSettings, type TicketPriority } from '../services/advancedSettingsService';
+import { getTicketWorkspaceMode, setTicketWorkspaceMode } from '../services/privateThreadTicketService';
 import { ensureArchiveCategory, ensureClosedCategory, ensureOptionalStatusCategory, getOptionalStatusCategory } from '../services/ticketStorageService';
 import { refreshSettingsChannel } from '../services/settingsChannelService';
 import { addUseCasePreset } from '../services/useCasePresetService';
 import { performFactoryReset } from '../services/factoryResetService';
 import { logSettingsEvent, refreshAuditPanelTheme } from '../services/auditLogService';
 import { approveRetentionDeletion, declineRetentionDeletion, getEligibleRetentionTickets } from '../services/ticketRetentionService';
+import { clearTicketInactivityWarningsForGuild } from '../services/ticketInactivityService';
 import { migrateDepartmentStaffRole } from '../services/departmentStaffRoleService';
 import { enforcePriorityRoleHierarchy } from '../services/priorityRoleService';
 import { getThemeColor, getThemeDefinition, isGuildTheme } from '../services/uiThemeService';
+import {
+  createDefaultSupportHoursPolicy,
+  deleteSupportHoursPolicy,
+  evaluateSupportHours,
+  formatSupportHoursInstant,
+  getSupportHoursPolicies,
+  getSupportHoursPolicy,
+  parseSupportHoursIntervals,
+  resolveEffectiveSupportHoursPolicy,
+  saveSupportHoursPolicy,
+  SUPPORT_HOURS_DAYS,
+  type SupportHoursDay,
+  type SupportHoursScopeType,
+  type OutsideHoursBehavior,
+} from '../services/supportHoursService';
 
 export interface SettingsSlashHooks {
   syncPanel(guild: Guild): Promise<void>;
@@ -253,6 +270,244 @@ export async function handleSettingsSlashCommand(
         '**Panel Appearance**\nTitle: ' + settings.appearance.panelTitle +
         '\nDescription: ' + settings.appearance.panelDescription +
         '\nFooter: ' + settings.appearance.panelFooter
+      );
+      return;
+    }
+
+    if (action === 'inactivity') {
+      const mode = interaction.options.getString('action', true);
+      const idleHours = interaction.options.getInteger('idle-hours');
+      const graceHours = interaction.options.getInteger('grace-hours');
+      const exemptRolesRaw = interaction.options.getString('exempt-roles');
+      const exemptDepartmentsRaw = interaction.options.getString('exempt-departments');
+      const supportedActions = [
+        'show', 'enable', 'disable', 'configure',
+        'set-exempt-roles', 'set-exempt-departments', 'clear-exemptions',
+      ];
+      if (!supportedActions.includes(mode)) {
+        throw new Error('Choose a supported inactivity policy action.');
+      }
+      if ((idleHours !== null && (idleHours < 1 || idleHours > 720)) ||
+          (graceHours !== null && (graceHours < 1 || graceHours > 168))) {
+        throw new Error('Idle hours must be 1–720 and grace hours must be 1–168.');
+      }
+      if (mode === 'configure' && idleHours === null && graceHours === null) {
+        throw new Error('Supply idle-hours, grace-hours, or both when configuring the inactivity policy.');
+      }
+
+      const parseIds = (raw: string | null): string[] => [...new Set(
+        (raw ?? '').split(',').map((value) => value.trim()).filter(Boolean),
+      )];
+      let requestedRoleIds: string[] | null = null;
+      let requestedDepartmentIds: string[] | null = null;
+
+      if (mode === 'set-exempt-roles') {
+        if (exemptRolesRaw === null) throw new Error('Supply exempt-roles as a comma-separated list of Discord role IDs. Use clear-exemptions to clear both lists.');
+        requestedRoleIds = parseIds(exemptRolesRaw);
+        if (requestedRoleIds.length < 1 || requestedRoleIds.length > 25) {
+          throw new Error('Supply between 1 and 25 role IDs. Use clear-exemptions to remove every exemption.');
+        }
+        const knownRoles = await guild.roles.fetch().catch(() => guild.roles.cache);
+        const missingRoles = requestedRoleIds.filter((id) => !knownRoles.has(id));
+        if (missingRoles.length) throw new Error('These role IDs were not found in this server: ' + missingRoles.join(', '));
+      }
+
+      if (mode === 'set-exempt-departments') {
+        if (exemptDepartmentsRaw === null) throw new Error('Supply exempt-departments as a comma-separated list of configured department IDs. Use clear-exemptions to clear both lists.');
+        requestedDepartmentIds = parseIds(exemptDepartmentsRaw);
+        if (requestedDepartmentIds.length < 1 || requestedDepartmentIds.length > 25) {
+          throw new Error('Supply between 1 and 25 department IDs. Use clear-exemptions to remove every exemption.');
+        }
+        const currentConfig = await getGuildConfig(guild.id);
+        const missingDepartments = requestedDepartmentIds.filter((id) => !currentConfig.departments[id]);
+        if (missingDepartments.length) throw new Error('These department IDs are not configured in this server: ' + missingDepartments.join(', '));
+      }
+
+      const mutating = ['enable', 'disable', 'configure', 'set-exempt-roles', 'set-exempt-departments', 'clear-exemptions'].includes(mode);
+      if (mutating) {
+        await updateAdvancedSettings(guild.id, (settings) => {
+          if (mode === 'enable') settings.inactivity.enabled = true;
+          if (mode === 'disable') settings.inactivity.enabled = false;
+          if (idleHours !== null) settings.inactivity.idleHours = idleHours;
+          if (graceHours !== null) settings.inactivity.graceHours = graceHours;
+          if (requestedRoleIds) settings.inactivity.exemptRoleIds = requestedRoleIds;
+          if (requestedDepartmentIds) settings.inactivity.exemptDepartmentIds = requestedDepartmentIds;
+          if (mode === 'clear-exemptions') {
+            settings.inactivity.exemptRoleIds = [];
+            settings.inactivity.exemptDepartmentIds = [];
+          }
+          settings.inactivity.generation = Math.min(2147483647, settings.inactivity.generation + 1);
+        });
+        await clearTicketInactivityWarningsForGuild(guild);
+        await refreshSettingsChannel(guild);
+        const savedPolicy = (await getAdvancedSettings(guild.id)).inactivity;
+        audit('TICKET_INACTIVITY_' + mode.toUpperCase(),
+          'Inactivity auto-close action=' + mode + '; enabled=' + savedPolicy.enabled +
+          '; idleHours=' + savedPolicy.idleHours + '; graceHours=' + savedPolicy.graceHours +
+          '; exemptRoleIds=' + savedPolicy.exemptRoleIds.join(',') +
+          '; exemptDepartmentIds=' + savedPolicy.exemptDepartmentIds.join(',') + '.');
+      }
+
+      const inactivity = (await getAdvancedSettings(guild.id)).inactivity;
+      const currentConfig = await getGuildConfig(guild.id);
+      const roleNames = inactivity.exemptRoleIds
+        .map((id) => guild.roles.cache.get(id)?.name ?? id)
+        .join(', ') || 'None';
+      const departmentNames = inactivity.exemptDepartmentIds
+        .map((id) => currentConfig.departments[id]?.name ? currentConfig.departments[id].name + ' (' + id + ')' : id)
+        .join(', ') || 'None';
+      await interaction.editReply(
+        '**Ticket Inactivity Automation**\n' +
+        'Status: **' + (inactivity.enabled ? 'Enabled' : 'Disabled') + '**\n' +
+        'Warning threshold: **' + inactivity.idleHours + ' idle hours**\n' +
+        'Grace period: **' + inactivity.graceHours + ' additional hours**\n' +
+        'Exempt roles (owner or assigned staff): **' + roleNames + '**\n' +
+        'Exempt departments: **' + departmentNames + '**\n\n' +
+        'Automation is opt-in. Warnings persist across restarts; closure requires a saved transcript, unchanged activity timestamp and no configured exemption.\n' +
+        'Use action:set-exempt-roles with exempt-roles, action:set-exempt-departments with exempt-departments, or action:clear-exemptions to manage exclusions.'
+      );
+      return;
+    }
+
+    if (action === 'ticket-workspace') {
+      const requested = interaction.options.getString('action', true);
+      if (requested !== 'show' && requested !== 'text-channels' && requested !== 'private-threads') {
+        throw new Error('Choose show, text-channels, or private-threads.');
+      }
+      const before = await getTicketWorkspaceMode(guild.id);
+      if (requested !== 'show') {
+        await setTicketWorkspaceMode(guild.id, requested);
+        await refreshSettingsChannel(guild);
+        audit('TICKET_WORKSPACE_MODE_CHANGED', 'Changed ticket workspace mode from ' + before + ' to ' + requested + '. Existing tickets were not migrated.');
+      }
+      const mode = await getTicketWorkspaceMode(guild.id);
+      await interaction.editReply(
+        '**Ticket Workspace**\nCurrent mode: **' + mode + '**\\n' +
+        (mode === 'private-threads'
+          ? 'New tickets use private threads inside a department workspace. Configure a staff role for each department and grant the bot Manage Threads and Create Private Threads.'
+          : 'New tickets use private text channels.') +
+        '\nExisting tickets are unchanged. Use the Settings channel Ticket Workspace button for visual controls.'
+      );
+      return;
+    }
+
+    if (action === 'support-hours') {
+      const scopeType = interaction.options.getString('scope', true) as SupportHoursScopeType;
+      const scopeIdInput = interaction.options.getString('scope-id');
+      const scopeId = scopeIdInput?.trim() || null;
+      if (scopeType === 'guild' && scopeId) throw new Error('The server-default scope does not take a scope ID.');
+      if (scopeType !== 'guild' && !scopeId) throw new Error('Supply the department ID or panel ID for this scope.');
+      if (scopeType === 'department' && !config.departments[scopeId!]) throw new Error('Department ID not found. Use /supportforge category list to see configured IDs.');
+      if (scopeType === 'panel' && !config.customPanels[scopeId!]) throw new Error('Ticket panel ID not found. Use /supportforge panel list to see published panel IDs.');
+
+      const currentPolicy = await getSupportHoursPolicy(guild.id, scopeType, scopeId);
+      const context = scopeType === 'department'
+        ? { departmentId: scopeId! }
+        : scopeType === 'panel'
+          ? { panelId: scopeId! }
+          : {};
+      const mode = interaction.options.getString('action', true);
+
+      if (mode === 'show') {
+        const allPolicies = await getSupportHoursPolicies(guild.id);
+        const effective = resolveEffectiveSupportHoursPolicy(allPolicies, context);
+        if (!effective) {
+          await interaction.editReply(
+            '**Support Hours**\nScope: **' + scopeType + (scopeId ? ' · ' + scopeId : '') + '**\n' +
+            'No effective schedule is configured. New tickets are currently unrestricted.\n\n' +
+            'Use the set-timezone, set-day, behavior, and enable actions to configure a schedule.',
+          );
+          return;
+        }
+        const evaluated = await evaluateSupportHours(guild.id, context);
+        const scheduleLines = SUPPORT_HOURS_DAYS.map((day) => {
+          const intervals = effective.weeklySchedule[day] ?? [];
+          return '**' + day.charAt(0).toUpperCase() + day.slice(1) + ':** ' +
+            (intervals.length ? intervals.map((interval) => interval.start + '–' + interval.end).join(', ') : 'Closed');
+        });
+        const currentState = !evaluated.policyEnabled
+          ? 'Enforcement disabled'
+          : evaluated.isOpen
+            ? 'OPEN'
+            : evaluated.ticketCreationAllowed
+              ? 'CLOSED · ticket creation allowed with notice'
+              : 'CLOSED · new ticket creation restricted';
+        const inheritance = currentPolicy
+          ? 'Using the configured override for this scope.'
+          : 'No override at this scope; using the inherited schedule.';
+        await interaction.editReply(
+          '**Support Hours**\nScope: **' + scopeType + (scopeId ? ' · ' + scopeId : '') + '**\n' +
+          'Status: **' + currentState + '**\n' +
+          'Time zone: ' + effective.timezone + '\n' +
+          'Outside hours: **' + effective.outsideHoursBehavior + '**\n' +
+          'Policy: version **' + effective.version + '** · ' + inheritance + '\n\n' +
+          scheduleLines.join('\n') + '\n\n' +
+          (evaluated.nextOpeningAt
+            ? 'Next opening: **' + formatSupportHoursInstant(evaluated.nextOpeningAt, evaluated.timezone) + '**'
+            : (!evaluated.isOpen && evaluated.policyEnabled ? 'No next opening is configured.' : '')));
+        return;
+      }
+
+      if (mode === 'clear-scope') {
+        const removed = await deleteSupportHoursPolicy(guild.id, scopeType, scopeId);
+        if (!removed) throw new Error('There is no saved override at this scope to remove.');
+        await refreshSettingsChannel(guild);
+        audit('SUPPORT_HOURS_CHANGED', 'Removed support-hours override for ' + scopeType + (scopeId ? ' ' + scopeId : '') + '; policy inheritance now applies.');
+        await interaction.editReply('✅ Removed the support-hours override. The next applicable scope now controls ticket intake.');
+        return;
+      }
+
+      const base = currentPolicy ?? createDefaultSupportHoursPolicy(scopeType, scopeId);
+      const draft = {
+        ...base,
+        scopeType,
+        scopeId,
+        weeklySchedule: Object.fromEntries(SUPPORT_HOURS_DAYS.map((day) => [
+          day,
+          [...(base.weeklySchedule[day] ?? [])],
+        ])) as typeof base.weeklySchedule,
+        updatedBy: interaction.user.id,
+      };
+      if (mode === 'set-timezone') {
+        const timezone = interaction.options.getString('timezone')?.trim();
+        if (!timezone) throw new Error('Supply an IANA time zone, for example Asia/Kolkata.');
+        draft.timezone = timezone;
+      } else if (mode === 'set-day') {
+        const day = interaction.options.getString('day') as SupportHoursDay | null;
+        const intervals = interaction.options.getString('intervals');
+        if (!day || !(SUPPORT_HOURS_DAYS as readonly string[]).includes(day)) throw new Error('Choose a valid weekday.');
+        if (intervals === null) throw new Error('Supply intervals such as 09:00-12:00,13:00-17:00, or type closed.');
+        draft.weeklySchedule[day] = parseSupportHoursIntervals(intervals);
+      } else if (mode === 'behavior') {
+        const behavior = interaction.options.getString('behavior') as OutsideHoursBehavior | null;
+        if (behavior !== 'allow' && behavior !== 'restrict') throw new Error('Choose allow or restrict for outside-hours behavior.');
+        draft.outsideHoursBehavior = behavior;
+      } else if (mode === 'enable') {
+        draft.enabled = true;
+      } else if (mode === 'disable') {
+        draft.enabled = false;
+      } else {
+        throw new Error('Unknown support-hours action.');
+      }
+
+      const saved = await saveSupportHoursPolicy(guild.id, draft);
+      await refreshSettingsChannel(guild);
+      audit(
+        'SUPPORT_HOURS_CHANGED',
+        'Support-hours policy ' + mode + ' at ' + scopeType + (scopeId ? ' ' + scopeId : '') +
+          '; version=' + saved.version + '; enabled=' + saved.enabled + '; timezone=' + saved.timezone + '.',
+      );
+      const message = mode === 'enable'
+        ? 'Support-hours enforcement enabled.'
+        : mode === 'disable'
+          ? 'Support-hours enforcement disabled; ticket creation is unrestricted at this scope.'
+          : mode === 'set-timezone'
+            ? 'Time zone updated to ' + saved.timezone + '.'
+            : mode === 'set-day'
+              ? 'Schedule for ' + interaction.options.getString('day', true) + ' updated.'
+              : 'Outside-hours behavior updated to ' + saved.outsideHoursBehavior + '.';
+      await interaction.editReply(
+        '✅ ' + message + '\nScope: **' + scopeType + (scopeId ? ' · ' + scopeId : '') + '** · Policy version **' + saved.version + '**.',
       );
       return;
     }

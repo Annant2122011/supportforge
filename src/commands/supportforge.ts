@@ -1503,6 +1503,66 @@ export const data =
         )
         .addSubcommand((subcommand) =>
           subcommand
+            .setName('support-hours')
+            .setDescription('Configure time-zone-aware support hours for this server, department, or panel')
+            .addStringOption((option) => option.setName('action').setDescription('Support-hours action').setRequired(true).addChoices(
+              { name: 'Show effective schedule', value: 'show' },
+              { name: 'Set time zone', value: 'set-timezone' },
+              { name: 'Set one weekday', value: 'set-day' },
+              { name: 'Set outside-hours behavior', value: 'behavior' },
+              { name: 'Enable schedule enforcement', value: 'enable' },
+              { name: 'Disable schedule enforcement', value: 'disable' },
+              { name: 'Remove this scope override', value: 'clear-scope' },
+            ))
+            .addStringOption((option) => option.setName('scope').setDescription('Which schedule to configure').setRequired(true).addChoices(
+              { name: 'Server default', value: 'guild' },
+              { name: 'Department override', value: 'department' },
+              { name: 'Ticket panel override', value: 'panel' },
+            ))
+            .addStringOption((option) => option.setName('scope-id').setDescription('Department ID or panel ID; omit for server default').setMaxLength(40))
+            .addStringOption((option) => option.setName('timezone').setDescription('IANA time zone, such as Asia/Kolkata').setMaxLength(100))
+            .addStringOption((option) => option.setName('day').setDescription('Weekday to configure').addChoices(
+              { name: 'Monday', value: 'monday' }, { name: 'Tuesday', value: 'tuesday' },
+              { name: 'Wednesday', value: 'wednesday' }, { name: 'Thursday', value: 'thursday' },
+              { name: 'Friday', value: 'friday' }, { name: 'Saturday', value: 'saturday' },
+              { name: 'Sunday', value: 'sunday' },
+            ))
+            .addStringOption((option) => option.setName('intervals').setDescription('Example: 09:00-12:00,13:00-17:00; or closed').setMaxLength(300))
+            .addStringOption((option) => option.setName('behavior').setDescription('What to do outside opening hours').addChoices(
+              { name: 'Allow new tickets outside opening hours', value: 'allow' },
+              { name: 'Restrict new ticket creation', value: 'restrict' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('ticket-workspace')
+            .setDescription('Choose the resource type used for new tickets')
+            .addStringOption((option) => option.setName('action').setDescription('Show or change the ticket workspace mode').setRequired(true).addChoices(
+              { name: 'Show current mode', value: 'show' },
+              { name: 'Use private text channels', value: 'text-channels' },
+              { name: 'Use private threads', value: 'private-threads' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('inactivity')
+            .setDescription('View or configure ticket inactivity auto-close')
+            .addStringOption((option) => option.setName('action').setDescription('Inactivity policy action').setRequired(true).addChoices(
+              { name: 'Show settings', value: 'show' },
+              { name: 'Enable automation', value: 'enable' },
+              { name: 'Disable automation', value: 'disable' },
+              { name: 'Configure thresholds', value: 'configure' },
+              { name: 'Set exempt roles', value: 'set-exempt-roles' },
+              { name: 'Set exempt departments', value: 'set-exempt-departments' },
+              { name: 'Clear all exemptions', value: 'clear-exemptions' },
+            ))
+            .addIntegerOption((option) => option.setName('idle-hours').setDescription('Hours of inactivity before warning (1–720)').setMinValue(1).setMaxValue(720))
+            .addIntegerOption((option) => option.setName('grace-hours').setDescription('Hours after warning before auto-close (1–168)').setMinValue(1).setMaxValue(168))
+            .addStringOption((option) => option.setName('exempt-roles').setDescription('Comma-separated Discord role IDs, up to 25').setMaxLength(1000))
+            .addStringOption((option) => option.setName('exempt-departments').setDescription('Comma-separated department IDs, up to 25').setMaxLength(1000)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
             .setName('reset')
             .setDescription('Factory-reset ResolvX after typed confirmation')
             .addStringOption((option) => option.setName('confirmation').setDescription('Type DELETE SUPPORT FORGE exactly').setRequired(true).setMinLength(20).setMaxLength(20))
