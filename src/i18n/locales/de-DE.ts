@@ -38,6 +38,7 @@ const deDE: Record<TranslationKey, string> = {
   "supportHours.open": "Der Support ist jetzt geöffnet.",
   "supportHours.closed": "Der Support ist derzeit geschlossen.",
   "supportHours.nextOpening": " Nächste Öffnung: {nextOpening}.",
+  "supportHours.noNextOpening": "Es ist keine nächste Öffnungszeit festgelegt. Wende dich an die Serveradministration.",
   "forms.submit": "Antworten senden",
   "forms.required": "Dieses Feld ist erforderlich.",
   "forms.invalid": "Diese Formularantwort ist ungültig. Prüfe die Hinweise zum Feld.",
