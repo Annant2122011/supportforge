@@ -14,12 +14,13 @@ import {
   translate,
 } from '../src/i18n/translationService';
 
-test('all nine supported locales and common aliases resolve safely', () => {
+test('all fifteen supported locales and common aliases resolve safely', () => {
   assert.deepEqual(SUPPORTED_LOCALES, [
     'en-US', 'hi-IN', 'bn-IN', 'es-ES', 'fr-FR', 'de-DE', 'pt-BR', 'ar', 'ja-JP',
+    'it-IT', 'id-ID', 'ko-KR', 'ru-RU', 'zh-CN', 'tr-TR',
   ]);
   for (const locale of SUPPORTED_LOCALES) assert.equal(isSupportedLocale(locale), true);
-  assert.equal(isSupportedLocale('zh-CN'), false);
+  assert.equal(isSupportedLocale('zh-CN'), true);
   assert.equal(resolveLocale('HI'), 'hi-IN');
   assert.equal(resolveLocale('bn'), 'bn-IN');
   assert.equal(resolveLocale('ES'), 'es-ES');
@@ -29,19 +30,35 @@ test('all nine supported locales and common aliases resolve safely', () => {
   assert.equal(resolveLocale('ar-sa'), 'ar');
   assert.equal(resolveLocale('ja'), 'ja-JP');
   assert.equal(resolveLocale(' en-us '), 'en-US');
-  assert.equal(resolveLocale('zh-CN'), 'en-US');
+  assert.equal(resolveLocale('zh-CN'), 'zh-CN');
+  assert.equal(resolveLocale('it'), 'it-IT');
+  assert.equal(resolveLocale('id'), 'id-ID');
+  assert.equal(resolveLocale('ko'), 'ko-KR');
+  assert.equal(resolveLocale('ru'), 'ru-RU');
+  assert.equal(resolveLocale('zh-hans'), 'zh-CN');
+  assert.equal(resolveLocale('tr'), 'tr-TR');
+  assert.equal(resolveLocale('unknown-language'), 'en-US');
   assert.equal(resolveLocale(null), 'en-US');
 });
 
 test('every language dictionary contains non-empty text for every canonical key', () => {
   const keys = getTranslationKeys();
-  assert.ok(keys.length >= 57);
+  assert.ok(keys.length >= 100);
   for (const locale of SUPPORTED_LOCALES) {
     for (const key of keys) {
       assert.equal(hasOwnTranslation(locale, key), true, 'Expected ' + locale + ' to translate ' + key);
       assert.ok(translate(locale, key).trim().length > 0, 'Expected non-empty copy for ' + locale + '/' + key);
     }
   }
+});
+
+test('new locales translate the expanded common and ticket vocabulary', () => {
+  assert.equal(translate('it-IT', 'common.close'), 'Chiudi');
+  assert.equal(translate('id-ID', 'ticket.created.title', { ticketNumber: 8 }), 'Tiket #8 dibuat');
+  assert.equal(translate('ko-KR', 'ticket.access.userAdded', { userName: 'Min' }), 'Min님이 이 티켓에 추가되었습니다.');
+  assert.equal(translate('ru-RU', 'errors.databaseUnavailable'), 'ResolvX не удалось подключиться к базе данных. Повторите попытку немного позже.');
+  assert.equal(translate('zh-CN', 'settings.locale.languageChanged', { locale: '简体中文' }), '服务器语言现在为 简体中文。');
+  assert.equal(translate('tr-TR', 'retention.reviewRequired'), 'Silmeyi onaylamadan önce uygun biletleri inceleyin.');
 });
 
 test('unknown locale values safely fall back to canonical English', () => {
