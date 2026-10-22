@@ -26,6 +26,7 @@ rollback() {
     git reset --hard "$old_sha" || true
     npm ci || true
     npm run build || true
+    npm run deploy-commands || true
     npm run db:migrate || true
     sudo systemctl restart "$SERVICE_NAME" || true
     sudo systemctl is-active --quiet "$SERVICE_NAME" || true
@@ -50,6 +51,7 @@ npm run build
 npm test
 npm run db:migrate
 npm run db:verify
+npm run deploy-commands
 sudo systemctl restart "$SERVICE_NAME"
 sleep 3
 sudo systemctl is-active --quiet "$SERVICE_NAME"
