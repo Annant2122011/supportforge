@@ -404,7 +404,7 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
 
     if (current.id !== record.id || current.guildId !== record.guildId) {
       throw new Error(
-        `Refusing to overwrite immutable ResolvX ticket identity for channel ${record.channelId}.`,
+        `Refusing to overwrite immutable QueryFixr ticket identity for channel ${record.channelId}.`,
       );
     }
 
@@ -442,7 +442,7 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
     const current = await this.getByChannelId(channelId);
     if (!current) {
       throw new Error(
-        `Cannot transition ResolvX ticket ${channelId}: ticket does not exist in durable storage.`,
+        `Cannot transition QueryFixr ticket ${channelId}: ticket does not exist in durable storage.`,
       );
     }
 
@@ -517,7 +517,7 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
       const row = currentResult.rows[0];
       if (!row) {
         throw new Error(
-          `Cannot transition ResolvX ticket ${channelId}: ticket does not exist in durable storage.`,
+          `Cannot transition QueryFixr ticket ${channelId}: ticket does not exist in durable storage.`,
         );
       }
 
@@ -757,7 +757,7 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
 
       if (!current) {
         throw new Error(
-          `Cannot update ResolvX ticket ${channelId}: durable ticket record does not exist.`,
+          `Cannot update QueryFixr ticket ${channelId}: durable ticket record does not exist.`,
         );
       }
 
@@ -788,7 +788,7 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
 
       if ((result.rowCount ?? 0) !== 1) {
         throw new Error(
-          `ResolvX ticket ${channelId} disappeared during metadata update.`,
+          `QueryFixr ticket ${channelId} disappeared during metadata update.`,
         );
       }
 
@@ -897,7 +897,7 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
     await this.markDeleted(
       channelId,
       new Date().toISOString(),
-      'Ticket removed from active ResolvX storage; history retained.',
+      'Ticket removed from active QueryFixr storage; history retained.',
     );
   }
 
@@ -914,7 +914,7 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
 
       for (const row of result.rows) {
         const current = fromRow(row);
-        const reason = 'ResolvX ticket store reset; history retained.';
+        const reason = 'QueryFixr ticket store reset; history retained.';
         const update = await client.query(
           'UPDATE tickets SET deleted_at = $1::timestamptz, deletion_reason = $2, updated_at = $1::timestamptz ' +
           'WHERE channel_id = $3 AND deleted_at IS NULL',
