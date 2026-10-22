@@ -518,7 +518,7 @@ export async function runPostgresMigrations(
       }
 
       throw new Error(
-        `ResolvX PostgreSQL migration ${migration.id} (${migration.name}) failed. The migration marker was not recorded.`,
+        `QueryFixr PostgreSQL migration ${migration.id} (${migration.name}) failed. The migration marker was not recorded.`,
         { cause: error },
       );
     }
