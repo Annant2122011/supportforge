@@ -77,6 +77,11 @@ const esES: Record<TranslationKey, string> = {
   "ticket.panel.voice": "Voz",
   "ticket.panel.joinVoice": "Unirse a voz",
   "ticket.panel.closeVoice": "Cerrar chat de voz",
+  "ticket.panel.reassign": "Reasignar",
+  "ticket.panel.internalNote": "Nota interna",
+  "ticket.panel.reportUser": "Denunciar usuario",
+  "ticket.panel.moveControls": "Mover controles aquí",
+  "ticket.panel.turnVoiceOn": "Activar modo de voz",
 };
 
 export default esES;
