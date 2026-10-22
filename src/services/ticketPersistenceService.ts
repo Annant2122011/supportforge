@@ -159,7 +159,7 @@ export async function setPersistedTicketStatus(
 
   if (!current) {
     throw new Error(
-      `Cannot transition SupportForge ticket ${channelId}: durable ticket record does not exist.`,
+      `Cannot transition ResolvX ticket ${channelId}: durable ticket record does not exist.`,
     );
   }
 
