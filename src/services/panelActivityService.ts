@@ -53,7 +53,7 @@ export async function recordTicketMessageForPanel(message: Message): Promise<voi
               item.embeds.some(
                 (embed) =>
                   embed.title ===
-                  `🎫 SupportForge Ticket #${getField(topic, 'number') ?? 'unknown'}`,
+                  `🎫 ResolvX Ticket #${getField(topic, 'number') ?? 'unknown'}`,
               ) ||
               item.components.some(
                 (row) =>
@@ -129,7 +129,7 @@ export async function recordTicketMessageForPanel(message: Message): Promise<voi
           ticketNumber: getField(topic, 'number') ?? 'unknown',
           event: 'ticket_panel_auto_moved',
           actorId: 'supportforge-system',
-          actorName: 'SupportForge',
+          actorName: 'ResolvX',
           detail: 'Automatic activity threshold reached; ticket controls were moved to the bottom.',
         },
       ).catch(() => undefined);
