@@ -105,7 +105,7 @@ import {
   syncPanel,
   runSupportForgeSetup,
   runSupportForgeRepair,
-} from '../commands/qf';
+} from '../commands/supportforge';
 
 const SETTINGS_TOPIC_PREFIX = 'supportforge:settings';
 
