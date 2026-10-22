@@ -1443,24 +1443,6 @@ async function createTicket(
 
     let threadParentChannelId: string | null = null;
     try {
-      ticketChannel =
-        (await guild.channels.create({
-            name:
-              getTicketChannelName(
-                String(number).padStart(4, '0'),
-                'open',
-                advancedSettings.ticketDefaults.priority,
-              ),
-            type:
-              ChannelType.GuildText,
-            parent:
-              auditParentCategoryId,
-            topic,
-            permissionOverwrites:
-              overwrites,
-            reason:
-              `ResolvX ticket #${number}`,
-          })) as TextChannel;
       if (advancedSettings.ticketWorkspace.mode === 'private-threads') {
         const created = await createPrivateThreadTicket(
           guild,
@@ -1700,33 +1682,16 @@ async function createTicket(
         });
       }
 
-      let departmentCategoryName = department.name;
-      try {
-        // At this point the ticket channel, panel, customer request, and
-        // durable ticket record all exist. Only now may the department
-        // category be created or repaired.
-        const departmentCategory = await ensureDepartmentCategory(guild, department);
-        departmentCategoryName = departmentCategory.name;
-
-        // ensureDepartmentCategory reconciles all active tickets into the
-        // category, including this new ticket. This avoids a second redundant
-        // channel PATCH and lets the shared REST queue handle rate limits.
-      } catch (categoryError) {
-        // Preserve the ticket even if category provisioning fails. It remains
-        // in the main ResolvX category and can be reconciled by setup.
-        console.warn(
-          '⚠️ Ticket #' + number +
-            ' was created successfully, but department category provisioning is pending:',
-          categoryError,
-        );
-      let departmentCategoryName = advancedSettings.ticketWorkspace.mode === 'private-threads'
-        ? 'private thread workspace for ' + department.name
-        : department.name;
+      let departmentCategoryName =
+        advancedSettings.ticketWorkspace.mode === 'private-threads'
+          ? 'private thread workspace for ' + department.name
+          : department.name;
       if (ticketChannel.type === ChannelType.GuildText) {
         try {
           const departmentCategory = await ensureDepartmentCategory(guild, department);
           departmentCategoryName = departmentCategory.name;
         } catch (categoryError) {
+          // Keep the durable ticket; setup/repair can reconcile category placement later.
           console.warn(
             '⚠️ Ticket #' + number +
               ' was created successfully, but department category provisioning is pending:',
@@ -2528,8 +2493,6 @@ async function transition(
             channelName: desiredChannelName,
             ...(destinationCategoryId ? { parentId: destinationCategoryId } : {}),
           },
-          new Set<string>(),
-          'Synchronize ResolvX closed/archived ticket channel metadata',
         );
       } catch (error) {
         sideEffectFailures.push('ticket channel metadata/category/read-only permissions');
@@ -3058,8 +3021,6 @@ async function closeTicket(
               channelName: closedChannelName,
               parentId: closedCategory.id,
             },
-            new Set<string>(),
-            'ResolvX persist closed ticket metadata and storage location',
           );
           channel.topic = closedTopic;
           channel.name = closedChannelName;
