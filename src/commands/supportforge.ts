@@ -1552,9 +1552,14 @@ export const data =
               { name: 'Enable automation', value: 'enable' },
               { name: 'Disable automation', value: 'disable' },
               { name: 'Configure thresholds', value: 'configure' },
+              { name: 'Set exempt roles', value: 'set-exempt-roles' },
+              { name: 'Set exempt departments', value: 'set-exempt-departments' },
+              { name: 'Clear all exemptions', value: 'clear-exemptions' },
             ))
             .addIntegerOption((option) => option.setName('idle-hours').setDescription('Hours of inactivity before warning (1–720)').setMinValue(1).setMaxValue(720))
-            .addIntegerOption((option) => option.setName('grace-hours').setDescription('Hours after warning before auto-close (1–168)').setMinValue(1).setMaxValue(168)),
+            .addIntegerOption((option) => option.setName('grace-hours').setDescription('Hours after warning before auto-close (1–168)').setMinValue(1).setMaxValue(168))
+            .addStringOption((option) => option.setName('exempt-roles').setDescription('Comma-separated Discord role IDs, up to 25').setMaxLength(1000))
+            .addStringOption((option) => option.setName('exempt-departments').setDescription('Comma-separated department IDs, up to 25').setMaxLength(1000)),
         )
         .addSubcommand((subcommand) =>
           subcommand
