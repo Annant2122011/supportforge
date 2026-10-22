@@ -21,8 +21,14 @@ Stage H2 expands the canonical dictionary and adds locale selection paths while 
 | `pt-BR` | Portuguese (Brazil) |
 | `ar` | Arabic |
 | `ja-JP` | Japanese |
+| `it-IT` | Italian (Italy) |
+| `id-ID` | Indonesian |
+| `ko-KR` | Korean |
+| `ru-RU` | Russian |
+| `zh-CN` | Chinese (Simplified) |
+| `tr-TR` | Turkish |
 
-Each catalogue is typed against the canonical English `TranslationKey` vocabulary. All nine catalogues currently include more than eighty non-empty keys for common controls, settings and locale feedback, ticket lifecycle outcomes, intake and support-hours messages, recovery notice, priorities, audit copy, and ticket-panel controls. Locale aliases are normalized safely; an unsupported persisted locale resolves to English.
+Each catalogue is typed against the canonical English `TranslationKey` vocabulary. All fifteen catalogues currently include 103 non-empty keys for common controls, settings and locale feedback, ticket lifecycle outcomes, intake and support-hours messages, recovery notice, priorities, audit copy, and ticket-panel controls. Locale aliases are normalized safely; an unsupported persisted locale resolves to English.
 
 ## Operator controls
 
@@ -71,7 +77,7 @@ The locale tag is stored in the existing JSON settings document, with `en-US` as
 
 Automated checks must confirm:
 - Build and TypeScript validation pass.
-- Every supported locale contains each canonical key and preserves placeholder names.
+- Every supported locale contains all 103 canonical keys and preserves placeholder names.
 - Unknown locale tags fall back safely to English.
 - Inserted parameter values are substituted literally and only once.
 - The command definition initializes under Discord's subcommand limit.
