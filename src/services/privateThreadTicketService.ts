@@ -86,11 +86,11 @@ async function ensurePrivateThreadParent(
 ): Promise<TextChannel> {
   const config = await getGuildConfig(guild.id);
   if (!config.supportCategoryId) {
-    throw new Error('SupportForge setup must be completed before private-thread tickets can be created.');
+    throw new Error('QueryFixr setup must be completed before private-thread tickets can be created.');
   }
   const category = guild.channels.cache.get(config.supportCategoryId);
   if (category?.type !== ChannelType.GuildCategory) {
-    throw new Error('The SupportForge category is missing. Run /supportforge repair before opening a private-thread ticket.');
+    throw new Error('The QueryFixr category is missing. Run /qf repair before opening a private-thread ticket.');
   }
   const bot = guild.members.me;
   if (!bot) throw new Error('The bot member could not be resolved for private-thread setup.');
@@ -119,7 +119,7 @@ async function ensurePrivateThreadParent(
       parent: category.id,
       topic: expectedTopic,
       permissionOverwrites: baseParentOverwrites(guild, bot.id),
-      reason: 'ResolveX private-thread ticket workspace for department ' + department.name,
+      reason: 'QueryFixr private-thread ticket workspace for department ' + department.name,
     });
   } else {
     if (parent.parentId !== category.id || parent.topic !== expectedTopic) {
@@ -127,7 +127,7 @@ async function ensurePrivateThreadParent(
         parent: category.id,
         lockPermissions: false,
         topic: expectedTopic,
-        reason: 'ResolveX private-thread workspace reconciliation',
+        reason: 'QueryFixr private-thread workspace reconciliation',
       });
     }
     await parent.permissionOverwrites.edit(guild.roles.everyone.id, {
@@ -196,12 +196,12 @@ export async function createPrivateThreadTicket(
     type: ChannelType.PrivateThread,
     autoArchiveDuration: 1440,
     invitable: false,
-    reason: 'ResolveX ticket #' + ticketNumber + ' for ' + ownerId,
+    reason: 'QueryFixr ticket #' + ticketNumber + ' for ' + ownerId,
   });
   try {
     await thread.members.add(ownerId);
   } catch (error) {
-    await thread.delete('ResolveX could not grant the ticket owner private-thread access').catch(() => undefined);
+    await thread.delete('QueryFixr could not grant the ticket owner private-thread access').catch(() => undefined);
     throw new Error('Private ticket thread was created but the ticket owner could not be added. The new thread was removed to avoid leaving an inaccessible ticket.', { cause: error });
   }
   return { thread, parent };
@@ -282,7 +282,7 @@ export async function refreshPrivateThreadPanel(
     const recent = await thread.messages.fetch({ limit: 100 }).catch(() => null);
     panel = recent?.find((message) =>
       message.author.id === thread.client.user?.id &&
-      message.embeds.some((embed) => embed.title === '🎫 SupportForge Ticket #' + ticket.ticketNumber),
+      message.embeds.some((embed) => embed.title === '🎫 QueryFixr Ticket #' + ticket.ticketNumber),
     ) ?? null;
   }
   if (panel) {
@@ -329,7 +329,7 @@ async function performThreadAction(
   const guild = interaction.guild;
   const channel = interaction.channel;
   if (!guild || channel?.type !== ChannelType.PrivateThread) {
-    throw new Error('This action must be used in a ResolveX private ticket thread.');
+    throw new Error('This action must be used in a QueryFixr private ticket thread.');
   }
   const thread = channel as ThreadChannel;
   const ticket = await getPersistedTicket(thread.id);
@@ -339,7 +339,7 @@ async function performThreadAction(
     ticket.deletedAt ||
     ticket.metadata.workspaceKind !== 'private-thread'
   ) {
-    throw new Error('This private thread is not linked to an active durable ResolveX ticket.');
+    throw new Error('This private thread is not linked to an active durable QueryFixr ticket.');
   }
   const topic = parseTicketTopic(ticket);
   const staffRoleId = typeof ticket.metadata.staffRoleId === 'string'
@@ -421,11 +421,11 @@ async function performThreadAction(
   const synchronizationFailures: string[] = [];
   try {
     if (nextStatus === 'closed' || nextStatus === 'archived') {
-      if (!thread.archived) await thread.setArchived(true, 'ResolveX ticket ' + nextStatus);
-      if (!thread.locked) await thread.setLocked(true, 'ResolveX ticket ' + nextStatus + ' read-only protection');
+      if (!thread.archived) await thread.setArchived(true, 'QueryFixr ticket ' + nextStatus);
+      if (!thread.locked) await thread.setLocked(true, 'QueryFixr ticket ' + nextStatus + ' read-only protection');
     } else if (thread.archived || thread.locked) {
-      if (thread.archived) await thread.setArchived(false, 'ResolveX ticket lifecycle update');
-      if (thread.locked) await thread.setLocked(false, 'ResolveX ticket lifecycle update');
+      if (thread.archived) await thread.setArchived(false, 'QueryFixr ticket lifecycle update');
+      if (thread.locked) await thread.setLocked(false, 'QueryFixr ticket lifecycle update');
     }
   } catch (error) {
     synchronizationFailures.push('thread archive/lock permissions');
@@ -437,8 +437,8 @@ async function performThreadAction(
     // Sending a replacement panel can alter Discord's thread archive state.
     // Reassert read-only closure after the UI reconciliation as a final guard.
     if (nextStatus === 'closed' || nextStatus === 'archived') {
-      if (!thread.archived) await thread.setArchived(true, 'ResolveX reassert closed ticket state after panel refresh');
-      if (!thread.locked) await thread.setLocked(true, 'ResolveX reassert closed ticket lock after panel refresh');
+      if (!thread.archived) await thread.setArchived(true, 'QueryFixr reassert closed ticket state after panel refresh');
+      if (!thread.locked) await thread.setLocked(true, 'QueryFixr reassert closed ticket lock after panel refresh');
     }
   } catch (error) {
     synchronizationFailures.push('ticket panel/archive-lock refresh');
