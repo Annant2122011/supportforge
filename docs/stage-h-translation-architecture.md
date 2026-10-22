@@ -27,8 +27,14 @@ Stage H2 expands the canonical dictionary and adds locale selection paths while 
 | `ru-RU` | Russian |
 | `zh-CN` | Chinese (Simplified) |
 | `tr-TR` | Turkish |
+| `nl-NL` | Dutch |
+| `pl-PL` | Polish |
+| `uk-UA` | Ukrainian |
+| `el-GR` | Greek |
+| `cs-CZ` | Czech |
+| `sv-SE` | Swedish |
 
-Each catalogue is typed against the canonical English `TranslationKey` vocabulary. All fifteen catalogues currently include 103 non-empty keys for common controls, settings and locale feedback, ticket lifecycle outcomes, intake and support-hours messages, recovery notice, priorities, audit copy, and ticket-panel controls. Locale aliases are normalized safely; an unsupported persisted locale resolves to English.
+Each catalogue is typed against the canonical English `TranslationKey` vocabulary. All twenty-one catalogues currently include 103 non-empty keys for common controls, settings and locale feedback, ticket lifecycle outcomes, intake and support-hours messages, recovery notice, priorities, audit copy, and ticket-panel controls. Locale aliases are normalized safely; an unsupported persisted locale resolves to English.
 
 ## Operator controls
 
