@@ -35,4 +35,6 @@ const enUS = {
   'priority.critical': 'Critical',
 } as const;
 
+export type TranslationKey = keyof typeof enUS;
+
 export default enUS;
