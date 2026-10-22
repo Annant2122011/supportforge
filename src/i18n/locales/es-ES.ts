@@ -38,6 +38,7 @@ const esES: Record<TranslationKey, string> = {
   "supportHours.open": "El soporte está disponible ahora.",
   "supportHours.closed": "El soporte está cerrado en este momento.",
   "supportHours.nextOpening": " Próxima apertura: {nextOpening}.",
+  "supportHours.noNextOpening": "No hay una próxima apertura configurada; contacta con un administrador del servidor.",
   "forms.submit": "Enviar respuestas",
   "forms.required": "Este campo es obligatorio.",
   "forms.invalid": "La respuesta del formulario no es válida. Revisa las instrucciones del campo.",
