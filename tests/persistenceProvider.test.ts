@@ -35,7 +35,7 @@ test('SQLite cannot silently become the live persistence provider', () => {
   withProvider('sqlite', () => {
     assert.throws(
       () => getPersistenceProvider(),
-      /SQLite is disabled for live ResolvX persistence/,
+      /SQLite is disabled for live QueryFixr persistence/,
     );
   });
 });
