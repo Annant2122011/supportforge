@@ -12,7 +12,8 @@ import {
 } from 'discord.js';
 import { getGuildConfig, type GuildConfig } from './configService';
 import { getPersistedTicketPriority, getPersistedTicketStatus } from './ticketPersistenceService';
-import type { TicketPriority } from './advancedSettingsService';
+import { getAdvancedSettings, type TicketPriority } from './advancedSettingsService';
+import { translate } from '../i18n/translationService';
 import { setChannelName, setChannelTopic } from './discordChannelService';
 import {
   getField,
@@ -101,42 +102,43 @@ export function buildTicketPanelEmbed(
 export function buildTicketPanelComponents(
   status: TicketStatus,
   topic = '',
+  localeInput: unknown = 'en-US',
 ): ActionRowBuilder<ButtonBuilder>[] {
   const lifecycle = new ActionRowBuilder<ButtonBuilder>();
   const deleteControls = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId('ticket:delete:start')
-      .setLabel('Delete Ticket')
+      .setLabel(translate(localeInput, 'ticket.panel.delete'))
       .setEmoji('🗑️')
       .setStyle(ButtonStyle.Danger),
   );
 
   if (status === 'open' || status === 'reopened') {
     lifecycle.addComponents(
-      new ButtonBuilder().setCustomId('ticket:claim').setLabel('Claim').setEmoji('🙋').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('ticket:pending').setLabel('Pending').setEmoji('⏳').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('ticket:close').setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('ticket:claim').setLabel(translate(localeInput, 'ticket.panel.claim')).setEmoji('🙋').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('ticket:pending').setLabel(translate(localeInput, 'ticket.panel.pending')).setEmoji('⏳').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('ticket:close').setLabel(translate(localeInput, 'ticket.panel.close')).setEmoji('🔒').setStyle(ButtonStyle.Danger),
     );
   } else if (status === 'claimed') {
     lifecycle.addComponents(
-      new ButtonBuilder().setCustomId('ticket:claim').setLabel('Claim / Join').setEmoji('🙋').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('ticket:unclaim').setLabel('Unclaim').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('ticket:pending').setLabel('Pending').setEmoji('⏳').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('ticket:close').setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('ticket:claim').setLabel(translate(localeInput, 'ticket.panel.claimJoin')).setEmoji('🙋').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('ticket:unclaim').setLabel(translate(localeInput, 'ticket.panel.unclaim')).setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('ticket:pending').setLabel(translate(localeInput, 'ticket.panel.pending')).setEmoji('⏳').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('ticket:close').setLabel(translate(localeInput, 'ticket.panel.close')).setEmoji('🔒').setStyle(ButtonStyle.Danger),
     );
   } else if (status === 'pending') {
     lifecycle.addComponents(
-      new ButtonBuilder().setCustomId('ticket:resume').setLabel('Resume').setEmoji('▶️').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('ticket:close').setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('ticket:resume').setLabel(translate(localeInput, 'ticket.panel.resume')).setEmoji('▶️').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('ticket:close').setLabel(translate(localeInput, 'ticket.panel.close')).setEmoji('🔒').setStyle(ButtonStyle.Danger),
     );
   } else if (status === 'closed') {
     lifecycle.addComponents(
-      new ButtonBuilder().setCustomId('ticket:reopen').setLabel('Reopen').setEmoji('🔓').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('ticket:archive').setLabel('Archive').setEmoji('🗄️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('ticket:reopen').setLabel(translate(localeInput, 'ticket.panel.reopen')).setEmoji('🔓').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('ticket:archive').setLabel(translate(localeInput, 'ticket.panel.archive')).setEmoji('🗄️').setStyle(ButtonStyle.Secondary),
     );
   } else {
     lifecycle.addComponents(
-      new ButtonBuilder().setCustomId('ticket:archived').setLabel('Archived').setEmoji('🗄️').setStyle(ButtonStyle.Secondary).setDisabled(true),
+      new ButtonBuilder().setCustomId('ticket:archived').setLabel(translate(localeInput, 'ticket.panel.archived')).setEmoji('🗄️').setStyle(ButtonStyle.Secondary).setDisabled(true),
     );
   }
 
@@ -148,17 +150,17 @@ export function buildTicketPanelComponents(
        * History does not permit messages or other ticket mutations.
        */
       tools.addComponents(
-        new ButtonBuilder().setCustomId('ticket:panel:history').setLabel('History').setEmoji('📜').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('ticket:panel:history').setLabel(translate(localeInput, 'ticket.panel.history')).setEmoji('📜').setStyle(ButtonStyle.Secondary),
       );
       return [lifecycle, tools, deleteControls];
     }
 
     tools.addComponents(
-      new ButtonBuilder().setCustomId('ticket:panel:add-user').setLabel('Add User').setEmoji('👥').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('ticket:panel:remove-user').setLabel('Remove User').setEmoji('➖').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('ticket:panel:priority').setLabel('Priority').setEmoji('⚡').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('ticket:panel:department').setLabel('Department').setEmoji('📂').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('ticket:panel:tag').setLabel('Tag').setEmoji('🏷️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('ticket:panel:add-user').setLabel(translate(localeInput, 'ticket.panel.addUser')).setEmoji('👥').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('ticket:panel:remove-user').setLabel(translate(localeInput, 'ticket.panel.removeUser')).setEmoji('➖').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('ticket:panel:priority').setLabel(translate(localeInput, 'ticket.panel.priority')).setEmoji('⚡').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('ticket:panel:department').setLabel(translate(localeInput, 'ticket.panel.department')).setEmoji('📂').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('ticket:panel:tag').setLabel(translate(localeInput, 'ticket.panel.tag')).setEmoji('🏷️').setStyle(ButtonStyle.Secondary),
     );
   }
 
@@ -177,12 +179,12 @@ export function buildTicketPanelComponents(
         voiceControls.addComponents(
           new ButtonBuilder()
             .setCustomId('ticket:panel:voice:end')
-            .setLabel('Close Voice Chat')
+            .setLabel(translate(localeInput, 'ticket.panel.closeVoice'))
             .setEmoji('🔚')
             .setStyle(ButtonStyle.Danger),
           new ButtonBuilder()
             .setCustomId('ticket:panel:voice:join')
-            .setLabel('Join Voice')
+            .setLabel(translate(localeInput, 'ticket.panel.joinVoice'))
             .setEmoji('🎙️')
             .setStyle(ButtonStyle.Secondary),
         );
@@ -190,7 +192,7 @@ export function buildTicketPanelComponents(
         voiceControls.addComponents(
           new ButtonBuilder()
             .setCustomId('ticket:panel:voice:start')
-            .setLabel('Turn On Voice Mode')
+            .setLabel(translate(localeInput, 'ticket.panel.turnVoiceOn'))
             .setEmoji('🎙️')
             .setStyle(ButtonStyle.Primary),
         );
@@ -200,27 +202,27 @@ export function buildTicketPanelComponents(
     const positioning = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId('ticket:panel:reassign')
-        .setLabel('Reassign')
+        .setLabel(translate(localeInput, 'ticket.panel.reassign'))
         .setEmoji('🔄')
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId('ticket:panel:note')
-        .setLabel('Internal Note')
+        .setLabel(translate(localeInput, 'ticket.panel.internalNote'))
         .setEmoji('📝')
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId('ticket:panel:report')
-        .setLabel('Report User')
+        .setLabel(translate(localeInput, 'ticket.panel.reportUser'))
         .setEmoji('🛡️')
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
         .setCustomId('ticket:panel:move-bottom')
-        .setLabel('Move Controls Here')
+        .setLabel(translate(localeInput, 'ticket.panel.moveControls'))
         .setEmoji('⬇️')
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId('ticket:panel:history')
-        .setLabel('History')
+        .setLabel(translate(localeInput, 'ticket.panel.history'))
         .setEmoji('📜')
         .setStyle(ButtonStyle.Secondary),
     );
@@ -251,6 +253,7 @@ export async function refreshTicketPanel(
   }
   const configuredMessageId = getField(effectiveTopic, 'message');
   const config = await getGuildConfig(channel.guild.id);
+  const locale = (await getAdvancedSettings(channel.guild.id)).locale;
   const ticketNumber = getField(effectiveTopic, 'number') ?? 'unknown';
 
   let message: Message | undefined;
@@ -287,10 +290,7 @@ export async function refreshTicketPanel(
           config,
         ),
       ],
-      components: buildTicketPanelComponents(
-        getTicketStatus(effectiveTopic),
-        effectiveTopic,
-      ),
+      components: buildTicketPanelComponents(getTicketStatus(effectiveTopic), effectiveTopic, locale),
     });
 
     const repairedTopic = setField(
@@ -320,10 +320,7 @@ export async function refreshTicketPanel(
     effectiveTopic,
     config,
   );
-  const desiredComponents = buildTicketPanelComponents(
-    getTicketStatus(effectiveTopic),
-    effectiveTopic,
-  );
+  const desiredComponents = buildTicketPanelComponents(getTicketStatus(effectiveTopic), effectiveTopic, locale);
 
   /*
    * Reconciliation is deliberately idempotent. Replayed outbox events must
@@ -638,6 +635,7 @@ export async function moveTicketPanelToBottom(
     (await getPersistedTicketStatus(channel.id).catch(() => undefined)) ??
     getTicketStatus(topic);
   const config = await getGuildConfig(channel.guild.id);
+  const locale = (await getAdvancedSettings(channel.guild.id)).locale;
   const ticketNumber = getField(topic, 'number') ?? 'unknown';
   const panelTitle = `🎫 ResolvX Ticket #${ticketNumber}`;
   const messageId = getField(topic, 'message');
@@ -663,7 +661,7 @@ export async function moveTicketPanelToBottom(
         config,
       ),
     ],
-    components: buildTicketPanelComponents(status, panelTopic),
+    components: buildTicketPanelComponents(status, panelTopic, locale),
   });
 
   if (currentPanel && currentPanel.id !== newPanel.id) {
