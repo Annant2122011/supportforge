@@ -77,6 +77,11 @@ const bnIN: Record<TranslationKey, string> = {
   "ticket.panel.voice": "ভয়েস",
   "ticket.panel.joinVoice": "ভয়েসে যোগ দিন",
   "ticket.panel.closeVoice": "ভয়েস চ্যাট বন্ধ করুন",
+  "ticket.panel.reassign": "আবার দায়িত্ব দিন",
+  "ticket.panel.internalNote": "অভ্যন্তরীণ নোট",
+  "ticket.panel.reportUser": "ব্যবহারকারী রিপোর্ট করুন",
+  "ticket.panel.moveControls": "কন্ট্রোল এখানে সরান",
+  "ticket.panel.turnVoiceOn": "ভয়েস মোড চালু করুন",
 };
 
 export default bnIN;
