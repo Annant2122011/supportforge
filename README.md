@@ -1,6 +1,6 @@
-# ResolvX
+# QueryFixr
 
-ResolvX is a Discord-first support ticket system. It uses Neon PostgreSQL as the live durable store and keeps Discord interactions on the same validated ticket-creation and lifecycle services regardless of whether the action starts from a slash command or a button.
+QueryFixr is a Discord-first support ticket system. It uses Neon PostgreSQL as the live durable store and keeps Discord interactions on the same validated ticket-creation and lifecycle services regardless of whether the action starts from a slash command or a button.
 
 ## Current capabilities
 
@@ -62,7 +62,7 @@ After setup, open **Settings → Ticket Panels**. This is the visual panel build
 5. Publish to an accessible text channel. The builder stores the published snapshot before trying to remove the prior panel message.
 6. Delete a panel only after confirmation. Tickets already created from that panel are retained.
 
-The matching slash-command family is `/supportforge panel create/list/show/update/preview/publish/delete`. Commands cover panel metadata and JSON button replacement; the button-based builder is the recommended way to add, retarget and reorder individual controls. Blank drafts are valid but cannot be published until they have at least one valid button.
+The matching slash-command family is `/qf panel create/list/show/update/preview/publish/delete`. Commands cover panel metadata and JSON button replacement; the button-based builder is the recommended way to add, retarget and reorder individual controls. Blank drafts are valid but cannot be published until they have at least one valid button.
 
 **Supported button target types**
 
@@ -80,8 +80,8 @@ Settings-channel customization is stored separately from the public ticket panel
 
 ## Verification and rollout
 
-The Build and ResolvX CI workflows run the TypeScript build, automated tests, and database verification. Keep PR #12 open until its final checks pass and live acceptance has been completed. Deploy to a test guild and non-production bot first. Do not merge or deploy a production build solely because a CI workflow is green.
-The Build and SupportForge CI workflows run the TypeScript build, automated tests, and database verification. Stages A–G remain an open, stacked pull-request chain; PR #17 contains the consolidated source review and UI polish. Use a test guild and non-production bot before promotion. Do not merge or deploy a production build solely because a CI workflow is green.
+The Build and QueryFixr CI workflows run the TypeScript build, automated tests, and database verification. Keep PR #12 open until its final checks pass and live acceptance has been completed. Deploy to a test guild and non-production bot first. Do not merge or deploy a production build solely because a CI workflow is green.
+The Build and QueryFixr CI workflows run the TypeScript build, automated tests, and database verification. Stages A–G remain an open, stacked pull-request chain; PR #17 contains the consolidated source review and UI polish. Use a test guild and non-production bot before promotion. Do not merge or deploy a production build solely because a CI workflow is green.
 
 - [Stage A–E inspection](docs/stages-a-to-e-audit.md)
 - [Ticket archive and recovery behavior](docs/recovery-archive.md)
@@ -97,14 +97,14 @@ Support-hours policies are stored in the existing Neon-backed JSON-document repo
 
 The Settings channel now has a **Support Hours** button with department and ticket-panel scope selectors, weekly schedule editing, timezone, enforcement, outside-hours behavior and clear-override controls. The selectors paginate when a server has more than 25 departments or panels. The equivalent slash-command group supports the same server, department and panel scopes:
 
-- /supportforge settings support-hours action:show scope:guild
-- /supportforge settings support-hours action:set-timezone scope:guild timezone:Asia/Kolkata
-- /supportforge settings support-hours action:set-day scope:guild day:monday intervals:09:00-12:00,13:00-17:00
-- /supportforge settings support-hours action:set-day scope:guild day:sunday intervals:closed
-- /supportforge settings support-hours action:behavior scope:guild behavior:restrict
-- /supportforge settings support-hours action:enable scope:guild
-- /supportforge settings support-hours action:show scope:department scope-id:department-id
-- /supportforge settings support-hours action:show scope:panel scope-id:panel-id
+- /qf settings support-hours action:show scope:guild
+- /qf settings support-hours action:set-timezone scope:guild timezone:Asia/Kolkata
+- /qf settings support-hours action:set-day scope:guild day:monday intervals:09:00-12:00,13:00-17:00
+- /qf settings support-hours action:set-day scope:guild day:sunday intervals:closed
+- /qf settings support-hours action:behavior scope:guild behavior:restrict
+- /qf settings support-hours action:enable scope:guild
+- /qf settings support-hours action:show scope:department scope-id:department-id
+- /qf settings support-hours action:show scope:panel scope-id:panel-id
 
 For a department or panel override, provide scope-id. Use valid IANA time-zone names, such as Asia/Kolkata or America/New_York; fixed UTC offsets are not accepted as time zones. Times use 24-hour HH:mm values. An interval can cross midnight, for example 22:00-02:00. Multiple intervals use commas. Overlapping intervals are rejected, including overlap across midnight.
 
@@ -114,7 +114,7 @@ The schedule engine handles daylight-saving gaps and repeated local times determ
 
 ### Part 2: private-thread ticket workspaces
 
-Select the workspace mode using **Settings → Ticket Workspace** or `/supportforge settings ticket-workspace`. It applies only to newly opened tickets. Existing dedicated text-channel tickets remain unchanged. In private-thread mode, ResolveX lazily creates a department-specific parent text channel and opens each new ticket as a private thread under it. The ticket owner is explicitly added; configured department staff and administrators can access tickets through Discord's private-thread permissions. The bot needs permission to view the parent, create/manage private threads, send messages in threads, and read message history. Each department should have a valid staff role configured before enabling this mode.
+Select the workspace mode using **Settings → Ticket Workspace** or `/qf settings ticket-workspace`. It applies only to newly opened tickets. Existing dedicated text-channel tickets remain unchanged. In private-thread mode, QueryFixr lazily creates a department-specific parent text channel and opens each new ticket as a private thread under it. The ticket owner is explicitly added; configured department staff and administrators can access tickets through Discord's private-thread permissions. The bot needs permission to view the parent, create/manage private threads, send messages in threads, and read message history. Each department should have a valid staff role configured before enabling this mode.
 
 The private-thread controls support the normal ticket lifecycle (claim, unclaim, pending, resume, close, reopen and archive), along with participant add/remove, staff reassignment, priority, internal notes and staff history. The matching slash-command routes are available inside the private thread as well as the button controls. User-selection actions are bound to the initiating user and exact thread so stale or cross-thread controls fail closed.
 
@@ -130,4 +130,4 @@ Stage G Part 1 centralizes ticket lifecycle authorization, makes closed/archived
 
 ## Stage G Part 2: Ticket inactivity automation
 
-Stage G Part 2 adds opt-in, per-server inactivity warnings and automatic closure with a grace period. It uses durable PostgreSQL activity metadata, recovers warning state after restarts, requires transcript delivery, and atomically rejects closure if activity changes. The default is disabled; administrators can manage it with the Settings dashboard's **Inactivity Automation** controls or `/supportforge settings inactivity`. See [the Stage G Part 2 design and acceptance checklist](docs/stage-g-part-2-inactivity.md).
+Stage G Part 2 adds opt-in, per-server inactivity warnings and automatic closure with a grace period. It uses durable PostgreSQL activity metadata, recovers warning state after restarts, requires transcript delivery, and atomically rejects closure if activity changes. The default is disabled; administrators can manage it with the Settings dashboard's **Inactivity Automation** controls or `/qf settings inactivity`. See [the Stage G Part 2 design and acceptance checklist](docs/stage-g-part-2-inactivity.md).
