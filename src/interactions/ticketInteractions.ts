@@ -2493,8 +2493,6 @@ async function transition(
             channelName: desiredChannelName,
             ...(destinationCategoryId ? { parentId: destinationCategoryId } : {}),
           },
-          new Set<string>(),
-          'Synchronize ResolvX closed/archived ticket channel metadata',
         );
       } catch (error) {
         sideEffectFailures.push('ticket channel metadata/category/read-only permissions');
@@ -3023,8 +3021,6 @@ async function closeTicket(
               channelName: closedChannelName,
               parentId: closedCategory.id,
             },
-            new Set<string>(),
-            'ResolvX persist closed ticket metadata and storage location',
           );
           channel.topic = closedTopic;
           channel.name = closedChannelName;
