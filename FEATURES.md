@@ -4825,3 +4825,17 @@ A consolidated source review is tracked in [docs/stage-a-to-g-reverification.md]
 - The inactivity close path rechecks the latest policy generation and recent human activity around transcript work and before the final PostgreSQL compare-and-close transaction.
 - Final second-round CI passed on [review run #1197](https://github.com/Annant2122011/supportforge/actions/runs/39399683798): TypeScript build passed, **117 tests passed / 0 failed**, and PostgreSQL verification passed.
 - CI does not substitute for validating role permissions, rate limits, transcript access, and restore behavior in a controlled Discord test guild.
+
+---
+
+# Stage H — Translation and Localization Architecture
+
+**Status:** H1 implementation in progress on a separate feature branch. This is not yet merged to main.
+
+The two-part design and acceptance checklist are tracked in [docs/stage-h-translation-architecture.md](docs/stage-h-translation-architecture.md).
+
+- **H1 — Translation core:** supported-locale registry, canonical English catalog, partial Hindi/Bengali catalogs, safe interpolation, locale-aware date/number formatting, and a per-guild locale preference in the existing Neon-backed advanced-settings JSON document. No SQL migration or third-party i18n dependency.
+- **H2 — User-facing localization:** Settings dashboard and slash-command language controls with parity; gradual coverage of ticket intake/lifecycle, forms, support-hours messages, settings, panel previews and selected reports; locale-specific interaction regression tests.
+- The canonical catalog defines typed keys. Missing translated keys fall back to English individually. Stable command names, internal IDs, audit action identifiers and user-generated content remain untranslated.
+- H1 keeps broad message changes opt-in. A green CI run and non-production Discord acceptance are required before merging/rolling out the framework.
+
