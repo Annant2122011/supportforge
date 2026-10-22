@@ -38,6 +38,7 @@ const ptBR: Record<TranslationKey, string> = {
   "supportHours.open": "O suporte está aberto agora.",
   "supportHours.closed": "O suporte está fechado no momento.",
   "supportHours.nextOpening": " Próxima abertura: {nextOpening}.",
+  "supportHours.noNextOpening": "Não há próximo horário de abertura configurado; fale com um administrador do servidor.",
   "forms.submit": "Enviar respostas",
   "forms.required": "Este campo é obrigatório.",
   "forms.invalid": "A resposta do formulário é inválida. Confira as instruções do campo.",
