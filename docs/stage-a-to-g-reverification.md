@@ -25,7 +25,7 @@ The source and requirements were reviewed from Stage A through Stage G against `
 - Added a recent-human-message reconciliation check around inactivity warnings and the close path. The sweep scans recent Discord history against the saved activity anchor; it refuses to act if history cannot be checked back to the anchor within its safety cap. Additional checks run around transcript upload and immediately before the compare-and-close operation.
 - Revalidates the inactivity policy generation before warning delivery and at multiple close checkpoints. A scheduler run holding an old enabled policy will cancel its warning/close attempt after an administrator changes the policy.
 - Clears and visibly cancels inactivity warnings when a ticket is manually closed/archived, when automation is disabled, when activity restarts the timer, or when the ticket becomes exempt.
-- Exempts critical tickets and tickets marked by supported durable `vip`, `activeEscalation`, or `inactivityExempt` metadata.
+- Exempts critical tickets, tickets marked by supported durable `vip`, `activeEscalation`, or `inactivityExempt` metadata, tickets in configured exempt departments, and tickets whose owner or assigned staff holds a configured exempt role. The Settings dashboard and `/supportforge settings inactivity` both expose the role/department controls.
 - Adds PostgreSQL regression coverage that metadata updates preserve lifecycle status, alongside the existing compare-and-close/stale-anchor integration coverage.
 - Reconciles the Settings dashboard summary with the implemented inactivity policy and workspace mode; changes the misleading retention label from “Unlimited/forever” to “No timer (365-day maximum)”.
 - Groups Settings controls by workflow. An exact untouched legacy default order migrates to the grouped layout; custom server order is preserved.
@@ -33,7 +33,7 @@ The source and requirements were reviewed from Stage A through Stage G against `
 
 ## Remaining partial scope and limits
 
-- The inactivity feature is `BUILT / PARTIAL`: critical priority and durable VIP/escalation/exemption markers are excluded, but there is not yet a dedicated administrator UI for VIP, escalation, staff exemption or per-department exemptions.
+- The inactivity feature remains `BUILT / PARTIAL` pending live acceptance and failure-injection: the Settings dashboard and slash-command fallback now configure exempt roles and departments, while ticket-specific `vip`, `activeEscalation`, and `inactivityExempt` metadata remain supported. The 1,000-message history scan cap remains a deliberate fail-safe; sustained high-volume tickets can pause auto-close until history can be proven.
 - A database commit and a Discord send cannot be part of one distributed atomic transaction. Deterministic markers, upload receipts, transaction guards, and outbox reconciliation reduce duplicate/missed side effects; they cannot guarantee mathematical exactly-once delivery through every process/network interruption.
 - A 1,000-message scan cap is deliberate fail-safe behavior. If the scheduler cannot prove the channel history back to the activity anchor within that cap, it pauses instead of guessing. Very busy channels may therefore need a longer audit/history limit or a dedicated durable activity cursor in a later increment.
 - CI uses a disposable local PostgreSQL instance. It does not prove that the production Neon project is migrated, backed up, or restorable.
