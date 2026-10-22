@@ -547,6 +547,42 @@ async function autoCloseInactiveTicket(
   }
 }
 
+async function hasConfiguredInactivityExemption(
+  guild: Guild,
+  ticket: PersistedTicket,
+  policy: AdvancedGuildSettings['inactivity'],
+): Promise<boolean> {
+  if (
+    ticket.departmentId &&
+    Array.isArray(policy.exemptDepartmentIds) &&
+    policy.exemptDepartmentIds.includes(ticket.departmentId)
+  ) return true;
+
+  const exemptRoleIds = Array.isArray(policy.exemptRoleIds) ? policy.exemptRoleIds : [];
+  if (exemptRoleIds.length === 0) return false;
+
+  // A role exemption applies to the ticket owner (VIP/customer role) or to
+  // an assigned staff member. If Discord cannot confirm membership, fail
+  // safe and do not auto-close this ticket during this sweep.
+  const candidateIds = [...new Set([
+    ticket.ownerId,
+    ...(ticket.claimedByIds ?? []),
+  ].filter((id): id is string => typeof id === 'string' && id.length > 0))];
+
+  for (const memberId of candidateIds) {
+    let member = guild.members.cache.get(memberId);
+    if (!member) {
+      try {
+        member = await guild.members.fetch(memberId);
+      } catch {
+        return true;
+      }
+    }
+    if (member.roles.cache.some((role) => exemptRoleIds.includes(role.id))) return true;
+  }
+  return false;
+}
+
 async function sweepTicket(
   client: Client,
   guild: Guild,
@@ -587,6 +623,15 @@ async function sweepTicket(
 
   const channel = await resolveTicketChannel(guild, ticket);
   if (!channel) return;
+
+  const configuredExemption = await hasConfiguredInactivityExemption(guild, ticket, policy);
+  if (configuredExemption) {
+    if (hasWarningState) {
+      await cancelVisibleWarnings(channel, client, ticket);
+      await clearWarningMetadata(ticket);
+    }
+    return;
+  }
 
   const decision = evaluateTicketInactivity(ticket, settings, nowMs);
   if (decision.action === 'skip') {
