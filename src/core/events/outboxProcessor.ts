@@ -192,7 +192,7 @@ export function startOutboxProcessor(
 
     void processOutboxBatch(publisher)
       .catch((error) => {
-        console.error('SupportForge outbox processor failed:', error);
+        console.error('ResolvX outbox processor failed:', error);
       })
       .finally(() => {
         running = false;
