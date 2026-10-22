@@ -39,6 +39,7 @@ const hiIN: Record<TranslationKey, string> = {
   "supportHours.closed": "सहायता सेवा अभी बंद है।",
   "supportHours.nextOpening": " अगली बार खुलने का समय: {nextOpening}।",
   "supportHours.noNextOpening": "अगली बार खुलने का समय निर्धारित नहीं है। सर्वर व्यवस्थापक से संपर्क करें।",
+  "supportHours.noNextOpening": "अगली बार खुलने का समय निर्धारित नहीं है। सर्वर व्यवस्थापक से संपर्क करें।",
   "forms.submit": "जवाब जमा करें",
   "forms.required": "यह जानकारी देना आवश्यक है।",
   "forms.invalid": "फ़ॉर्म का जवाब मान्य नहीं है। फ़ील्ड के निर्देश जाँचें।",
