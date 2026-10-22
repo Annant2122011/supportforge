@@ -188,7 +188,7 @@ export async function requestRetentionApproval(
         new EmbedBuilder()
           .setTitle('⚠️ Retention approval required')
           .setDescription(
-            `ResolvX found **${eligibleChannels.length}** ${label.toLowerCase()} that are already eligible for deletion under the **${days}-day** policy.\n\n` +
+            `QueryFixr found **${eligibleChannels.length}** ${label.toLowerCase()} that are already eligible for deletion under the **${days}-day** policy.\n\n` +
             `The oldest eligible record is ${oldest ? '<t:' + Math.floor(oldest / 1000) + ':R>' : 'unknown'}.\n\n` +
             `Deletion will **not** happen unless the requested administrator approves it below.`,
           )
@@ -196,7 +196,7 @@ export async function requestRetentionApproval(
             name: 'Requested permission',
             value: `Delete ${label.toLowerCase()} older than **${days} days**.`,
           })
-          .setFooter({ text: 'ResolvX • Retention safeguard' })
+          .setFooter({ text: 'QueryFixr • Retention safeguard' })
           .setTimestamp(),
       ],
       components: approvalComponents(scope),
@@ -235,7 +235,7 @@ export async function approveRetentionDeletion(
 
   for (const channel of eligible) {
     try {
-      await channel.delete('ResolvX approved retention cleanup');
+      await channel.delete('QueryFixr approved retention cleanup');
       deleted += 1;
 
       /*
@@ -245,7 +245,7 @@ export async function approveRetentionDeletion(
        */
       await markPersistedTicketDeleted(
         channel.id,
-        'ResolvX approved retention cleanup',
+        'QueryFixr approved retention cleanup',
       );
     } catch (error) {
       console.warn(
