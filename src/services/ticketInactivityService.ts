@@ -14,6 +14,7 @@ import {
   getTicketInactivityAnchor,
   normalizeInactivitySettings,
 } from '../core/domain/ticketInactivityPolicy';
+import { hasExemptInactivityRole, isDepartmentExemptFromInactivity } from '../core/domain/ticketInactivityExemptions';
 import {
   getAdvancedSettings,
   type AdvancedGuildSettings,
@@ -552,11 +553,7 @@ async function hasConfiguredInactivityExemption(
   ticket: PersistedTicket,
   policy: AdvancedGuildSettings['inactivity'],
 ): Promise<boolean> {
-  if (
-    ticket.departmentId &&
-    Array.isArray(policy.exemptDepartmentIds) &&
-    policy.exemptDepartmentIds.includes(ticket.departmentId)
-  ) return true;
+  if (isDepartmentExemptFromInactivity(ticket.departmentId, policy.exemptDepartmentIds ?? [])) return true;
 
   const exemptRoleIds = Array.isArray(policy.exemptRoleIds) ? policy.exemptRoleIds : [];
   if (exemptRoleIds.length === 0) return false;
@@ -578,7 +575,7 @@ async function hasConfiguredInactivityExemption(
         return true;
       }
     }
-    if (member.roles.cache.some((role) => exemptRoleIds.includes(role.id))) return true;
+    if (hasExemptInactivityRole([...member.roles.cache.keys()], exemptRoleIds)) return true;
   }
   return false;
 }
