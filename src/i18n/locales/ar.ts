@@ -77,6 +77,11 @@ const ar: Record<TranslationKey, string> = {
   "ticket.panel.voice": "صوت",
   "ticket.panel.joinVoice": "الانضمام إلى المحادثة الصوتية",
   "ticket.panel.closeVoice": "إغلاق المحادثة الصوتية",
+  "ticket.panel.reassign": "إعادة التعيين",
+  "ticket.panel.internalNote": "ملاحظة داخلية",
+  "ticket.panel.reportUser": "الإبلاغ عن مستخدم",
+  "ticket.panel.moveControls": "نقل عناصر التحكم إلى هنا",
+  "ticket.panel.turnVoiceOn": "تفعيل وضع الصوت",
 };
 
 export default ar;
