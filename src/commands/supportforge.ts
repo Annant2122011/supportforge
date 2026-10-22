@@ -94,10 +94,10 @@ import {
   getTicketStatus,
 } from '../services/ticketStateService';
 
-const SUPPORT_CATEGORY_NAME = 'Support Forge';
-const PANEL_CHANNEL_NAME = 'support-panel';
+const SUPPORT_CATEGORY_NAME = 'QueryFixr Support';
+const PANEL_CHANNEL_NAME = 'qf-panel';
 const PANEL_TOPIC = 'supportforge:panel';
-const TRANSCRIPT_NAME = '📄 support-transcripts';
+const TRANSCRIPT_NAME = '📄 qf-transcripts';
 const TRANSCRIPT_TOPIC = 'supportforge:transcript';
 const TICKET_PREFIX = 'supportforge:ticket';
 
