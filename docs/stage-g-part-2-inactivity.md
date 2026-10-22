@@ -2,19 +2,19 @@
 
 ## Scope
 
-This stage adds per-server inactivity warnings and automatic closure for durable ResolveX tickets. It does not change ticket creation, support-hour admission, retention approvals, or the Stage G Part 1 permission policy.
+This stage adds per-server inactivity warnings and automatic closure for durable QueryFixr tickets. It does not change ticket creation, support-hour admission, retention approvals, or the Stage G Part 1 permission policy.
 
 ## Configuration
 
 The feature is **disabled by default**. An administrator can configure it from either the Settings dashboard's **Inactivity Automation** button or the slash-command fallback:
 
-- `/supportforge settings inactivity action:show`
-- `/supportforge settings inactivity action:enable`
-- `/supportforge settings inactivity action:disable`
-- `/supportforge settings inactivity action:configure idle-hours:72 grace-hours:24`
-- `/supportforge settings inactivity action:set-exempt-roles exempt-roles:ROLE_ID_1,ROLE_ID_2`
-- `/supportforge settings inactivity action:set-exempt-departments exempt-departments:billing,returns`
-- `/supportforge settings inactivity action:clear-exemptions`
+- `/qf settings inactivity action:show`
+- `/qf settings inactivity action:enable`
+- `/qf settings inactivity action:disable`
+- `/qf settings inactivity action:configure idle-hours:72 grace-hours:24`
+- `/qf settings inactivity action:set-exempt-roles exempt-roles:ROLE_ID_1,ROLE_ID_2`
+- `/qf settings inactivity action:set-exempt-departments exempt-departments:billing,returns`
+- `/qf settings inactivity action:clear-exemptions`
 
 The Settings dashboard offers the same role and department controls: choose zero or more roles in the role selector, and edit the comma-separated list of configured department IDs through the department modal. Up to 25 roles and 25 department IDs are retained. A configured role exempts tickets whose owner or assigned staff member has that role; a configured department exempts all tickets in that department. All settings changes invalidate old policy-generation warning markers and clear outstanding warning/grace state. Idle threshold is bounded to 1–720 hours; grace is bounded to 1–168 hours. Defaults, when enabled explicitly, are a 72-hour idle threshold followed by a 24-hour grace period.
 
@@ -26,7 +26,7 @@ The Settings dashboard offers the same role and department controls: choose zero
 - Critical-priority tickets and tickets with durable `vip`, `activeEscalation`, or `inactivityExempt` markers are exempt. Administrators can also exempt roles and departments from the Settings dashboard or slash-command fallback. If Discord membership lookup fails while configured role exemptions must be evaluated, the sweep fails safe and does not auto-close that ticket during the current pass.
 - The warning message contains a deterministic ticket/activity/policy-generation marker. If the process stops after Discord sends the warning but before PostgreSQL stores its message ID, the next sweep tries to recover that warning instead of sending another. Discord and PostgreSQL cannot share one atomic transaction, so recovery minimizes but cannot mathematically eliminate every duplicate-send window.
 - The warning creation time and configured grace period determine the persisted deadline. New ticket activity changes the baseline and invalidates the old warning/deadline.
-- Before closure, ResolveX must find or create a transcript in the configured transcript channel. A deterministic transcript marker lets a restart reuse a transcript already uploaded before a process interruption.
+- Before closure, QueryFixr must find or create a transcript in the configured transcript channel. A deterministic transcript marker lets a restart reuse a transcript already uploaded before a process interruption.
 - The final status transition uses a PostgreSQL row lock and compares the expected activity anchor in the same transaction that records the lifecycle event and outbox work. If a reply or other ticket update wins the race, the stale auto-close is rejected.
 - Once the durable close commits, the existing outbox reconciles text-channel permissions, channel organization, and private-thread locking/archival. A direct private-thread sync is attempted as well; failures remain retryable through the outbox.
 - Closed, archived, deleted, malformed, unsupported, or unexpectedly locked private-thread tickets are not auto-closed. Missing transcript configuration/permissions also fails safely without changing ticket status.
