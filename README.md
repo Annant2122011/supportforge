@@ -1,6 +1,6 @@
-# ResolveX
+# ResolvX
 
-ResolveX is a Discord-first support ticket system. It uses Neon PostgreSQL as the live durable store and keeps Discord interactions on the same validated ticket-creation and lifecycle services regardless of whether the action starts from a slash command or a button.
+ResolvX is a Discord-first support ticket system. It uses Neon PostgreSQL as the live durable store and keeps Discord interactions on the same validated ticket-creation and lifecycle services regardless of whether the action starts from a slash command or a button.
 
 ## Current capabilities
 
@@ -80,7 +80,7 @@ Settings-channel customization is stored separately from the public ticket panel
 
 ## Verification and rollout
 
-The Build and SupportForge CI workflows run the TypeScript build, automated tests, and database verification. Keep PR #12 open until its final checks pass and live acceptance has been completed. Deploy to a test guild and non-production bot first. Do not merge or deploy a production build solely because a CI workflow is green.
+The Build and ResolvX CI workflows run the TypeScript build, automated tests, and database verification. Keep PR #12 open until its final checks pass and live acceptance has been completed. Deploy to a test guild and non-production bot first. Do not merge or deploy a production build solely because a CI workflow is green.
 
 - [Stage A–E inspection](docs/stages-a-to-e-audit.md)
 - [Ticket archive and recovery behavior](docs/recovery-archive.md)
