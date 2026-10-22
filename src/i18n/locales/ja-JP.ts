@@ -77,6 +77,11 @@ const jaJP: Record<TranslationKey, string> = {
   "ticket.panel.voice": "音声",
   "ticket.panel.joinVoice": "音声に参加",
   "ticket.panel.closeVoice": "音声チャットを終了",
+  "ticket.panel.reassign": "再割り当て",
+  "ticket.panel.internalNote": "内部メモ",
+  "ticket.panel.reportUser": "ユーザーを報告",
+  "ticket.panel.moveControls": "操作ボタンをここへ移動",
+  "ticket.panel.turnVoiceOn": "音声モードを有効化",
 };
 
 export default jaJP;
