@@ -203,7 +203,7 @@ export function runMigrations(
       }
 
       throw new Error(
-        'SupportForge database migration ' +
+        'ResolvX database migration ' +
           migration.id +
           ' (' +
           migration.name +
