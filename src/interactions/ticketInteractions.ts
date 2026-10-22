@@ -59,6 +59,7 @@ import {
 
 import { resetPanelActivity } from '../services/panelActivityService';
 import { getAdvancedSettings, type TicketPriority } from '../services/advancedSettingsService';
+import { translate } from '../i18n/translationService';
 import { getThemeColor } from '../services/uiThemeService';
 import { ensureDepartmentCategory } from '../services/departmentCategoryService';
 import { endTicketVoiceMode, startTicketVoiceMode, syncTicketVoiceParticipants } from '../services/voiceModeService';
@@ -769,6 +770,7 @@ async function updateMainMessage(
       await getGuildConfig(
           channel.guild.id,
         );
+    const locale = (await getAdvancedSettings(channel.guild.id)).locale;
 
     let message;
     try {
@@ -858,10 +860,7 @@ async function updateMainMessage(
           ),
         ],
         components:
-          buildTicketPanelComponents(
-            status,
-            effectivePanelTopic,
-          ),
+          buildTicketPanelComponents(status, effectivePanelTopic, locale),
       });
   } catch (error) {
     console.error(
@@ -1052,11 +1051,16 @@ async function ensureSupportHoursAllows(
   const decision = await evaluateSupportHours(guildId, { departmentId, panelId });
   if (decision.ticketCreationAllowed) return true;
 
+  const locale = (await getAdvancedSettings(guildId)).locale;
   const nextOpening = decision.nextOpeningAt
-    ? ' Next opening: ' + formatSupportHoursInstant(decision.nextOpeningAt, decision.timezone) + '.'
-    : ' No next opening is configured; contact a server administrator.';
-  const message = '⏰ Support is currently closed in ' + decision.timezone +
-    '. New tickets are restricted by the configured support-hours policy.' + nextOpening;
+    ? translate(locale, 'supportHours.nextOpening', {
+        nextOpening: formatSupportHoursInstant(decision.nextOpeningAt, decision.timezone),
+      })
+    : translate(locale, 'supportHours.noNextOpening');
+  const message = '⏰ ' + translate(locale, 'ticket.intake.outsideHours', {
+    timezone: decision.timezone,
+    nextOpening,
+  });
   await replyError(interaction, message);
 
   // Audit delivery must not delay Discord's initial acknowledgement.
@@ -1102,6 +1106,9 @@ async function createTicket(
 
   const guild =
     interaction.guild;
+  const serverLocale = await getAdvancedSettings(guild.id)
+    .then((settings) => settings.locale)
+    .catch(() => 'en-US' as const);
 
   const lockKey =
     `${guild.id}:${interaction.user.id}:${departmentId}`;
@@ -1113,7 +1120,7 @@ async function createTicket(
   ) {
     await replyError(
       interaction,
-      '⏳ Your ticket request is already being processed.',
+      translate(serverLocale, 'ticket.intake.inProgress'),
     );
     return;
   }
@@ -1140,7 +1147,7 @@ async function createTicket(
     if (!creationLease) {
       await replyError(
         interaction,
-        '⏳ Another ticket request for this department is already being processed. Please wait a moment and try again.',
+        translate(serverLocale, 'ticket.intake.inProgress'),
       );
       return;
     }
@@ -1169,7 +1176,7 @@ async function createTicket(
     if (!department || !tag) {
       await replyError(
         interaction,
-        '❌ This department/tag combination no longer exists. Please refresh the support panel.',
+        translate(serverLocale, 'ticket.intake.invalidDepartment'),
       );
       return;
     }
@@ -1324,7 +1331,7 @@ async function createTicket(
     if (existing) {
       await replyError(
         interaction,
-        `❌ You already have an active **${department.name}** ticket: ${existing}`,
+        translate(serverLocale, 'ticket.intake.alreadyActive', { department: department.name, ticketChannel: existing.toString() }),
       );
       return;
     }
@@ -1500,7 +1507,7 @@ async function createTicket(
             ],
             components: ticketChannel.type === ChannelType.PrivateThread
               ? buildPrivateThreadTicketComponents('open', ticketChannel.id)
-              : buildTicketPanelComponents('open', topic),
+              : buildTicketPanelComponents('open', topic, advancedSettings.locale),
           });
 
       const finalTopic =
@@ -1702,7 +1709,7 @@ async function createTicket(
 
       await interaction.editReply({
         content:
-          `✅ Your ticket has been created: ${ticketChannel}`,
+          translate(advancedSettings.locale, 'ticket.created.confirmation', { channel: ticketChannel.toString() }),
       });
 
       /*
@@ -1984,6 +1991,7 @@ async function transition(
   );
 
   try {
+    const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
     /*
      * Always read the latest channel topic before changing state.
      * This prevents stale runtime data from becoming authoritative.
@@ -2535,14 +2543,24 @@ async function transition(
       );
     }
 
+    const ticketNumber = getField(newTopic, 'number') ?? 'unknown';
+    const localizedStatusMessage = newStatus === 'claimed'
+      ? translate(locale, 'ticket.claimed', { staffName: interaction.user.tag })
+      : newStatus === 'pending'
+        ? translate(locale, 'ticket.pending', { ticketNumber })
+        : newStatus === 'open'
+          ? translate(locale, 'ticket.resumed', { ticketNumber })
+          : newStatus === 'closed'
+            ? translate(locale, 'ticket.closed', { ticketNumber })
+            : newStatus === 'reopened'
+              ? translate(locale, 'ticket.reopened', { ticketNumber })
+              : translate(locale, 'ticket.archived', { ticketNumber });
     await interaction.editReply(
       sideEffectFailures.length
-        ? `⚠️ Ticket status changed to **${capitalize(
-            newStatus,
-          )}** in durable storage. Discord could not immediately apply: ${sideEffectFailures.join(', ')}. The durable ticket state was preserved.`
-        : `✅ Ticket status changed to **${capitalize(
-            newStatus,
-          )}**.`,
+        ? '⚠️ ' + localizedStatusMessage + ' ' +
+          translate(locale, 'errors.actionFailed') + ' ' + sideEffectFailures.join(', ') +
+          '. The durable ticket state was preserved.'
+        : '✅ ' + localizedStatusMessage,
     );
 
     /*
@@ -2550,9 +2568,7 @@ async function transition(
      */
     void channel
       .send(
-        `📌 Ticket status changed to **${capitalize(
-          newStatus,
-        )}** by ${interaction.user}.`,
+        localizedStatusMessage + ' • ' + interaction.user.tag,
       )
       .catch((error) => {
         console.error(
