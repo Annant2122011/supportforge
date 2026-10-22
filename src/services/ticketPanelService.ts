@@ -39,6 +39,8 @@ function formatInstant(value: string | undefined): string {
   return Number.isNaN(date.getTime()) ? value : `<t:${Math.floor(date.getTime() / 1000)}:R>`;
 }
 
+const QUERYFIXR_ICON_URL = 'https://i.ibb.co/fdRDWXbH/3v-OKZCYL0-Rqkdu-OQ4t-PKA-Xt-Cc-OQu-N-Picsart-Ai-Image-Enhancer.png';
+
 export function buildTicketPanelEmbed(
   guild: { name: string },
   channelName: string,
@@ -63,6 +65,7 @@ export function buildTicketPanelEmbed(
 
   return new EmbedBuilder()
     .setColor(priorityColor(priority))
+    .setAuthor({ name: 'QueryFixr', iconURL: QUERYFIXR_ICON_URL })
     .setTitle(`🎫 QueryFixr Ticket #${ticketNumber}`)
     .setDescription(
       `**${decodeSubject(getField(topic, 'subject'))}**\n\n` +
