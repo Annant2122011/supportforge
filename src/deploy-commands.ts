@@ -13,11 +13,11 @@ const rest = new REST({ version: '10' }).setToken(required('DISCORD_TOKEN'));
 async function deploy(): Promise<void> {
   const clientId = required('CLIENT_ID');
   const guildId = required('GUILD_ID');
-  console.log('🔄 Deploying SupportForge commands...');
+  console.log('🔄 Deploying ResolvX commands...');
   await rest.put(Routes.applicationGuildCommands(clientId, guildId), {
     body: [data.toJSON()],
   });
-  console.log('✅ SupportForge command deployed.');
+  console.log('✅ ResolvX command deployed.');
 }
 
 deploy().catch((error) => {
