@@ -63,7 +63,7 @@ test('new locales translate the expanded common and ticket vocabulary', () => {
   assert.equal(translate('it-IT', 'common.close'), 'Chiudi');
   assert.equal(translate('id-ID', 'ticket.created.title', { ticketNumber: 8 }), 'Tiket #8 dibuat');
   assert.equal(translate('ko-KR', 'ticket.access.userAdded', { userName: 'Min' }), 'Min님이 이 티켓에 추가되었습니다.');
-  assert.equal(translate('ru-RU', 'errors.databaseUnavailable'), 'ResolvX не удалось подключиться к базе данных. Повторите попытку немного позже.');
+  assert.equal(translate('ru-RU', 'errors.databaseUnavailable'), 'QueryFixr не удалось подключиться к базе данных. Повторите попытку немного позже.');
   assert.equal(translate('zh-CN', 'settings.locale.languageChanged', { locale: '简体中文' }), '服务器语言现在为 简体中文。');
   assert.equal(translate('tr-TR', 'retention.reviewRequired'), 'Silmeyi onaylamadan önce uygun biletleri inceleyin.');
 });
