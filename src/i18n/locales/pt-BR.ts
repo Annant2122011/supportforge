@@ -77,6 +77,11 @@ const ptBR: Record<TranslationKey, string> = {
   "ticket.panel.voice": "Voz",
   "ticket.panel.joinVoice": "Entrar na voz",
   "ticket.panel.closeVoice": "Fechar chat de voz",
+  "ticket.panel.reassign": "Reatribuir",
+  "ticket.panel.internalNote": "Nota interna",
+  "ticket.panel.reportUser": "Denunciar usuário",
+  "ticket.panel.moveControls": "Mover controles para cá",
+  "ticket.panel.turnVoiceOn": "Ativar modo de voz",
 };
 
 export default ptBR;
