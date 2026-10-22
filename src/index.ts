@@ -24,6 +24,7 @@ import {
 import {
   getPersistedTicket,
   getPersistedTicketStatus,
+  transitionPersistedTicket,
   updatePersistedTicketMetadata,
 } from './services/ticketPersistenceService';
 
@@ -919,17 +920,17 @@ client.on('messageCreate', async (message) => {
     return;
   }
 
-  if (persistedTicket && !persistedTicket.deletedAt) {
-    const department = persistedTicket.departmentId
-      ? guildConfig.departments[persistedTicket.departmentId]
+  if (observedTicket && !observedTicket.deletedAt) {
+    const department = observedTicket.departmentId
+      ? guildConfig.departments[observedTicket.departmentId]
       : undefined;
     const hasStaffRole = Boolean(
       department?.staffRoleId &&
       message.member?.roles.cache.has(department.staffRoleId),
     );
     const isOwnerOrParticipant = Boolean(
-      message.author.id === persistedTicket.ownerId ||
-      persistedTicket.participantIds.includes(message.author.id),
+      message.author.id === observedTicket.ownerId ||
+      observedTicket.participantIds.includes(message.author.id),
     );
     const authorType = hasStaffRole
       ? 'staff'
