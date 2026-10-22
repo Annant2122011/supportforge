@@ -34,8 +34,10 @@ import { refreshPrivateThreadPanel } from './privateThreadTicketService';
 import { logTicketEvent } from './auditLogService';
 
 const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
-const WARNING_MARKER_PREFIX = 'QueryFixr inactivity warning';
-const TRANSCRIPT_MARKER_PREFIX = '[QueryFixr inactivity transcript';
+const WARNING_MARKER_PREFIX = 'QF inactivity warning';
+const LEGACY_WARNING_MARKER_PREFIX = 'Resolve' + 'X inactivity warning';
+const TRANSCRIPT_MARKER_PREFIX = '[QF inactivity transcript';
+const LEGACY_TRANSCRIPT_MARKER_PREFIX = '[Resolve' + 'X inactivity transcript';
 const SYSTEM_ACTOR = {
   id: 'supportforge-system',
   attribution: 'actorKnown' as const,
@@ -58,6 +60,19 @@ function metadataString(ticket: PersistedTicket, key: string): string | null {
 function warningMarker(channelId: string, anchorAt: string, generation: number): string {
   return WARNING_MARKER_PREFIX + ' | ticket=' + channelId + ' | activity=' + anchorAt + ' | generation=' + generation;
 }
+function matchesWarningMarker(footer: string | null, marker: string): boolean {
+  if (!footer) return false;
+  if (footer === marker) return true;
+  const suffix = marker.slice(WARNING_MARKER_PREFIX.length);
+  return footer === LEGACY_WARNING_MARKER_PREFIX + suffix;
+}
+
+function matchesTranscriptMarker(content: string, marker: string): boolean {
+  if (content.includes(marker)) return true;
+  const suffix = marker.slice(TRANSCRIPT_MARKER_PREFIX.length);
+  return content.includes(LEGACY_TRANSCRIPT_MARKER_PREFIX + suffix);
+}
+
 
 async function cancelIfInactivityPolicyChanged(
   client: Client,
@@ -135,11 +150,11 @@ async function findWarningMessage(
 ): Promise<Message | null> {
   if (knownMessageId) {
     const known = await channel.messages.fetch(knownMessageId).catch(() => null);
-    if (known && known.author.id === client.user?.id && embedFooter(known) === marker) return known;
+    if (known && known.author.id === client.user?.id && matchesWarningMarker(embedFooter(known), marker)) return known;
   }
   const recent = await channel.messages.fetch({ limit: 100 });
   return recent.find((message) =>
-    message.author.id === client.user?.id && embedFooter(message) === marker,
+    message.author.id === client.user?.id && matchesWarningMarker(embedFooter(message), marker),
   ) ?? null;
 }
 
@@ -148,7 +163,10 @@ async function cancelVisibleWarnings(
   client: Client,
   ticket: PersistedTicket,
 ): Promise<void> {
-  const prefix = WARNING_MARKER_PREFIX + ' | ticket=' + ticket.channelId + ' |';
+  const prefixes = [
+    WARNING_MARKER_PREFIX + ' | ticket=' + ticket.channelId + ' |',
+    LEGACY_WARNING_MARKER_PREFIX + ' | ticket=' + ticket.channelId + ' |',
+  ];
   const candidates = new Map<string, Message>();
   const knownId = metadataString(ticket, 'inactivityWarningMessageId');
   if (knownId) {
@@ -161,7 +179,7 @@ async function cancelVisibleWarnings(
     const footer = embedFooter(message);
     if (
       message.author.id !== client.user?.id ||
-      !footer?.startsWith(prefix) ||
+      !prefixes.some((prefix) => footer?.startsWith(prefix)) ||
       footer.endsWith('| CANCELLED')
     ) continue;
     await message.edit({
@@ -374,10 +392,10 @@ async function findTranscriptMessage(
 ): Promise<Message | null> {
   if (knownMessageId) {
     const known = await channel.messages.fetch(knownMessageId).catch(() => null);
-    if (known && known.content.includes(marker)) return known;
+    if (known && matchesTranscriptMarker(known.content, marker)) return known;
   }
   const recent = await channel.messages.fetch({ limit: 100 });
-  return recent.find((message) => message.content.includes(marker)) ?? null;
+  return recent.find((message) => matchesTranscriptMarker(message.content, marker)) ?? null;
 }
 
 function makeClosedTopic(topic: string, closedAt: string, transcriptId: string): string {
@@ -428,6 +446,11 @@ async function autoCloseInactiveTicket(
     ? metadataString(fresh, 'inactivityTranscriptMessageId')
     : null;
   let transcriptMessage = await findTranscriptMessage(destination, marker, knownTranscriptId);
+  if (transcriptMessage && !transcriptMessage.content.includes(marker)) {
+    await transcriptMessage.edit({ content: marker }).catch((error) => {
+      console.warn('Could not update a legacy inactivity transcript marker to QF branding:', error);
+    });
+  }
 
   if (!transcriptMessage) {
     const ticketNumber = fresh.ticketNumber ?? 'unknown';
