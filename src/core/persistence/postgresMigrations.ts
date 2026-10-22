@@ -518,7 +518,7 @@ export async function runPostgresMigrations(
       }
 
       throw new Error(
-        `SupportForge PostgreSQL migration ${migration.id} (${migration.name}) failed. The migration marker was not recorded.`,
+        `ResolvX PostgreSQL migration ${migration.id} (${migration.name}) failed. The migration marker was not recorded.`,
         { cause: error },
       );
     }
