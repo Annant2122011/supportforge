@@ -8,6 +8,7 @@ import {
   MessageFlags,
   ModalBuilder,
   PermissionFlagsBits,
+  RoleSelectMenuBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuInteraction,
   RoleSelectMenuInteraction,
@@ -106,7 +107,7 @@ import {
 
 const SETTINGS_TOPIC_PREFIX = 'supportforge:settings';
 
-type SettingsViewInteraction = ButtonInteraction | StringSelectMenuInteraction;
+type SettingsViewInteraction = ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction;
 
 function isAdministrator(interaction: ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction | ModalSubmitInteraction): boolean {
   return Boolean(
@@ -1475,7 +1476,24 @@ async function showRetention(interaction: ButtonInteraction): Promise<void> {
 }
 
 async function showInactivitySettings(interaction: SettingsViewInteraction, notice = ''): Promise<void> {
-  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const guild = interaction.guild!;
+  const settings = await getAdvancedSettings(guild.id);
+  const config = await getGuildConfig(guild.id);
+  const defaultRoleIds = settings.inactivity.exemptRoleIds.filter((roleId) => guild.roles.cache.has(roleId));
+  const roleSelector = new RoleSelectMenuBuilder()
+    .setCustomId('sf:settings:inactivity:exempt-roles')
+    .setPlaceholder('Select roles exempt from inactivity closure')
+    .setMinValues(0)
+    .setMaxValues(25);
+  if (defaultRoleIds.length) roleSelector.setDefaultRoles(...defaultRoleIds);
+
+  const roleNames = settings.inactivity.exemptRoleIds
+    .map((roleId) => guild.roles.cache.get(roleId)?.name ?? roleId)
+    .join(', ') || 'None';
+  const departmentNames = settings.inactivity.exemptDepartmentIds
+    .map((departmentId) => config.departments[departmentId]?.name ?? departmentId)
+    .join(', ') || 'None';
+
   await renderSettingsView(interaction, [
     new EmbedBuilder()
       .setTitle('⏳ Ticket Inactivity Automation')
@@ -1484,8 +1502,10 @@ async function showInactivitySettings(interaction: SettingsViewInteraction, noti
         'When enabled, active tickets with no recorded activity receive a visible warning. If nobody replies during the grace period, ResolveX creates or reuses a transcript and closes the ticket. Any new activity resets the warning. The scheduler and deadlines survive restarts.\n\n' +
         '**Status:** ' + (settings.inactivity.enabled ? '🟢 Enabled' : '⚪ Disabled') + '\n' +
         '**Warn after:** ' + settings.inactivity.idleHours + ' hours without activity\n' +
-        '**Grace after warning:** ' + settings.inactivity.graceHours + ' hours\n\n' +
-        'Automation is opt-in for each server. Closure is skipped if transcript delivery is unavailable or the ticket receives new activity.'
+        '**Grace after warning:** ' + settings.inactivity.graceHours + ' hours\n' +
+        '**Exempt roles:** ' + roleNames + '\n' +
+        '**Exempt departments:** ' + departmentNames + '\n\n' +
+        'A selected role exempts tickets whose owner or assigned staff holds that role. Department exemptions apply to every ticket in that department. An exemption takes effect immediately and clears any existing warning for the affected ticket.'
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -1495,8 +1515,10 @@ async function showInactivitySettings(interaction: SettingsViewInteraction, noti
         .setEmoji(settings.inactivity.enabled ? '⏸️' : '▶️')
         .setStyle(settings.inactivity.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
       new ButtonBuilder().setCustomId('sf:settings:inactivity:edit').setLabel('Edit Thresholds').setEmoji('🕒').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:inactivity:departments').setLabel('Edit Departments').setEmoji('🗂️').setStyle(ButtonStyle.Secondary),
       backButton(),
     ),
+    new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(roleSelector),
   ]);
 }
 
@@ -2058,6 +2080,20 @@ export async function handleSettingsInteraction(
         new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:remove:' + categoryId + ':' + subcategoryId).setLabel('Remove').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
       )],
     });
+    return true;
+  }
+
+  if (interaction.isRoleSelectMenu() && interaction.customId === 'sf:settings:inactivity:exempt-roles') {
+    const selectedRoleIds = [...new Set(interaction.values)].slice(0, 25);
+    await updateAdvancedSettings(guild.id, (settings) => {
+      settings.inactivity.exemptRoleIds = selectedRoleIds;
+      settings.inactivity.generation = Math.min(2147483647, settings.inactivity.generation + 1);
+    });
+    await clearTicketInactivityWarningsForGuild(guild);
+    await refreshSettingsChannel(guild);
+    await auditSettingsAction(guild, interaction, 'TICKET_INACTIVITY_EXEMPT_ROLES_CHANGED',
+      'Set inactivity-exempt roles to ' + (selectedRoleIds.join(', ') || 'none') + '.');
+    await showInactivitySettings(interaction, '✅ Inactivity role exemptions saved.');
     return true;
   }
 
@@ -2710,6 +2746,20 @@ export async function handleSettingsInteraction(
       await showInactivitySettings(interaction, enabled
         ? '✅ Inactivity automation is enabled.'
         : '✅ Inactivity automation is disabled and outstanding grace periods were cleared.');
+      return true;
+    }
+
+    if (id === 'sf:settings:inactivity:departments') {
+      const settings = await getAdvancedSettings(guild.id);
+      const deptText = settings.inactivity.exemptDepartmentIds.join(', ');
+      const input = new TextInputBuilder()
+        .setCustomId('departments')
+        .setLabel('Comma-separated department IDs (max 25)')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(false)
+        .setMaxLength(1000);
+      if (deptText) input.setValue(deptText);
+      await openModal(interaction, 'sf:settings:modal:inactivity-departments', 'Department Exemptions', [input]);
       return true;
     }
 
@@ -3530,6 +3580,38 @@ export async function handleSettingsInteraction(
       } catch (error) {
         await reject(interaction, error instanceof Error ? error.message : 'Could not save that support-hours schedule.');
       }
+      return true;
+    }
+
+    if (interaction.customId === 'sf:settings:modal:inactivity-departments') {
+      const rawDepartmentIds = interaction.fields.getTextInputValue('departments');
+      const departmentIds = [...new Set(rawDepartmentIds.split(',').map((value) => value.trim()).filter(Boolean))];
+      if (departmentIds.length > 25) {
+        await reject(interaction, 'Choose no more than 25 department IDs.');
+        return true;
+      }
+      const config = await getGuildConfig(guild.id);
+      const missing = departmentIds.filter((departmentId) => !config.departments[departmentId]);
+      if (missing.length) {
+        await reject(interaction, 'These department IDs are not configured in this server: ' + missing.join(', '));
+        return true;
+      }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await updateAdvancedSettings(guild.id, (settings) => {
+        settings.inactivity.exemptDepartmentIds = departmentIds;
+        settings.inactivity.generation = Math.min(2147483647, settings.inactivity.generation + 1);
+      });
+      await clearTicketInactivityWarningsForGuild(guild);
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'TICKET_INACTIVITY_EXEMPT_DEPARTMENTS_CHANGED',
+        'Set inactivity-exempt department IDs to ' + (departmentIds.join(', ') || 'none') + '.');
+      await interaction.editReply({
+        content: '✅ Department inactivity exemptions saved.',
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId('sf:settings:inactivity').setLabel('Open Inactivity Settings').setEmoji('⏳').setStyle(ButtonStyle.Primary),
+          backButton(),
+        )],
+      });
       return true;
     }
 
