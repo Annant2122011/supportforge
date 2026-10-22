@@ -38,7 +38,7 @@ const CATALOGS: Readonly<Record<SupportedLocale, Readonly<Record<TranslationKey,
 
 /** Single-pass interpolation: parameter content is literal and never reparsed. */
 function interpolate(template: string, params: TranslationParams = {}): string {
-  return template.replace(/\\{([A-Za-z][A-Za-z0-9_]*)\\}/g, (placeholder, name: string) => {
+  return template.replace(/\{([A-Za-z][A-Za-z0-9_]*)\}/g, (placeholder, name: string) => {
     const value = params[name];
     return value === null || value === undefined ? placeholder : String(value);
   });
