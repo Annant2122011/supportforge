@@ -77,6 +77,11 @@ const deDE: Record<TranslationKey, string> = {
   "ticket.panel.voice": "Sprache",
   "ticket.panel.joinVoice": "Sprachchat beitreten",
   "ticket.panel.closeVoice": "Sprachchat schließen",
+  "ticket.panel.reassign": "Neu zuweisen",
+  "ticket.panel.internalNote": "Interne Notiz",
+  "ticket.panel.reportUser": "Benutzer melden",
+  "ticket.panel.moveControls": "Steuerung hierher verschieben",
+  "ticket.panel.turnVoiceOn": "Sprachmodus aktivieren",
 };
 
 export default deDE;
