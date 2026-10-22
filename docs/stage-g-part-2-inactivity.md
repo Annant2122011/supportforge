@@ -12,15 +12,18 @@ The feature is **disabled by default**. An administrator can configure it from e
 - `/supportforge settings inactivity action:enable`
 - `/supportforge settings inactivity action:disable`
 - `/supportforge settings inactivity action:configure idle-hours:72 grace-hours:24`
+- `/supportforge settings inactivity action:set-exempt-roles exempt-roles:ROLE_ID_1,ROLE_ID_2`
+- `/supportforge settings inactivity action:set-exempt-departments exempt-departments:billing,returns`
+- `/supportforge settings inactivity action:clear-exemptions`
 
-The Settings button offers the same enable/disable and threshold-edit actions. Idle threshold is bounded to 1–720 hours; grace is bounded to 1–168 hours. Defaults, when enabled explicitly, are a 72-hour idle threshold followed by a 24-hour grace period.
+The Settings dashboard offers the same role and department controls: choose zero or more roles in the role selector, and edit the comma-separated list of configured department IDs through the department modal. Up to 25 roles and 25 department IDs are retained. A configured role exempts tickets whose owner or assigned staff member has that role; a configured department exempts all tickets in that department. All settings changes invalidate old policy-generation warning markers and clear outstanding warning/grace state. Idle threshold is bounded to 1–720 hours; grace is bounded to 1–168 hours. Defaults, when enabled explicitly, are a 72-hour idle threshold followed by a 24-hour grace period.
 
 ## Runtime design
 
 - A single scheduler starts after Discord client readiness and sweeps durable PostgreSQL ticket records every five minutes. Timers are not stored in memory as source of truth.
 - Activity baseline is the durable `metadata.lastActivityAt`, falling back to `updatedAt` and then `createdAt` for older tickets.
 - Before sending a warning, after generating/uploading a transcript, and immediately before close, the scheduler checks recent Discord human messages against the activity anchor. The full due-action sweep scans up to 1,000 history entries; if it cannot establish that the anchor is covered, it pauses instead of guessing.
-- Critical-priority tickets and tickets with durable `vip`, `activeEscalation`, or `inactivityExempt` markers are exempt. These markers are currently supported in the domain policy but do not yet have a dedicated settings UI or per-department exemption editor.
+- Critical-priority tickets and tickets with durable `vip`, `activeEscalation`, or `inactivityExempt` markers are exempt. Administrators can also exempt roles and departments from the Settings dashboard or slash-command fallback. If Discord membership lookup fails while configured role exemptions must be evaluated, the sweep fails safe and does not auto-close that ticket during the current pass.
 - The warning message contains a deterministic ticket/activity/policy-generation marker. If the process stops after Discord sends the warning but before PostgreSQL stores its message ID, the next sweep tries to recover that warning instead of sending another. Discord and PostgreSQL cannot share one atomic transaction, so recovery minimizes but cannot mathematically eliminate every duplicate-send window.
 - The warning creation time and configured grace period determine the persisted deadline. New ticket activity changes the baseline and invalidates the old warning/deadline.
 - Before closure, ResolveX must find or create a transcript in the configured transcript channel. A deterministic transcript marker lets a restart reuse a transcript already uploaded before a process interruption.
