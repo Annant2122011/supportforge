@@ -1,4 +1,4 @@
-name: SupportForge CI
+name: ResolvX CI
 
 on:
   push:
