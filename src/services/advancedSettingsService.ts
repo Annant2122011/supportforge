@@ -1,5 +1,6 @@
 import type { Guild } from 'discord.js';
 import { normalizeDiscordEmoji } from '../core/domain/discordEmoji';
+import { normalizeInactivityExemptionIds } from '../core/domain/ticketInactivityExemptions';
 import { getJsonDocument, setJsonDocument } from './jsonDocumentPersistenceService';
 
 export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent' | 'critical';
@@ -266,7 +267,7 @@ function cloneDefaults(): AdvancedGuildSettings {
   return {
     ...DEFAULTS,
     panelActivity: { ...DEFAULTS.panelActivity },
-    inactivity: { ...DEFAULTS.inactivity },
+    inactivity: { ...DEFAULTS.inactivity, exemptRoleIds: [...DEFAULTS.inactivity.exemptRoleIds], exemptDepartmentIds: [...DEFAULTS.inactivity.exemptDepartmentIds] },
     retention: {
       ...DEFAULTS.retention,
       pendingApprovals: {
@@ -352,15 +353,6 @@ function normalizeBoundedInteger(value: unknown, fallback: number, minimum: numb
   return Math.min(maximum, Math.max(minimum, parsed));
 }
 
-function normalizeStringIdList(value: unknown, maximum = 25): string[] {
-  if (!Array.isArray(value)) return [];
-  return [...new Set(value
-    .filter((candidate): candidate is string => typeof candidate === 'string')
-    .map((candidate) => candidate.trim())
-    .filter((candidate) => candidate.length > 0 && candidate.length <= 100))]
-    .slice(0, maximum);
-}
-
 function normalizeExistingSettings(
   settings: Partial<AdvancedGuildSettings>,
 ): AdvancedGuildSettings {
@@ -379,8 +371,8 @@ function normalizeExistingSettings(
       idleHours: normalizeBoundedInteger(settings.inactivity?.idleHours, DEFAULTS.inactivity.idleHours, 1, 720),
       graceHours: normalizeBoundedInteger(settings.inactivity?.graceHours, DEFAULTS.inactivity.graceHours, 1, 168),
       generation: normalizeBoundedInteger(settings.inactivity?.generation, DEFAULTS.inactivity.generation, 1, 2147483647),
-      exemptRoleIds: normalizeStringIdList(settings.inactivity?.exemptRoleIds),
-      exemptDepartmentIds: normalizeStringIdList(settings.inactivity?.exemptDepartmentIds),
+      exemptRoleIds: normalizeInactivityExemptionIds(settings.inactivity?.exemptRoleIds),
+      exemptDepartmentIds: normalizeInactivityExemptionIds(settings.inactivity?.exemptDepartmentIds),
     },
     retention: {
       ...DEFAULTS.retention,
