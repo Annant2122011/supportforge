@@ -17,7 +17,7 @@ import { getDiscordRetryAfterMs } from '../utils/discordRateLimit';
 const DATA_DIR = join(process.cwd(), 'data');
 
 /*
- * Factory reset must only delete resources SupportForge can positively
+ * Factory reset must only delete resources ResolvX can positively
  * identify through persisted IDs, managed topics, or managed-category ancestry.
  * Names alone are never ownership proof because Discord users can create
  * unrelated resources with identical names.
@@ -75,7 +75,7 @@ function isSupportForgeChannel(
   /*
    * Destructive reset intentionally refuses to infer ownership from names or
    * permission fingerprints. Explicit persisted IDs, managed-category ledger
-   * entries, or SupportForge topic metadata are the only ownership proofs.
+   * entries, or ResolvX topic metadata are the only ownership proofs.
    */
   return false;
 }
@@ -208,7 +208,7 @@ export async function performFactoryReset(
      */
     await guild.channels.fetch().catch((error) => {
       throw new Error(
-        'SupportForge could not refresh the guild channel inventory before reset. No infrastructure was deleted.',
+        'ResolvX could not refresh the guild channel inventory before reset. No infrastructure was deleted.',
         { cause: error },
       );
     });
@@ -304,7 +304,7 @@ export async function performFactoryReset(
 
     /*
      * Delete child channels first. This includes ticket voice rooms, which
-     * are not categories but are nevertheless SupportForge-created resources.
+     * are not categories but are nevertheless ResolvX-created resources.
      */
     const childChannels = targets
       .filter((channel) => channel.type !== ChannelType.GuildCategory)
@@ -325,7 +325,7 @@ export async function performFactoryReset(
     for (const channel of childChannels) {
       const result = await deleteChannelSafely(
         channel,
-        'SupportForge factory reset: remove all SupportForge channels and messages',
+        'ResolvX factory reset: remove all ResolvX channels and messages',
       );
 
       if (result.deleted) {
@@ -347,7 +347,7 @@ export async function performFactoryReset(
     for (const category of categories) {
       const result = await deleteChannelSafely(
         category,
-        'SupportForge factory reset: remove all SupportForge channels and messages',
+        'ResolvX factory reset: remove all ResolvX channels and messages',
       );
 
       if (result.deleted) {
@@ -363,14 +363,14 @@ export async function performFactoryReset(
     }
 
     /*
-     * Priority/developer roles are also part of SupportForge infrastructure.
+     * Priority/developer roles are also part of ResolvX infrastructure.
      * Keep the state files intact when even one managed resource cannot be
      * deleted, so a second reset attempt still has the IDs required to retry.
      */
     for (const role of managedPriorityRoles) {
       const result = await deleteRoleSafely(
         guildRoleFromAny(role),
-        'SupportForge factory reset: remove managed role',
+        'ResolvX factory reset: remove managed role',
       );
 
       if (result.deleted) {
@@ -396,7 +396,7 @@ export async function performFactoryReset(
 
     /*
      * Only after the entire Discord-side deletion has succeeded do we erase
-     * SupportForge's normal configuration, reports, and ticket persistence.
+     * ResolvX's normal configuration, reports, and ticket persistence.
      * This prevents a partial reset from losing the IDs needed for recovery.
      */
     await resetConfigState();
