@@ -169,6 +169,12 @@ export async function ensureSettingsChannel(
     }
   }
 
+  if (channel.name !== 'qf-settings') {
+    await channel.setName('qf-settings', { reason: 'Rename the managed settings channel for QueryFixr branding' }).catch((error) => {
+      console.warn('Could not rename the QueryFixr settings channel:', error);
+    });
+  }
+
   await setChannelTopic(
     channel.id,
     SETTINGS_TOPIC_PREFIX + ' guild=' + guild.id,
