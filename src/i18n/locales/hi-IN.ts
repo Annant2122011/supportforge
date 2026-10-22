@@ -77,6 +77,11 @@ const hiIN: Record<TranslationKey, string> = {
   "ticket.panel.voice": "वॉइस",
   "ticket.panel.joinVoice": "वॉइस में शामिल हों",
   "ticket.panel.closeVoice": "वॉइस चैट बंद करें",
+  "ticket.panel.reassign": "फिर से सौंपें",
+  "ticket.panel.internalNote": "आंतरिक नोट",
+  "ticket.panel.reportUser": "उपयोगकर्ता की रिपोर्ट करें",
+  "ticket.panel.moveControls": "नियंत्रण यहाँ ले जाएँ",
+  "ticket.panel.turnVoiceOn": "वॉइस मोड चालू करें",
 };
 
 export default hiIN;
