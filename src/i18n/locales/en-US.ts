@@ -75,6 +75,11 @@ const enUS = {
   "ticket.panel.voice": "Voice",
   "ticket.panel.joinVoice": "Join Voice",
   "ticket.panel.closeVoice": "Close Voice Chat",
+  "ticket.panel.reassign": "Reassign",
+  "ticket.panel.internalNote": "Internal Note",
+  "ticket.panel.reportUser": "Report User",
+  "ticket.panel.moveControls": "Move Controls Here",
+  "ticket.panel.turnVoiceOn": "Turn On Voice Mode",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
