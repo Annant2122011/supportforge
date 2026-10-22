@@ -36,6 +36,7 @@ const enUS = {
   "supportHours.open": "Support is open now.",
   "supportHours.closed": "Support is currently closed.",
   "supportHours.nextOpening": " Next opening: {nextOpening}.",
+  "supportHours.noNextOpening": "No next opening is configured; contact a server administrator.",
   "forms.submit": "Submit answers",
   "forms.required": "This field is required.",
   "forms.invalid": "This form response is invalid. Check the field instructions.",
