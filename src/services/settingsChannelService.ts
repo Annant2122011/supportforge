@@ -397,37 +397,32 @@ const SETTINGS_MESSAGE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 function isSettingsDashboardMessage(message: {
   author: { id: string };
   embeds: readonly { title?: string | null; footer?: { text?: string | null } | null }[];
-}): boolean {
+  createdTimestamp: number;
+}, botId: string): boolean {
+  if (message.author.id !== botId) return false;
+
   return message.embeds.some((embed) => {
     const title = embed.title ?? '';
     const footer = embed.footer?.text ?? '';
     return (
-      (title.includes('Settings') && (
+      title.includes('Settings') &&
+      (
         footer.includes('Settings Dashboard') ||
         footer.includes('Advanced Ticket Configuration') ||
         footer.includes('Select a section to configure it')
-      ))
+      )
     );
   });
-}, botId: string): boolean {
-  if (message.author.id !== botId) return false;
-
-  return message.embeds.some(
-    (embed) =>
-      embed.footer?.text?.includes('QueryFixr Settings Dashboard') ||
-      embed.footer?.text?.includes('QueryFixr Settings Dashboard') ||
-      embed.title === SETTINGS_TITLE ||
-      embed.title === '⚙️ QueryFixr Settings' ||
-      embed.footer?.text?.startsWith('QueryFixr • Advanced Ticket Configuration') ||
-      embed.footer?.text?.startsWith('QueryFixr • Advanced Ticket Configuration'),
-  );
 }
 
-function isSettingsPurposeMessage(message: {
-  author: { id: string };
-  embeds: readonly { title?: string | null; footer?: { text?: string | null } | null }[];
-}): boolean {
-  return message.embeds.some((embed) =>
+function isSettingsPurposeMessage(
+  message: {
+    author: { id: string };
+    embeds: readonly { title?: string | null; footer?: { text?: string | null } | null }[];
+  },
+  botId: string,
+): boolean {
+  return message.author.id === botId && message.embeds.some((embed) =>
     (embed.title ?? '').includes('Channel Purpose') &&
     (embed.footer?.text ?? '').includes('Channel Purpose'),
   );
@@ -439,13 +434,6 @@ function isLegacySmallSettingsDashboard(message: {
   return message.embeds.some((embed) =>
     (embed.title ?? '').includes('Settings') &&
     (embed.footer?.text ?? '').includes('Select a section to configure it'),
-  );
-}): boolean {
-  return message.embeds.some(
-    (embed) =>
-      (embed.title === SETTINGS_TITLE || embed.title === '⚙️ QueryFixr Settings') &&
-      (embed.footer?.text?.startsWith('QueryFixr • Select a section to configure it') ||
-        embed.footer?.text?.startsWith('QueryFixr • Select a section to configure it')),
   );
 }
 
