@@ -63,7 +63,7 @@ export function buildTicketPanelEmbed(
 
   return new EmbedBuilder()
     .setColor(priorityColor(priority))
-    .setTitle(`🎫 ResolvX Ticket #${ticketNumber}`)
+    .setTitle(`🎫 QueryFixr Ticket #${ticketNumber}`)
     .setDescription(
       `**${decodeSubject(getField(topic, 'subject'))}**\n\n` +
         `Use the controls below to manage this ticket.`,
@@ -266,7 +266,7 @@ export async function refreshTicketPanel(
 
   /*
    * A panel message is recoverable state, not an irreplaceable record. If a
-   * moderator deleted it manually, find the existing ResolvX panel first
+   * moderator deleted it manually, find the existing QueryFixr panel first
    * so refresh never creates duplicates.
    */
   if (!message) {
@@ -275,7 +275,7 @@ export async function refreshTicketPanel(
       (candidate) =>
         candidate.author.id === channel.client.user?.id &&
         candidate.embeds.some(
-          (embed) => (embed.title === '🎫 ResolvX Ticket #' + ticketNumber || embed.title === '🎫 SupportForge Ticket #' + ticketNumber),
+          (embed) => (embed.title === '🎫 QueryFixr Ticket #' + ticketNumber || embed.title === '🎫 QueryFixr Ticket #' + ticketNumber),
         ),
     );
   }
@@ -303,7 +303,7 @@ export async function refreshTicketPanel(
     await setChannelTopic(
       channel.id,
       repairedTopic,
-      'ResolvX ticket panel message reference repair',
+      'QueryFixr ticket panel message reference repair',
     ).catch((error) => {
       console.warn(
         '⚠️ Ticket panel was recreated, but its message reference could not be persisted:',
@@ -549,11 +549,11 @@ export async function collapseTicketPanelToRestoreButton(
   const topic = channel.topic ?? '';
 
   if (!topic.startsWith('supportforge:ticket')) {
-    throw new Error('This channel is not a ResolvX ticket.');
+    throw new Error('This channel is not a QueryFixr ticket.');
   }
 
   const ticketNumber = getField(topic, 'number') ?? 'unknown';
-  const panelTitle = `🎫 ResolvX Ticket #${ticketNumber}`;
+  const panelTitle = `🎫 QueryFixr Ticket #${ticketNumber}`;
   const messageId = getField(topic, 'message');
 
   const { panel, restore } = await findCurrentPanelAndRestoreControl(
@@ -614,7 +614,7 @@ export async function collapseTicketPanelToRestoreButton(
   await setChannelTopic(
     channel.id,
     collapsedTopic,
-    'ResolvX panel collapsed to restore control',
+    'QueryFixr panel collapsed to restore control',
   ).catch(() => undefined);
 
   console.log(
@@ -628,7 +628,7 @@ export async function moveTicketPanelToBottom(
   const topic = channel.topic ?? '';
 
   if (!topic.startsWith('supportforge:ticket')) {
-    throw new Error('This channel is not a ResolvX ticket.');
+    throw new Error('This channel is not a QueryFixr ticket.');
   }
 
   const status =
@@ -637,7 +637,7 @@ export async function moveTicketPanelToBottom(
   const config = await getGuildConfig(channel.guild.id);
   const locale = (await getAdvancedSettings(channel.guild.id)).locale;
   const ticketNumber = getField(topic, 'number') ?? 'unknown';
-  const panelTitle = `🎫 ResolvX Ticket #${ticketNumber}`;
+  const panelTitle = `🎫 QueryFixr Ticket #${ticketNumber}`;
   const messageId = getField(topic, 'message');
 
   const { panel: currentPanel, restore: restoreControl } =
@@ -682,7 +682,7 @@ export async function moveTicketPanelToBottom(
   await setChannelTopic(
     channel.id,
     movedTopic,
-    'ResolvX ticket panel pointer moved to latest panel',
+    'QueryFixr ticket panel pointer moved to latest panel',
   ).catch(() => undefined);
 
   console.log(
