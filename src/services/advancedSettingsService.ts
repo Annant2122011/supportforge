@@ -173,15 +173,15 @@ const DEFAULTS: AdvancedGuildSettings = {
     pendingCategoryId: null,
   },
   appearance: {
-    panelTitle: '🎫 SupportForge Support Center',
+    panelTitle: '🎫 ResolvX Support Center',
     panelDescription:
       'Click a department button below to open a private support ticket.',
-    panelFooter: 'SupportForge • Professional Ticket System',
+    panelFooter: 'ResolvX • Professional Ticket System',
   },
   settingsDashboard: {
-    title: '⚙️ ResolveX Settings',
+    title: '⚙️ ResolvX Settings',
     description: 'Configure your server’s ticket system, support panels and retention policies.',
-    footer: 'ResolveX • Settings Dashboard',
+    footer: 'ResolvX • Settings Dashboard',
     buttonOrder: [...SETTINGS_DASHBOARD_BUTTON_KEYS],
     buttonCustomizations: {},
   },
@@ -268,7 +268,7 @@ async function load(): Promise<SettingsFile> {
       Array.isArray(persisted.guilds)
     ) {
       throw new Error(
-        'SupportForge advanced settings database document is malformed. Existing data was not overwritten.',
+        'ResolvX advanced settings database document is malformed. Existing data was not overwritten.',
       );
     }
     state = { version: 5, guilds: persisted.guilds as Record<string, AdvancedGuildSettings> };
