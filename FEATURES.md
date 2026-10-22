@@ -1,7 +1,7 @@
-# ResolvX — Master Features, Requirements & Long-Term Product Specification
+# QueryFixr — Master Features, Requirements & Long-Term Product Specification
 
-**Project:** ResolvX  
-**Repository:** `Annant2122011/supportforge`  
+**Project:** QueryFixr  
+**Repository:** `Annant2122011/qf`  
 **Current Repository Version:** `2.0.0`  
 **Primary Runtime:** Node.js + TypeScript + discord.js  
 **Initial Product Surface:** Discord  
@@ -13,7 +13,7 @@
 
 # 0. HOW TO USE THIS DOCUMENT
 
-This file is the long-term memory of ResolvX.
+This file is the long-term memory of QueryFixr.
 
 It is intentionally much more detailed than an ordinary README. The goal is that development can stop for weeks or months and this document will still explain what the system is supposed to become, what has already been implemented, what remains incomplete, why a feature exists, what it depends on, and what “done” actually means.
 
@@ -27,15 +27,15 @@ Whenever possible, implementation should proceed in small, tested increments rat
 
 # 1. PRODUCT IDENTITY
 
-## 1.1 What ResolvX Is
+## 1.1 What QueryFixr Is
 
-ResolvX is an advanced support and ticket-management platform initially delivered through Discord. It is intended to provide businesses, online communities, software projects, e-commerce operations, crypto communities, and similar organizations with a professional customer-support workflow inside Discord, eventually expanding into a full multi-tenant SaaS platform.
+QueryFixr is an advanced support and ticket-management platform initially delivered through Discord. It is intended to provide businesses, online communities, software projects, e-commerce operations, crypto communities, and similar organizations with a professional customer-support workflow inside Discord, eventually expanding into a full multi-tenant SaaS platform.
 
 The Discord bot is the first interface and operational adapter. It should not become a permanent container for all business logic. Over time, the core support domain should be separated from Discord-specific code so that the same ticket, SLA, analytics, AI, and automation systems can serve Discord, a web dashboard, an API, and external integrations.
 
 ## 1.2 Product Vision
 
-ResolvX should evolve through these stages:
+QueryFixr should evolve through these stages:
 
 ```text
 Discord Ticket Bot
@@ -237,7 +237,7 @@ Provide a visible entry point where customers can start a support interaction.
 
 ### Current behavior
 
-ResolvX can create a Support Center panel with ticket creation controls and department-related buttons.
+QueryFixr can create a Support Center panel with ticket creation controls and department-related buttons.
 
 ### Required behavior
 
@@ -282,9 +282,9 @@ Discord bot, guild configuration, department configuration.
 
 Turn the generated Support Center into a true configurable panel builder rather than a mostly fixed bot-generated message.
 
-### Current implementation checkpoint (ResolvX Stage E)
+### Current implementation checkpoint (QueryFixr Stage E)
 
-The Discord implementation supports multiple saved public ticket panels in the Neon-backed guild configuration document. Administrators can build and edit drafts through **Settings → Ticket Panels**, without writing JSON for routine work, and through the matching `/supportforge panel` command family. The visual builder supports panel name/title/instructions, accent color, author icon, thumbnail and banner URLs; up to 25 ordered buttons; public channel selection; private disabled preview; reordering; target changes; role restrictions; optional per-button confirmation text; and a confirmed delete flow. Button label, emoji, style and target can be managed independently.
+The Discord implementation supports multiple saved public ticket panels in the Neon-backed guild configuration document. Administrators can build and edit drafts through **Settings → Ticket Panels**, without writing JSON for routine work, and through the matching `/qf panel` command family. The visual builder supports panel name/title/instructions, accent color, author icon, thumbnail and banner URLs; up to 25 ordered buttons; public channel selection; private disabled preview; reordering; target changes; role restrictions; optional per-button confirmation text; and a confirmed delete flow. Button label, emoji, style and target can be managed independently.
 
 Each button can target either an existing department ticket flow (optional pinned tag or customer tag selection) or a specific active ticket form pinned to a version and concrete tag. All launches enter the existing validated ticket creation/form pipeline. Role rules at panel and button level are combined; server administrators can always use the controls. Custom component IDs are stable per button, rotated when its target changes, and accepted only from the exact current published message/channel. Confirmation prompts are ephemeral and bound to both their initiating user and the source published message.
 
@@ -812,7 +812,7 @@ This becomes essential once the project moves into a real database.
 - Up to 25 custom fields distributed across steps. Each step has at most three custom fields so the first step also fits the built-in Subject and Description within Discord's five top-level modal components.
 - Expiring form modal IDs, stale-version checks, PostgreSQL-backed routing cache and durable answer drafts before ticket channel creation.
 - PostgreSQL submission recovery reconciles a retained answer with an existing persisted ticket or reconstructs the ticket record from a matching ticket topic when channel creation succeeded but ticket registration failed.
-- Commands: `/supportforge form list`, `create`, `update`, `activate`, and `deactivate`.
+- Commands: `/qf form list`, `create`, `update`, `activate`, and `deactivate`.
 
 ## F-016 — Conditional Form Fields
 
@@ -848,10 +848,10 @@ A field may contain a `step` number from 1 through 10 and a `condition` object, 
 **Status:** `IMPLEMENTED — CI verified; live Discord acceptance pending`  
 **Priority:** `P2`
 
-- `/supportforge form template-save` stores a validated schema as a server-scoped reusable template.
-- `/supportforge form template-list` is paginated and displays stable template IDs.
-- `/supportforge form template-apply` creates a new inactive form from a template for an existing department/tag mapping.
-- `/supportforge form template-delete` deletes only the template. Forms already created from it, their versions, and historical submissions remain unchanged.
+- `/qf form template-save` stores a validated schema as a server-scoped reusable template.
+- `/qf form template-list` is paginated and displays stable template IDs.
+- `/qf form template-apply` creates a new inactive form from a template for an existing department/tag mapping.
+- `/qf form template-delete` deletes only the template. Forms already created from it, their versions, and historical submissions remain unchanged.
 - Template names are unique case-insensitively per guild. Templates and all resulting forms remain isolated by guild ID.
 
 ## F-018 — Add / Remove Ticket Users
@@ -1239,7 +1239,7 @@ Merged tickets should become historical records that point to the master ticket 
 ### Implemented core
 
 - Per-server automation is opt-in and disabled by default.
-- Administrators can view, enable, disable, and configure thresholds through both the Settings dashboard and `/supportforge settings inactivity`.
+- Administrators can view, enable, disable, and configure thresholds through both the Settings dashboard and `/qf settings inactivity`.
 - Idle warning threshold is bounded to 1–720 hours; the warning grace period is bounded to 1–168 hours.
 - A restart-safe five-minute scheduler stores warning markers, policy generation, deadlines, and transcript receipts in the existing Neon/PostgreSQL ticket metadata.
 - A visible warning is sent before closure. New human activity cancels the old grace period; the scheduler also checks recent Discord history to protect against delayed activity-event persistence.
@@ -1249,7 +1249,7 @@ Merged tickets should become historical records that point to the master ticket 
 
 ### Remaining partial scope
 
-- Administrators can configure up to 25 exempt roles and up to 25 exempt department IDs through the Settings dashboard and `/supportforge settings inactivity`. A selected role exempts tickets when held by the ticket owner or an assigned staff member; department exemptions match the persisted department ID. Exemption changes bump the policy generation and clear active warnings.
+- Administrators can configure up to 25 exempt roles and up to 25 exempt department IDs through the Settings dashboard and `/qf settings inactivity`. A selected role exempts tickets when held by the ticket owner or an assigned staff member; department exemptions match the persisted department ID. Exemption changes bump the policy generation and clear active warnings.
 - Discord delivery and Neon commits cannot form one distributed transaction; recovery markers and reconciliation reduce duplicate effects but do not provide mathematical exactly-once delivery.
 - The scheduler, permissions, transcript access, real warning presentation and race behavior still require live Discord test-guild acceptance. CI passing alone does not qualify this feature as production-accepted.
 
@@ -1379,7 +1379,7 @@ Possible actions:
 **Status:** `PLANNED`  
 **Priority:** `P2`
 
-ResolvX should understand support calendars.
+QueryFixr should understand support calendars.
 
 Example:
 
@@ -1606,7 +1606,7 @@ Concept:
 ```text
 Discord Bot
      ↓
-ResolvX Application Layer
+QueryFixr Application Layer
      ↓
 AI Service Interface
      ↓
@@ -1618,7 +1618,7 @@ Possible model backends:
 - external API provider
 - self-hosted model
 - local model
-- custom ResolvX model
+- custom QueryFixr model
 
 The bot should not contain provider-specific AI logic everywhere.
 
@@ -1889,16 +1889,16 @@ Do not choose a vendor merely because it appears popular today. The selection sh
 
 ---
 
-# 21. CUSTOM RESOLVX 8B MODEL
+# 21. CUSTOM QUERYFIXR 8B MODEL
 
-## F-058 — Custom ResolvX 8B-Class Model
+## F-058 — Custom QueryFixr 8B-Class Model
 
 **Status:** `FUTURE / INFRASTRUCTURE REQUIRED`  
 **Priority:** `P3`
 
 ### Purpose
 
-Develop a specialized model for ResolvX support workflows.
+Develop a specialized model for QueryFixr support workflows.
 
 ### Potential capabilities
 
@@ -1917,11 +1917,11 @@ The model is an intelligence component. It is not the authoritative database, pe
 ### Long-term architecture
 
 ```text
-ResolvX Backend
+QueryFixr Backend
         ↓
 AI Gateway
         ↓
-ResolvX Model
+QueryFixr Model
         ↓
 RAG / Tools / Policies
 ```
@@ -2144,7 +2144,7 @@ Connect Discord
  ↓
 Choose Guild
  ↓
-Authorize ResolvX
+Authorize QueryFixr
  ↓
 Create Default Configuration
  ↓
@@ -2204,7 +2204,7 @@ Settings
 
 ### Goal
 
-Users should be able to configure ResolvX without manually editing JSON or source code.
+Users should be able to configure QueryFixr without manually editing JSON or source code.
 
 ---
 
@@ -2242,7 +2242,7 @@ Potential methods:
 - email/password
 - Google or another OAuth provider
 
-Discord OAuth is the most natural initial method because ResolvX is Discord-centric.
+Discord OAuth is the most natural initial method because QueryFixr is Discord-centric.
 
 Authentication must be tied to tenant membership and permissions.
 
@@ -2576,7 +2576,7 @@ The setup process should create or repair required Discord infrastructure.
 
 Potential resources:
 
-- ResolvX category
+- QueryFixr category
 - support panel
 - transcript channel
 - audit channel
@@ -2597,7 +2597,7 @@ Running setup multiple times should not create uncontrolled duplicates.
 Possible command:
 
 ```text
-/supportforge diagnose
+/qf diagnose
 ```
 
 Checks:
@@ -3308,7 +3308,7 @@ AI Layer
       ↓
 RAG
       ↓
-Custom ResolvX Model
+Custom QueryFixr Model
       ↓
 Commercial SaaS
 ```
@@ -3342,7 +3342,7 @@ Automated Tests
 
 ### Exit criteria
 
-A normal business should be able to configure ResolvX entirely from Discord without editing source files, and the core ticket workflow should be testable and predictable.
+A normal business should be able to configure QueryFixr entirely from Discord without editing source files, and the core ticket workflow should be testable and predictable.
 
 ---
 
@@ -3391,7 +3391,7 @@ Authentication
 
 ### Exit criteria
 
-ResolvX should be able to operate as a persistent backend service independently of a single bot process.
+QueryFixr should be able to operate as a persistent backend service independently of a single bot process.
 
 ---
 
@@ -3443,7 +3443,7 @@ Enterprise Controls
 
 ### Exit criteria
 
-An external business should be able to sign up, connect Discord, configure ResolvX, select a plan, and operate support without developer intervention.
+An external business should be able to sign up, connect Discord, configure QueryFixr, select a plan, and operate support without developer intervention.
 
 ---
 
@@ -3520,7 +3520,7 @@ The following items are known to exist in the present project foundation and sho
 [✓] Reply references in transcripts
 [✓] Ticket creation cooldown
 [✓] Add/remove users
-[✓] ResolvX setup
+[✓] QueryFixr setup
 [✓] Category management
 [✓] Priority levels
 [✓] Ticket tags
@@ -3564,7 +3564,7 @@ The major gaps between the current Discord foundation and the complete product v
 [ ] AI routing
 [ ] AI translation
 [ ] RAG
-[ ] Custom ResolvX 8B model integration
+[ ] Custom QueryFixr 8B model integration
 [ ] Production external database
 [ ] Database migrations
 [ ] Real multi-tenant backend
@@ -3824,7 +3824,7 @@ Do not rewrite working code unnecessarily while adding unrelated features.
 # 53. LONG-TERM REFERENCE ARCHITECTURE
 
 ```text
-                            RESOLVX
+                            QUERYFIXR
                                  │
            ┌─────────────────────┼─────────────────────┐
            │                     │                     │
@@ -3856,7 +3856,7 @@ Do not rewrite working code unnecessarily while adding unrelated features.
             │                    │                    │
             └────────────────────┼────────────────────┘
                                  │
-                     ResolvX Model Layer
+                     QueryFixr Model Layer
                                  │
                          Custom 8B Model
 ```
@@ -3866,7 +3866,7 @@ Do not rewrite working code unnecessarily while adding unrelated features.
 # 54. LONG-TERM PRODUCT MODULE MAP
 
 ```text
-RESOLVX
+QUERYFIXR
 │
 ├── Ticketing
 │   ├── Creation
@@ -3939,7 +3939,7 @@ RESOLVX
 The final product should allow a business to:
 
 ```text
-1. Add ResolvX to Discord
+1. Add QueryFixr to Discord
 2. Connect the server to the dashboard
 3. Configure departments
 4. Design support panels
@@ -3977,7 +3977,7 @@ toward:
 ```text
 Discord Bot
     ↓
-ResolvX Core
+QueryFixr Core
     ↓
 Persistent Backend
 ```
@@ -4006,7 +4006,7 @@ The model may recommend or assist with these workflows, but deterministic system
 
 # 58. WHAT THE BOT SHOULD REMAIN GOOD AT
 
-Even after ResolvX becomes a SaaS platform, the Discord bot should continue to be excellent at:
+Even after QueryFixr becomes a SaaS platform, the Discord bot should continue to be excellent at:
 
 - fast ticket creation
 - responsive interactions
@@ -4134,7 +4134,7 @@ Do not maintain two competing realities indefinitely.
 
 # 63. FINAL REFERENCE CHECKLIST
 
-Before declaring ResolvX “complete”, verify the following layers separately.
+Before declaring QueryFixr “complete”, verify the following layers separately.
 
 ## Layer 1 — Discord Core
 
@@ -4213,7 +4213,7 @@ Before declaring ResolvX “complete”, verify the following layers separately.
 
 # 64. FINAL PRODUCT STATEMENT
 
-ResolvX is not intended to remain a bot whose main trick is creating private Discord channels.
+QueryFixr is not intended to remain a bot whose main trick is creating private Discord channels.
 
 The Discord ticket system is the foundation.
 
@@ -4257,7 +4257,7 @@ The system should grow deliberately, with working features preserved and documen
 # 65. DOCUMENT MAINTENANCE FOOTER
 
 **Last major specification update:** September 2026  
-**Purpose:** Long-term ResolvX product memory  
+**Purpose:** Long-term QueryFixr product memory  
 **Authority:** Product roadmap and requirements reference  
 **Implementation authority:** Actual tested code takes precedence over stale documentation  
 
@@ -4278,7 +4278,7 @@ The audit channel includes a persistent control panel at the start of the audit 
 Initial state:
 
 ```text
-📒 ResolvX Audit Log
+📒 QueryFixr Audit Log
 
 [ Summarise Everything ]
 ```
@@ -4317,7 +4317,7 @@ The summary combines:
 - Current custom-tag count.
 - Tag creation history and creation dates from audit records.
 - Current server channel count.
-- Current ResolvX-managed channel count.
+- Current QueryFixr-managed channel count.
 - Ticket channels created to date.
 - Audit activity volume.
 - Settings activity volume.
@@ -4378,7 +4378,7 @@ Priority parsing is validated before it reaches the channel-name API, so the nam
 
 Priority roles are opt-in.
 
-No priority role is created during normal ResolvX setup.
+No priority role is created during normal QueryFixr setup.
 
 Administrators can open:
 
@@ -4402,7 +4402,7 @@ The role colors match the priority visual system.
 Example:
 
 ```text
-ResolvX • Urgent Tickets
+QueryFixr • Urgent Tickets
 ```
 
 uses the Urgent priority color.
@@ -4511,9 +4511,9 @@ Avoid:
 - Automatic retention deletion without approval.
 ```
 
-# 74. RESOLVX CHANNEL PURPOSE MESSAGES
+# 74. QUERYFIXR CHANNEL PURPOSE MESSAGES
 
-ResolvX-managed non-ticket text channels now receive a dedicated default purpose message explaining what the channel is for.
+QueryFixr-managed non-ticket text channels now receive a dedicated default purpose message explaining what the channel is for.
 
 ## Current default purpose messages
 
@@ -4523,7 +4523,7 @@ The Settings channel explains that it is the private administrative control cent
 
 ### Audit log
 
-The Audit channel explains that it stores the durable ResolvX operational history, including ticket lifecycle actions, configuration changes, retention decisions, repairs, and other administrative events with responsible users and timestamps.
+The Audit channel explains that it stores the durable QueryFixr operational history, including ticket lifecycle actions, configuration changes, retention decisions, repairs, and other administrative events with responsible users and timestamps.
 
 ### Transcripts
 
@@ -4531,13 +4531,13 @@ The Transcript channel explains that it is the private archive for exported HTML
 
 ## Public panel exception
 
-The public ResolvX panel intentionally receives no purpose-message embed. The panel is customer-facing and is reserved for the ticket creation experience.
+The public QueryFixr panel intentionally receives no purpose-message embed. The panel is customer-facing and is reserved for the ticket creation experience.
 
-## Future ResolvX channels
+## Future QueryFixr channels
 
-A central channel-purpose service now handles future ResolvX-managed text channels through their ResolvX metadata.
+A central channel-purpose service now handles future QueryFixr-managed text channels through their QueryFixr metadata.
 
-Any future non-ticket channel carrying a `supportforge:` topic marker is automatically given the generic ResolvX-managed purpose message unless it is a ticket channel or the public panel.
+Any future non-ticket channel carrying a `supportforge:` topic marker is automatically given the generic QueryFixr-managed purpose message unless it is a ticket channel or the public panel.
 
 Future subsystems can also supply a custom purpose directly through the reusable purpose-message service. This keeps the default behavior automatic while leaving room for later AI-specific or subsystem-specific descriptions.
 
@@ -4545,14 +4545,14 @@ Purpose messages are idempotent and serialized per channel, so repair/setup runs
 
 # 75. DEDICATED OPEN CATEGORY
 
-ResolvX now provisions a separate **Open** ticket category.
+QueryFixr now provisions a separate **Open** ticket category.
 
 The original **Support Forge** category is not repurposed or renamed.
 
 ## Category responsibilities
 
 **Support Forge**
-- Remains the primary ResolvX container for the existing public panel and internal system channels.
+- Remains the primary QueryFixr container for the existing public panel and internal system channels.
 - Continues to be used by the existing configuration and support-system setup logic.
 - Existing permissions and identity remain unchanged.
 
@@ -4568,15 +4568,15 @@ Explicitly provisioned department categories continue to work as before, so depa
 
 The Open category ID is persisted per guild in `data/config.json`.
 
-If the configured category disappears or becomes full, ResolvX finds another matching Open category or provisions another suffixed category as needed to respect Discord's category channel limit.
+If the configured category disappears or becomes full, QueryFixr finds another matching Open category or provisions another suffixed category as needed to respect Discord's category channel limit.
 
-The setup command repairs/provisions the Open category alongside the existing ResolvX system without altering the existing **Support Forge** category.
+The setup command repairs/provisions the Open category alongside the existing QueryFixr system without altering the existing **Support Forge** category.
 
 # 76. REPEATED PANEL ACTIVITY REPOSITIONING
 
 Automatic ticket-panel compaction is now a repeating cycle rather than a one-time action.
 
-When the configured visual/message threshold is reached, ResolvX moves the compact Restore/Move control to the newest position.
+When the configured visual/message threshold is reached, QueryFixr moves the compact Restore/Move control to the newest position.
 
 If conversation activity reaches the threshold again, the restore control is moved again instead of being treated as a completed one-time operation.
 
@@ -4586,17 +4586,17 @@ The panel therefore remains discoverable throughout long conversations without c
 
 # 77. EXPANDED AUDIT COVERAGE
 
-The audit system now records a much broader set of ResolvX mutations.
+The audit system now records a much broader set of QueryFixr mutations.
 
 ## Discord infrastructure
 
-ResolvX-managed channel and category events include:
+QueryFixr-managed channel and category events include:
 
 - Channel/category creation.
 - Channel renames.
 - Parent/category moves.
 - Category/channel reordering.
-- Topic and ResolvX metadata changes.
+- Topic and QueryFixr metadata changes.
 - Permission-overwrite changes.
 - Text-channel settings changes such as NSFW and slowmode.
 - Channel/category deletion.
@@ -4608,7 +4608,7 @@ Managed priority-role events include:
 - Hoist and mentionability changes.
 - Role deletion.
 
-The system attempts to resolve the Discord audit-log executor for infrastructure changes. When Discord does not expose a usable executor or the bot cannot read audit logs, the entry identifies the actor as Discord/ResolvX rather than inventing a user.
+The system attempts to resolve the Discord audit-log executor for infrastructure changes. When Discord does not expose a usable executor or the bot cannot read audit logs, the entry identifies the actor as Discord/QueryFixr rather than inventing a user.
 
 ## Ticket workflow
 
@@ -4679,16 +4679,16 @@ When neither day has recorded activity, no empty daily summary is created.
 
 ## Recovery after Discord-side deletion
 
-Persisted ResolvX configuration and audit history are not tied to the continued existence of the Discord channels themselves.
+Persisted QueryFixr configuration and audit history are not tied to the continued existence of the Discord channels themselves.
 
-If ResolvX-managed Discord channels are manually deleted but the local ResolvX data files still exist:
+If QueryFixr-managed Discord channels are manually deleted but the local QueryFixr data files still exist:
 
-- `/supportforge setup` can recreate the ResolvX infrastructure.
+- `/qf setup` can recreate the QueryFixr infrastructure.
 - The persisted audit history remains available.
 - The recreated audit channel can display the historical overall summary.
 - The setup workflow records the restoration/setup event.
 
-This does not apply after the deliberate three-step **Delete Everything** factory reset, because that operation intentionally removes the persisted ResolvX state.
+This does not apply after the deliberate three-step **Delete Everything** factory reset, because that operation intentionally removes the persisted QueryFixr state.
 
 # 79. DISASTER-RECOVERY GUIDANCE FOR THE SETTINGS HUB
 
@@ -4698,41 +4698,41 @@ The Settings channel is an operational convenience layer, not the only recovery 
 
 Use the standalone:
 
-`/supportforge setup`
+`/qf setup`
 
 command from another server channel.
 
-It does not require the Settings channel to exist and can recreate the core ResolvX infrastructure.
+It does not require the Settings channel to exist and can recreate the core QueryFixr infrastructure.
 
 ## Recommended future backup plan
 
-A future recovery feature can provide a small administrator-only recovery beacon outside the ResolvX-managed channels, containing the setup command and a one-click recovery action.
+A future recovery feature can provide a small administrator-only recovery beacon outside the QueryFixr-managed channels, containing the setup command and a one-click recovery action.
 
-A second, stronger backup is an exported ResolvX configuration snapshot stored outside Discord. This would preserve departments, categories, retention rules, appearance, tags and other configuration even if both Discord channels and local runtime data are lost.
+A second, stronger backup is an exported QueryFixr configuration snapshot stored outside Discord. This would preserve departments, categories, retention rules, appearance, tags and other configuration even if both Discord channels and local runtime data are lost.
 
 These recovery mechanisms should remain separate from the normal Settings channel so deleting the Settings hub cannot remove every recovery path.
 
 # 80. AUDIT INTERPRETATION
 
-ResolvX now treats every meaningful ResolvX state-changing operation and managed Discord infrastructure mutation as auditable.
+QueryFixr now treats every meaningful QueryFixr state-changing operation and managed Discord infrastructure mutation as auditable.
 
 This includes channel/category lifecycle changes, permission/settings changes, managed role changes, ticket workflow mutations, ticket metadata changes, settings changes, retention decisions, repairs, panel repositioning, setup, and related operations.
 
 Read-only navigation such as opening a settings page or reading ticket history is intentionally not treated as a state-changing mutation. Ticket conversation messages themselves remain in the ticket record/transcript rather than being duplicated as one audit entry per message.
 
-Channel and category additions created manually by administrators are also detected when they match ResolvX-managed naming/configuration, not only when ResolvX creates them itself.
+Channel and category additions created manually by administrators are also detected when they match QueryFixr-managed naming/configuration, not only when QueryFixr creates them itself.
 
 
 
 # 76. EXPANDED AUDIT COVERAGE AND RECOVERY
 
-ResolvX auditing now observes the Discord mutations that affect ResolvX-managed infrastructure, not only the high-level settings/ticket functions.
+QueryFixr auditing now observes the Discord mutations that affect QueryFixr-managed infrastructure, not only the high-level settings/ticket functions.
 
 ## Newly audited infrastructure actions
 
-- ResolvX-managed channel creation.
-- ResolvX-managed category creation.
-- ResolvX-managed channel/category deletion.
+- QueryFixr-managed channel creation.
+- QueryFixr-managed category creation.
+- QueryFixr-managed channel/category deletion.
 - Channel renames.
 - Channel/category moves.
 - Channel reordering.
@@ -4740,9 +4740,9 @@ ResolvX auditing now observes the Discord mutations that affect ResolvX-managed 
 - Permission-overwrite changes.
 - Text-channel NSFW changes.
 - Text-channel slowmode changes.
-- ResolvX-managed role creation.
-- ResolvX-managed role updates.
-- ResolvX-managed role deletion.
+- QueryFixr-managed role creation.
+- QueryFixr-managed role updates.
+- QueryFixr-managed role deletion.
 - Manual ticket-panel movement.
 - Automatic ticket-panel movement.
 - Setup/repair completion.
@@ -4757,30 +4757,30 @@ Therefore repeated long-message activity can trigger panel movement repeatedly r
 
 ## Current-day setup summary
 
-The audit store records the date of the most recent ResolvX setup/repair.
+The audit store records the date of the most recent QueryFixr setup/repair.
 
-If ResolvX is fully rebuilt today, the daily summary scheduler uses today's setup/activity date instead of incorrectly preferring an older previous-day summary.
+If QueryFixr is fully rebuilt today, the daily summary scheduler uses today's setup/activity date instead of incorrectly preferring an older previous-day summary.
 
 ## Audit persistence after factory reset
 
-Factory reset removes ResolvX's Discord infrastructure and normal configuration/ticket state, but the durable audit database is intentionally preserved.
+Factory reset removes QueryFixr's Discord infrastructure and normal configuration/ticket state, but the durable audit database is intentionally preserved.
 
 The audit database is stored in:
 
 - `data/audit-log.json`
 - `data/audit-log.backup.json`
 
-The second file is a continuously maintained local backup. If the primary audit file is missing or corrupted, ResolvX attempts to load the backup.
+The second file is a continuously maintained local backup. If the primary audit file is missing or corrupted, QueryFixr attempts to load the backup.
 
-After a later `/supportforge setup`, the audit channel and audit panel can therefore be rebuilt while retaining the previous audit history.
+After a later `/qf setup`, the audit channel and audit panel can therefore be rebuilt while retaining the previous audit history.
 
 ## Settings-channel recovery
 
-If only the Settings channel is deleted manually while the main Support Forge category still exists, ResolvX automatically recreates the Settings channel and restores its dashboard.
+If only the Settings channel is deleted manually while the main Support Forge category still exists, QueryFixr automatically recreates the Settings channel and restores its dashboard.
 
-If the entire ResolvX structure is deleted, use:
+If the entire QueryFixr structure is deleted, use:
 
-`/supportforge setup`
+`/qf setup`
 
 The setup command provisions/repairs the Support Forge container, Open category, Settings channel, Audit channel, Transcript channel, panel, storage categories, and department categories.
 
@@ -4790,7 +4790,7 @@ The setup command provisions/repairs the Support Forge container, Open category,
 
 ## Stage A reliability and audit fixes
 
-- Normal Repair now detects ResolvX ticket channels that are missing a durable Neon/PostgreSQL ticket row and reconstructs only those missing rows from validated channel metadata.
+- Normal Repair now detects QueryFixr ticket channels that are missing a durable Neon/PostgreSQL ticket row and reconstructs only those missing rows from validated channel metadata.
 - Existing durable ticket rows remain authoritative. Repair never overwrites their lifecycle status or metadata from the Discord channel topic.
 - Recovered records preserve ticket status, owner, department, tag, priority, claimants, participants, creation/update timestamps, panel message ID, and form-submission reference when available.
 - Ticket creation uses a PostgreSQL lease keyed by guild, requester, and department to prevent concurrent bot workers from creating duplicate tickets.
@@ -4801,7 +4801,7 @@ The setup command provisions/repairs the Support Forge container, Open category,
 
 ## Stage D advanced ticket forms
 
-- Administrators can create, list, update, activate, and deactivate versioned ticket forms through `/supportforge form`.
+- Administrators can create, list, update, activate, and deactivate versioned ticket forms through `/qf form`.
 - Forms are bound to an existing department and optional routing tag. Only one active form can own a department/tag mapping at a time.
 - Supported question types: short/long text, whole number, decimal, URL, email, date, dropdown, multi-select, checkbox, Discord user, Discord role, and attachment.
 - Every submitted answer is validated server-side. Validation covers required fields, lengths, numeric bounds, valid dates, configured choices, text patterns, Discord principals, and attachment size/type/trusted host.
@@ -4823,7 +4823,7 @@ A consolidated source review is tracked in [docs/stage-a-to-g-reverification.md]
 - F-032 Inactivity Auto-Close is **BUILT / PARTIAL**, not production-accepted. Core warning/grace/transcript/compare-and-close behavior exists; exemption configuration UI and live-guild acceptance remain incomplete.
 - Message activity writes use metadata-only persistence to avoid re-applying an earlier lifecycle status from an asynchronous message handler.
 - The inactivity close path rechecks the latest policy generation and recent human activity around transcript work and before the final PostgreSQL compare-and-close transaction.
-- Final second-round CI passed on [review run #1197](https://github.com/Annant2122011/supportforge/actions/runs/39399683798): TypeScript build passed, **117 tests passed / 0 failed**, and PostgreSQL verification passed.
+- Final second-round CI passed on [review run #1197](https://github.com/Annant2122011/qf/actions/runs/39399683798): TypeScript build passed, **117 tests passed / 0 failed**, and PostgreSQL verification passed.
 - CI does not substitute for validating role permissions, rate limits, transcript access, and restore behavior in a controlled Discord test guild.
 
 ---
