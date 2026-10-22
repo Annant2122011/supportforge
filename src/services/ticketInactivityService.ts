@@ -180,7 +180,7 @@ async function cancelVisibleWarnings(
     if (
       message.author.id !== client.user?.id ||
       !prefixes.some((prefix) => footer?.startsWith(prefix)) ||
-      footer.endsWith('| CANCELLED')
+      footer?.endsWith('| CANCELLED')
     ) continue;
     await message.edit({
       embeds: [
