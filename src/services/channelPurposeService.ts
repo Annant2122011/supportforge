@@ -5,8 +5,8 @@ import {
   type TextChannel,
 } from 'discord.js';
 
-const PURPOSE_TITLE = '📝 ResolvX Channel Purpose';
-const PURPOSE_FOOTER = 'ResolvX • Channel Purpose';
+const PURPOSE_TITLE = '📝 QueryFixr Channel Purpose';
+const PURPOSE_FOOTER = 'QueryFixr • Channel Purpose';
 
 export type SupportForgeChannelPurpose =
   | 'settings'
@@ -26,13 +26,13 @@ const DEFAULT_PURPOSES: Record<
   string
 > = {
   settings:
-    'This private channel is ResolvX’s administrative control center. Use the buttons here to configure tickets, departments, tags, retention, appearance, storage, rules, roles, repairs, and other server-level ResolvX settings.',
+    'This private channel is QueryFixr’s administrative control center. Use the buttons here to configure tickets, departments, tags, retention, appearance, storage, rules, roles, repairs, and other server-level QueryFixr settings.',
   audit:
-    'This private channel stores ResolvX’s durable operational audit history. It records important ticket lifecycle actions, configuration changes, retention decisions, repairs, and other administrative events with responsible users and timestamps.',
+    'This private channel stores QueryFixr’s durable operational audit history. It records important ticket lifecycle actions, configuration changes, retention decisions, repairs, and other administrative events with responsible users and timestamps.',
   transcript:
-    'This private channel is the ResolvX transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
+    'This private channel is the QueryFixr transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
   managed:
-    'This is a ResolvX-managed channel reserved for the subsystem that created it. Its ResolvX metadata defines its operational purpose. Keep unrelated conversations out of this channel.',
+    'This is a QueryFixr-managed channel reserved for the subsystem that created it. Its QueryFixr metadata defines its operational purpose. Keep unrelated conversations out of this channel.',
 };
 
 export function getDefaultChannelPurpose(
@@ -105,7 +105,7 @@ export async function ensureChannelPurposeMessage(
     const recent = await channel.messages
       .fetch({ limit: 50 })
       .catch((error) => {
-        console.warn('⚠️ Could not verify the ResolvX purpose marker in channel ' + channel.id + ':', error);
+        console.warn('⚠️ Could not verify the QueryFixr purpose marker in channel ' + channel.id + ':', error);
         return null;
       });
 
@@ -117,8 +117,8 @@ export async function ensureChannelPurposeMessage(
         message.embeds.some(
           (embed) =>
             ((embed.title === PURPOSE_TITLE && embed.footer?.text === PURPOSE_FOOTER) ||
-            (embed.title === '📝 SupportForge Channel Purpose' &&
-              embed.footer?.text === 'SupportForge • Channel Purpose')),
+            (embed.title === '📝 QueryFixr Channel Purpose' &&
+              embed.footer?.text === 'QueryFixr • Channel Purpose')),
         ),
     );
 
