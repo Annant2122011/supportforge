@@ -114,11 +114,9 @@ export async function ensureChannelPurposeMessage(
     const existing = recent.find(
       (message) =>
         message.author.id === botId &&
-        message.embeds.some(
-          (embed) =>
-            ((embed.title === PURPOSE_TITLE && embed.footer?.text === PURPOSE_FOOTER) ||
-            (embed.title === '📝 QueryFixr Channel Purpose' &&
-              embed.footer?.text === 'QueryFixr • Channel Purpose')),
+        message.embeds.some((embed) =>
+          (embed.title ?? '').includes('Channel Purpose') &&
+          (embed.footer?.text ?? '').includes('Channel Purpose'),
         ),
     );
 
