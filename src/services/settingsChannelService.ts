@@ -397,7 +397,18 @@ const SETTINGS_MESSAGE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 function isSettingsDashboardMessage(message: {
   author: { id: string };
   embeds: readonly { title?: string | null; footer?: { text?: string | null } | null }[];
-  createdTimestamp: number;
+}): boolean {
+  return message.embeds.some((embed) => {
+    const title = embed.title ?? '';
+    const footer = embed.footer?.text ?? '';
+    return (
+      (title.includes('Settings') && (
+        footer.includes('Settings Dashboard') ||
+        footer.includes('Advanced Ticket Configuration') ||
+        footer.includes('Select a section to configure it')
+      ))
+    );
+  });
 }, botId: string): boolean {
   if (message.author.id !== botId) return false;
 
@@ -412,28 +423,23 @@ function isSettingsDashboardMessage(message: {
   );
 }
 
-function isSettingsPurposeMessage(
-  message: {
-    author: { id: string };
-    embeds: readonly {
-      title?: string | null;
-      footer?: { text?: string | null } | null;
-    }[];
-  },
-  botId: string,
-): boolean {
-  return message.author.id === botId &&
-    message.embeds.some(
-      (embed) =>
-        ((embed.title === '📝 QueryFixr Channel Purpose' &&
-          embed.footer?.text === 'QueryFixr • Channel Purpose') ||
-          (embed.title === '📝 QueryFixr Channel Purpose' &&
-          embed.footer?.text === 'QueryFixr • Channel Purpose')),
-    );
+function isSettingsPurposeMessage(message: {
+  author: { id: string };
+  embeds: readonly { title?: string | null; footer?: { text?: string | null } | null }[];
+}): boolean {
+  return message.embeds.some((embed) =>
+    (embed.title ?? '').includes('Channel Purpose') &&
+    (embed.footer?.text ?? '').includes('Channel Purpose'),
+  );
 }
 
 function isLegacySmallSettingsDashboard(message: {
   embeds: readonly { title?: string | null; footer?: { text?: string | null } | null }[];
+}): boolean {
+  return message.embeds.some((embed) =>
+    (embed.title ?? '').includes('Settings') &&
+    (embed.footer?.text ?? '').includes('Select a section to configure it'),
+  );
 }): boolean {
   return message.embeds.some(
     (embed) =>
