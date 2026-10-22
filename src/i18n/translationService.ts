@@ -14,6 +14,12 @@ import koKR from './locales/ko-KR';
 import ruRU from './locales/ru-RU';
 import zhCN from './locales/zh-CN';
 import trTR from './locales/tr-TR';
+import nlNL from './locales/nl-NL';
+import plPL from './locales/pl-PL';
+import ukUA from './locales/uk-UA';
+import elGR from './locales/el-GR';
+import csCZ from './locales/cs-CZ';
+import svSE from './locales/sv-SE';
 
 export type TranslationKey = keyof typeof enUS;
 export type TranslationParams = Readonly<Record<string, string | number | boolean | null | undefined>>;
@@ -34,6 +40,12 @@ const CATALOGS: Readonly<Record<SupportedLocale, Readonly<Record<TranslationKey,
   'ru-RU': ruRU,
   'zh-CN': zhCN,
   'tr-TR': trTR,
+  'nl-NL': nlNL,
+  'pl-PL': plPL,
+  'uk-UA': ukUA,
+  'el-GR': elGR,
+  'cs-CZ': csCZ,
+  'sv-SE': svSE,
 };
 
 /** Single-pass interpolation: parameter content is literal and never reparsed. */
