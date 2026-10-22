@@ -270,7 +270,7 @@ let writeQueue: Promise<void> = Promise.resolve();
 function normalizeBrandTextDeep<T>(value: T): T {
   if (typeof value === 'string') {
     const legacyBrandAliases = ['Support' + 'Forge', 'Resolve' + 'X', 'Resolv' + 'X', 'SUPPORT' + 'FORGE'];
-    const legacyBrandPattern = new RegExp(\\`\\\\b(?:${legacyBrandAliases.join('|')})\\\\b\\`, 'g');
+    const legacyBrandPattern = new RegExp('\\b(?:' + legacyBrandAliases.join('|') + ')\\b', 'g');
     return value.replace(legacyBrandPattern, 'QueryFixr') as unknown as T;
   }
   if (Array.isArray(value)) return value.map((entry) => normalizeBrandTextDeep(entry)) as unknown as T;
