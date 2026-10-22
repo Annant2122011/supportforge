@@ -72,7 +72,7 @@ async function render(interaction: FormSettingsInteraction, content: string, com
   const description = heading ? content.replace(heading[0], '').trim() : content;
   const embed = new EmbedBuilder()
     .setColor(theme.color)
-    .setAuthor({ name: 'ResolvX • Forms & Templates' })
+    .setAuthor({ name: 'QueryFixr • Forms & Templates' })
     .setTitle(title)
     .setDescription((description || 'Use the controls below to continue.').slice(0, 4096))
     .setFooter({ text: theme.label + ' theme • Guided setup and advanced schema tools' });
@@ -197,7 +197,7 @@ async function openQuickFormModal(interaction: ButtonInteraction, departmentId: 
 async function home(interaction: FormSettingsInteraction): Promise<void> {
   await render(interaction,
     '**🧾 Ticket Forms & Templates**\n\n' +
-    'Manage the same versioned forms available through /supportforge form commands. Both the slash commands and this Settings panel use the same validation and Neon PostgreSQL records.\n\n' +
+    'Manage the same versioned forms available through /qf form commands. Both the slash commands and this Settings panel use the same validation and Neon PostgreSQL records.\n\n' +
     '**Forms:** list, inspect details, view paginated schema JSON, read the field guide, create, version, activate, and deactivate.\n' +
     '**Templates:** save reusable schemas, list and inspect them, create forms from them, and delete templates without changing forms already created.\n\n' +
     'The Settings modal accepts up to 4,000 characters of field JSON. Use the slash command for longer schemas.',
