@@ -1,4 +1,4 @@
-# ResolveX Stage A–E Inspection and Completion Record
+# ResolvX Stage A–E Inspection and Completion Record
 
 **Inspection date:** 18 October 2026  
 **Branch inspected:** `feature/forms-settings-panel`  
@@ -69,7 +69,7 @@ Stage E now includes separate visual builders for the public ticket panels and t
 - Button access rules can be set at panel and individual button level. If both levels are restricted, a member must satisfy both. Admins with Manage Server/Administrator can use the panel.
 - Optional confirmation prompts are ephemeral, identify their initiating user, and bind to the source published message. The runtime validates the public message/channel and role access when clicked; confirmation clicks are also revalidated, and the Cancel button remains usable even if the source panel becomes unavailable during confirmation.
 - Published configuration is stored as a snapshot separately from the editable draft. Button IDs rotate on workflow retargeting; stale or copied component IDs are rejected. Panel definitions from older builder revisions that lack a published snapshot must be re-published once before their old buttons become active again; the detail view indicates that the draft needs publishing.
-- Publishing creates a replacement message, persists its channel/message pointer and immutable button snapshot, and only then tries to remove the old message. When persistence fails, ResolveX restores the previous published pointer/snapshot in configuration, then attempts to remove the unregistered replacement and retain the previous panel. When Discord fails to delete an old message, the panel interaction guard makes that stale message nonfunctional and the UI warns the administrator.
+- Publishing creates a replacement message, persists its channel/message pointer and immutable button snapshot, and only then tries to remove the old message. When persistence fails, ResolvX restores the previous published pointer/snapshot in configuration, then attempts to remove the unregistered replacement and retain the previous panel. When Discord fails to delete an old message, the panel interaction guard makes that stale message nonfunctional and the UI warns the administrator.
 - Removing a panel removes only the definition and known public panel message; ticket channels opened through that panel remain independent.
 - Discord's five-row/25-component ceiling is respected. The private preview uses at most 20 buttons when it needs a navigation row; a published panel may use all 25.
 
@@ -91,7 +91,7 @@ Live acceptance is still required for actual role/permission behavior, public ch
 The current branch head was built and tested by GitHub Actions on commit `fdcc08526726330ffdca771c4a50ab1cc6ad6373`:
 
 - [Build run 39187857351](https://github.com/Annant2122011/supportforge/actions/runs/39187857351) passed the TypeScript build and automated tests.
-- [SupportForge CI run 39187857407](https://github.com/Annant2122011/supportforge/actions/runs/39187857407) passed build, tests and database verification.
+- [ResolvX CI run 39187857407](https://github.com/Annant2122011/supportforge/actions/runs/39187857407) passed build, tests and database verification.
 
 Those runs include the custom-panel interaction-ID parser tests, Settings-button customization tests, target editor, visual department-tag picker, and user/source-bound confirmation handling. CI used disposable test data, not production Neon. Live acceptance remains outstanding.
 

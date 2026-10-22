@@ -73,7 +73,7 @@ export async function handleSettingsSlashCommand(
       const departments = Object.values(config.departments);
       const tagCount = departments.reduce((sum, department) => sum + Object.keys(department.tags ?? {}).length, 0);
       await interaction.editReply(
-        '**SupportForge Settings Overview**\n\n' +
+        '**ResolvX Settings Overview**\n\n' +
         'Departments: **' + departments.length + '** · Tags: **' + tagCount + '**\n' +
         'Default priority: **' + settings.ticketDefaults.priority + '**\n' +
         'Simultaneous moderators: **' + settings.ticketDefaults.maxClaimedModerators + '**\n' +
@@ -110,7 +110,7 @@ export async function handleSettingsSlashCommand(
             { name: 'Current theme', value: '**' + activeTheme.label + '**\n' + activeTheme.description, inline: true },
             { name: 'Change it', value: 'Use /supportforge settings theme with action:set and choose a palette.', inline: true },
           )
-          .setFooter({ text: 'SupportForge • Server-specific appearance' })],
+          .setFooter({ text: 'ResolvX • Server-specific appearance' })],
       });
       return;
     }
@@ -614,7 +614,7 @@ export async function handleSettingsSlashCommand(
       if (role && (role.managed || role.id === guild.roles.everyone.id)) throw new Error('Choose a normal server role, not @everyone or a managed integration role.');
       const staffRoleId = clearRole ? null : role?.id ?? department.staffRoleId;
       const category = department.categoryId ? guild.channels.cache.get(department.categoryId) : null;
-      if (category?.type === ChannelType.GuildCategory) await category.edit({ name: ('SupportForge.' + newName).slice(0, 100), reason: 'SupportForge department update from slash command' });
+      if (category?.type === ChannelType.GuildCategory) await category.edit({ name: ('ResolvX.' + newName).slice(0, 100), reason: 'ResolvX department update from slash command' });
       await updateGuildConfig(guild.id, (current) => {
         const item = current.departments[department.id];
         if (item) { item.name = newName; item.staffRoleId = staffRoleId; }
@@ -716,7 +716,7 @@ export async function handleSettingsSlashCommand(
     if (action === 'priority-role') {
       const mode = interaction.options.getString('action', true);
       if (mode !== 'status' && !interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
-        throw new Error('Creating or deleting SupportForge priority roles requires the Administrator permission.');
+        throw new Error('Creating or deleting ResolvX priority roles requires the Administrator permission.');
       }
       const settings = await getAdvancedSettings(guild.id);
       if (mode === 'status') {
@@ -743,7 +743,7 @@ export async function handleSettingsSlashCommand(
           return;
         }
         const bot = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
-        if (!bot?.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('SupportForge needs Manage Roles to create priority roles.');
+        if (!bot?.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('ResolvX needs Manage Roles to create priority roles.');
         const roleMeta: Record<TicketPriority, { label: string; color: number }> = {
           low: { label: 'Low', color: 0x2ecc71 },
           normal: { label: 'Normal', color: 0xf1c40f },
@@ -753,10 +753,10 @@ export async function handleSettingsSlashCommand(
         };
         const meta = roleMeta[priority];
         const role = await guild.roles.create({
-          name: 'SupportForge • ' + meta.label + ' Tickets',
+          name: 'ResolvX • ' + meta.label + ' Tickets',
           colors: { primaryColor: meta.color },
           mentionable: false,
-          reason: 'SupportForge priority role created through slash command',
+          reason: 'ResolvX priority role created through slash command',
         });
         await updateAdvancedSettings(guild.id, (current) => { current.priorityRoles[priority] = role.id; });
         await enforcePriorityRoleHierarchy(guild);
@@ -773,9 +773,9 @@ export async function handleSettingsSlashCommand(
         }
         const bot = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
         if (!existing.editable || existing.managed || !bot?.permissions.has(PermissionFlagsBits.ManageRoles)) {
-          throw new Error('Discord will not let SupportForge delete that role. Move the bot role above it and ensure Manage Roles is granted.');
+          throw new Error('Discord will not let ResolvX delete that role. Move the bot role above it and ensure Manage Roles is granted.');
         }
-        await existing.delete('SupportForge priority role removed through slash command');
+        await existing.delete('ResolvX priority role removed through slash command');
         await updateAdvancedSettings(guild.id, (current) => { delete current.priorityRoles[priority]; });
         await enforcePriorityRoleHierarchy(guild);
         await refreshSettingsChannel(guild);
@@ -845,7 +845,7 @@ export async function handleSettingsSlashCommand(
     if (action === 'manual') {
       const version = interaction.options.getString('version', true);
       await interaction.editReply(
-        '**SupportForge ' + (version === 'quick' ? 'Quick Manual' : 'Detailed Manual') + '**\n\n' +
+        '**ResolvX ' + (version === 'quick' ? 'Quick Manual' : 'Detailed Manual') + '**\n\n' +
         'Use Claim to take ownership, Pending when waiting for a customer, Resume to return a pending ticket to open, and Close to generate the transcript and lock the ticket.\n\n' +
         'Administrators can configure departments, tags, retention, panel behavior, report safety, and forms using Settings buttons or slash commands.\n\n' +
         'For the full detailed guide, open Settings → Manual and choose the detailed version.'
@@ -857,7 +857,7 @@ export async function handleSettingsSlashCommand(
       const confirmation = interaction.options.getString('confirmation', true).trim().toUpperCase();
       if (confirmation !== 'DELETE SUPPORT FORGE') throw new Error('Confirmation must be exactly DELETE SUPPORT FORGE. Nothing was deleted.');
       const accumulate = interaction.options.getBoolean('accumulate-audit', true);
-      await interaction.editReply('SupportForge factory reset started. This is destructive and cannot be undone.');
+      await interaction.editReply('ResolvX factory reset started. This is destructive and cannot be undone.');
       const result = await performFactoryReset(guild, accumulate);
       const failures = result.failed.slice(0, 8).map((failure) => '• ' + failure.name + ' (' + failure.id + '): ' + failure.error).join('\n');
       await interaction.followUp({

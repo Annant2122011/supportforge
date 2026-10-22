@@ -291,7 +291,7 @@ export class TicketOutboxPublisher implements OutboxPublisher {
         if (voiceChannel?.type === ChannelType.GuildVoice) {
           try {
             await voiceChannel.delete(
-              'SupportForge outbox reconciliation: ticket is no longer claimed',
+              'ResolvX outbox reconciliation: ticket is no longer claimed',
             );
           } catch (error) {
             if (!isUnknownChannel(error)) throw error;

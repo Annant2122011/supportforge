@@ -1,5 +1,5 @@
 [Unit]
-Description=Check GitHub for new ResolveX commits
+Description=Check GitHub for new ResolvX commits
 
 [Timer]
 OnBootSec=90s

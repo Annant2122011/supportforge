@@ -31,7 +31,7 @@ export function assertTicketStatusTransition(
   }
 
   throw new Error(
-    `Invalid SupportForge ticket lifecycle transition: ${from} -> ${to}.`,
+    `Invalid ResolvX ticket lifecycle transition: ${from} -> ${to}.`,
   );
 }
 

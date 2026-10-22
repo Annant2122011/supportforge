@@ -111,7 +111,7 @@ async function getTicketContext(
     !topic.startsWith('supportforge:ticket')
   ) {
     throw new Error(
-      'This channel is not a SupportForge ticket.',
+      'This channel is not a ResolvX ticket.',
     );
   }
 
@@ -226,7 +226,7 @@ async function syncCommandTicketVisibility(
 ): Promise<void> {
   const ownerId = getField(newTopic, 'owner');
   if (!ownerId) {
-    throw new Error('Cannot reconcile SupportForge ticket visibility without an owner ID.');
+    throw new Error('Cannot reconcile ResolvX ticket visibility without an owner ID.');
   }
 
   const staffRoleId = getField(newTopic, 'staff');
@@ -306,7 +306,7 @@ async function syncCommandTicketVisibility(
     context.channel.id,
     properties,
     roleIds,
-    'Synchronize SupportForge ticket topic, channel name, and visibility in one PATCH',
+    'Synchronize ResolvX ticket topic, channel name, and visibility in one PATCH',
     { deferLongRateLimit: false },
   );
   if (properties.topic !== undefined) context.channel.topic = properties.topic;
@@ -325,7 +325,7 @@ async function saveTopic(
   const oldTopic = context.topic;
   const persisted = await getPersistedTicket(context.channel.id);
   if (!persisted || persisted.deletedAt) {
-    throw new Error('Cannot update a SupportForge ticket without an active durable ticket record.');
+    throw new Error('Cannot update a ResolvX ticket without an active durable ticket record.');
   }
 
   let topic = requestedTopic;
@@ -402,7 +402,7 @@ async function saveTopic(
         context.channel,
         topic,
         status,
-        'SupportForge voice mode ended by ticket command transition',
+        'ResolvX voice mode ended by ticket command transition',
         { deferTicketTopicUpdate: true, queueRename: false },
       );
       await updatePersistedTicketMetadata(
@@ -420,7 +420,7 @@ async function saveTopic(
       topic = setField(topic, 'updated_at', now);
     } catch (error) {
       console.warn(
-        'SupportForge ticket state committed, but private voice cleanup is pending:',
+        'ResolvX ticket state committed, but private voice cleanup is pending:',
         error,
       );
     }
@@ -430,7 +430,7 @@ async function saveTopic(
     await syncCommandTicketVisibility(context, oldTopic, topic);
   } catch (error) {
     console.warn(
-      'SupportForge ticket state is durable; Discord topic/name/permissions will be reconciled by the outbox:',
+      'ResolvX ticket state is durable; Discord topic/name/permissions will be reconciled by the outbox:',
       error,
     );
   }
@@ -526,9 +526,9 @@ export async function executeTicketCommand(
             .setColor(color)
             .setTitle('⚠️ Confirm ticket deletion · Step 1 of 2')
             .setDescription(
-              'You are about to delete **Ticket #' + context.ticketNumber + '**. ResolveX will archive the available conversation and accessible attachments before deleting the channel. If the archive cannot finish, deletion will be cancelled.',
+              'You are about to delete **Ticket #' + context.ticketNumber + '**. ResolvX will archive the available conversation and accessible attachments before deleting the channel. If the archive cannot finish, deletion will be cancelled.',
             )
-            .setFooter({ text: 'ResolveX • Two-step deletion protection' }),
+            .setFooter({ text: 'ResolvX • Two-step deletion protection' }),
         ],
         components: [
           new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -653,7 +653,7 @@ export async function executeTicketCommand(
             message.embeds.some(
               (embed) =>
                 embed.title ===
-                `🎫 SupportForge Ticket #${ticketNumber}`,
+                `🎫 ResolvX Ticket #${ticketNumber}`,
             ),
         );
       }
@@ -679,7 +679,7 @@ export async function executeTicketCommand(
 
       await interaction.editReply({
         content:
-          '🎛️ **SupportForge Panel Controls**\n\n' +
+          '🎛️ **ResolvX Panel Controls**\n\n' +
           'Move the ticket controls to the bottom of the conversation when needed. ' +
           'Automatic activity-based repositioning is re-armed after each move, so the panel can be surfaced repeatedly as the conversation grows.',
         components: rows,

@@ -139,7 +139,7 @@ async function isDepartmentStaff(interaction: ButtonInteraction | StringSelectMe
 
 function manualQuickEmbed(): EmbedBuilder {
   return new EmbedBuilder()
-    .setTitle('📖 SupportForge Staff Manual • Quick Overview')
+    .setTitle('📖 ResolvX Staff Manual • Quick Overview')
     .setDescription(
       '**1. Ticket lifecycle**\n' +
       'Open → Claimed/Pending → Closed → Archived. Reopened tickets return to the active workflow.\n\n' +
@@ -161,10 +161,10 @@ function manualQuickEmbed(): EmbedBuilder {
 function manualDetailedEmbeds(): EmbedBuilder[] {
   return [
     new EmbedBuilder()
-      .setTitle('📖 SupportForge Staff Manual • Detailed • Page 1')
+      .setTitle('📖 ResolvX Staff Manual • Detailed • Page 1')
       .setDescription(
         '**Getting started**\n' +
-        'SupportForge keeps ticket work private and structured. Your department role controls which support areas and audit/settings resources you can access. Use the buttons in the ticket panel instead of attempting manual channel-management actions.\n\n' +
+        'ResolvX keeps ticket work private and structured. Your department role controls which support areas and audit/settings resources you can access. Use the buttons in the ticket panel instead of attempting manual channel-management actions.\n\n' +
         '**Ticket states**\n' +
         '• **Open:** Active ticket waiting for staff action.\n' +
         '• **Claimed:** A staff member has taken ownership.\n' +
@@ -175,19 +175,19 @@ function manualDetailedEmbeds(): EmbedBuilder[] {
         '**Claiming and pending**\n' +
         'Claim only when you intend to own the work. Pending should be used when progress genuinely depends on a response. Resume moves a pending ticket back to Open.\n\n' +
         '**Closing**\n' +
-        'SupportForge generates and uploads the transcript before committing the Closed state. If transcript creation fails, the ticket is not treated as safely closed. Reopen is available only from Closed, and Archive is the deliberate terminal historical action.',
+        'ResolvX generates and uploads the transcript before committing the Closed state. If transcript creation fails, the ticket is not treated as safely closed. Reopen is available only from Closed, and Archive is the deliberate terminal historical action.',
       )
       .setFooter({ text: 'Private manual view • Page 1 of 2' })
       .setTimestamp(),
     new EmbedBuilder()
-      .setTitle('📖 SupportForge Staff Manual • Detailed • Page 2')
+      .setTitle('📖 ResolvX Staff Manual • Detailed • Page 2')
       .setDescription(
         '**Priority & tags**\n' +
         'Priority is not cosmetic. It is displayed in the ticket name, panel color, and status area. Use the lowest accurate priority and increase it when urgency changes. Tags add searchable operational context.\n\n' +
         '**Internal notes & history**\n' +
         'Internal notes are staff-only workflow context. History reads the audit record for the ticket. Do not put customer-facing promises, passwords, tokens, or other secrets into notes.\n\n' +
         '**Panel navigation**\n' +
-        'When conversation activity pushes the panel away from view, SupportForge may collapse or move it. Restore/Move Panel brings the controls back to the bottom without duplicating old panels.\n\n' +
+        'When conversation activity pushes the panel away from view, ResolvX may collapse or move it. Restore/Move Panel brings the controls back to the bottom without duplicating old panels.\n\n' +
         '**Audit log**\n' +
         'The audit log records ticket and administrative activity. Use **Daily Summary** for the current day, **Audit Data Settings** for retention controls, and **Developer Options** for the continuous technical audit stream.\n\n' +
         '**Settings & priority roles**\n' +
@@ -195,7 +195,7 @@ function manualDetailedEmbeds(): EmbedBuilder[] {
         '**Retention**\n' +
         'Closed and archived tickets are not silently deleted. When a retention rule finds eligible tickets, an approval step is required. Review the eligible tickets before approving deletion.\n\n' +
         '**Safety**\n' +
-        'Never bypass SupportForge permissions. Never expose private tickets. When a workflow looks stale, use the supported panel controls or ask an administrator to run Repair System.',
+        'Never bypass ResolvX permissions. Never expose private tickets. When a workflow looks stale, use the supported panel controls or ask an administrator to run Repair System.',
       )
       .setFooter({ text: 'Private manual view • Page 2 of 2' })
       .setTimestamp(),
@@ -212,7 +212,7 @@ function findPriorityRole(
   configuredRoleId?: string,
 ) {
   // A matching display name is not ownership proof. Only the saved role ID
-  // identifies a SupportForge-managed priority role.
+  // identifies a ResolvX-managed priority role.
   if (!configuredRoleId) return undefined;
   const configured = guild.roles.cache.get(configuredRoleId);
   return configured && !configured.managed ? configured : undefined;
@@ -225,7 +225,7 @@ async function showManual(interaction: SettingsViewInteraction): Promise<void> {
     new EmbedBuilder()
       .setTitle('📖 Staff Manual')
       .setDescription(
-        'A newcomer-friendly guide to SupportForge. Choose a concise overview or the full instructions. Each manual is delivered as an **ephemeral** response, so other staff do not see or accumulate your manual pages.',
+        'A newcomer-friendly guide to ResolvX. Choose a concise overview or the full instructions. Each manual is delivered as an **ephemeral** response, so other staff do not see or accumulate your manual pages.',
       )
       .addFields(
         { name: 'Quick Overview', value: 'Core workflow and the controls you need most often.', inline: true },
@@ -295,7 +295,7 @@ async function showPriorityRules(interaction: ButtonInteraction): Promise<void> 
     new EmbedBuilder()
       .setTitle('🎨 Priority Rules & Roles')
       .setDescription(
-        'Priority roles are optional server rules. **Nothing is created automatically.** Choose a priority to create its role, or delete an existing SupportForge priority role. SupportForge will not fail the whole rule operation just because Discord refuses a role-hierarchy reorder.',
+        'Priority roles are optional server rules. **Nothing is created automatically.** Choose a priority to create its role, or delete an existing ResolvX priority role. ResolvX will not fail the whole rule operation just because Discord refuses a role-hierarchy reorder.',
       )
       .addFields({
         name: 'Current priority rules',
@@ -320,7 +320,7 @@ async function createPriorityRole(interaction: ButtonInteraction, priority: Tick
   if (!botMember?.permissions.has(PermissionFlagsBits.ManageRoles)) {
     await reject(
       interaction,
-      '❌ SupportForge needs **Manage Roles** to create priority roles. Discord does not allow a bot to grant itself that permission.',
+      '❌ ResolvX needs **Manage Roles** to create priority roles. Discord does not allow a bot to grant itself that permission.',
     );
     return;
   }
@@ -350,12 +350,12 @@ async function createPriorityRole(interaction: ButtonInteraction, priority: Tick
   try {
     const definition = PRIORITY_ROLE_DEFINITIONS[priority];
     const role = await interaction.guild!.roles.create({
-      name: 'SupportForge • ' + definition.label + ' Tickets',
+      name: 'ResolvX • ' + definition.label + ' Tickets',
       colors: {
         primaryColor: definition.color,
       },
       mentionable: false,
-      reason: 'SupportForge administrator-created priority rule',
+      reason: 'ResolvX administrator-created priority rule',
     });
 
     await updateAdvancedSettings(interaction.guild!.id, (settings) => {
@@ -395,7 +395,7 @@ async function createPriorityRole(interaction: ButtonInteraction, priority: Tick
   } catch (error) {
     console.error('❌ Priority role creation failed:', error);
     await interaction.editReply(
-      '❌ SupportForge could not create that priority role. Check that the bot can Manage Roles and that its role is above the target role.',
+      '❌ ResolvX could not create that priority role. Check that the bot can Manage Roles and that its role is above the target role.',
     );
   }
 }
@@ -429,7 +429,7 @@ async function deletePriorityRole(
       await interaction.editReply(
         'ℹ️ No ' +
           priorityRoleLabel(priority) +
-          ' priority role exists. The stale SupportForge configuration was cleared.',
+          ' priority role exists. The stale ResolvX configuration was cleared.',
       );
       await auditSettingsAction(
         interaction.guild!,
@@ -454,14 +454,14 @@ async function deletePriorityRole(
           ' because Discord role hierarchy/permissions do not permit the bot to manage it.',
       );
       await interaction.editReply(
-        '❌ Discord will not let SupportForge delete ' +
+        '❌ Discord will not let ResolvX delete ' +
           role.toString() +
-          '. Move the SupportForge bot role above this role and ensure it has **Manage Roles**, then try again.',
+          '. Move the ResolvX bot role above this role and ensure it has **Manage Roles**, then try again.',
       );
       return;
     }
 
-    await role.delete('SupportForge administrator deleted priority rule role');
+    await role.delete('ResolvX administrator deleted priority rule role');
 
     await updateAdvancedSettings(interaction.guild!.id, (current) => {
       delete current.priorityRoles[priority];
@@ -485,7 +485,7 @@ async function deletePriorityRole(
   } catch (error) {
     console.error('❌ Priority role deletion failed:', error);
     await interaction.editReply(
-      '❌ SupportForge could not delete that priority role. Discord may be preventing the bot from managing it because of the role hierarchy.',
+      '❌ ResolvX could not delete that priority role. Discord may be preventing the bot from managing it because of the role hierarchy.',
     );
   }
 }
@@ -1631,9 +1631,9 @@ async function showResetStepOne(interaction: ButtonInteraction): Promise<void> {
     new EmbedBuilder()
       .setTitle('🚨 Delete Everything • Confirmation 1 of 3')
       .setDescription(
-        '**This permanently removes SupportForge data from this server.**\n\n' +
-        'Before continuing, choose whether SupportForge should retain individual audit events for future summaries. Daily and overall summaries are retained either way.\n\n' +
-        'SupportForge-managed ticket channels and their messages, SupportForge categories, the public ticket panel, transcript/audit/settings channels, and stored SupportForge data will be deleted.\n\n' +
+        '**This permanently removes ResolvX data from this server.**\n\n' +
+        'Before continuing, choose whether ResolvX should retain individual audit events for future summaries. Daily and overall summaries are retained either way.\n\n' +
+        'ResolvX-managed ticket channels and their messages, ResolvX categories, the public ticket panel, transcript/audit/settings channels, and stored ResolvX data will be deleted.\n\n' +
         'Unrelated Discord channels are not targeted.',
       ),
   ], [
@@ -1651,10 +1651,10 @@ async function showResetStepTwo(interaction: ButtonInteraction): Promise<void> {
     new EmbedBuilder()
       .setTitle('🚨 Delete Everything • Confirmation 2 of 3')
       .setDescription(
-        '**You are about to erase every SupportForge-managed channel and stored record in this server.**\n\n' +
+        '**You are about to erase every ResolvX-managed channel and stored record in this server.**\n\n' +
         'Audit retention choice: **' + (accumulate ? 'Accumulate individual audit data' : 'Keep summaries only') + '**.\n\n' +
-        'Daily and overall summaries will remain available after SupportForge is set up again. This choice can be changed later from the Audit Log controls.\n\n' +
-        'This includes every message inside SupportForge-managed channels. SupportForge cannot undo this operation.',
+        'Daily and overall summaries will remain available after ResolvX is set up again. This choice can be changed later from the Audit Log controls.\n\n' +
+        'This includes every message inside ResolvX-managed channels. ResolvX cannot undo this operation.',
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -1698,7 +1698,7 @@ async function openModal(
     }
     await interaction.showModal(modal);
   } catch (error) {
-    console.error('❌ Failed to open SupportForge settings form:', error);
+    console.error('❌ Failed to open ResolvX settings form:', error);
     await reject(interaction, '❌ The settings form could not be opened. Please try again.');
   }
 }
@@ -1713,7 +1713,7 @@ async function recoveryEmbed(guild: Guild, title: string, description: string): 
     .setColor(getThemeColor(config.theme))
     .setTitle(title.slice(0, 256))
     .setDescription((description || 'Use the controls below to continue.').slice(0, 3900))
-    .setFooter({ text: getThemeDefinition(config.theme).label + ' theme • ResolveX Ticket Recovery' })
+    .setFooter({ text: getThemeDefinition(config.theme).label + ' theme • ResolvX Ticket Recovery' })
     .setTimestamp();
 }
 
@@ -1829,7 +1829,7 @@ async function showRecoveryCandidateDetail(
   }
 
   const text = source === 'discord_native'
-    ? 'This channel was deleted outside the ResolveX ticket Delete button. Native deletion is recorded separately and does not trigger the accidental-deletion question.'
+    ? 'This channel was deleted outside the ResolvX ticket Delete button. Native deletion is recorded separately and does not trigger the accidental-deletion question.'
     : item.accidentalAnswer === 'yes'
       ? 'Review answer: **Yes, it was deleted by mistake.** This ticket is eligible for restoration through this review workflow.'
       : 'Was this ticket deleted by mistake?\\n\\nOriginal channel ID: ' + item.originalChannelId +
@@ -1999,7 +1999,7 @@ export async function handleSettingsInteraction(
     (interaction.customId.startsWith('sf:settings:'))
   ) {
     if (!isSettingsChannel(interaction)) {
-      await reject(interaction, '❌ SupportForge settings can only be used from the SupportForge settings channel.');
+      await reject(interaction, '❌ ResolvX settings can only be used from the ResolvX settings channel.');
       return true;
     }
 
@@ -2012,7 +2012,7 @@ export async function handleSettingsInteraction(
         interaction,
         manualAction
           ? '❌ The Staff Manual is available to configured department staff or administrators.'
-          : '❌ You need **Manage Server** or **Administrator** to change SupportForge settings.',
+          : '❌ You need **Manage Server** or **Administrator** to change ResolvX settings.',
       );
       return true;
     }
@@ -2255,9 +2255,9 @@ export async function handleSettingsInteraction(
     if (id === SETTINGS_LAYOUT_PREFIX + ':reset-order') {
       await interaction.deferUpdate();
       await updateAdvancedSettings(guild.id, (settings) => {
-        settings.settingsDashboard.title = '⚙️ ResolveX Settings';
+        settings.settingsDashboard.title = '⚙️ ResolvX Settings';
         settings.settingsDashboard.description = 'Configure your server’s ticket system, support panels and retention policies.';
-        settings.settingsDashboard.footer = 'ResolveX • Settings Dashboard';
+        settings.settingsDashboard.footer = 'ResolvX • Settings Dashboard';
         settings.settingsDashboard.buttonOrder = [...SETTINGS_DASHBOARD_BUTTON_KEYS];
         settings.settingsDashboard.buttonCustomizations = {};
       });
@@ -3019,14 +3019,14 @@ export async function handleSettingsInteraction(
         const restoreMode = id !== 'sf:settings:setup';
         const result = await runSupportForgeSetup(guild, restoreMode);
         await interaction.editReply(
-          '✅ **SupportForge ' + (restoreMode ? 'restored' : 'setup/repair completed') + ' successfully.**\n\n' +
+          '✅ **ResolvX ' + (restoreMode ? 'restored' : 'setup/repair completed') + ' successfully.**\n\n' +
           'Container: <#' + result.supportCategoryId + '>\n' +
           'Department categories: **' + result.departmentCount + '**\n' +
           (result.legacyOpenCategoryId ? 'Legacy Open bucket: <#' + result.legacyOpenCategoryId + '>\n' : '') +
           'The support panel, audit channel, Settings, transcripts, and department categories were checked and repaired.'
         );
       } catch (error) {
-        await interaction.editReply('❌ SupportForge could not complete setup/restore: ' + (error instanceof Error ? error.message : 'Unknown error.'));
+        await interaction.editReply('❌ ResolvX could not complete setup/restore: ' + (error instanceof Error ? error.message : 'Unknown error.'));
       }
       return true;
     }
@@ -3047,7 +3047,7 @@ export async function handleSettingsInteraction(
               .setColor(repairThemeColor)
               .setTitle('🛡️ Restore & Update • Complete')
               .setDescription(
-                'The existing PostgreSQL-backed configuration and ticket records were retained. SupportForge has reconciled its managed categories, core channels, settings, transcript archive, audit panel, support panel, and department categories.\n\n' +
+                'The existing PostgreSQL-backed configuration and ticket records were retained. ResolvX has reconciled its managed categories, core channels, settings, transcript archive, audit panel, support panel, and department categories.\n\n' +
                 'Recovered missing ticket records from surviving channel metadata: **' + result.recoveredTickets + '**.\n\n' +
                 (deployment.requested
                   ? '🚀 **Code deployment queued.** ' + deployment.reason
@@ -3058,7 +3058,7 @@ export async function handleSettingsInteraction(
           ],
           components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
         });
-        await auditSettingsAction(guild, interaction, 'RESTORE_AND_UPDATE', 'Reconciled SupportForge infrastructure; deployment requested=' + deployment.requested + '; recovered ticket records=' + result.recoveredTickets + '.');
+        await auditSettingsAction(guild, interaction, 'RESTORE_AND_UPDATE', 'Reconciled ResolvX infrastructure; deployment requested=' + deployment.requested + '; recovered ticket records=' + result.recoveredTickets + '.');
       } catch (error) {
         console.error('❌ Restore & Update failed:', error);
         await interaction.editReply('❌ Restore & Update stopped before completion: ' + (error instanceof Error ? error.message : 'Unknown error. Existing database records were not intentionally reset.'));
@@ -3076,8 +3076,8 @@ export async function handleSettingsInteraction(
             new EmbedBuilder()
               .setTitle('✅ Normal Repair Complete')
               .setDescription(
-                'SupportForge infrastructure has been checked and repaired where required.' +
-                (recoveredTickets ? '\n\nRecovered **' + recoveredTickets + '** missing durable ticket record(s) from existing ticket-channel metadata.' : '\n\nAll existing SupportForge ticket channels already had durable records.'),
+                'ResolvX infrastructure has been checked and repaired where required.' +
+                (recoveredTickets ? '\n\nRecovered **' + recoveredTickets + '** missing durable ticket record(s) from existing ticket-channel metadata.' : '\n\nAll existing ResolvX ticket channels already had durable records.'),
               ),
           ],
           components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
@@ -3494,8 +3494,8 @@ export async function handleSettingsInteraction(
         : null;
       if (category?.type === ChannelType.GuildCategory) {
         await category.edit({
-          name: ('SupportForge.' + name).slice(0, 100),
-          reason: 'SupportForge department rename',
+          name: ('ResolvX.' + name).slice(0, 100),
+          reason: 'ResolvX department rename',
         });
       }
       await updateGuildConfig(guild.id, (current) => {
@@ -3693,11 +3693,11 @@ export async function handleSettingsInteraction(
          * interaction which opened this modal. Therefore the ephemeral
          * @original response is not a safe place to send the final result.
          * Use a webhook follow-up instead, which is independent of the
-         * deleted SupportForge channel.
+         * deleted ResolvX channel.
          */
         await interaction.editReply({
           content:
-            '⏳ **SupportForge reset is being completed.** All SupportForge-managed infrastructure and stored data are being removed. The final confirmation will be sent separately after the destructive operation finishes.',
+            '⏳ **ResolvX reset is being completed.** All ResolvX-managed infrastructure and stored data are being removed. The final confirmation will be sent separately after the destructive operation finishes.',
         });
 
         const resetResult = await performFactoryReset(
@@ -3721,8 +3721,8 @@ export async function handleSettingsInteraction(
 
           await interaction.editReply({
             content:
-              '⚠️ **SupportForge reset was only partially completed.**\n' +
-              'Some managed resources could not be deleted, so SupportForge preserved its state for a safe retry.\n\n' +
+              '⚠️ **ResolvX reset was only partially completed.**\n' +
+              'Some managed resources could not be deleted, so ResolvX preserved its state for a safe retry.\n\n' +
               (failures || 'No detailed failure information was returned.') +
               (resetResult.failed.length > 5
                 ? '\n\n…and ' +
@@ -3744,7 +3744,7 @@ export async function handleSettingsInteraction(
          */
         await interaction.user.send({
           content:
-            '✅ SupportForge has been completely reset. All SupportForge-managed messages, channels, categories, and stored data were deleted.',
+            '✅ ResolvX has been completely reset. All ResolvX-managed messages, channels, categories, and stored data were deleted.',
         }).catch((deliveryError) => {
           console.warn(
             '⚠️ Factory reset completed, but the completion DM could not be delivered:',
@@ -3752,7 +3752,7 @@ export async function handleSettingsInteraction(
           );
         });
       } catch (error) {
-        console.error('❌ SupportForge factory reset failed:', error);
+        console.error('❌ ResolvX factory reset failed:', error);
 
         await interaction.editReply({
           content:
@@ -3828,7 +3828,7 @@ export async function handleSettingsInteraction(
         settings.settingsDashboard.title = title;
         // Empty description intentionally falls back to the built-in helper text.
         settings.settingsDashboard.description = description;
-        settings.settingsDashboard.footer = footer || 'ResolveX • Settings Dashboard';
+        settings.settingsDashboard.footer = footer || 'ResolvX • Settings Dashboard';
       });
       await refreshSettingsChannel(guild);
       await auditSettingsAction(guild, interaction, 'SETTINGS_DASHBOARD_BRANDING_CHANGED', 'Updated the per-server Settings dashboard title, description or footer.');
@@ -3864,7 +3864,7 @@ export async function handleSettingsInteraction(
         embeds: [new EmbedBuilder().setTitle('✅ Appearance Updated').setDescription('Panel title, description, and footer were saved and the support panel was refreshed.')],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
-      await auditSettingsAction(guild, interaction, 'APPEARANCE_CHANGED', 'Updated the SupportForge panel appearance.');
+      await auditSettingsAction(guild, interaction, 'APPEARANCE_CHANGED', 'Updated the ResolvX panel appearance.');
       return true;
     }
   }
@@ -3885,7 +3885,7 @@ async function showRepairSystem(interaction: ButtonInteraction): Promise<void> {
         .setColor(themeColor)
         .setTitle('🛠️ Repair System')
         .setDescription(
-          'ResolveX repairs managed infrastructure without resetting Neon data. Restore & Update reconciles Discord infrastructure and requests a GitHub Actions deployment. Automatic pushes to main and the independent server watchdog deploy code without requiring this button. ' +
+          'ResolvX repairs managed infrastructure without resetting Neon data. Restore & Update reconciles Discord infrastructure and requests a GitHub Actions deployment. Automatic pushes to main and the independent server watchdog deploy code without requiring this button. ' +
           'Restore Channel handles native Discord channel deletions; Ticket Deletion Review handles only ticket-button deletions and their accidental-deletion question. Normal Repair checks infrastructure without deploying code. Storage Repair verifies the Closed and Archive storage categories.',
         ),
     ],

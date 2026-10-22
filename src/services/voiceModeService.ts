@@ -33,7 +33,7 @@ function participantOverwrites(
   staffRoleId?: string,
 ) {
   const botId = guild.members.me?.id;
-  if (!botId) throw new Error('SupportForge bot member could not be resolved.');
+  if (!botId) throw new Error('ResolvX bot member could not be resolved.');
 
   const participantAllow = [
     PermissionFlagsBits.ViewChannel,
@@ -155,7 +155,7 @@ export async function startTicketVoiceMode(
     parent: ticketChannel.parentId ?? undefined,
     userLimit: settings.ticketDefaults.maxClaimedModerators + 1,
     permissionOverwrites: participantOverwrites(guild, ownerId, moderatorIds, staffRoleId),
-    reason: 'SupportForge private voice mode for ticket #' + number,
+    reason: 'ResolvX private voice mode for ticket #' + number,
   }) as VoiceChannel;
 
   const voiceStartedAt = new Date().toISOString();
@@ -188,12 +188,12 @@ export async function startTicketVoiceMode(
     newTopic = await updateVoiceTopic(
       ticketChannel,
       newTopic,
-      'SupportForge voice mode metadata for ticket #' + number,
+      'ResolvX voice mode metadata for ticket #' + number,
       true,
     );
   } catch (error) {
     await voiceChannel.delete(
-      'SupportForge rollback after voice metadata persistence failure',
+      'ResolvX rollback after voice metadata persistence failure',
     ).catch((rollbackError) => {
       console.error(
         '❌ Voice mode rollback could not delete the newly created voice channel:',
@@ -262,17 +262,17 @@ export async function syncTicketVoiceParticipants(
       guild.roles.everyone.id,
       ...(staffRoleId ? [staffRoleId] : []),
     ]),
-    'Synchronize SupportForge voice participants',
+    'Synchronize ResolvX voice participants',
   ).catch((error) => {
-    console.warn('⚠️ Could not synchronize SupportForge voice participants:', error);
+    console.warn('⚠️ Could not synchronize ResolvX voice participants:', error);
   });
 
   await setChannelUserLimit(
     voiceChannel.id,
     settings.ticketDefaults.maxClaimedModerators + 1,
-    'Synchronize SupportForge voice capacity',
+    'Synchronize ResolvX voice capacity',
   ).catch((error) => {
-    console.warn('⚠️ Could not synchronize SupportForge voice capacity:', error);
+    console.warn('⚠️ Could not synchronize ResolvX voice capacity:', error);
   });
 }
 
@@ -300,10 +300,10 @@ export async function endTicketVoiceMode(
          * Never clear the recovery pointer when Discord refused the delete.
          * Keeping voice_channel_id in the ticket metadata allows a later
          * repair/retry to find the orphaned room instead of making it
-         * permanently invisible to SupportForge.
+         * permanently invisible to ResolvX.
          */
         console.warn(
-          '⚠️ Could not delete SupportForge voice channel ' + voiceId + ':',
+          '⚠️ Could not delete ResolvX voice channel ' + voiceId + ':',
           error,
         );
         throw new Error(
@@ -317,7 +317,7 @@ export async function endTicketVoiceMode(
        * successful cleanup and clear the stale pointer.
        */
       console.warn(
-        '⚠️ SupportForge voice channel ' + voiceId + ' was already missing; clearing stale voice metadata.',
+        '⚠️ ResolvX voice channel ' + voiceId + ' was already missing; clearing stale voice metadata.',
       );
     }
   }

@@ -55,7 +55,7 @@ async function main(): Promise<void> {
   }
 
   console.log('────────────────────────────────────────────');
-  console.log('SupportForge PostgreSQL verification');
+  console.log('ResolvX PostgreSQL verification');
   console.log('────────────────────────────────────────────');
   console.log(`Tickets: ${counts[0].rows[0]?.count ?? '0'}`);
   console.log(`Ticket events: ${counts[1].rows[0]?.count ?? '0'}`);

@@ -1,5 +1,5 @@
 [Unit]
-Description=ResolveX GitHub self-update reconciliation
+Description=ResolvX GitHub self-update reconciliation
 After=network-online.target
 Wants=network-online.target
 

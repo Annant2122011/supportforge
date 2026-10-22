@@ -18,7 +18,7 @@ async function fetchLatestSha(): Promise<string | null> {
     const response = await fetch(UPDATE_URL, {
       headers: {
         Accept: 'application/vnd.github+json',
-        'User-Agent': 'SupportForge',
+        'User-Agent': 'ResolvX',
       },
       signal: AbortSignal.timeout(20_000),
     });
@@ -28,7 +28,7 @@ async function fetchLatestSha(): Promise<string | null> {
     const payload = await response.json() as { sha?: string };
     return payload.sha ?? null;
   } catch (error) {
-    console.warn('⚠️ SupportForge update check failed:', error);
+    console.warn('⚠️ ResolvX update check failed:', error);
     return null;
   }
 }
@@ -72,7 +72,7 @@ export async function requestGitHubDeployment(): Promise<GitHubDeployRequestResu
         Authorization: `Bearer ${token}`,
         'X-GitHub-Api-Version': '2022-11-28',
         'Content-Type': 'application/json',
-        'User-Agent': 'SupportForge-Deployment-Control',
+        'User-Agent': 'ResolvX-Deployment-Control',
       },
       body: JSON.stringify({ ref: 'main' }),
       signal: AbortSignal.timeout(20_000),
@@ -100,7 +100,7 @@ export async function refreshAllSupportForgeUi(client: Client): Promise<void> {
   try {
     for (const guild of client.guilds.cache.values()) {
       await refreshGuildUi(guild).catch((error) => {
-        console.warn(`⚠️ SupportForge UI refresh failed for ${guild.id}:`, error);
+        console.warn(`⚠️ ResolvX UI refresh failed for ${guild.id}:`, error);
       });
     }
   } finally {
@@ -126,9 +126,9 @@ async function checkForUpdate(client: Client): Promise<void> {
     reason: error instanceof Error ? error.message : 'GitHub deployment request failed.',
   }));
   if (deployment.requested) {
-    console.info('ResolveX deployment workflow accepted the detected commit: ' + deployment.reason);
+    console.info('ResolvX deployment workflow accepted the detected commit: ' + deployment.reason);
   } else {
-    console.warn('ResolveX did not dispatch a deployment from the bot monitor: ' + deployment.reason + ' The push-triggered workflow and server-side watchdog remain the automatic update paths.');
+    console.warn('ResolvX did not dispatch a deployment from the bot monitor: ' + deployment.reason + ' The push-triggered workflow and server-side watchdog remain the automatic update paths.');
   }
   // UI reconciliation is separate from fetching/building/restarting code. The
   // GitHub workflow and the independent server watchdog perform the deployment.

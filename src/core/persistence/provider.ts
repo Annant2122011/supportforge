@@ -23,7 +23,7 @@ export function getPersistenceProvider(): PersistenceProvider {
 
   if (value === 'sqlite') {
     throw new Error(
-      'SQLite is disabled for live SupportForge persistence. Set SUPPORTFORGE_DATABASE_PROVIDER=postgres and configure the Neon DATABASE_URL and DATABASE_URL_UNPOOLED values.',
+      'SQLite is disabled for live ResolvX persistence. Set SUPPORTFORGE_DATABASE_PROVIDER=postgres and configure the Neon DATABASE_URL and DATABASE_URL_UNPOOLED values.',
     );
   }
 
@@ -167,7 +167,7 @@ export async function initializePersistence(): Promise<void> {
 export function getTicketPersistenceRepository(): AsyncTicketRepository {
   if (!initialized) {
     throw new Error(
-      'SupportForge persistence has not been initialized. Call initializePersistence() before accessing repositories.',
+      'ResolvX persistence has not been initialized. Call initializePersistence() before accessing repositories.',
     );
   }
 

@@ -84,21 +84,21 @@ export function readLegacyTicketJson(
     source = JSON.parse(readFileSync(path, 'utf8')) as unknown;
   } catch (error) {
     throw new Error(
-      'SupportForge could not import data/tickets.json because the file is invalid JSON. The original file and its backup were preserved.',
+      'ResolvX could not import data/tickets.json because the file is invalid JSON. The original file and its backup were preserved.',
       { cause: error },
     );
   }
 
   if (!source || typeof source !== 'object' || Array.isArray(source)) {
     throw new Error(
-      'SupportForge could not import data/tickets.json because the root must be a JSON object.',
+      'ResolvX could not import data/tickets.json because the root must be a JSON object.',
     );
   }
 
   const root = source as { version?: unknown; tickets?: unknown };
   if (root.version !== undefined && root.version !== 1) {
     throw new Error(
-      'SupportForge cannot import data/tickets.json version ' +
+      'ResolvX cannot import data/tickets.json version ' +
         String(root.version) +
         '. Only legacy version 1 is supported.',
     );
@@ -109,7 +109,7 @@ export function readLegacyTicketJson(
     Array.isArray(root.tickets)
   ) {
     throw new Error(
-      'SupportForge could not import data/tickets.json because its tickets collection is malformed.',
+      'ResolvX could not import data/tickets.json because its tickets collection is malformed.',
     );
   }
 

@@ -115,11 +115,11 @@ function parseStringArray(value: string): string[] {
   try {
     parsed = JSON.parse(value) as unknown;
   } catch (error) {
-    throw new Error('Corrupt JSON array in SupportForge ticket record.', { cause: error });
+    throw new Error('Corrupt JSON array in ResolvX ticket record.', { cause: error });
   }
 
   if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== 'string')) {
-    throw new Error('Corrupt string-array field in SupportForge ticket record.');
+    throw new Error('Corrupt string-array field in ResolvX ticket record.');
   }
   return parsed as string[];
 }
@@ -129,11 +129,11 @@ function parseMetadata(value: string): Record<string, unknown> {
   try {
     parsed = JSON.parse(value) as unknown;
   } catch (error) {
-    throw new Error('Corrupt JSON metadata in SupportForge ticket record.', { cause: error });
+    throw new Error('Corrupt JSON metadata in ResolvX ticket record.', { cause: error });
   }
 
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('Corrupt object metadata in SupportForge ticket record.');
+    throw new Error('Corrupt object metadata in ResolvX ticket record.');
   }
   return parsed as Record<string, unknown>;
 }
@@ -422,7 +422,7 @@ export class SqliteTicketRepository implements TicketRepository {
 
     if (current.id !== record.id || current.guildId !== record.guildId) {
       throw new Error(
-        `Refusing to overwrite immutable SupportForge ticket identity for channel ${record.channelId}.`,
+        `Refusing to overwrite immutable ResolvX ticket identity for channel ${record.channelId}.`,
       );
     }
 
@@ -464,7 +464,7 @@ export class SqliteTicketRepository implements TicketRepository {
     const current = this.getByChannelId(channelId);
     if (!current) {
       throw new Error(
-        `Cannot transition SupportForge ticket ${channelId}: ticket does not exist in durable storage.`,
+        `Cannot transition ResolvX ticket ${channelId}: ticket does not exist in durable storage.`,
       );
     }
 
@@ -536,7 +536,7 @@ export class SqliteTicketRepository implements TicketRepository {
       const current = this.getByChannelId(channelId);
       if (!current) {
         throw new Error(
-          `Cannot transition SupportForge ticket ${channelId}: ticket does not exist in durable storage.`,
+          `Cannot transition ResolvX ticket ${channelId}: ticket does not exist in durable storage.`,
         );
       }
 
@@ -648,7 +648,7 @@ export class SqliteTicketRepository implements TicketRepository {
     const current = this.getByChannelId(channelId);
     if (!current) {
       throw new Error(
-        `Cannot update SupportForge ticket ${channelId}: durable ticket record does not exist.`,
+        `Cannot update ResolvX ticket ${channelId}: durable ticket record does not exist.`,
       );
     }
 
@@ -696,7 +696,7 @@ export class SqliteTicketRepository implements TicketRepository {
 
       if (Number(result.changes) !== 1) {
         throw new Error(
-          `SupportForge ticket ${channelId} disappeared during metadata update.`,
+          `ResolvX ticket ${channelId} disappeared during metadata update.`,
         );
       }
 
@@ -778,7 +778,7 @@ export class SqliteTicketRepository implements TicketRepository {
     this.markDeleted(
       channelId,
       new Date().toISOString(),
-      'Ticket removed from active SupportForge storage; history retained.',
+      'Ticket removed from active ResolvX storage; history retained.',
     );
   }
 
@@ -796,7 +796,7 @@ export class SqliteTicketRepository implements TicketRepository {
       );
 
       for (const ticket of activeTickets) {
-        const reason = 'SupportForge ticket store reset; history retained.';
+        const reason = 'ResolvX ticket store reset; history retained.';
         const result = update.run(deletedAt, reason, deletedAt, ticket.channelId);
         if (Number(result.changes) !== 1) continue;
 

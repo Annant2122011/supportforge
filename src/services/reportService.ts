@@ -76,7 +76,7 @@ async function load(): Promise<ReportStore> {
       Array.isArray(persisted.guilds)
     ) {
       throw new Error(
-        'SupportForge report database document is malformed. Existing data was not overwritten.',
+        'ResolvX report database document is malformed. Existing data was not overwritten.',
       );
     }
 
@@ -84,7 +84,7 @@ async function load(): Promise<ReportStore> {
     for (const [guildId, rawStore] of Object.entries(persisted.guilds)) {
       if (!rawStore || typeof rawStore !== 'object' || Array.isArray(rawStore)) {
         throw new Error(
-          'SupportForge report database document contains a malformed guild entry: ' + guildId,
+          'ResolvX report database document contains a malformed guild entry: ' + guildId,
         );
       }
 
@@ -165,7 +165,7 @@ async function applyFlagRule(
           PermissionFlagsBits.AddReactions,
         ],
         1,
-        'SupportForge automatic report flag restriction',
+        'ResolvX automatic report flag restriction',
       );
       succeeded = true;
     } catch (error) {
@@ -176,11 +176,11 @@ async function applyFlagRule(
     try {
       await guild.members.ban(targetUserId, {
         deleteMessageSeconds: 0,
-        reason: 'SupportForge automatic report flag threshold reached',
+        reason: 'ResolvX automatic report flag threshold reached',
       });
       succeeded = true;
     } catch (error) {
-      console.warn('⚠️ Could not apply automatic SupportForge server ban:', error);
+      console.warn('⚠️ Could not apply automatic ResolvX server ban:', error);
       return false;
     }
   }
@@ -196,7 +196,7 @@ async function applyFlagRule(
     await logTicketEvent(guild, config.supportCategoryId, {
       ticketNumber: 'report',
       event: 'report_automatic_action',
-      actor: 'SupportForge',
+      actor: 'ResolvX',
       detail:
         'Automatic flag rule reached: ' +
         rule.action +

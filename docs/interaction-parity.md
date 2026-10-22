@@ -1,6 +1,6 @@
 # Slash-command and button parity
 
-SupportForge exposes two independent entry points for each major feature: slash commands and persistent/button-driven controls. A slash command must not merely display a button and require that button to complete the action. Multi-step flows may still use select menus or modals when the operation needs user input.
+ResolvX exposes two independent entry points for each major feature: slash commands and persistent/button-driven controls. A slash command must not merely display a button and require that button to complete the action. Multi-step flows may still use select menus or modals when the operation needs user input.
 
 ## Feature coverage
 

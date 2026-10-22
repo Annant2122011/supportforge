@@ -231,16 +231,16 @@ const DEFAULTS: AdvancedGuildSettings = {
     pendingCategoryId: null,
   },
   appearance: {
-    panelTitle: '🎫 SupportForge Support Center',
+    panelTitle: '🎫 ResolvX Support Center',
     panelDescription:
       'Click a department button below to open a private support ticket.',
-    panelFooter: 'SupportForge • Professional Ticket System',
+    panelFooter: 'ResolvX • Professional Ticket System',
   },
   ticketWorkspace: { mode: 'text-channels' },
   settingsDashboard: {
-    title: '⚙️ ResolveX Settings',
+    title: '⚙️ ResolvX Settings',
     description: 'Configure your server’s ticket system, support panels and retention policies.',
-    footer: 'ResolveX • Settings Dashboard',
+    footer: 'ResolvX • Settings Dashboard',
     buttonOrder: [...SETTINGS_DASHBOARD_BUTTON_KEYS],
     buttonCustomizations: {},
   },
@@ -262,6 +262,21 @@ const DEFAULTS: AdvancedGuildSettings = {
 
 let state: SettingsFile | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
+
+function normalizeBrandTextDeep<T>(value: T): T {
+  if (typeof value === 'string') {
+    return value.replace(/\b(?:SupportForge|ResolveX|SUPPORTFORGE)\b/g, 'ResolvX') as unknown as T;
+  }
+  if (Array.isArray(value)) return value.map((entry) => normalizeBrandTextDeep(entry)) as unknown as T;
+  if (value && typeof value === 'object') {
+    const normalized: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      normalized[key] = normalizeBrandTextDeep(entry);
+    }
+    return normalized as unknown as T;
+  }
+  return value;
+}
 
 function cloneDefaults(): AdvancedGuildSettings {
   return {
@@ -329,10 +344,13 @@ async function load(): Promise<SettingsFile> {
       Array.isArray(persisted.guilds)
     ) {
       throw new Error(
-        'SupportForge advanced settings database document is malformed. Existing data was not overwritten.',
+        'ResolvX advanced settings database document is malformed. Existing data was not overwritten.',
       );
     }
-    state = { version: 5, guilds: persisted.guilds as Record<string, AdvancedGuildSettings> };
+    const normalizedGuilds = normalizeBrandTextDeep(persisted.guilds) as Record<string, AdvancedGuildSettings>;
+    state = { version: 5, guilds: normalizedGuilds };
+    // Normalize previously saved visible labels/footers while preserving setting keys and structure.
+    if (JSON.stringify(persisted.guilds) !== JSON.stringify(normalizedGuilds)) await persist();
     return state;
   }
 

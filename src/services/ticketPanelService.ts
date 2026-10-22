@@ -62,7 +62,7 @@ export function buildTicketPanelEmbed(
 
   return new EmbedBuilder()
     .setColor(priorityColor(priority))
-    .setTitle(`🎫 SupportForge Ticket #${ticketNumber}`)
+    .setTitle(`🎫 ResolvX Ticket #${ticketNumber}`)
     .setDescription(
       `**${decodeSubject(getField(topic, 'subject'))}**\n\n` +
         `Use the controls below to manage this ticket.`,
@@ -263,7 +263,7 @@ export async function refreshTicketPanel(
 
   /*
    * A panel message is recoverable state, not an irreplaceable record. If a
-   * moderator deleted it manually, find the existing SupportForge panel first
+   * moderator deleted it manually, find the existing ResolvX panel first
    * so refresh never creates duplicates.
    */
   if (!message) {
@@ -272,7 +272,7 @@ export async function refreshTicketPanel(
       (candidate) =>
         candidate.author.id === channel.client.user?.id &&
         candidate.embeds.some(
-          (embed) => embed.title === '🎫 SupportForge Ticket #' + ticketNumber,
+          (embed) => (embed.title === '🎫 ResolvX Ticket #' + ticketNumber || embed.title === '🎫 SupportForge Ticket #' + ticketNumber),
         ),
     );
   }
@@ -303,7 +303,7 @@ export async function refreshTicketPanel(
     await setChannelTopic(
       channel.id,
       repairedTopic,
-      'SupportForge ticket panel message reference repair',
+      'ResolvX ticket panel message reference repair',
     ).catch((error) => {
       console.warn(
         '⚠️ Ticket panel was recreated, but its message reference could not be persisted:',
@@ -552,11 +552,11 @@ export async function collapseTicketPanelToRestoreButton(
   const topic = channel.topic ?? '';
 
   if (!topic.startsWith('supportforge:ticket')) {
-    throw new Error('This channel is not a SupportForge ticket.');
+    throw new Error('This channel is not a ResolvX ticket.');
   }
 
   const ticketNumber = getField(topic, 'number') ?? 'unknown';
-  const panelTitle = `🎫 SupportForge Ticket #${ticketNumber}`;
+  const panelTitle = `🎫 ResolvX Ticket #${ticketNumber}`;
   const messageId = getField(topic, 'message');
 
   const { panel, restore } = await findCurrentPanelAndRestoreControl(
@@ -617,7 +617,7 @@ export async function collapseTicketPanelToRestoreButton(
   await setChannelTopic(
     channel.id,
     collapsedTopic,
-    'SupportForge panel collapsed to restore control',
+    'ResolvX panel collapsed to restore control',
   ).catch(() => undefined);
 
   console.log(
@@ -631,7 +631,7 @@ export async function moveTicketPanelToBottom(
   const topic = channel.topic ?? '';
 
   if (!topic.startsWith('supportforge:ticket')) {
-    throw new Error('This channel is not a SupportForge ticket.');
+    throw new Error('This channel is not a ResolvX ticket.');
   }
 
   const status =
@@ -639,7 +639,7 @@ export async function moveTicketPanelToBottom(
     getTicketStatus(topic);
   const config = await getGuildConfig(channel.guild.id);
   const ticketNumber = getField(topic, 'number') ?? 'unknown';
-  const panelTitle = `🎫 SupportForge Ticket #${ticketNumber}`;
+  const panelTitle = `🎫 ResolvX Ticket #${ticketNumber}`;
   const messageId = getField(topic, 'message');
 
   const { panel: currentPanel, restore: restoreControl } =
@@ -684,7 +684,7 @@ export async function moveTicketPanelToBottom(
   await setChannelTopic(
     channel.id,
     movedTopic,
-    'SupportForge ticket panel pointer moved to latest panel',
+    'ResolvX ticket panel pointer moved to latest panel',
   ).catch(() => undefined);
 
   console.log(

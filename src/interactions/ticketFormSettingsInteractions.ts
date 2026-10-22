@@ -72,7 +72,7 @@ async function render(interaction: FormSettingsInteraction, content: string, com
   const description = heading ? content.replace(heading[0], '').trim() : content;
   const embed = new EmbedBuilder()
     .setColor(theme.color)
-    .setAuthor({ name: 'ResolveX • Forms & Templates' })
+    .setAuthor({ name: 'ResolvX • Forms & Templates' })
     .setTitle(title)
     .setDescription((description || 'Use the controls below to continue.').slice(0, 4096))
     .setFooter({ text: theme.label + ' theme • Guided setup and advanced schema tools' });

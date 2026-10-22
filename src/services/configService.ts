@@ -121,6 +121,21 @@ const DEFAULT_CONFIG: GuildConfig = {
 let state: ConfigFile | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 
+function normalizeBrandTextDeep<T>(value: T): T {
+  if (typeof value === 'string') {
+    return value.replace(/\b(?:SupportForge|ResolveX|SUPPORTFORGE)\b/g, 'ResolvX') as unknown as T;
+  }
+  if (Array.isArray(value)) return value.map((entry) => normalizeBrandTextDeep(entry)) as unknown as T;
+  if (value && typeof value === 'object') {
+    const normalized: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      normalized[key] = normalizeBrandTextDeep(entry);
+    }
+    return normalized as unknown as T;
+  }
+  return value;
+}
+
 function cloneDefaultConfig(): GuildConfig {
   return {
     ...DEFAULT_CONFIG,
@@ -144,13 +159,16 @@ async function loadState(): Promise<ConfigFile> {
       Array.isArray(persisted.guilds)
     ) {
       throw new Error(
-        'SupportForge database configuration document is malformed. Existing data was not overwritten.',
+        'ResolvX database configuration document is malformed. Existing data was not overwritten.',
       );
     }
+    const normalizedGuilds = normalizeBrandTextDeep(persisted.guilds) as Record<string, GuildConfig>;
     state = {
       version: 1,
-      guilds: persisted.guilds as Record<string, GuildConfig>,
+      guilds: normalizedGuilds,
     };
+    // Migrate legacy visible brand text in saved panels/configuration without renaming IDs or keys.
+    if (JSON.stringify(persisted.guilds) !== JSON.stringify(normalizedGuilds)) await persistState();
     return state;
   }
 
@@ -239,7 +257,7 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
       name: typeof candidate.name === 'string' ? candidate.name : 'Custom Panel',
       title: typeof candidate.title === 'string' ? candidate.title : 'Customer Support',
       description: typeof candidate.description === 'string' ? candidate.description : '',
-      footer: typeof candidate.footer === 'string' ? candidate.footer : 'ResolveX • Customer Support',
+      footer: typeof candidate.footer === 'string' ? candidate.footer : 'ResolvX • Customer Support',
       color: typeof candidate.color === 'string' ? candidate.color : null,
       iconUrl,
       thumbnailUrl: typeof candidate.thumbnailUrl === 'string' ? candidate.thumbnailUrl : null,
