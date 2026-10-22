@@ -14,10 +14,11 @@ import {
   translate,
 } from '../src/i18n/translationService';
 
-test('all fifteen supported locales and common aliases resolve safely', () => {
+test('all twenty-one supported locales and common aliases resolve safely', () => {
   assert.deepEqual(SUPPORTED_LOCALES, [
     'en-US', 'hi-IN', 'bn-IN', 'es-ES', 'fr-FR', 'de-DE', 'pt-BR', 'ar', 'ja-JP',
     'it-IT', 'id-ID', 'ko-KR', 'ru-RU', 'zh-CN', 'tr-TR',
+    'nl-NL', 'pl-PL', 'uk-UA', 'el-GR', 'cs-CZ', 'sv-SE',
   ]);
   for (const locale of SUPPORTED_LOCALES) assert.equal(isSupportedLocale(locale), true);
   assert.equal(isSupportedLocale('zh-CN'), true);
@@ -37,6 +38,12 @@ test('all fifteen supported locales and common aliases resolve safely', () => {
   assert.equal(resolveLocale('ru'), 'ru-RU');
   assert.equal(resolveLocale('zh-hans'), 'zh-CN');
   assert.equal(resolveLocale('tr'), 'tr-TR');
+  assert.equal(resolveLocale('nl'), 'nl-NL');
+  assert.equal(resolveLocale('pl'), 'pl-PL');
+  assert.equal(resolveLocale('uk'), 'uk-UA');
+  assert.equal(resolveLocale('el'), 'el-GR');
+  assert.equal(resolveLocale('cs'), 'cs-CZ');
+  assert.equal(resolveLocale('sv'), 'sv-SE');
   assert.equal(resolveLocale('unknown-language'), 'en-US');
   assert.equal(resolveLocale(null), 'en-US');
 });
@@ -59,6 +66,15 @@ test('new locales translate the expanded common and ticket vocabulary', () => {
   assert.equal(translate('ru-RU', 'errors.databaseUnavailable'), 'ResolvX не удалось подключиться к базе данных. Повторите попытку немного позже.');
   assert.equal(translate('zh-CN', 'settings.locale.languageChanged', { locale: '简体中文' }), '服务器语言现在为 简体中文。');
   assert.equal(translate('tr-TR', 'retention.reviewRequired'), 'Silmeyi onaylamadan önce uygun biletleri inceleyin.');
+});
+
+test('the six added catalogs translate ticket, settings and workflow copy', () => {
+  assert.equal(translate('nl-NL', 'ticket.created.title', { ticketNumber: 8 }), 'Ticket #8 aangemaakt');
+  assert.equal(translate('pl-PL', 'ticket.created.title', { ticketNumber: 8 }), 'Utworzono zgłoszenie #8');
+  assert.equal(translate('uk-UA', 'ticket.created.title', { ticketNumber: 8 }), 'Створено тікет №8');
+  assert.equal(translate('el-GR', 'ticket.created.title', { ticketNumber: 8 }), 'Δημιουργήθηκε αίτημα #8');
+  assert.equal(translate('cs-CZ', 'ticket.created.title', { ticketNumber: 8 }), 'Ticket #8 vytvořen');
+  assert.equal(translate('sv-SE', 'ticket.created.title', { ticketNumber: 8 }), 'Ärende #8 har skapats');
 });
 
 test('unknown locale values safely fall back to canonical English', () => {
