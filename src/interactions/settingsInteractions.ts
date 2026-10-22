@@ -35,6 +35,8 @@ import {
   type SettingsDashboardButtonKey,
   type TicketPriority,
 } from '../services/advancedSettingsService';
+import { LOCALE_OPTIONS, getLocaleLabel, isSupportedLocale } from '../i18n/localeRegistry';
+import { translate } from '../i18n/translationService';
 
 import {
   buildSettingsDashboardComponents,
@@ -617,6 +619,32 @@ async function showHome(interaction: SettingsViewInteraction): Promise<void> {
   );
 }
 
+async function showLanguageSettings(interaction: SettingsViewInteraction): Promise<void> {
+  const guild = interaction.guild;
+  if (!guild) return;
+  const settings = await getAdvancedSettings(guild.id);
+  const picker = new StringSelectMenuBuilder()
+    .setCustomId('sf:settings:language:select')
+    .setPlaceholder(translate(settings.locale, 'settings.locale.title').slice(0, 150))
+    .addOptions(LOCALE_OPTIONS.map((locale) => ({
+      label: (locale.label + ' · ' + locale.nativeLabel).slice(0, 100),
+      value: locale.value,
+      description: locale.value,
+      default: locale.value === settings.locale,
+    })));
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('🌐 ' + translate(settings.locale, 'settings.locale.title'))
+      .setDescription(
+        translate(settings.locale, 'settings.locale.prompt') + '\n\n' +
+        translate(settings.locale, 'settings.locale.current', { locale: getLocaleLabel(settings.locale) }),
+      ),
+  ], [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(picker),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()),
+  ]);
+}
+
 const SETTINGS_LAYOUT_PREFIX = 'sf:settings:dashboard-builder';
 
 const SETTINGS_LAYOUT_LABELS: Record<SettingsDashboardButtonKey, string> = {
@@ -642,6 +670,7 @@ const SETTINGS_LAYOUT_LABELS: Record<SettingsDashboardButtonKey, string> = {
   'support-hours': 'Support Hours',
   'ticket-workspace': 'Ticket Workspace',
   inactivity: 'Inactivity Automation',
+  language: 'Server Language',
 };
 
 const SETTINGS_LAYOUT_DEFAULT_EMOJIS: Record<SettingsDashboardButtonKey, string> = {
@@ -649,7 +678,7 @@ const SETTINGS_LAYOUT_DEFAULT_EMOJIS: Record<SettingsDashboardButtonKey, string>
   retention: '🧹', appearance: '🎨', storage: '🗄️', rules: '🛡️', repair: '🛠️',
   team: '👥', manual: '📖', forms: '🧾', refresh: '🔄', reset: '🚨', theme: '🌈',
   premium: '💎', panels: '🧱', 'dashboard-builder': '🧰', 'support-hours': '🕒', 'ticket-workspace': '🧵',
-  inactivity: '⏳',
+  inactivity: '⏳', language: '🌐',
 };
 
 function effectiveSettingsLayoutLabel(
@@ -2110,6 +2139,11 @@ export async function handleSettingsInteraction(
       return true;
     }
 
+    if (id === 'sf:settings:language') {
+      await showLanguageSettings(interaction);
+      return true;
+    }
+
     if (id === 'sf:settings:manual') {
       await showManual(interaction);
       return true;
@@ -3113,6 +3147,24 @@ export async function handleSettingsInteraction(
   }
 
   if (interaction.isStringSelectMenu()) {
+    if (interaction.customId === 'sf:settings:language:select') {
+      const selected = interaction.values[0];
+      if (!isSupportedLocale(selected)) {
+        await reject(interaction, 'Unsupported language selection. Please choose a language from the list.');
+        return true;
+      }
+      await interaction.deferUpdate();
+      await updateAdvancedSettings(guild.id, (settings) => { settings.locale = selected; });
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'SERVER_LANGUAGE_CHANGED',
+        'Changed the server language to ' + selected + ' (' + getLocaleLabel(selected) + ').');
+      await interaction.followUp({
+        content: translate(selected, 'settings.locale.saved', { locale: getLocaleLabel(selected) }),
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => undefined);
+      return true;
+    }
+
     if (interaction.customId === SETTINGS_LAYOUT_PREFIX + ':reorder-select') {
       const key = interaction.values[0];
       if (!key || !(SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(key)) {
