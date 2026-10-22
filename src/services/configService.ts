@@ -119,7 +119,7 @@ let writeQueue: Promise<void> = Promise.resolve();
 
 function normalizeBrandTextDeep<T>(value: T): T {
   if (typeof value === 'string') {
-    return value.replace(/\b(?:SupportForge|ResolveX|SUPPORTFORGE)\b/g, 'ResolvX') as T;
+    return value.replace(/\b(?:SupportForge|ResolveX|SUPPORTFORGE)\b/g, 'ResolvX') as unknown as T;
   }
   if (Array.isArray(value)) return value.map((entry) => normalizeBrandTextDeep(entry)) as unknown as T;
   if (value && typeof value === 'object') {
