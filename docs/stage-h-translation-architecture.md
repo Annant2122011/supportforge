@@ -2,7 +2,7 @@
 
 **Status:** H1 core and H2 first implementation complete in this branch; CI and live-guild acceptance still required before production rollout.  
 **Persistence:** Existing Neon/PostgreSQL-backed advanced-settings JSON document; no SQL migration.  
-**Compatibility:** Existing `/supportforge` root, ticket IDs, component custom IDs, event codes and stored machine values remain unchanged.
+**Compatibility:** Existing `/qf` root, ticket IDs, component custom IDs, event codes and stored machine values remain unchanged.
 
 ## H2 scope
 
@@ -39,7 +39,7 @@ Each catalogue is typed against the canonical English `TranslationKey` vocabular
 ## Operator controls
 
 - **Settings dashboard:** the **Server Language** control opens a native select menu showing each language by its readable and native name.
-- **Slash command:** `/supportforge settings language` displays the current locale; `/supportforge settings language locale:<locale>` saves a supported locale.
+- **Slash command:** `/qf settings language` displays the current locale; `/qf settings language locale:<locale>` saves a supported locale.
 - Saving uses the existing advanced-settings document, refreshes the Settings panel, writes a `SERVER_LANGUAGE_CHANGED` audit entry and confirms the new selection in that language.
 - The locale selection is server-wide, not a personal Discord preference. User-authored ticket subjects, descriptions, form answers, names, tags, IDs, URLs, timestamps in archived user content, audit action identifiers, and component custom IDs are not machine-translated.
 
@@ -69,7 +69,7 @@ A command-registration regression test imports the command module and verifies t
 - `src/i18n/translationService.ts`: translation, interpolation, date and number formatting.
 - `src/services/advancedSettingsService.ts`: durable server locale through the existing Neon-backed settings document.
 - `src/services/settingsChannelService.ts` and `src/interactions/settingsInteractions.ts`: Settings dashboard language control.
-- `src/interactions/settingsCommandTools.ts` and `src/commands/supportforge.ts`: slash command.
+- `src/interactions/settingsCommandTools.ts` and `src/commands/qf.ts`: slash command.
 - `tests/translationService.test.ts`: alias, catalogue completeness, fallback, placeholder safety and formatting.
 - `tests/commandRegistration.test.ts`: command declaration builds at import time.
 
