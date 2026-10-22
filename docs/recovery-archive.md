@@ -1,6 +1,6 @@
 # Durable ticket archive and recovery
 
-ResolvX uses Neon PostgreSQL for ticket metadata, message history, channel snapshots, deletion-intent events and recovery state. Message attachments are copied into PostgreSQL BYTEA columns when they are accessible from Discord's CDN and fit the configured size limit.
+QueryFixr uses Neon PostgreSQL for ticket metadata, message history, channel snapshots, deletion-intent events and recovery state. Message attachments are copied into PostgreSQL BYTEA columns when they are accessible from Discord's CDN and fit the configured size limit.
 
 ## What is archived
 
@@ -14,7 +14,7 @@ A background backfill archives existing message history in pages of 100 and stor
 ## Delete flows
 
 - Discord-native channel deletion is recorded as discord_native with intent unknown. It is listed only under Settings → Repair System → Restore Channel.
-- Delete Ticket from inside a ticket requires two separate confirmations. ResolvX durably records the button intent before calling Discord's delete endpoint. The deletion is listed only under Ticket Deletion Review.
+- Delete Ticket from inside a ticket requires two separate confirmations. QueryFixr durably records the button intent before calling Discord's delete endpoint. The deletion is listed only under Ticket Deletion Review.
 - Ticket Deletion Review asks “Was this ticket deleted by mistake?” The Yes/No result and reviewer are stored in Neon and logged through both the ticket audit stream and developer/system audit stream.
 - A ticket-button deletion can be restored only after the reviewer chooses Yes. A native deletion does not trigger this question.
 
