@@ -116,8 +116,9 @@ export async function ensureChannelPurposeMessage(
         message.author.id === botId &&
         message.embeds.some(
           (embed) =>
-            embed.title === PURPOSE_TITLE &&
-            embed.footer?.text === PURPOSE_FOOTER,
+            ((embed.title === PURPOSE_TITLE && embed.footer?.text === PURPOSE_FOOTER) ||
+            (embed.title === '📝 SupportForge Channel Purpose' &&
+              embed.footer?.text === 'SupportForge • Channel Purpose')),
         ),
     );
 
