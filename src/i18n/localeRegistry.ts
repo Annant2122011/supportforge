@@ -1,4 +1,4 @@
-export const SUPPORTED_LOCALES = ['en-US', 'hi-IN', 'bn-IN', 'es-ES', 'fr-FR', 'de-DE', 'pt-BR', 'ar', 'ja-JP', 'it-IT', 'id-ID', 'ko-KR', 'ru-RU', 'zh-CN', 'tr-TR'] as const;
+export const SUPPORTED_LOCALES = ['en-US', 'hi-IN', 'bn-IN', 'es-ES', 'fr-FR', 'de-DE', 'pt-BR', 'ar', 'ja-JP', 'it-IT', 'id-ID', 'ko-KR', 'ru-RU', 'zh-CN', 'tr-TR', 'nl-NL', 'pl-PL', 'uk-UA', 'el-GR', 'cs-CZ', 'sv-SE'] as const;
 
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
@@ -24,6 +24,12 @@ export const LOCALE_OPTIONS: readonly LocaleOption[] = [
   { value: 'ru-RU', label: 'Russian', nativeLabel: 'Русский' },
   { value: 'zh-CN', label: 'Chinese (Simplified)', nativeLabel: '简体中文' },
   { value: 'tr-TR', label: 'Turkish', nativeLabel: 'Türkçe' },
+  { value: 'nl-NL', label: 'Dutch', nativeLabel: 'Nederlands' },
+  { value: 'pl-PL', label: 'Polish', nativeLabel: 'Polski' },
+  { value: 'uk-UA', label: 'Ukrainian', nativeLabel: 'Українська' },
+  { value: 'el-GR', label: 'Greek', nativeLabel: 'Ελληνικά' },
+  { value: 'cs-CZ', label: 'Czech', nativeLabel: 'Čeština' },
+  { value: 'sv-SE', label: 'Swedish', nativeLabel: 'Svenska' },
 ];
 
 const LANGUAGE_ALIASES: Readonly<Record<string, SupportedLocale>> = {
@@ -42,6 +48,12 @@ const LANGUAGE_ALIASES: Readonly<Record<string, SupportedLocale>> = {
   ru: 'ru-RU', 'ru-ru': 'ru-RU',
   zh: 'zh-CN', 'zh-cn': 'zh-CN', 'zh-hans': 'zh-CN',
   tr: 'tr-TR', 'tr-tr': 'tr-TR',
+  nl: 'nl-NL', 'nl-nl': 'nl-NL',
+  pl: 'pl-PL', 'pl-pl': 'pl-PL',
+  uk: 'uk-UA', 'uk-ua': 'uk-UA',
+  el: 'el-GR', 'el-gr': 'el-GR',
+  cs: 'cs-CZ', 'cs-cz': 'cs-CZ',
+  sv: 'sv-SE', 'sv-se': 'sv-SE',
 };
 
 export function isSupportedLocale(value: unknown): value is SupportedLocale {
