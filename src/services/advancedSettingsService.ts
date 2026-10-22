@@ -208,13 +208,13 @@ function normalizeBrandTextDeep<T>(value: T): T {
   if (typeof value === 'string') {
     return value.replace(/\b(?:SupportForge|ResolveX|SUPPORTFORGE)\b/g, 'ResolvX') as T;
   }
-  if (Array.isArray(value)) return value.map((entry) => normalizeBrandTextDeep(entry)) as T;
+  if (Array.isArray(value)) return value.map((entry) => normalizeBrandTextDeep(entry)) as unknown as T;
   if (value && typeof value === 'object') {
     const normalized: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
       normalized[key] = normalizeBrandTextDeep(entry);
     }
-    return normalized as T;
+    return normalized as unknown as T;
   }
   return value;
 }
