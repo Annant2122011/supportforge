@@ -679,7 +679,7 @@ async function removePreviousTicketTranscript(
 
   /*
    * Legacy fallback: older tickets did not store the transcript message ID.
-   * Remove matching SupportForge transcript posts from the recent transcript
+   * Remove matching ResolvX transcript posts from the recent transcript
    * history, without touching unrelated files/messages.
    */
   const ticketNumber = getField(topic, 'number') ?? 'unknown';
@@ -775,7 +775,7 @@ async function updateMainMessage(
           candidate.embeds.some(
             (embed) =>
               embed.title ===
-              `🎫 SupportForge Ticket #${ticketNumber}`,
+              `🎫 ResolvX Ticket #${ticketNumber}`,
           ),
       );
     }
@@ -1005,7 +1005,7 @@ async function applyTicketVisibilityMode(
     channel.id,
     properties,
     roleIds,
-    'Synchronize SupportForge ticket metadata and privacy in one channel update',
+    'Synchronize ResolvX ticket metadata and privacy in one channel update',
     { deferLongRateLimit: false },
   );
   if (properties.topic !== undefined) channel.topic = properties.topic;
@@ -1091,7 +1091,7 @@ async function createTicket(
       const flags = await getUserFlagCount(guild.id, interaction.user.id);
       await replyError(
         interaction,
-        `🚫 You are currently restricted from opening new SupportForge tickets because your account has reached **${flags}** moderation flag(s).`,
+        `🚫 You are currently restricted from opening new ResolvX tickets because your account has reached **${flags}** moderation flag(s).`,
       );
       return;
     }
@@ -1190,7 +1190,7 @@ async function createTicket(
     if (!auditParentCategoryId) {
       await replyError(
         interaction,
-        '❌ SupportForge is not configured. Run `/supportforge setup` first.',
+        '❌ ResolvX is not configured. Run `/supportforge setup` first.',
       );
       return;
     }
@@ -1279,7 +1279,7 @@ async function createTicket(
     }
 
     /*
-     * Create the ticket in the existing SupportForge parent first. The
+     * Create the ticket in the existing ResolvX parent first. The
      * department-specific category is provisioned only after the ticket,
      * its panel, and its durable record have been created successfully.
      */
@@ -1357,7 +1357,7 @@ async function createTicket(
 
     if (!bot) {
       throw new Error(
-        'SupportForge bot member could not be resolved.',
+        'ResolvX bot member could not be resolved.',
       );
     }
 
@@ -1388,7 +1388,7 @@ async function createTicket(
             permissionOverwrites:
               overwrites,
             reason:
-              `SupportForge ticket #${number}`,
+              `ResolvX ticket #${number}`,
           })) as TextChannel;
 
       if (formDraftRecorded) {
@@ -1598,7 +1598,7 @@ async function createTicket(
         // channel PATCH and lets the shared REST queue handle rate limits.
       } catch (categoryError) {
         // Preserve the ticket even if category provisioning fails. It remains
-        // in the main SupportForge category and can be reconciled by setup.
+        // in the main ResolvX category and can be reconciled by setup.
         console.warn(
           '⚠️ Ticket #' + number +
             ' was created successfully, but department category provisioning is pending:',
@@ -1664,7 +1664,7 @@ async function createTicket(
           embeds: [
             new EmbedBuilder()
               .setColor(recoveryThemeColor)
-              .setTitle('⚠️ SupportForge Ticket Recovery')
+              .setTitle('⚠️ ResolvX Ticket Recovery')
               .setDescription(
                 'The ticket channel was created successfully, but one initialization step did not complete. The ticket has **not** been deleted. An administrator can use **Repair System** or refresh the ticket panel to complete recovery.',
               )
@@ -1680,7 +1680,7 @@ async function createTicket(
         await interaction.editReply({
           content:
             `✅ Your ticket channel was created: ${ticketChannel}
-⚠️ One setup step did not complete, so SupportForge preserved the ticket for recovery instead of reporting a false creation failure.`,
+⚠️ One setup step did not complete, so ResolvX preserved the ticket for recovery instead of reporting a false creation failure.`,
         }).catch(() => undefined);
 
         return;
@@ -1696,7 +1696,7 @@ async function createTicket(
 
     await replyError(
       interaction,
-      '❌ SupportForge could not create the ticket. Please try again.',
+      '❌ ResolvX could not create the ticket. Please try again.',
     );
   } finally {
     if (creationLease) {
@@ -1706,7 +1706,7 @@ async function createTicket(
         departmentId,
         creationLease,
       ).catch((error) => {
-        console.warn('Could not release SupportForge ticket creation lease:', error);
+        console.warn('Could not release ResolvX ticket creation lease:', error);
       });
     }
     ticketCreationLocks.delete(lockKey);
@@ -1925,7 +1925,7 @@ async function transition(
       )
     ) {
       throw new Error(
-        'Invalid SupportForge ticket topic.',
+        'Invalid ResolvX ticket topic.',
       );
     }
 
@@ -2284,7 +2284,7 @@ async function transition(
         channel,
         newTopic,
         newStatus,
-        'SupportForge voice mode ended because ticket status changed',
+        'ResolvX voice mode ended because ticket status changed',
         { deferTicketTopicUpdate: true, queueRename: false },
       );
     }
@@ -2411,7 +2411,7 @@ async function transition(
             ...(destinationCategoryId ? { parentId: destinationCategoryId } : {}),
           },
           new Set<string>(),
-          'Synchronize SupportForge closed/archived ticket channel metadata',
+          'Synchronize ResolvX closed/archived ticket channel metadata',
         );
         channel.topic = newTopic;
         channel.name = desiredChannelName;
@@ -2628,7 +2628,7 @@ async function closeTicket(
       )
     ) {
       throw new Error(
-        'Invalid SupportForge ticket topic.',
+        'Invalid ResolvX ticket topic.',
       );
     }
 
@@ -2897,7 +2897,7 @@ async function closeTicket(
               channel,
               closedTopic,
               'closed',
-              'SupportForge voice mode ended because ticket was closed',
+              'ResolvX voice mode ended because ticket was closed',
               { deferTicketTopicUpdate: true, queueRename: false },
             );
             closedTopic = setField(closedTopic, 'updated_at', closeTimestamp);
@@ -2940,7 +2940,7 @@ async function closeTicket(
               parentId: closedCategory.id,
             },
             new Set<string>(),
-            'SupportForge persist closed ticket metadata and storage location',
+            'ResolvX persist closed ticket metadata and storage location',
           );
           channel.topic = closedTopic;
           channel.name = closedChannelName;
@@ -3098,7 +3098,7 @@ export async function showTicketCreationModalFromCommand(
   } catch (error) {
     console.error('Failed to open ticket creation modal from slash command:', error);
     if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: 'SupportForge could not open the ticket form. Please try again.', flags: MessageFlags.Ephemeral }).catch(() => undefined);
+      await interaction.reply({ content: 'ResolvX could not open the ticket form. Please try again.', flags: MessageFlags.Ephemeral }).catch(() => undefined);
     }
   }
 }
@@ -3532,7 +3532,7 @@ async function showTicketCreationModal(
      */
     await replyError(
       interaction,
-      '❌ SupportForge could not open the ticket creation form. Please try again.',
+      '❌ ResolvX could not open the ticket creation form. Please try again.',
     );
   }
 }
@@ -3839,7 +3839,7 @@ async function showReportTargetSelector(interaction: ButtonInteraction, page = 0
   const reportSettings = await getAdvancedSettings(interaction.guild.id);
 
   if (!isTicketTopic(topic) || !isActiveTicketStatus(getTicketStatus(topic))) {
-    await replyError(interaction, '❌ Reporting is only available on an active SupportForge ticket.');
+    await replyError(interaction, '❌ Reporting is only available on an active ResolvX ticket.');
     return;
   }
 
@@ -3933,7 +3933,7 @@ async function handleReportTargetSelection(interaction: StringSelectMenuInteract
 
   const rows = Object.values(settings.reports.categories).slice(0, 25);
   await interaction.editReply({
-    content: '🚩 **Report category**\nChoose the category that best describes the behaviour. The category set is built into SupportForge and is separate from ticket use-case/departments.',
+    content: '🚩 **Report category**\nChoose the category that best describes the behaviour. The category set is built into ResolvX and is separate from ticket use-case/departments.',
     components: [
       new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
         new StringSelectMenuBuilder()
@@ -4107,7 +4107,7 @@ async function handleReportModal(interaction: ModalSubmitInteraction): Promise<v
   }
 
   if (!isTicketTopic(topic) || !isActiveTicketStatus(getTicketStatus(topic))) {
-    await replyError(interaction, '❌ Reporting is only available on an active SupportForge ticket.');
+    await replyError(interaction, '❌ Reporting is only available on an active ResolvX ticket.');
     return;
   }
 
@@ -4302,7 +4302,7 @@ async function showTicketHistory(
     await interaction.editReply({ content: '', embeds });
   } catch (error) {
     console.error('❌ Failed to load ticket history:', error);
-    await replyError(interaction, '❌ SupportForge could not load this ticket history.');
+    await replyError(interaction, '❌ ResolvX could not load this ticket history.');
   }
 }
 
@@ -4332,14 +4332,14 @@ async function renderDepartmentSelector(interaction: ButtonInteraction | StringS
 export async function executeTicketReportCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
-    await replyError(interaction, 'Reporting must be run inside an active SupportForge ticket.');
+    await replyError(interaction, 'Reporting must be run inside an active ResolvX ticket.');
     return;
   }
   const channel = interaction.channel as TextChannel;
   const topic = await getEffectiveTicketTopic(channel, channel.topic ?? '');
   const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
   if (!isTicketTopic(topic) || !isActiveTicketStatus(status)) {
-    await replyError(interaction, 'Reporting is only available inside an active SupportForge ticket.');
+    await replyError(interaction, 'Reporting is only available inside an active ResolvX ticket.');
     return;
   }
   const staff = getStaffContext(interaction, topic);
@@ -4426,14 +4426,14 @@ export async function executeTicketRoutingCommand(
 ): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
-    await replyError(interaction, 'This command must be used inside a SupportForge ticket channel.');
+    await replyError(interaction, 'This command must be used inside a ResolvX ticket channel.');
     return;
   }
   const channel = interaction.channel as TextChannel;
   const topic = await getEffectiveTicketTopic(channel, channel.topic ?? '');
   const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
   if (!isTicketTopic(topic) || !isActiveTicketStatus(status)) {
-    await replyError(interaction, 'Only active SupportForge tickets can be rerouted.');
+    await replyError(interaction, 'Only active ResolvX tickets can be rerouted.');
     return;
   }
   const staff = getStaffContext(interaction, topic);
@@ -4860,7 +4860,7 @@ async function handleTicketVoiceStart(interaction: ButtonInteraction | ChatInput
     }
   } catch (error) {
     console.error('❌ Failed to start ticket voice mode:', error);
-    await replyError(interaction, '❌ SupportForge could not start private voice mode. The ticket itself was not changed.');
+    await replyError(interaction, '❌ ResolvX could not start private voice mode. The ticket itself was not changed.');
   }
 }
 
@@ -4887,7 +4887,7 @@ async function handleTicketVoiceEnd(interaction: ButtonInteraction | ChatInputCo
     return;
   }
   try {
-    const newTopic = await endTicketVoiceMode(interaction.guild, channel, topic, status, 'SupportForge voice mode ended');
+    const newTopic = await endTicketVoiceMode(interaction.guild, channel, topic, status, 'ResolvX voice mode ended');
     channel.topic = newTopic;
     await updateMainMessage(channel, getField(newTopic, 'message'), status, newTopic);
     const voiceEndThemeColor = getThemeColor((await getGuildConfig(interaction.guild.id)).theme);
@@ -4913,7 +4913,7 @@ async function handleTicketVoiceEnd(interaction: ButtonInteraction | ChatInputCo
     }
   } catch (error) {
     console.error('❌ Failed to end ticket voice mode:', error);
-    await replyError(interaction, '❌ SupportForge could not end voice mode safely.');
+    await replyError(interaction, '❌ ResolvX could not end voice mode safely.');
   }
 }
 
@@ -4983,7 +4983,7 @@ async function handlePanelButton(
       if (!isSupportPanel) {
         await replyError(
           interaction,
-          '❌ This pagination control can only be used on the SupportForge support panel.',
+          '❌ This pagination control can only be used on the ResolvX support panel.',
         );
         return;
       }
@@ -5071,7 +5071,7 @@ async function handlePanelButton(
       await interaction.editReply({}).catch(() => undefined);
     } catch (error) {
       console.error('❌ Failed to change support panel page:', error);
-      await replyError(interaction, '❌ SupportForge could not change the support panel page.');
+      await replyError(interaction, '❌ ResolvX could not change the support panel page.');
     }
     return;
   }
@@ -5314,7 +5314,7 @@ async function handlePanelButton(
       console.error('❌ Failed to move ticket panel manually:', error);
       await replyError(
         interaction,
-        '❌ SupportForge could not move the ticket panel.',
+        '❌ ResolvX could not move the ticket panel.',
       );
     }
 
@@ -5477,7 +5477,7 @@ async function handlePanelButton(
   } else {
     await replyError(
       interaction,
-      '❌ This SupportForge ticket control is no longer available. Please refresh the ticket panel.',
+      '❌ This ResolvX ticket control is no longer available. Please refresh the ticket panel.',
     );
   }
 }
@@ -5529,7 +5529,7 @@ async function handlePanelModal(
   ) {
     await replyError(
       interaction,
-      '❌ This is not a valid SupportForge ticket.',
+      '❌ This is not a valid ResolvX ticket.',
     );
     return;
   }
@@ -6045,7 +6045,7 @@ async function handleCustomPanelEntry(interaction: ButtonInteraction): Promise<v
       .setColor(getThemeColor((await getGuildConfig(interaction.guild.id)).theme))
       .setTitle('Confirm support request')
       .setDescription(button.confirmationMessage.slice(0, 4096))
-      .setFooter({ text: 'ResolveX • No ticket is created until you confirm' });
+      .setFooter({ text: 'ResolvX • No ticket is created until you confirm' });
     const confirmationPrefix = 'ticket:custom:';
     await interaction.reply({
       embeds: [confirmation],
@@ -6075,7 +6075,7 @@ async function handleCustomPanelEntry(interaction: ButtonInteraction): Promise<v
     await startCustomPanelTarget(interaction, button);
   } catch (error) {
     console.error('Custom support-panel route failed:', error);
-    await replyError(interaction, 'ResolveX could not open this ticket request. Please try again or use another support-panel option.');
+    await replyError(interaction, 'ResolvX could not open this ticket request. Please try again or use another support-panel option.');
   }
 }
 
@@ -6123,7 +6123,7 @@ async function handleTicketDeletionInteraction(interaction: ButtonInteraction): 
   const channel = interaction.channel as TextChannel;
   const topic = channel.topic ?? '';
   if (!isTicketTopic(topic)) {
-    await interaction.editReply('This channel is not a managed ResolveX ticket.');
+    await interaction.editReply('This channel is not a managed ResolvX ticket.');
     return;
   }
 
@@ -6166,9 +6166,9 @@ async function handleTicketDeletionInteraction(interaction: ButtonInteraction): 
           .setTitle('⚠️ Confirm ticket deletion · Step 1 of 2')
           .setDescription(
             'You are about to delete **#' + (ticket?.ticketNumber ?? getField(topic, 'number') ?? 'unknown') +
-            '**. ResolveX will archive the available conversation and then delete this channel. This action removes the current channel URL and cannot be undone in place.',
+            '**. ResolvX will archive the available conversation and then delete this channel. This action removes the current channel URL and cannot be undone in place.',
           )
-          .setFooter({ text: 'ResolveX • Two-step deletion protection' }),
+          .setFooter({ text: 'ResolvX • Two-step deletion protection' }),
       ],
       components: [
         new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -6187,9 +6187,9 @@ async function handleTicketDeletionInteraction(interaction: ButtonInteraction): 
           .setColor(color)
           .setTitle('🚨 Final confirmation · Step 2 of 2')
           .setDescription(
-            'This is the second confirmation. ResolveX will finish archiving the ticket history before deleting the channel. If archival fails, deletion will be cancelled. A separate deletion-review record will be created.',
+            'This is the second confirmation. ResolvX will finish archiving the ticket history before deleting the channel. If archival fails, deletion will be cancelled. A separate deletion-review record will be created.',
           )
-          .setFooter({ text: 'ResolveX • Final confirmation required' }),
+          .setFooter({ text: 'ResolvX • Final confirmation required' }),
       ],
       components: [
         new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -6214,8 +6214,8 @@ async function handleTicketDeletionInteraction(interaction: ButtonInteraction): 
         new EmbedBuilder()
           .setColor(color)
           .setTitle('📦 Preparing ticket archive')
-          .setDescription('ResolveX is saving message history, edits, attachment metadata and accessible attachment files before deletion. The channel will remain if archival cannot finish.')
-          .setFooter({ text: 'ResolveX • Durable recovery' }),
+          .setDescription('ResolvX is saving message history, edits, attachment metadata and accessible attachment files before deletion. The channel will remain if archival cannot finish.')
+          .setFooter({ text: 'ResolvX • Durable recovery' }),
       ],
       components: [],
     });
@@ -6249,21 +6249,21 @@ async function handleTicketDeletionInteraction(interaction: ButtonInteraction): 
     // Neon intent is durable before the destructive Discord API call.
     await beginTicketButtonDeletion(channel, interaction.user.id, interaction.user.tag);
     intentRecorded = true;
-    await channel.delete('ResolveX ticket Delete button; actor ' + interaction.user.id + '; two confirmations completed');
+    await channel.delete('ResolvX ticket Delete button; actor ' + interaction.user.id + '; two confirmations completed');
     channelDeleted = true;
   } catch (error) {
     if (intentRecorded && !channelDeleted) {
       await cancelTicketButtonDeletion(channel.id).catch(() => undefined);
     }
     const detail = error instanceof Error ? error.message : 'Unknown deletion error.';
-    console.error('ResolveX ticket-button deletion failed:', error);
+    console.error('ResolvX ticket-button deletion failed:', error);
     await interaction.editReply({
       embeds: [
         new EmbedBuilder()
           .setColor(color)
           .setTitle('❌ Ticket deletion did not complete')
-          .setDescription(detail.slice(0, 3500) + '\n\nThe ticket channel was not intentionally deleted by ResolveX. Check the archive and bot permissions before retrying.')
-          .setFooter({ text: 'ResolveX • Database and channel state are preserved where possible' }),
+          .setDescription(detail.slice(0, 3500) + '\n\nThe ticket channel was not intentionally deleted by ResolvX. Check the archive and bot permissions before retrying.')
+          .setFooter({ text: 'ResolvX • Database and channel state are preserved where possible' }),
       ],
       components: [],
     }).catch(() => undefined);
@@ -6278,7 +6278,7 @@ async function handleTicketDeletionInteraction(interaction: ButtonInteraction): 
         .setColor(color)
         .setTitle('✅ Ticket channel deleted')
         .setDescription('The channel was deleted after the durable archive step. Open **Settings → Repair System → Ticket Deletion Review** to answer “Was this ticket deleted by mistake?” The original channel ID and recovered-message attribution remain in the archive.')
-        .setFooter({ text: 'ResolveX • The replacement channel will have a new ID and URL if restored.' }),
+        .setFooter({ text: 'ResolvX • The replacement channel will have a new ID and URL if restored.' }),
     ],
     components: [],
   }).catch((error) => {
@@ -6499,12 +6499,12 @@ export async function handleTicketInteraction(
        * Do not silently leave the interaction unacknowledged.
        */
       console.warn(
-        `⚠️ Unhandled SupportForge button: ${interaction.customId}`,
+        `⚠️ Unhandled ResolvX button: ${interaction.customId}`,
       );
 
       await replyError(
         interaction,
-        '❌ This SupportForge button is no longer available. Please refresh the panel.',
+        '❌ This ResolvX button is no longer available. Please refresh the panel.',
       );
 
       return;
@@ -6591,25 +6591,25 @@ export async function handleTicketInteraction(
        * Unknown modal.
        */
       console.warn(
-        `⚠️ Unhandled SupportForge modal: ${interaction.customId}`,
+        `⚠️ Unhandled ResolvX modal: ${interaction.customId}`,
       );
 
       await replyError(
         interaction,
-        '❌ This SupportForge form is no longer available. Please try again.',
+        '❌ This ResolvX form is no longer available. Please try again.',
       );
 
       return;
     }
   } catch (error) {
     console.error(
-      '❌ Unhandled SupportForge interaction error:',
+      '❌ Unhandled ResolvX interaction error:',
       error,
     );
 
     await replyError(
       interaction,
-      '❌ SupportForge encountered an unexpected error while processing this action.',
+      '❌ ResolvX encountered an unexpected error while processing this action.',
     );
   }
 }
