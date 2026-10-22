@@ -45,11 +45,11 @@ function parseObject(value: string): Record<string, unknown> {
   try {
     parsed = JSON.parse(value) as unknown;
   } catch (error) {
-    throw new Error('Corrupt JSON payload in ResolvX ticket event/outbox record.', { cause: error });
+    throw new Error('Corrupt JSON payload in QueryFixr ticket event/outbox record.', { cause: error });
   }
 
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('ResolvX ticket event/outbox payload must be a JSON object.');
+    throw new Error('QueryFixr ticket event/outbox payload must be a JSON object.');
   }
   return parsed as Record<string, unknown>;
 }
