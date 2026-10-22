@@ -89,9 +89,9 @@ test('Settings dashboard custom labels and emojis override presentation but keep
 test('Settings dashboard summarizes inactivity/workspace policy and explains retention limits', () => {
   const partial = {
     settingsDashboard: {
-      title: 'ResolveX Settings',
+      title: 'QueryFixr Settings',
       description: 'Server settings',
-      footer: 'ResolveX',
+      footer: 'QueryFixr',
     },
     priorityRoles: {},
     retention: { closedDays: 0, archiveDays: 7 },
@@ -108,7 +108,7 @@ test('Settings dashboard summarizes inactivity/workspace policy and explains ret
     appearance: {
       panelTitle: 'Support center',
       panelDescription: 'Open a support ticket.',
-      panelFooter: 'ResolveX',
+      panelFooter: 'QueryFixr',
     },
   } as unknown as AdvancedGuildSettings;
 
