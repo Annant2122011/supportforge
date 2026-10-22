@@ -136,6 +136,7 @@ jobs:
             git reset --hard "$old_sha" || true
             npm ci || true
             npm run build || true
+            npm run deploy-commands || true
             sudo systemctl restart "$DEPLOY_SERVICE_NAME" || true
             exit "$status"
           }
@@ -154,6 +155,7 @@ jobs:
           npm test
           npm run db:migrate
           npm run db:verify
+          npm run deploy-commands
           sudo systemctl restart "$DEPLOY_SERVICE_NAME"
           sleep 3
           sudo systemctl is-active --quiet "$DEPLOY_SERVICE_NAME"
