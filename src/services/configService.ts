@@ -117,6 +117,21 @@ const DEFAULT_CONFIG: GuildConfig = {
 let state: ConfigFile | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 
+function normalizeBrandTextDeep<T>(value: T): T {
+  if (typeof value === 'string') {
+    return value.replace(/\\b(?:SupportForge|ResolveX|SUPPORTFORGE)\\b/g, 'ResolvX') as T;
+  }
+  if (Array.isArray(value)) return value.map((entry) => normalizeBrandTextDeep(entry)) as T;
+  if (value && typeof value === 'object') {
+    const normalized: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      normalized[key] = normalizeBrandTextDeep(entry);
+    }
+    return normalized as T;
+  }
+  return value;
+}
+
 function cloneDefaultConfig(): GuildConfig {
   return {
     ...DEFAULT_CONFIG,
@@ -143,10 +158,13 @@ async function loadState(): Promise<ConfigFile> {
         'ResolvX database configuration document is malformed. Existing data was not overwritten.',
       );
     }
+    const normalizedGuilds = normalizeBrandTextDeep(persisted.guilds) as Record<string, GuildConfig>;
     state = {
       version: 1,
-      guilds: persisted.guilds as Record<string, GuildConfig>,
+      guilds: normalizedGuilds,
     };
+    // Migrate legacy visible brand text in saved panels/configuration without renaming IDs or keys.
+    if (JSON.stringify(persisted.guilds) !== JSON.stringify(normalizedGuilds)) await persistState();
     return state;
   }
 
