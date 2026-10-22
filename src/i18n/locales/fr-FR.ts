@@ -77,6 +77,11 @@ const frFR: Record<TranslationKey, string> = {
   "ticket.panel.voice": "Vocal",
   "ticket.panel.joinVoice": "Rejoindre le vocal",
   "ticket.panel.closeVoice": "Fermer le vocal",
+  "ticket.panel.reassign": "Réattribuer",
+  "ticket.panel.internalNote": "Note interne",
+  "ticket.panel.reportUser": "Signaler l’utilisateur",
+  "ticket.panel.moveControls": "Déplacer les commandes ici",
+  "ticket.panel.turnVoiceOn": "Activer le mode vocal",
 };
 
 export default frFR;
