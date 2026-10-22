@@ -39,6 +39,7 @@ const bnIN: Record<TranslationKey, string> = {
   "supportHours.closed": "সহায়তা পরিষেবা এখন বন্ধ।",
   "supportHours.nextOpening": " পরবর্তী খোলার সময়: {nextOpening}।",
   "supportHours.noNextOpening": "পরবর্তী খোলার সময় নির্ধারিত নেই। সার্ভার প্রশাসকের সঙ্গে যোগাযোগ করুন।",
+  "supportHours.noNextOpening": "পরবর্তী খোলার সময় নির্ধারিত নেই। সার্ভার প্রশাসকের সঙ্গে যোগাযোগ করুন।",
   "forms.submit": "উত্তর জমা দিন",
   "forms.required": "এই তথ্যটি আবশ্যক।",
   "forms.invalid": "ফর্মের উত্তরটি সঠিক নয়। ক্ষেত্রের নির্দেশনা দেখুন।",
