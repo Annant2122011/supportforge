@@ -274,9 +274,7 @@ export async function refreshTicketPanel(
     message = recent?.find(
       (candidate) =>
         candidate.author.id === channel.client.user?.id &&
-        candidate.embeds.some(
-          (embed) => (embed.title === '🎫 QueryFixr Ticket #' + ticketNumber || embed.title === '🎫 QueryFixr Ticket #' + ticketNumber),
-        ),
+        candidate.embeds.some((embed) => (embed.title ?? '').includes('Ticket #' + ticketNumber)),
     );
   }
 
