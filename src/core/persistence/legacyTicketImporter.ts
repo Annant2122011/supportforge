@@ -171,7 +171,7 @@ export async function importLegacyJsonTickets(
   });
 
   console.info(
-    '✅ Legacy SupportForge tickets processed: imported=' + imported +
+    '✅ Legacy ResolvX tickets processed: imported=' + imported +
     ', restoredCreationEvents=' + recoveredCreationEvents +
     ', existingDatabaseRecordsPreserved=' + skippedCurrentRecords + '.',
   );
