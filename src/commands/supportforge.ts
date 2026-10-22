@@ -364,7 +364,7 @@ async function ensureContainer(guild: Guild) {
         }, { reason: 'Allow QueryFixr to manage its container' });
       }
       if (channel.name !== SUPPORT_CATEGORY_NAME) {
-        await channel.setName(SUPPORT_CATEGORY_NAME, { reason: 'Rename the managed category for QueryFixr branding' }).catch((error) => {
+        await channel.setName(SUPPORT_CATEGORY_NAME, 'Rename the managed category for QueryFixr branding').catch((error) => {
           console.warn('Could not rename the managed QueryFixr category:', error);
         });
       }
@@ -454,7 +454,7 @@ async function ensureTranscriptChannel(
       );
 
       if (saved.name !== TRANSCRIPT_NAME) {
-        await saved.setName(TRANSCRIPT_NAME, { reason: 'Rename the managed transcript channel for QueryFixr branding' }).catch((error) => {
+        await saved.setName(TRANSCRIPT_NAME, 'Rename the managed transcript channel for QueryFixr branding').catch((error) => {
           console.warn('Could not rename the QueryFixr transcript channel:', error);
         });
       }
@@ -487,7 +487,7 @@ async function ensureTranscriptChannel(
     );
 
     if (existing.name !== TRANSCRIPT_NAME) {
-      await existing.setName(TRANSCRIPT_NAME, { reason: 'Rename the recovered transcript channel for QueryFixr branding' }).catch((error) => {
+      await existing.setName(TRANSCRIPT_NAME, 'Rename the recovered transcript channel for QueryFixr branding').catch((error) => {
         console.warn('Could not rename the recovered QueryFixr transcript channel:', error);
       });
     }
@@ -593,7 +593,7 @@ export async function ensurePanelChannel(
         'Repair QueryFixr panel channel parent, topic and access',
       );
       if (saved.name !== PANEL_CHANNEL_NAME) {
-        await saved.setName(PANEL_CHANNEL_NAME, { reason: 'Rename the managed panel channel for QueryFixr branding' }).catch((error) => {
+        await saved.setName(PANEL_CHANNEL_NAME, 'Rename the managed panel channel for QueryFixr branding').catch((error) => {
           console.warn('Could not rename the QueryFixr panel channel:', error);
         });
       }
@@ -623,7 +623,7 @@ export async function ensurePanelChannel(
     );
 
     if (existing.name !== PANEL_CHANNEL_NAME) {
-      await existing.setName(PANEL_CHANNEL_NAME, { reason: 'Rename the recovered panel channel for QueryFixr branding' }).catch((error) => {
+      await existing.setName(PANEL_CHANNEL_NAME, 'Rename the recovered panel channel for QueryFixr branding').catch((error) => {
         console.warn('Could not rename the recovered QueryFixr panel channel:', error);
       });
     }
