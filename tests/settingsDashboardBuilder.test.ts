@@ -17,6 +17,7 @@ test('Settings dashboard layout preserves server order while retaining every bui
       buttonOrder: ['reset', 'repair', 'dashboard-builder'],
     },
   } as unknown as AdvancedGuildSettings;
+  assert.equal(new Set(SETTINGS_DASHBOARD_BUTTON_KEYS).size, SETTINGS_DASHBOARD_BUTTON_KEYS.length);
   const rows = buildSettingsDashboardComponents(partial);
   const ids = rows.flatMap((row) => row.components.map((button) => button.data.custom_id as string));
 
