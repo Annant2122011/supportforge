@@ -238,7 +238,7 @@ async function load(): Promise<AuditStore> {
     Array.isArray(rawGuilds)
   ) {
     throw new Error(
-      'SupportForge audit data is malformed: the guild collection is invalid.',
+      'ResolvX audit data is malformed: the guild collection is invalid.',
     );
   }
 
@@ -247,7 +247,7 @@ async function load(): Promise<AuditStore> {
   for (const [guildId, rawStore] of Object.entries(rawGuilds)) {
     if (!rawStore || typeof rawStore !== 'object' || Array.isArray(rawStore)) {
       throw new Error(
-        'SupportForge audit data is malformed for guild ' + guildId + '.',
+        'ResolvX audit data is malformed for guild ' + guildId + '.',
       );
     }
 
@@ -537,11 +537,11 @@ export async function isSupportForgeManagedChannel(
 
   /*
    * Names and parent-category membership are not ownership proof. An
-   * administrator may place an unrelated channel inside a SupportForge
-   * category, and that must not make the channel part of SupportForge's
+   * administrator may place an unrelated channel inside a ResolvX
+   * category, and that must not make the channel part of ResolvX's
    * managed audit scope.
    *
-   * Ownership is established by a SupportForge topic or an explicitly
+   * Ownership is established by a ResolvX topic or an explicitly
    * persisted resource ID only.
    */
   return false;
@@ -702,12 +702,12 @@ export async function logSystemEvent(
     await recordAndPublish(guild, parentCategoryId, {
       event: action,
       actorId: 'supportforge-system',
-      actorName: 'SupportForge',
+      actorName: 'ResolvX',
       detail,
       category: 'system',
     });
   } catch (error) {
-    console.warn('⚠️ SupportForge system audit failed:', error);
+    console.warn('⚠️ ResolvX system audit failed:', error);
   }
 }
 
@@ -803,7 +803,7 @@ async function createOrRepairAuditDeveloperInfrastructure(
 ): Promise<AuditDeveloperInfrastructure> {
   const config = await getGuildConfig(guild.id);
   const bot = guild.members.me;
-  if (!bot) throw new Error('SupportForge bot member could not be resolved.');
+  if (!bot) throw new Error('ResolvX bot member could not be resolved.');
 
   let role: Role | null = null;
 
@@ -840,7 +840,7 @@ async function createOrRepairAuditDeveloperInfrastructure(
   if (channel) {
     /*
      * A stale but still-valid saved role ID can point at a different role. If
-     * the identified SupportForge dev channel already grants access to the
+     * the identified ResolvX dev channel already grants access to the
      * unique reserved developer role, that channel ACL is stronger evidence
      * for the team members who should see it than the stale setting alone.
      */
@@ -862,7 +862,7 @@ async function createOrRepairAuditDeveloperInfrastructure(
       role = aclRole;
       if (needsRoleRecoveryLog) {
         console.warn(
-          '♻️ Recovered the SupportForge developer audit role from the existing channel permission overwrite.',
+          '♻️ Recovered the ResolvX developer audit role from the existing channel permission overwrite.',
         );
       }
     } else if (
@@ -877,7 +877,7 @@ async function createOrRepairAuditDeveloperInfrastructure(
   }
 
   /*
-   * If a channel has been positively identified as SupportForge's developer
+   * If a channel has been positively identified as ResolvX's developer
    * channel, a unique role with the reserved name is a safe recovery target
    * even if its previous overwrite was removed. Never create a replacement
    * role when an existing team role can be recovered unambiguously.
@@ -888,7 +888,7 @@ async function createOrRepairAuditDeveloperInfrastructure(
     );
     if (namedCandidates.length === 1) {
       role = namedCandidates[0]!;
-      console.warn('♻️ Recovered the unique SupportForge developer audit role by its reserved role name.');
+      console.warn('♻️ Recovered the unique ResolvX developer audit role by its reserved role name.');
     } else if (namedCandidates.length > 1) {
       ambiguousDeveloperRole = true;
       console.warn('⚠️ Multiple roles use the reserved developer audit role name; refusing to choose one arbitrarily.');
@@ -899,7 +899,7 @@ async function createOrRepairAuditDeveloperInfrastructure(
     role = await guild.roles.create({
       name: AUDIT_DEVELOPER_ROLE_NAME,
       mentionable: false,
-      reason: 'SupportForge private developer audit access',
+      reason: 'ResolvX private developer audit access',
     }).catch((error) => {
       console.warn('⚠️ Could not create the developer audit role:', error);
       return null;
@@ -910,7 +910,7 @@ async function createOrRepairAuditDeveloperInfrastructure(
     throw new Error(
       ambiguousDeveloperRole
         ? 'Multiple developer audit roles exist and no configured role ID identifies the correct team.'
-        : 'The SupportForge developer audit role is unavailable. Grant Manage Roles or configure the existing developer role ID.',
+        : 'The ResolvX developer audit role is unavailable. Grant Manage Roles or configure the existing developer role ID.',
     );
   }
 
@@ -1018,7 +1018,7 @@ async function createOrRepairAuditDeveloperInfrastructure(
       permissionOverwrites?: typeof expectedOverwrites;
       reason: string;
     } = {
-      reason: 'Repair SupportForge developer audit channel configuration',
+      reason: 'Repair ResolvX developer audit channel configuration',
     };
 
     if (existingChannel.name !== AUDIT_DEV_NAME) {
@@ -1045,7 +1045,7 @@ async function createOrRepairAuditDeveloperInfrastructure(
 
   await ensureChannelPurposeMessage(
     channel,
-    'This private channel contains the raw SupportForge developer audit stream. Every durable audit event is published here. Access is granted only through the **' + AUDIT_DEVELOPER_ROLE_NAME + '** role.',
+    'This private channel contains the raw ResolvX developer audit stream. Every durable audit event is published here. Access is granted only through the **' + AUDIT_DEVELOPER_ROLE_NAME + '** role.',
   );
 
   /*
@@ -1113,7 +1113,7 @@ export async function getOrCreateAuditChannel(
     }
 
     if (existing.name !== AUDIT_NAME) {
-      await existing.setName(AUDIT_NAME, 'SupportForge general audit channel normalization').catch(() => undefined);
+      await existing.setName(AUDIT_NAME, 'ResolvX general audit channel normalization').catch(() => undefined);
     }
     const parentCategory = guild.channels.cache.get(parentCategoryId);
     if (
@@ -1123,30 +1123,30 @@ export async function getOrCreateAuditChannel(
       await existing
         .setParent(parentCategory.id, { lockPermissions: false })
         .catch((error) => {
-          console.warn('⚠️ Could not move the SupportForge audit channel into its container:', error);
+          console.warn('⚠️ Could not move the ResolvX audit channel into its container:', error);
         });
     } else if (existing.parentId !== parentCategoryId) {
       /*
        * A persisted category ID can become stale after a reset or manual
        * deletion. Never send a known-deleted category ID to Discord.
        * The audit channel remains where it is until setup recreates a valid
-       * SupportForge category.
+       * ResolvX category.
        */
       console.warn(
-        `⚠️ SupportForge audit channel parent ${parentCategoryId} is not a valid category; leaving the audit channel in its current location.`,
+        `⚠️ ResolvX audit channel parent ${parentCategoryId} is not a valid category; leaving the audit channel in its current location.`,
       );
     }
 
     await ensureChannelPurposeMessage(
       existing,
-      'This private channel stores SupportForge’s durable operational audit history. It records important ticket lifecycle actions, configuration changes, retention decisions, repairs, and other administrative events with responsible users and timestamps.',
+      'This private channel stores ResolvX’s durable operational audit history. It records important ticket lifecycle actions, configuration changes, retention decisions, repairs, and other administrative events with responsible users and timestamps.',
     );
     await ensureAuditPanelOnce(guild, existing);
     return existing;
   }
 
   const bot = guild.members.me;
-  if (!bot) throw new Error('SupportForge bot member could not be resolved.');
+  if (!bot) throw new Error('ResolvX bot member could not be resolved.');
 
   const config = await getGuildConfig(guild.id);
   const staffRoleIds = Object.values(config.departments)
@@ -1192,7 +1192,7 @@ export async function getOrCreateAuditChannel(
 
   await ensureChannelPurposeMessage(
     channel,
-    'This private channel stores SupportForge’s durable operational audit history. It records important ticket lifecycle actions, configuration changes, retention decisions, repairs, and other administrative events with responsible users and timestamps.',
+    'This private channel stores ResolvX’s durable operational audit history. It records important ticket lifecycle actions, configuration changes, retention decisions, repairs, and other administrative events with responsible users and timestamps.',
   );
 
   await ensureAuditPanelOnce(guild, channel);
@@ -1271,7 +1271,7 @@ async function sendAuditEntry(
     embeds: [
       new EmbedBuilder()
         .setColor(auditThemeColor)
-        .setTitle(`SupportForge Audit • ${actionLabel(event.action)}`)
+        .setTitle(`ResolvX Audit • ${actionLabel(event.action)}`)
         .setDescription(description)
         .setFooter({
         text:
@@ -1286,7 +1286,7 @@ async function sendAuditEntry(
   });
 }
 
-const AUDIT_PANEL_TITLE = '📒 SupportForge Audit Log';
+const AUDIT_PANEL_TITLE = '📒 ResolvX Audit Log';
 const AUDIT_SUMMARY_CUSTOM_ID = 'sf:audit:summary';
 const AUDIT_DAILY_CUSTOM_ID = 'sf:audit:daily';
 const AUDIT_ACCUMULATE_CUSTOM_ID = 'sf:audit:accumulate';
@@ -1339,20 +1339,20 @@ async function buildAuditPanelEmbed(guild: Guild): Promise<EmbedBuilder> {
     .setColor(getThemeColor(config.theme))
     .setTitle(AUDIT_PANEL_TITLE)
     .setDescription(
-      'This channel is the central SupportForge audit record. It keeps a durable history of ticket lifecycle actions and important configuration changes, including responsible users and timestamps.\n\n' +
+      'This channel is the central ResolvX audit record. It keeps a durable history of ticket lifecycle actions and important configuration changes, including responsible users and timestamps.\n\n' +
       '**Move Audit Panel Down** places this control panel at the newest point in the audit channel. Use it repeatedly as new entries arrive. Overall summaries are never inserted as a bottom-of-channel control.',
     )
     .addFields(
       {
         name: 'What the audit log records',
-        value: 'Ticket lifecycle actions, Settings changes, tags, departments, retention decisions, repairs, priority-role creation, and other SupportForge configuration activity.',
+        value: 'Ticket lifecycle actions, Settings changes, tags, departments, retention decisions, repairs, priority-role creation, and other ResolvX configuration activity.',
       },
       {
         name: 'What the overall summary contains',
         value: 'Tickets created to date, current Open/Claimed/Pending/Closed/Archived totals, tag creation dates, channel counts, departments, priorities, audit activity, and useful operational metrics.',
       },
     )
-    .setFooter({ text: guild.name + ' • SupportForge Audit' })
+    .setFooter({ text: guild.name + ' • ResolvX Audit' })
     .setTimestamp();
 }
 
@@ -1364,9 +1364,9 @@ async function removeHiddenAuditMessages(channel: TextChannel): Promise<void> {
     if (message.author.id !== channel.client.user?.id) continue;
 
     const title = message.embeds[0]?.title ?? '';
-    if (!title.startsWith('SupportForge Audit • ')) continue;
+    if (!title.startsWith('ResolvX Audit • ')) continue;
 
-    const actionLabelFromTitle = title.slice('SupportForge Audit • '.length);
+    const actionLabelFromTitle = title.slice('ResolvX Audit • '.length);
     const normalizedAction = actionLabelFromTitle
       .split(' ')
       .filter(Boolean)
@@ -1636,7 +1636,7 @@ async function buildPrivateDeveloperAuditPage(
         .setDescription(
           'No retained audit events are currently available.',
         )
-        .setFooter({ text: 'SupportForge • Developer Audit' })
+        .setFooter({ text: 'ResolvX • Developer Audit' })
         .setTimestamp(),
     );
   } else {
@@ -1878,7 +1878,7 @@ async function generateOverallAuditSummary(
     '',
     '**Channels currently in server:** ' + nonCategoryChannels,
     '**Categories currently in server:** ' + categoriesCurrentlyInServer,
-    '**SupportForge-managed channels currently present:** ' + managedChannels,
+    '**ResolvX-managed channels currently present:** ' + managedChannels,
     '**Ticket channels created to date:** ' + ticketsCreatedToDate,
     '',
     '**Existing departments:** ' + departments.length,
@@ -1991,7 +1991,7 @@ async function generateOverallAuditSummary(
         '📋 Audit Details' +
           (detailSections > 1 ? ' • Page ' + (index + 1) + '/' + detailSections : ''),
       )
-      .setFooter({ text: 'SupportForge • Overall audit to date' })
+      .setFooter({ text: 'ResolvX • Overall audit to date' })
       .setTimestamp();
 
     if (tagChunks[index]) {
@@ -2055,7 +2055,7 @@ async function generateOverallAuditSummary(
 
   const first = new EmbedBuilder()
     .setColor(getThemeColor(config.theme))
-    .setTitle('📊 SupportForge Overall Audit Summary • ' + guild.name)
+    .setTitle('📊 ResolvX Overall Audit Summary • ' + guild.name)
     .setDescription(summaryLines.join('\n'))
     .addFields(
       {
@@ -2098,7 +2098,7 @@ async function publishBottomMoveControl(channel: TextChannel): Promise<void> {
 
   await channel.send({
     content:
-      '⬇️ **Move Audit Panel Down**\nMove the SupportForge audit control panel to the newest point in this channel.',
+      '⬇️ **Move Audit Panel Down**\nMove the ResolvX audit control panel to the newest point in this channel.',
     components: [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
@@ -2159,7 +2159,7 @@ async function recordAndPublish(
   await appendAuditRecord(guild, record);
 
   /*
-   * The raw developer stream is opt-in. A normal SupportForge audit event must
+   * The raw developer stream is opt-in. A normal ResolvX audit event must
    * never create the developer role/channel as a side effect. Once Developer
    * View has been enabled at least once, its persisted channel ID marks the
    * infrastructure as intentionally provisioned and the stream remains
@@ -2306,9 +2306,9 @@ function buildNoActivityDailySummaryEmbed(
   return new EmbedBuilder()
     .setTitle(`📊 Daily Audit • ${date}`)
     .setDescription(
-      `**Date:** ${date} (UTC)\n\nNo SupportForge audit data was recorded for this day. No significant SupportForge changes were detected.`,
+      `**Date:** ${date} (UTC)\n\nNo ResolvX audit data was recorded for this day. No significant ResolvX changes were detected.`,
     )
-    .setFooter({ text: 'SupportForge • Daily audit marker (UTC)' })
+    .setFooter({ text: 'ResolvX • Daily audit marker (UTC)' })
     .setTimestamp();
 }
 
@@ -2379,7 +2379,7 @@ function buildDailySummaryEmbed(
   return new EmbedBuilder()
     .setTitle(`📊 Daily Audit Summary • ${date}`)
     .setDescription(lines.join('\n').slice(0, 4000))
-    .setFooter({ text: 'SupportForge • Daily audit summary (UTC)' })
+    .setFooter({ text: 'ResolvX • Daily audit summary (UTC)' })
     .setTimestamp();
 }
 
@@ -2427,7 +2427,7 @@ async function removeInvalidCurrentDaySummaries(
   let stateChanged = false;
 
   /*
-   * Older SupportForge versions could leave behind a summary for the
+   * Older ResolvX versions could leave behind a summary for the
    * current UTC day. That message is permanently invalid because that
    * calendar day has not finished yet. Remove the stale visible message
    * and its persisted marker so the completed-day scheduler can recreate
@@ -2460,8 +2460,8 @@ async function removeInvalidCurrentDaySummaries(
           match &&
           match[1] >= currentDate &&
           (
-            footer === 'SupportForge • Daily audit summary (UTC)' ||
-            footer === 'SupportForge • Daily audit marker (UTC)'
+            footer === 'ResolvX • Daily audit summary (UTC)' ||
+            footer === 'ResolvX • Daily audit marker (UTC)'
           ),
         );
       });
@@ -2567,7 +2567,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
 
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
     await interaction.reply({
-      content: '❌ This audit control can only be used inside the SupportForge audit channel.',
+      content: '❌ This audit control can only be used inside the ResolvX audit channel.',
       flags: MessageFlags.Ephemeral,
     });
     return true;
@@ -2575,7 +2575,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
 
   if (!(interaction.channel.topic ?? '').startsWith(AUDIT_TOPIC)) {
     await interaction.reply({
-      content: '❌ This is not the SupportForge audit channel.',
+      content: '❌ This is not the ResolvX audit channel.',
       flags: MessageFlags.Ephemeral,
     });
     return true;
@@ -2694,7 +2694,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
      * A member of the actual developer-team role must be allowed to reach the
      * Developer View controls even if that role was not configured as a
      * department staff role. When config was lost, verify membership against
-     * the role overwrite on the identified SupportForge developer channel.
+     * the role overwrite on the identified ResolvX developer channel.
      */
     const namedDeveloperRoles = [...interaction.guild.roles.cache.values()].filter(
       (role) => !role.managed && role.name === AUDIT_DEVELOPER_ROLE_NAME,
@@ -2732,7 +2732,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
     if (!isModerator) {
       await interaction.editReply({
         content:
-          '❌ Developer audit tools are restricted to SupportForge moderators.',
+          '❌ Developer audit tools are restricted to ResolvX moderators.',
       });
       return true;
     }
@@ -2814,7 +2814,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
     if (parentCategory?.type !== ChannelType.GuildCategory) {
       await interaction.editReply({
         content:
-          '❌ SupportForge could not locate its managed category, so it cannot safely create or repair audit-log-dev. Run /supportforge setup to restore the SupportForge category, then enable Developer View again.',
+          '❌ ResolvX could not locate its managed category, so it cannot safely create or repair audit-log-dev. Run /supportforge setup to restore the ResolvX category, then enable Developer View again.',
       });
       return true;
     }
@@ -2882,14 +2882,14 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
       if (!member.roles.cache.has(infrastructure.role.id)) {
         await member.roles.add(
           infrastructure.role,
-          'SupportForge Developer Audit Mode enabled',
+          'ResolvX Developer Audit Mode enabled',
         ).catch((error) => {
           throw new Error('Could not grant the developer-mode audit-log role: ' + String(error));
         });
       }
       await persist();
     } else if (interaction.customId === AUDIT_DEVELOPER_OFF_CUSTOM_ID) {
-      await member.roles.remove(infrastructure.role, 'SupportForge Developer Audit Mode disabled').catch((error) => {
+      await member.roles.remove(infrastructure.role, 'ResolvX Developer Audit Mode disabled').catch((error) => {
         console.warn('⚠️ Could not remove developer audit role:', error);
       });
       store.developerViewers = store.developerViewers.filter(
@@ -3083,7 +3083,7 @@ export async function handleAuditInteraction(interaction: ButtonInteraction): Pr
 
 export async function executeAuditPanelCommand(guild: Guild, mode: 'move' | 'restore'): Promise<void> {
   const channel = await findAuditChannel(guild);
-  if (!channel) throw new Error('SupportForge audit-log-general could not be found. Run /supportforge setup first.');
+  if (!channel) throw new Error('ResolvX audit-log-general could not be found. Run /supportforge setup first.');
   const current = await load();
   const store = getGuildStore(current, guild.id);
   if (mode === 'restore') {
@@ -3130,7 +3130,7 @@ export async function handleAuditSlashCommand(
   if (interaction.channel?.type !== ChannelType.GuildText ||
       !(interaction.channel.topic ?? '').startsWith(AUDIT_TOPIC)) {
     await interaction.reply({
-      content: 'Run audit slash commands inside SupportForge audit-log-general. The existing button controls require that audit channel context.',
+      content: 'Run audit slash commands inside ResolvX audit-log-general. The existing button controls require that audit channel context.',
       flags: MessageFlags.Ephemeral,
     });
     return;
@@ -3156,7 +3156,7 @@ export async function handleAuditSlashCommand(
     store.developerViewers.includes(interaction.user.id),
   );
   if (!isModerator) {
-    await interaction.editReply('Developer and audit controls are restricted to SupportForge moderators.');
+    await interaction.editReply('Developer and audit controls are restricted to ResolvX moderators.');
     return;
   }
 
@@ -3245,7 +3245,7 @@ export async function handleAuditSlashCommand(
       const developerRole = config.auditDeveloperRoleId
         ? guild.roles.cache.get(config.auditDeveloperRoleId)
         : [...guild.roles.cache.values()].find((role) => !role.managed && role.name === AUDIT_DEVELOPER_ROLE_NAME);
-      if (developerRole) await member.roles.remove(developerRole, 'SupportForge Developer Audit Mode disabled').catch(() => undefined);
+      if (developerRole) await member.roles.remove(developerRole, 'ResolvX Developer Audit Mode disabled').catch(() => undefined);
       store.developerViewers = store.developerViewers.filter((id) => id !== interaction.user.id);
       delete store.developerViewModes[interaction.user.id];
       delete store.developerViewStartedAt[interaction.user.id];
@@ -3266,7 +3266,7 @@ export async function handleAuditSlashCommand(
       }
       if (!store.developerViewers.includes(interaction.user.id)) store.developerViewers.push(interaction.user.id);
       if (!member.roles.cache.has(infrastructure.role.id)) {
-        await member.roles.add(infrastructure.role, 'SupportForge Developer Audit Mode enabled');
+        await member.roles.add(infrastructure.role, 'ResolvX Developer Audit Mode enabled');
       }
       await persist();
       const page = await buildPrivateDeveloperAuditPage(guild, interaction.user.id, 0);
@@ -3294,7 +3294,7 @@ export async function handleAuditSlashCommand(
     const mode = interaction.options.getString('action', true);
     if (mode === 'refresh') {
       await refreshAuditPanel(guild);
-      await interaction.editReply('✅ The SupportForge audit control panel was refreshed.');
+      await interaction.editReply('✅ The ResolvX audit control panel was refreshed.');
       return;
     }
     await executeAuditPanelCommand(guild, mode as 'move' | 'restore');
