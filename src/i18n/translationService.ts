@@ -8,6 +8,12 @@ import deDE from './locales/de-DE';
 import ptBR from './locales/pt-BR';
 import ar from './locales/ar';
 import jaJP from './locales/ja-JP';
+import itIT from './locales/it-IT';
+import idID from './locales/id-ID';
+import koKR from './locales/ko-KR';
+import ruRU from './locales/ru-RU';
+import zhCN from './locales/zh-CN';
+import trTR from './locales/tr-TR';
 
 export type TranslationKey = keyof typeof enUS;
 export type TranslationParams = Readonly<Record<string, string | number | boolean | null | undefined>>;
@@ -22,6 +28,12 @@ const CATALOGS: Readonly<Record<SupportedLocale, Readonly<Record<TranslationKey,
   'pt-BR': ptBR,
   ar,
   'ja-JP': jaJP,
+  'it-IT': itIT,
+  'id-ID': idID,
+  'ko-KR': koKR,
+  'ru-RU': ruRU,
+  'zh-CN': zhCN,
+  'tr-TR': trTR,
 };
 
 /** Single-pass interpolation: parameter content is literal and never reparsed. */
