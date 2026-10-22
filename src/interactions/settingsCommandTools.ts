@@ -278,8 +278,14 @@ export async function handleSettingsSlashCommand(
       const mode = interaction.options.getString('action', true);
       const idleHours = interaction.options.getInteger('idle-hours');
       const graceHours = interaction.options.getInteger('grace-hours');
-      if (!['show', 'enable', 'disable', 'configure'].includes(mode)) {
-        throw new Error('Choose show, enable, disable, or configure.');
+      const exemptRolesRaw = interaction.options.getString('exempt-roles');
+      const exemptDepartmentsRaw = interaction.options.getString('exempt-departments');
+      const supportedActions = [
+        'show', 'enable', 'disable', 'configure',
+        'set-exempt-roles', 'set-exempt-departments', 'clear-exemptions',
+      ];
+      if (!supportedActions.includes(mode)) {
+        throw new Error('Choose a supported inactivity policy action.');
       }
       if ((idleHours !== null && (idleHours < 1 || idleHours > 720)) ||
           (graceHours !== null && (graceHours < 1 || graceHours > 168))) {
@@ -288,29 +294,77 @@ export async function handleSettingsSlashCommand(
       if (mode === 'configure' && idleHours === null && graceHours === null) {
         throw new Error('Supply idle-hours, grace-hours, or both when configuring the inactivity policy.');
       }
-      if (mode === 'enable' || mode === 'disable' || mode === 'configure') {
+
+      const parseIds = (raw: string | null): string[] => [...new Set(
+        (raw ?? '').split(',').map((value) => value.trim()).filter(Boolean),
+      )];
+      let requestedRoleIds: string[] | null = null;
+      let requestedDepartmentIds: string[] | null = null;
+
+      if (mode === 'set-exempt-roles') {
+        if (exemptRolesRaw === null) throw new Error('Supply exempt-roles as a comma-separated list of Discord role IDs. Use clear-exemptions to clear both lists.');
+        requestedRoleIds = parseIds(exemptRolesRaw);
+        if (requestedRoleIds.length < 1 || requestedRoleIds.length > 25) {
+          throw new Error('Supply between 1 and 25 role IDs. Use clear-exemptions to remove every exemption.');
+        }
+        const knownRoles = await guild.roles.fetch().catch(() => guild.roles.cache);
+        const missingRoles = requestedRoleIds.filter((id) => !knownRoles.has(id));
+        if (missingRoles.length) throw new Error('These role IDs were not found in this server: ' + missingRoles.join(', '));
+      }
+
+      if (mode === 'set-exempt-departments') {
+        if (exemptDepartmentsRaw === null) throw new Error('Supply exempt-departments as a comma-separated list of configured department IDs. Use clear-exemptions to clear both lists.');
+        requestedDepartmentIds = parseIds(exemptDepartmentsRaw);
+        if (requestedDepartmentIds.length < 1 || requestedDepartmentIds.length > 25) {
+          throw new Error('Supply between 1 and 25 department IDs. Use clear-exemptions to remove every exemption.');
+        }
+        const currentConfig = await getGuildConfig(guild.id);
+        const missingDepartments = requestedDepartmentIds.filter((id) => !currentConfig.departments[id]);
+        if (missingDepartments.length) throw new Error('These department IDs are not configured in this server: ' + missingDepartments.join(', '));
+      }
+
+      const mutating = ['enable', 'disable', 'configure', 'set-exempt-roles', 'set-exempt-departments', 'clear-exemptions'].includes(mode);
+      if (mutating) {
         await updateAdvancedSettings(guild.id, (settings) => {
           if (mode === 'enable') settings.inactivity.enabled = true;
           if (mode === 'disable') settings.inactivity.enabled = false;
           if (idleHours !== null) settings.inactivity.idleHours = idleHours;
           if (graceHours !== null) settings.inactivity.graceHours = graceHours;
+          if (requestedRoleIds) settings.inactivity.exemptRoleIds = requestedRoleIds;
+          if (requestedDepartmentIds) settings.inactivity.exemptDepartmentIds = requestedDepartmentIds;
+          if (mode === 'clear-exemptions') {
+            settings.inactivity.exemptRoleIds = [];
+            settings.inactivity.exemptDepartmentIds = [];
+          }
           settings.inactivity.generation = Math.min(2147483647, settings.inactivity.generation + 1);
         });
         await clearTicketInactivityWarningsForGuild(guild);
         await refreshSettingsChannel(guild);
         const savedPolicy = (await getAdvancedSettings(guild.id)).inactivity;
         audit('TICKET_INACTIVITY_' + mode.toUpperCase(),
-          'Inactivity auto-close ' + mode + '; idleHours=' + savedPolicy.idleHours +
-          '; graceHours=' + savedPolicy.graceHours + '.');
+          'Inactivity auto-close action=' + mode + '; enabled=' + savedPolicy.enabled +
+          '; idleHours=' + savedPolicy.idleHours + '; graceHours=' + savedPolicy.graceHours +
+          '; exemptRoleIds=' + savedPolicy.exemptRoleIds.join(',') +
+          '; exemptDepartmentIds=' + savedPolicy.exemptDepartmentIds.join(',') + '.');
       }
+
       const inactivity = (await getAdvancedSettings(guild.id)).inactivity;
+      const currentConfig = await getGuildConfig(guild.id);
+      const roleNames = inactivity.exemptRoleIds
+        .map((id) => guild.roles.cache.get(id)?.name ?? id)
+        .join(', ') || 'None';
+      const departmentNames = inactivity.exemptDepartmentIds
+        .map((id) => currentConfig.departments[id]?.name ? currentConfig.departments[id].name + ' (' + id + ')' : id)
+        .join(', ') || 'None';
       await interaction.editReply(
-        '**Ticket Inactivity Automation**\n' +
-        'Status: **' + (inactivity.enabled ? 'Enabled' : 'Disabled') + '**\n' +
-        'Warning threshold: **' + inactivity.idleHours + ' idle hours**\n' +
-        'Grace period: **' + inactivity.graceHours + ' additional hours**\n\n' +
-        'Automation is opt-in. Warnings persist across restarts; closure requires a saved transcript and an unchanged activity timestamp.\n' +
-        'Use /supportforge settings inactivity action:configure with idle-hours and/or grace-hours to update thresholds.'
+        '**Ticket Inactivity Automation**\\n' +
+        'Status: **' + (inactivity.enabled ? 'Enabled' : 'Disabled') + '**\\n' +
+        'Warning threshold: **' + inactivity.idleHours + ' idle hours**\\n' +
+        'Grace period: **' + inactivity.graceHours + ' additional hours**\\n' +
+        'Exempt roles (owner or assigned staff): **' + roleNames + '**\\n' +
+        'Exempt departments: **' + departmentNames + '**\\n\\n' +
+        'Automation is opt-in. Warnings persist across restarts; closure requires a saved transcript, unchanged activity timestamp and no configured exemption.\\n' +
+        'Use action:set-exempt-roles with exempt-roles, action:set-exempt-departments with exempt-departments, or action:clear-exemptions to manage exclusions.'
       );
       return;
     }
