@@ -554,7 +554,7 @@ function isEphemeralSettingsMessage(interaction: ButtonInteraction): boolean {
 async function renderSettingsView(
   interaction: SettingsViewInteraction,
   embeds: EmbedBuilder[],
-  components: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>>,
+  components: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<RoleSelectMenuBuilder>>,
 ): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
   const themedEmbeds = embeds.map((embed) => embed.setColor(getThemeColor(config.theme)));
