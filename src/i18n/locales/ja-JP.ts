@@ -38,6 +38,7 @@ const jaJP: Record<TranslationKey, string> = {
   "supportHours.open": "サポートは現在受付中です。",
   "supportHours.closed": "サポートは現在受付時間外です。",
   "supportHours.nextOpening": " 次回受付開始：{nextOpening}。",
+  "supportHours.noNextOpening": "次回の受付開始時刻が設定されていません。サーバー管理者に連絡してください。",
   "forms.submit": "回答を送信",
   "forms.required": "この項目は必須です。",
   "forms.invalid": "フォームの回答が無効です。項目の説明を確認してください。",
