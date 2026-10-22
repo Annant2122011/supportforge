@@ -121,8 +121,12 @@ export interface AdvancedGuildSettings {
     enabled: boolean;
     idleHours: number;
     graceHours: number;
-    /** Increments when policy toggles or thresholds change, invalidating old warning markers. */
+    /** Increments when policy toggles, thresholds, or exemption lists change. */
     generation: number;
+    /** Roles held by a ticket owner or assigned staff member exempt the ticket from inactivity closure. */
+    exemptRoleIds: string[];
+    /** Department IDs that never use automatic inactivity closure. */
+    exemptDepartmentIds: string[];
   };
   retention: {
     closedDays: number;
@@ -208,6 +212,8 @@ const DEFAULTS: AdvancedGuildSettings = {
     idleHours: 72,
     graceHours: 24,
     generation: 1,
+    exemptRoleIds: [],
+    exemptDepartmentIds: [],
   },
   retention: {
     closedDays: 180,
@@ -346,6 +352,15 @@ function normalizeBoundedInteger(value: unknown, fallback: number, minimum: numb
   return Math.min(maximum, Math.max(minimum, parsed));
 }
 
+function normalizeStringIdList(value: unknown, maximum = 25): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value
+    .filter((candidate): candidate is string => typeof candidate === 'string')
+    .map((candidate) => candidate.trim())
+    .filter((candidate) => candidate.length > 0 && candidate.length <= 100))]
+    .slice(0, maximum);
+}
+
 function normalizeExistingSettings(
   settings: Partial<AdvancedGuildSettings>,
 ): AdvancedGuildSettings {
@@ -364,6 +379,8 @@ function normalizeExistingSettings(
       idleHours: normalizeBoundedInteger(settings.inactivity?.idleHours, DEFAULTS.inactivity.idleHours, 1, 720),
       graceHours: normalizeBoundedInteger(settings.inactivity?.graceHours, DEFAULTS.inactivity.graceHours, 1, 168),
       generation: normalizeBoundedInteger(settings.inactivity?.generation, DEFAULTS.inactivity.generation, 1, 2147483647),
+      exemptRoleIds: normalizeStringIdList(settings.inactivity?.exemptRoleIds),
+      exemptDepartmentIds: normalizeStringIdList(settings.inactivity?.exemptDepartmentIds),
     },
     retention: {
       ...DEFAULTS.retention,
