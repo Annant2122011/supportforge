@@ -38,6 +38,7 @@ const frFR: Record<TranslationKey, string> = {
   "supportHours.open": "Le support est ouvert.",
   "supportHours.closed": "Le support est actuellement fermé.",
   "supportHours.nextOpening": " Prochaine ouverture : {nextOpening}.",
+  "supportHours.noNextOpening": "Aucune prochaine ouverture n’est configurée ; contactez un administrateur du serveur.",
   "forms.submit": "Envoyer les réponses",
   "forms.required": "Ce champ est obligatoire.",
   "forms.invalid": "La réponse au formulaire est invalide. Vérifiez les instructions du champ.",
