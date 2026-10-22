@@ -9,7 +9,7 @@ const nlNL: Record<TranslationKey, string> = {
   "common.save": "Opslaan",
   "common.select": "Selecteren",
   "settings.title": "ResolvX-instellingen",
-  "settings.locale.title": "Servert taal",
+  "settings.locale.title": "Servertaal",
   "settings.locale.prompt": "Kies de taal voor ondersteunde ResolvX-botberichten op deze server.",
   "settings.locale.current": "Huidige taal: {locale}",
   "settings.locale.saved": "Servert taal opgeslagen als {locale}. Ondersteunde berichten gebruiken deze taal waar vertalingen beschikbaar zijn.",
