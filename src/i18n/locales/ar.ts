@@ -38,6 +38,7 @@ const ar: Record<TranslationKey, string> = {
   "supportHours.open": "الدعم متاح الآن.",
   "supportHours.closed": "الدعم مغلق حاليًا.",
   "supportHours.nextOpening": " موعد الفتح التالي: {nextOpening}.",
+  "supportHours.noNextOpening": "لم يتم تحديد موعد الفتح التالي؛ تواصل مع مسؤول الخادم.",
   "forms.submit": "إرسال الإجابات",
   "forms.required": "هذا الحقل مطلوب.",
   "forms.invalid": "إجابة النموذج غير صالحة. راجع تعليمات الحقل.",
