@@ -25,6 +25,7 @@ import {
 } from './ticketPersistenceService';
 import { getField, isTicketTopic, removeField, setField } from './ticketStateService';
 import { refreshTicketPanel } from './ticketPanelService';
+import { isRecoveryArchiveFooter, isTicketPanelTitle } from '../core/domain/legacyBrandRecognition';
 
 const ARCHIVE_PAGE_SIZE = 100;
 const DEFAULT_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -103,7 +104,7 @@ function isRecoveryReplay(message: Message): boolean {
   // replayed copies as if they were fresh original messages.
   return message.content.startsWith('[Recovered original message by ') ||
     message.embeds.some((embed) =>
-      Boolean(embed.footer?.text?.startsWith(RECOVERY_FOOTER_PREFIX)),
+      isRecoveryArchiveFooter(embed.footer?.text),
     );
 }
 
@@ -777,9 +778,9 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
         const customId = String(component.custom_id ?? component.customId ?? '');
         return customId.startsWith('ticket:');
       });
-    }) && archivedEmbeds.some((entry) => /(?:QueryFixr|QueryFixr) Ticket #/.test(String((entry as Record<string, unknown>).title ?? '')));
+    }) && archivedEmbeds.some((entry) => isTicketPanelTitle((entry as Record<string, unknown>).title));
     if (isPanel || (botId && archived.author_id === botId && archivedComponents.length > 0 && archivedEmbeds.length > 0 &&
-      archivedEmbeds.some((entry) => /(?:QueryFixr|QueryFixr) Ticket #/.test(String((entry as Record<string, unknown>).title ?? ''))))) {
+      archivedEmbeds.some((entry) => isTicketPanelTitle((entry as Record<string, unknown>).title)))) {
       continue;
     }
 
