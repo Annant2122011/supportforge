@@ -2,6 +2,7 @@ import type { Guild } from 'discord.js';
 import { normalizeDiscordEmoji } from '../core/domain/discordEmoji';
 import { normalizeInactivityExemptionIds } from '../core/domain/ticketInactivityExemptions';
 import { getJsonDocument, setJsonDocument } from './jsonDocumentPersistenceService';
+import { resolveLocale, type SupportedLocale } from '../i18n/localeRegistry';
 
 export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent' | 'critical';
 
@@ -108,6 +109,8 @@ export interface SettingsDashboardSettings {
 
 export interface AdvancedGuildSettings {
   version: 5;
+  /** Per-server default language. Older documents normalise to en-US without a database migration. */
+  locale: SupportedLocale;
   settingsChannelId: string | null;
   closedCategoryId: string | null;
   archiveCategoryId: string | null;
@@ -199,6 +202,7 @@ function defaultReportCategories(): Record<string, ReportCategory> {
 
 const DEFAULTS: AdvancedGuildSettings = {
   version: 5,
+  locale: 'en-US',
   settingsChannelId: null,
   closedCategoryId: null,
   archiveCategoryId: null,
@@ -360,6 +364,7 @@ function normalizeExistingSettings(
     ...cloneDefaults(),
     ...settings,
     version: 5,
+    locale: resolveLocale(settings.locale),
     panelActivity: {
       ...DEFAULTS.panelActivity,
       ...(settings.panelActivity ?? {}),
@@ -488,6 +493,18 @@ export async function updateAdvancedSettings(
   updater(settings);
   await persist();
   return settings;
+}
+
+/** Read the resolved default language for one guild. */
+export async function getGuildLocale(guildId: string): Promise<SupportedLocale> {
+  return (await getAdvancedSettings(guildId)).locale;
+}
+
+/** Persist a validated locale in the existing Neon-backed advanced-settings document. */
+export async function setGuildLocale(guildId: string, locale: SupportedLocale): Promise<AdvancedGuildSettings> {
+  return updateAdvancedSettings(guildId, (settings) => {
+    settings.locale = resolveLocale(locale);
+  });
 }
 
 export function normalizeTagName(name: string): string {
