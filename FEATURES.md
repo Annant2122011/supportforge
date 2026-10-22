@@ -1249,7 +1249,7 @@ Merged tickets should become historical records that point to the master ticket 
 
 ### Remaining partial scope
 
-- No administrator UI yet configures VIP, escalation, or per-department inactivity exemptions. Those are recognized only when represented by the supported durable metadata / priority values.
+- Administrators can configure up to 25 exempt roles and up to 25 exempt department IDs through the Settings dashboard and `/supportforge settings inactivity`. A selected role exempts tickets when held by the ticket owner or an assigned staff member; department exemptions match the persisted department ID. Exemption changes bump the policy generation and clear active warnings.
 - Discord delivery and Neon commits cannot form one distributed transaction; recovery markers and reconciliation reduce duplicate effects but do not provide mathematical exactly-once delivery.
 - The scheduler, permissions, transcript access, real warning presentation and race behavior still require live Discord test-guild acceptance. CI passing alone does not qualify this feature as production-accepted.
 
