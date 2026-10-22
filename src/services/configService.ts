@@ -16,6 +16,10 @@ export interface DepartmentConfig {
   name: string;
   staffRoleId: string | null;
   categoryId?: string | null;
+  /** Saved private-thread parent channel for this department, created lazily. */
+  threadParentChannelId?: string | null;
+  /** Tracks which role received Manage Threads on the department parent. */
+  threadParentStaffRoleId?: string | null;
   tags: Record<string, TagConfig>;
   createdAt: string;
 }
@@ -278,6 +282,14 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
   for (const department of Object.values(current.guilds[guildId].departments)) {
     if (department.categoryId === undefined) {
       department.categoryId = null;
+      migrated = true;
+    }
+    if (department.threadParentChannelId === undefined) {
+      department.threadParentChannelId = null;
+      migrated = true;
+    }
+    if (department.threadParentStaffRoleId === undefined) {
+      department.threadParentStaffRoleId = null;
       migrated = true;
     }
     if (!department.tags || Object.keys(department.tags).length === 0) {

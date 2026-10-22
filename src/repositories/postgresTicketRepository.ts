@@ -214,6 +214,14 @@ export interface AsyncTicketRepository {
     updatedAt: string,
     actor?: EventActor,
   ): Promise<void>;
+  /** Atomically closes only if the recorded activity anchor is unchanged. */
+  closeIfActivityUnchanged?(
+    channelId: string,
+    expectedActivityAnchorAt: string,
+    updates: import('./ticketRepository').TicketMetadataUpdates,
+    updatedAt: string,
+    actor?: EventActor,
+  ): Promise<boolean>;
   updateMetadata(
     channelId: string,
     updates: Partial<
@@ -269,6 +277,18 @@ function insertParameters(record: TicketRepositoryRecord): unknown[] {
     record.deletedAt,
     record.deletionReason,
   ];
+}
+
+function canonicalTimestamp(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+}
+
+function activityAnchor(record: TicketRepositoryRecord): string | null {
+  return canonicalTimestamp(record.metadata.lastActivityAt)
+    ?? canonicalTimestamp(record.updatedAt)
+    ?? canonicalTimestamp(record.createdAt);
 }
 
 export class PostgresTicketRepository implements AsyncTicketRepository {
@@ -588,6 +608,113 @@ export class PostgresTicketRepository implements AsyncTicketRepository {
       } catch {
         // Preserve original transaction error.
       }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Compare-and-close guard for inactivity automation. The activity anchor is
+   * checked while holding the same row lock used by message activity writes,
+   * so a reply racing the scheduler either wins before closure or observes the
+   * closed state after it commits; stale reads never auto-close a fresh ticket.
+   */
+  public async closeIfActivityUnchanged(
+    channelId: string,
+    expectedActivityAnchorAt: string,
+    updates: import('./ticketRepository').TicketMetadataUpdates,
+    updatedAt: string,
+    actor?: EventActor,
+  ): Promise<boolean> {
+    const client = await getPostgresPool().connect();
+    try {
+      await client.query('BEGIN');
+      const currentResult = await client.query<TicketRow>(
+        'SELECT * FROM tickets WHERE channel_id = $1 FOR UPDATE',
+        [channelId],
+      );
+      const row = currentResult.rows[0];
+      if (!row) {
+        await client.query('COMMIT');
+        return false;
+      }
+      const current = fromRow(row);
+      const expected = canonicalTimestamp(expectedActivityAnchorAt);
+      if (
+        current.deletedAt ||
+        !['open', 'claimed', 'pending', 'reopened'].includes(current.status) ||
+        !expected ||
+        activityAnchor(current) !== expected
+      ) {
+        await client.query('COMMIT');
+        return false;
+      }
+
+      assertTicketStatusTransition(current.status, 'closed');
+      const changedFields = Object.keys(updates).filter(
+        (key) => updates[key as keyof import('./ticketRepository').TicketMetadataUpdates] !== undefined,
+      );
+      const next: TicketRepositoryRecord = {
+        ...current,
+        ...updates,
+        status: 'closed',
+        claimedByIds: updates.claimedByIds ?? current.claimedByIds,
+        participantIds: updates.participantIds ?? current.participantIds,
+        metadata: updates.metadata !== undefined
+          ? mergeTicketMetadata(current.metadata, updates.metadata)
+          : current.metadata,
+        updatedAt,
+      };
+      const result = await client.query(
+        'UPDATE tickets SET status = $1, department_id = $2, tag_id = $3, owner_id = $4, priority = $5, ' +
+          'claimed_by_ids = $6::text[], participant_ids = $7::text[], metadata = $8::jsonb, ' +
+          'updated_at = $9::timestamptz WHERE channel_id = $10 AND status = $11 AND deleted_at IS NULL',
+        [
+          next.status, next.departmentId, next.tagId, next.ownerId, next.priority,
+          next.claimedByIds, next.participantIds, JSON.stringify(next.metadata),
+          updatedAt, channelId, current.status,
+        ],
+      );
+      if ((result.rowCount ?? 0) !== 1) {
+        await client.query('ROLLBACK');
+        return false;
+      }
+
+      const resolved = resolveActor(actor);
+      await this.events.append({
+        id: randomUUID(),
+        type: lifecycleEventType(current.status, 'closed'),
+        aggregateType: 'ticket',
+        aggregateId: current.id,
+        guildId: current.guildId,
+        channelId: current.channelId,
+        actorId: resolved.id,
+        actorAttribution: resolved.attribution,
+        actorConfidence: resolved.confidence,
+        payload: { from: current.status, to: 'closed', changedFields, reason: 'inactivity' },
+        occurredAt: updatedAt,
+      }, undefined, client);
+
+      if (changedFields.length > 0) {
+        await this.events.append({
+          id: randomUUID(),
+          type: metadataEventType(changedFields, current, updates),
+          aggregateType: 'ticket',
+          aggregateId: current.id,
+          guildId: current.guildId,
+          channelId: current.channelId,
+          actorId: resolved.id,
+          actorAttribution: resolved.attribution,
+          actorConfidence: resolved.confidence,
+          payload: metadataEventPayload(changedFields, updates),
+          occurredAt: updatedAt,
+        }, undefined, client);
+      }
+      await client.query('COMMIT');
+      return true;
+    } catch (error) {
+      try { await client.query('ROLLBACK'); } catch { /* preserve original error */ }
       throw error;
     } finally {
       client.release();

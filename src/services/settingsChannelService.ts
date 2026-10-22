@@ -52,6 +52,7 @@ const SETTINGS_DASHBOARD_BUTTONS: Record<SettingsDashboardButtonKey, {
   usecases: { customId: 'sf:settings:usecases', label: 'Use Cases', style: ButtonStyle.Secondary, emoji: '🧩' },
   reports: { customId: 'sf:settings:reports', label: 'Safety & Reports', style: ButtonStyle.Secondary, emoji: '🚩' },
   retention: { customId: 'sf:settings:retention', label: 'Retention', style: ButtonStyle.Secondary, emoji: '🧹' },
+  inactivity: { customId: 'sf:settings:inactivity', label: 'Inactivity Automation', style: ButtonStyle.Primary, emoji: '⏳' },
   appearance: { customId: 'sf:settings:appearance', label: 'Public Panel', style: ButtonStyle.Secondary, emoji: '🎨' },
   storage: { customId: 'sf:settings:storage', label: 'Storage', style: ButtonStyle.Secondary, emoji: '🗄️' },
   rules: { customId: 'sf:settings:rules', label: 'Rules & Roles', style: ButtonStyle.Secondary, emoji: '🛡️' },
@@ -65,6 +66,8 @@ const SETTINGS_DASHBOARD_BUTTONS: Record<SettingsDashboardButtonKey, {
   premium: { customId: 'sf:settings:premium', label: 'Premium & Demo', style: ButtonStyle.Secondary, emoji: '💎' },
   panels: { customId: 'sf:settings:panels:home', label: 'Ticket Panels', style: ButtonStyle.Primary, emoji: '🧱' },
   'dashboard-builder': { customId: 'sf:settings:dashboard-builder', label: 'Settings Layout', style: ButtonStyle.Primary, emoji: '🧰' },
+  'support-hours': { customId: 'sf:settings:support-hours', label: 'Support Hours', style: ButtonStyle.Primary, emoji: '🕒' },
+  'ticket-workspace': { customId: 'sf:settings:ticket-workspace', label: 'Ticket Workspace', style: ButtonStyle.Primary, emoji: '🧵' },
 };
 
 /** Per-server order is customizable, but every built-in control remains available. */
@@ -261,11 +264,11 @@ export function buildSettingsDashboardEmbed(
 
   const closed =
     settings.retention.closedDays === 0
-      ? 'Unlimited/forever'
+      ? 'No timer (365-day maximum)'
       : settings.retention.closedDays + ' days';
   const archive =
     settings.retention.archiveDays === 0
-      ? 'Unlimited/forever'
+      ? 'No timer (365-day maximum)'
       : settings.retention.archiveDays + ' days';
 
   const claimed = settings.statusCategories.claimedCategoryId
@@ -280,7 +283,7 @@ export function buildSettingsDashboardEmbed(
     .setColor(getThemeColor(theme))
     .setDescription(
       ((settings.settingsDashboard.description || 'Configure your server ticket system, support panels and retention policies.') +
-        '\\n\\nButton-driven configuration • actions are audited. Use **Refresh** to re-read the latest saved configuration.').slice(0, 3900),
+        '\n\nButton-driven configuration • actions are audited. Use **Refresh** to re-read the latest saved configuration.').slice(0, 3900),
     )
     .addFields(
       {
@@ -320,6 +323,20 @@ export function buildSettingsDashboardEmbed(
         inline: true,
       },
       {
+        name: '⏳ Inactivity automation',
+        value: (settings.inactivity.enabled ? '🟢 Enabled' : '⚪ Disabled') +
+          '\nWarn after: **' + settings.inactivity.idleHours + ' h**' +
+          '\nGrace period: **' + settings.inactivity.graceHours + ' h**',
+        inline: true,
+      },
+      {
+        name: '🧵 Ticket workspace',
+        value: settings.ticketWorkspace.mode === 'private-threads'
+          ? 'Private threads'
+          : 'Private text channels',
+        inline: true,
+      },
+      {
         name: '🎨 Appearance',
         value: 'Panel title: **' + settings.appearance.panelTitle.slice(0, 80) + '**',
         inline: true,
@@ -353,6 +370,12 @@ export function buildSettingsDashboardEmbed(
           closed +
           '; Archived – ' +
           archive +
+          '\n' +
+          '**Inactivity automation**: ' +
+          (settings.inactivity.enabled ? 'Enabled' : 'Disabled') +
+          '; warn after ' + settings.inactivity.idleHours + ' hours; grace ' + settings.inactivity.graceHours + ' hours' +
+          '\n' +
+          '**Ticket workspace**: ' + settings.ticketWorkspace.mode +
           '\n' +
           '**Optional status categories**: Claimed tickets – ' +
           claimed +

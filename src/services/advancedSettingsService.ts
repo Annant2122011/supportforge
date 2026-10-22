@@ -1,5 +1,6 @@
 import type { Guild } from 'discord.js';
 import { normalizeDiscordEmoji } from '../core/domain/discordEmoji';
+import { normalizeInactivityExemptionIds } from '../core/domain/ticketInactivityExemptions';
 import { getJsonDocument, setJsonDocument } from './jsonDocumentPersistenceService';
 
 export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent' | 'critical';
@@ -49,10 +50,45 @@ export interface FlagRule {
 }
 
 export const SETTINGS_DASHBOARD_BUTTON_KEYS = [
+  // Core ticket experience first, then routing and server policy.
+  'panel', 'panels', 'forms', 'defaults', 'tags',
+  'usecases', 'support-hours', 'ticket-workspace', 'inactivity', 'reports',
+  // Appearance/team operations, then recovery and administration.
+  'team', 'retention', 'appearance', 'theme', 'dashboard-builder',
+  'storage', 'rules', 'repair', 'premium', 'manual',
+  'refresh', 'reset',
+] as const;
+
+/**
+ * Exact pre-inactivity default order persisted by older releases. Only this
+ * untouched default migrates to the new grouped layout; any custom ordering
+ * is preserved and newly introduced buttons are appended safely.
+ */
+const LEGACY_DEFAULT_SETTINGS_BUTTON_ORDER = [
   'panel', 'defaults', 'tags', 'usecases', 'reports', 'retention', 'appearance',
   'storage', 'rules', 'repair', 'team', 'manual', 'forms', 'refresh', 'reset',
-  'theme', 'premium', 'panels', 'dashboard-builder',
+  'theme', 'premium', 'panels', 'dashboard-builder', 'support-hours', 'ticket-workspace',
 ] as const;
+
+export function normalizeSettingsDashboardButtonOrder(rawOrderInput: unknown): SettingsDashboardButtonKey[] {
+  const rawOrder = Array.isArray(rawOrderInput) ? rawOrderInput : [];
+  const validOrder = rawOrder.filter((key): key is SettingsDashboardButtonKey =>
+    typeof key === 'string' && (SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(key),
+  );
+  const uniqueOrder = [...new Set(validOrder)];
+  const isUncustomizedLegacyDefault =
+    rawOrder.length === LEGACY_DEFAULT_SETTINGS_BUTTON_ORDER.length &&
+    rawOrder.every((key, index) => key === LEGACY_DEFAULT_SETTINGS_BUTTON_ORDER[index]);
+  // Upgrade only the exact legacy default. A server's custom order is
+  // user data and must never be silently rearranged by a UI upgrade.
+  const normalizedOrder: SettingsDashboardButtonKey[] = isUncustomizedLegacyDefault
+    ? [...SETTINGS_DASHBOARD_BUTTON_KEYS]
+    : uniqueOrder;
+  for (const key of SETTINGS_DASHBOARD_BUTTON_KEYS) {
+    if (!normalizedOrder.includes(key)) normalizedOrder.push(key);
+  }
+  return normalizedOrder;
+}
 
 export type SettingsDashboardButtonKey = (typeof SETTINGS_DASHBOARD_BUTTON_KEYS)[number];
 
@@ -81,6 +117,18 @@ export interface AdvancedGuildSettings {
     messageBudget: number;
     minimumMessagesBeforeMove: number;
   };
+  /** Explicitly opt-in, restart-safe auto-close policy for idle tickets. */
+  inactivity: {
+    enabled: boolean;
+    idleHours: number;
+    graceHours: number;
+    /** Increments when policy toggles, thresholds, or exemption lists change. */
+    generation: number;
+    /** Roles held by a ticket owner or assigned staff member exempt the ticket from inactivity closure. */
+    exemptRoleIds: string[];
+    /** Department IDs that never use automatic inactivity closure. */
+    exemptDepartmentIds: string[];
+  };
   retention: {
     closedDays: number;
     archiveDays: number;
@@ -100,6 +148,8 @@ export interface AdvancedGuildSettings {
     panelDescription: string;
     panelFooter: string;
   };
+  /** Per-server ticket resource choice; text channels remain the backward-compatible default. */
+  ticketWorkspace: { mode: 'text-channels' | 'private-threads' };
   /** Per-server Settings-channel branding and button order; essential controls are never hidden. */
   settingsDashboard: SettingsDashboardSettings;
   ticketDefaults: {
@@ -158,6 +208,14 @@ const DEFAULTS: AdvancedGuildSettings = {
     messageBudget: 12,
     minimumMessagesBeforeMove: 6,
   },
+  inactivity: {
+    enabled: false,
+    idleHours: 72,
+    graceHours: 24,
+    generation: 1,
+    exemptRoleIds: [],
+    exemptDepartmentIds: [],
+  },
   retention: {
     closedDays: 180,
     archiveDays: 180,
@@ -178,6 +236,7 @@ const DEFAULTS: AdvancedGuildSettings = {
       'Click a department button below to open a private support ticket.',
     panelFooter: 'SupportForge • Professional Ticket System',
   },
+  ticketWorkspace: { mode: 'text-channels' },
   settingsDashboard: {
     title: '⚙️ ResolveX Settings',
     description: 'Configure your server’s ticket system, support panels and retention policies.',
@@ -208,6 +267,7 @@ function cloneDefaults(): AdvancedGuildSettings {
   return {
     ...DEFAULTS,
     panelActivity: { ...DEFAULTS.panelActivity },
+    inactivity: { ...DEFAULTS.inactivity, exemptRoleIds: [...DEFAULTS.inactivity.exemptRoleIds], exemptDepartmentIds: [...DEFAULTS.inactivity.exemptDepartmentIds] },
     retention: {
       ...DEFAULTS.retention,
       pendingApprovals: {
@@ -221,6 +281,7 @@ function cloneDefaults(): AdvancedGuildSettings {
       buttonOrder: [...DEFAULTS.settingsDashboard.buttonOrder],
       buttonCustomizations: {},
     },
+    ticketWorkspace: { ...DEFAULTS.ticketWorkspace },
     ticketDefaults: { ...DEFAULTS.ticketDefaults },
     reports: {
       ...DEFAULTS.reports,
@@ -286,6 +347,12 @@ function normalizeRetentionDays(value: unknown, fallback: number): number {
   return Math.min(365, Math.max(0, parsed));
 }
 
+function normalizeBoundedInteger(value: unknown, fallback: number, minimum: number, maximum: number): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) return fallback;
+  return Math.min(maximum, Math.max(minimum, parsed));
+}
+
 function normalizeExistingSettings(
   settings: Partial<AdvancedGuildSettings>,
 ): AdvancedGuildSettings {
@@ -296,6 +363,16 @@ function normalizeExistingSettings(
     panelActivity: {
       ...DEFAULTS.panelActivity,
       ...(settings.panelActivity ?? {}),
+    },
+    inactivity: {
+      ...DEFAULTS.inactivity,
+      ...(settings.inactivity ?? {}),
+      enabled: settings.inactivity?.enabled === true,
+      idleHours: normalizeBoundedInteger(settings.inactivity?.idleHours, DEFAULTS.inactivity.idleHours, 1, 720),
+      graceHours: normalizeBoundedInteger(settings.inactivity?.graceHours, DEFAULTS.inactivity.graceHours, 1, 168),
+      generation: normalizeBoundedInteger(settings.inactivity?.generation, DEFAULTS.inactivity.generation, 1, 2147483647),
+      exemptRoleIds: normalizeInactivityExemptionIds(settings.inactivity?.exemptRoleIds),
+      exemptDepartmentIds: normalizeInactivityExemptionIds(settings.inactivity?.exemptDepartmentIds),
     },
     retention: {
       ...DEFAULTS.retention,
@@ -321,16 +398,13 @@ function normalizeExistingSettings(
       ...DEFAULTS.appearance,
       ...(settings.appearance ?? {}),
     },
+    ticketWorkspace: {
+      mode: settings.ticketWorkspace?.mode === 'private-threads' ? 'private-threads' : 'text-channels',
+    },
     settingsDashboard: (() => {
       const saved = settings.settingsDashboard;
       const rawOrder = Array.isArray(saved?.buttonOrder) ? saved.buttonOrder : [];
-      const validOrder = rawOrder.filter((key): key is SettingsDashboardButtonKey =>
-        typeof key === 'string' && (SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(key),
-      );
-      const uniqueOrder = [...new Set(validOrder)];
-      for (const key of SETTINGS_DASHBOARD_BUTTON_KEYS) {
-        if (!uniqueOrder.includes(key)) uniqueOrder.push(key);
-      }
+      const normalizedOrder = normalizeSettingsDashboardButtonOrder(rawOrder);
       const text = (value: unknown, fallback: string, max: number): string =>
         typeof value === 'string' ? value.trim().slice(0, max) : fallback;
       const rawCustomizations = saved?.buttonCustomizations && typeof saved.buttonCustomizations === 'object' &&
@@ -361,7 +435,7 @@ function normalizeExistingSettings(
         title: text(saved?.title, DEFAULTS.settingsDashboard.title, 256) || DEFAULTS.settingsDashboard.title,
         description: text(saved?.description, DEFAULTS.settingsDashboard.description, 4000),
         footer: text(saved?.footer, DEFAULTS.settingsDashboard.footer, 2048) || DEFAULTS.settingsDashboard.footer,
-        buttonOrder: uniqueOrder,
+        buttonOrder: normalizedOrder,
         buttonCustomizations,
       };
     })(),
@@ -511,6 +585,11 @@ export function buildSettingsSummary(
   const tags = Object.values(settings.customTags);
 
   return [
+    '**⏳ Inactivity Automation**',
+    '• Auto-close: ' + (settings.inactivity.enabled ? 'Enabled' : 'Disabled'),
+    '• Warning after: ' + settings.inactivity.idleHours + ' hours',
+    '• Grace period: ' + settings.inactivity.graceHours + ' hours',
+    '',
     '**🎛️ Panel**',
     '• Automatic repositioning: ' +
       (settings.panelActivity.enabled ? 'Enabled' : 'Disabled'),

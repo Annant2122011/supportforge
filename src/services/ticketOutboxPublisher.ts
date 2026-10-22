@@ -4,6 +4,7 @@ import {
   type CategoryChannel,
   type Guild,
   type TextChannel,
+  type ThreadChannel,
 } from 'discord.js';
 
 import {
@@ -33,6 +34,7 @@ import type { OutboxEvent } from '../core/events/domainEvents';
 import { PermanentOutboxPublishError, type OutboxPublisher } from '../core/events/outboxProcessor';
 import { getField } from './ticketStateService';
 import { projectDurableTicketTopic } from './ticketTopicProjectionService';
+import { refreshPrivateThreadPanel } from './privateThreadTicketService';
 
 function isUnknownChannel(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
@@ -114,10 +116,7 @@ function visibilityOverwrites(
       .map((overwrite) => overwrite.id),
   ]);
 
-  if (ticket.status === 'closed' || ticket.status === 'archived') {
-    return { roleIds };
-  }
-
+  const isClosed = ticket.status === 'closed' || ticket.status === 'archived';
   const existing = [...channel.permissionOverwrites.cache.values()].map((overwrite) => ({
     id: overwrite.id,
     kind: overwrite.type === 0 ? 'role' as const : 'member' as const,
@@ -125,19 +124,26 @@ function visibilityOverwrites(
     deny: overwrite.deny.bitfield.toString(),
   }));
 
-  const staffRoleId = stringValue(ticket.metadata.staffRoleId);
+  const staffRoleId = stringValue(ticket.metadata.staffRoleId) ?? getField(topic, 'staff');
+  const botId = channel.guild.members.me?.id;
+  const ownerId = ticket.ownerId ?? getField(topic, 'owner');
+  if (isClosed && (!ownerId || !botId)) {
+    throw new Error('Cannot safely reconcile a closed ticket ACL without its owner and bot member.');
+  }
   const plan = buildTicketVisibilityPlan({
     existing,
     roleIds,
     staffRoleId,
-    ownerId: ticket.ownerId ?? '',
+    everyoneRoleId: channel.guild.roles.everyone.id,
+    botId,
+    ownerId: ownerId ?? '',
     userIds: ticket.participantIds.filter((id) => id !== ticket.ownerId),
     claimedModeratorIds: ticket.claimedByIds,
     formerClaimantIds: (getField(channel.topic ?? topic, 'claimed_by') ?? '')
       .split(',')
       .map((id) => id.trim())
       .filter(Boolean),
-    mode: ticket.status === 'claimed' ? 'claimed' : 'unclaimed',
+    mode: isClosed ? 'closed' : ticket.status === 'claimed' ? 'claimed' : 'unclaimed',
   });
 
   if (!plan.changed) return { roleIds };
@@ -223,10 +229,33 @@ export class TicketOutboxPublisher implements OutboxPublisher {
       throw error;
     }
 
-    if (!fetched || fetched.type !== ChannelType.GuildText) {
+    if (!fetched) {
+      throw new Error('Ticket channel fetch returned no channel during outbox reconciliation.');
+    }
+
+    if (fetched.type === ChannelType.PrivateThread && ticket.metadata.workspaceKind === 'private-thread') {
+      const thread = fetched as ThreadChannel;
+      const topic = projectDurableTicketTopic('', ticket);
+      if (ticket.status === 'closed' || ticket.status === 'archived') {
+        if (!thread.archived) await thread.setArchived(true, 'ResolveX outbox closed-ticket reconciliation');
+        if (!thread.locked) await thread.setLocked(true, 'ResolveX outbox closed-ticket reconciliation');
+        await refreshPrivateThreadPanel(thread, ticket, topic);
+        // A missing panel may be recreated by sending a new message. Ensure
+        // that such repair never leaves the durable closed ticket writable.
+        if (!thread.archived) await thread.setArchived(true, 'ResolveX outbox reassert closed ticket after panel refresh');
+        if (!thread.locked) await thread.setLocked(true, 'ResolveX outbox reassert closed ticket lock after panel refresh');
+      } else {
+        if (thread.archived) await thread.setArchived(false, 'ResolveX outbox active-ticket reconciliation');
+        if (thread.locked) await thread.setLocked(false, 'ResolveX outbox active-ticket reconciliation');
+        await refreshPrivateThreadPanel(thread, ticket, topic);
+      }
+      return;
+    }
+
+    if (fetched.type !== ChannelType.GuildText) {
       await markPersistedTicketDeleted(
         ticketChannelId,
-        'Ticket channel was missing or no longer a text channel during outbox reconciliation.',
+        'Ticket channel was missing or no longer a supported ticket resource during outbox reconciliation.',
         {
           id: 'supportforge-system',
           attribution: 'actorUnknown',

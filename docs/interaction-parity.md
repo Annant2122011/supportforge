@@ -20,6 +20,7 @@ SupportForge exposes two independent entry points for each major feature: slash 
 | Ticket reports | `/supportforge ticket report` | Ticket panel Report workflow |
 | Ticket panel position | `/supportforge ticket panel/move-panel` | Ticket panel move/restore controls |
 | Settings and panel behavior | `/supportforge settings overview/theme/panel/defaults/team/retention/appearance` | Settings dashboard controls, including per-server Theme and the visual Settings Layout builder for title/description/footer, navigation order, labels and emojis |
+| Ticket inactivity automation | `/supportforge settings inactivity action:show/enable/disable/configure` | Settings → Inactivity Automation → Enable/Disable / Edit Thresholds (automation is disabled by default) |
 | Report intake and categories | `/supportforge settings reports/report-categories/report-rules/report-subcategory-add/report-subcategory-edit/report-subcategory-remove` | Settings → Reports controls |
 | Retention review and action | `/supportforge settings retention-action` | Settings → Retention review/approval controls |
 | Storage and infrastructure repair | `/supportforge settings storage action:status/claimed/pending/repair`, `/supportforge settings repair/refresh` | Settings → Repair System and Storage controls |
@@ -53,6 +54,7 @@ The table above groups the surface by feature area. This operation checklist is 
 | Form templates | `/supportforge form template-save/template-list/template-show/template-apply/template-delete` | Templates → Save/List/Detail/Apply/Delete | Both routes preserve template/form independence. |
 | Form routing IDs | Included in `/supportforge form list` | Ticket Forms → Routing IDs | Both routes display the department and tag IDs used by form mappings. |
 | Panel automation | `/supportforge settings panel` | Settings → Panel → Toggle/Edit Thresholds | Both routes update the same automatic movement settings. |
+| Inactivity automation | `/supportforge settings inactivity action:show/enable/disable/configure idle-hours:72 grace-hours:24` | Settings → Inactivity Automation | Show, enable, disable, and threshold configuration execute independently; warning cancellation, transcript-before-close, and protected exemptions are shared behavior. |
 | Ticket defaults and team capacity | `/supportforge settings defaults/team` | Settings → Defaults / Team & Voice | Both routes update the default priority and moderator/voice capacity. |
 | Retention | `/supportforge settings retention/retention-action` | Settings → Retention / Review / Approval | Both routes review eligibility and require explicit approval before deletion. |
 | Appearance | `/supportforge settings appearance` | Settings → Appearance → Edit | Both routes update and resync the public support panel. |

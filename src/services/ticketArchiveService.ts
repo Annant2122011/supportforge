@@ -10,6 +10,7 @@ import {
   type Message,
   type PermissionResolvable,
   type TextChannel,
+  type ThreadChannel,
 } from 'discord.js';
 import { randomUUID } from 'node:crypto';
 import type { QueryResult, QueryResultRow } from 'pg';
@@ -179,22 +180,26 @@ async function readBodyWithLimit(response: Response, maxBytes: number): Promise<
 }
 
 /** Save a durable snapshot of channel settings before the channel is lost. */
-export async function archiveTicketChannelSnapshot(channel: TextChannel): Promise<void> {
-  const topic = channel.topic ?? '';
-  if (!isTicketTopic(topic)) return;
+export async function archiveTicketChannelSnapshot(channel: TextChannel | ThreadChannel): Promise<void> {
   const ticket = await getPersistedTicket(channel.id);
   if (!ticket || !ticket.guildId) return;
+  const isPrivateThread = channel.type === ChannelType.PrivateThread && ticket.metadata.workspaceKind === 'private-thread';
+  const savedThreadTopic = typeof ticket.metadata.ticketTopic === 'string' ? ticket.metadata.ticketTopic : '';
+  const topic = channel.type === ChannelType.GuildText ? channel.topic ?? '' : isPrivateThread ? savedThreadTopic : '';
+  if (!isTicketTopic(topic)) return;
 
   const originalChannelId =
     typeof ticket.metadata.originalChannelId === 'string'
       ? ticket.metadata.originalChannelId
       : channel.id;
-  const permissionOverwrites = Array.from(channel.permissionOverwrites.cache.values()).map((overwrite) => ({
-    id: overwrite.id,
-    type: overwrite.type,
-    allow: overwrite.allow.bitfield.toString(),
-    deny: overwrite.deny.bitfield.toString(),
-  }));
+  const permissionOverwrites = channel.type === ChannelType.GuildText
+    ? Array.from(channel.permissionOverwrites.cache.values()).map((overwrite) => ({
+        id: overwrite.id,
+        type: overwrite.type,
+        allow: overwrite.allow.bitfield.toString(),
+        deny: overwrite.deny.bitfield.toString(),
+      }))
+    : [];
 
   await getPostgresPool().query(
     'INSERT INTO ticket_channel_archive ' +
@@ -214,9 +219,9 @@ export async function archiveTicketChannelSnapshot(channel: TextChannel): Promis
       channel.parent?.name ?? null,
       JSON.stringify(permissionOverwrites),
       channel.type,
-      channel.position,
-      channel.nsfw,
-      channel.rateLimitPerUser,
+      channel.type === ChannelType.GuildText ? channel.position : 0,
+      channel.type === ChannelType.GuildText ? channel.nsfw : false,
+      channel.type === ChannelType.GuildText ? channel.rateLimitPerUser : 0,
     ],
   );
 }
@@ -301,13 +306,18 @@ async function archiveAttachment(
 
 /** Archive message payload before it can disappear with its Discord channel. */
 export async function archiveTicketMessage(message: Message): Promise<void> {
-  if (!message.guild || message.channel.type !== ChannelType.GuildText || isRecoveryReplay(message)) return;
-  const channel = message.channel as TextChannel;
-  const topic = channel.topic ?? '';
-  if (!isTicketTopic(topic)) return;
-
+  if (!message.guild || isRecoveryReplay(message)) return;
+  const channel = message.channel;
+  if (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.PrivateThread) return;
   const ticket = await getPersistedTicket(channel.id);
-  if (!ticket || !ticket.guildId || ticket.deletedAt) return;
+  if (!ticket || !ticket.guildId || ticket.deletedAt || ticket.guildId !== message.guild.id) return;
+  const isPrivateThread = channel.type === ChannelType.PrivateThread && ticket.metadata.workspaceKind === 'private-thread';
+  const topic = channel.type === ChannelType.GuildText
+    ? channel.topic ?? ''
+    : isPrivateThread && typeof ticket.metadata.ticketTopic === 'string'
+      ? ticket.metadata.ticketTopic
+      : '';
+  if (!isTicketTopic(topic)) return;
   const pool = getPostgresPool();
   const snapshot = await pool.query('SELECT ticket_id FROM ticket_channel_archive WHERE ticket_id=$1 LIMIT 1', [ticket.id]);
   if (!snapshot.rows.length) await archiveTicketChannelSnapshot(channel);
@@ -489,7 +499,7 @@ export async function archiveTicketChannelForRecovery(channel: TextChannel): Pro
 }
 
 export async function beginTicketButtonDeletion(
-  channel: TextChannel,
+  channel: TextChannel | ThreadChannel,
   actorId: string,
   actorName: string,
 ): Promise<void> {
@@ -545,9 +555,10 @@ export async function cancelTicketButtonDeletion(channelId: string): Promise<voi
 }
 
 /** Called only for the actual Discord channelDelete event. */
-export async function recordTicketChannelDeleted(channel: TextChannel): Promise<void> {
+export async function recordTicketChannelDeleted(channel: TextChannel | ThreadChannel): Promise<void> {
   const ticket = await getPersistedTicket(channel.id);
   if (!ticket || !ticket.guildId) return;
+  if (channel.type === ChannelType.PrivateThread && ticket.metadata.workspaceKind !== 'private-thread') return;
 
   await archiveTicketChannelSnapshot(channel).catch((error) => {
     console.warn('Could not refresh ticket channel snapshot after deletion event:', error instanceof Error ? error.message : 'unknown error');
@@ -1017,6 +1028,10 @@ export async function restoreArchivedTicket(
         restoredChannelId: channel.id,
         restoredAt,
         recoveredFromDeletionSource: source,
+        ticketChannelType: 'text',
+        workspaceKind: null,
+        ticketTopic: topic,
+        threadParentChannelId: null,
       }),
       ticketId,
       guild.id,

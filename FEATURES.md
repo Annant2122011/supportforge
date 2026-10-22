@@ -1233,38 +1233,25 @@ Merged tickets should become historical records that point to the master ticket 
 
 ## F-032 — Inactivity Auto-Close
 
-**Status:** `PLANNED`  
+**Status:** `BUILT / PARTIAL`  
 **Priority:** `P1`
 
-### Example
+### Implemented core
 
-```text
-Day 7:
-No customer response → warning
+- Per-server automation is opt-in and disabled by default.
+- Administrators can view, enable, disable, and configure thresholds through both the Settings dashboard and `/supportforge settings inactivity`.
+- Idle warning threshold is bounded to 1–720 hours; the warning grace period is bounded to 1–168 hours.
+- A restart-safe five-minute scheduler stores warning markers, policy generation, deadlines, and transcript receipts in the existing Neon/PostgreSQL ticket metadata.
+- A visible warning is sent before closure. New human activity cancels the old grace period; the scheduler also checks recent Discord history to protect against delayed activity-event persistence.
+- Transcript creation/upload precedes closure. The final PostgreSQL transaction compares the expected activity anchor under a row lock and commits the lifecycle event and outbox intent atomically.
+- Critical tickets and tickets marked with `vip`, `activeEscalation`, or `inactivityExempt` metadata are excluded. Missing transcript access and uncertain channel/history checks fail safe.
+- Warning and closure operations use stable markers/receipts to recover after restarts and avoid repeating a successful external action unnecessarily.
 
-Day 10:
-Still inactive → auto-close
-```
+### Remaining partial scope
 
-### Exemptions
-
-Possible exemptions:
-
-- Critical tickets
-- VIP tickets
-- staff-marked exemption
-- active escalation
-- certain departments
-
-### Requirements
-
-- warning before closure
-- configurable thresholds
-- audit event
-- transcript generation before closure
-- no duplicate automated actions
-
-This likely requires a background worker for reliable production behavior.
+- Administrators can configure up to 25 exempt roles and up to 25 exempt department IDs through the Settings dashboard and `/supportforge settings inactivity`. A selected role exempts tickets when held by the ticket owner or an assigned staff member; department exemptions match the persisted department ID. Exemption changes bump the policy generation and clear active warnings.
+- Discord delivery and Neon commits cannot form one distributed transaction; recovery markers and reconciliation reduce duplicate effects but do not provide mathematical exactly-once delivery.
+- The scheduler, permissions, transcript access, real warning presentation and race behavior still require live Discord test-guild acceptance. CI passing alone does not qualify this feature as production-accepted.
 
 ---
 
@@ -4823,3 +4810,18 @@ The setup command provisions/repairs the Support Forge container, Open category,
 - Reusable templates can be saved, listed, applied to create a new form, and deleted without modifying forms or historical submissions already created from them.
 - Form definitions and immutable versions, wizard sessions, submission drafts, answer snapshots, ticket associations, and creation leases are stored in Neon/PostgreSQL migrations. No SQLite persistence path is introduced.
 - CI on the Stage A/D branch completed the TypeScript build, automated tests, and database verification successfully after the interaction/build fixes.
+
+
+---
+
+# 82. STAGE A–G REVERIFICATION (20 OCTOBER 2026)
+
+A consolidated source review is tracked in [docs/stage-a-to-g-reverification.md](docs/stage-a-to-g-reverification.md).
+
+- Stages A–G have substantial code and automated coverage on the current stacked feature branches, but their pull requests are not yet integrated into `main`.
+- The Settings dashboard has been regrouped around the ticket workflow. Only an untouched legacy default layout is automatically migrated; customized per-server ordering is preserved.
+- F-032 Inactivity Auto-Close is **BUILT / PARTIAL**, not production-accepted. Core warning/grace/transcript/compare-and-close behavior exists; exemption configuration UI and live-guild acceptance remain incomplete.
+- Message activity writes use metadata-only persistence to avoid re-applying an earlier lifecycle status from an asynchronous message handler.
+- The inactivity close path rechecks the latest policy generation and recent human activity around transcript work and before the final PostgreSQL compare-and-close transaction.
+- Final second-round CI passed on [review run #1197](https://github.com/Annant2122011/supportforge/actions/runs/39399683798): TypeScript build passed, **117 tests passed / 0 failed**, and PostgreSQL verification passed.
+- CI does not substitute for validating role permissions, rate limits, transcript access, and restore behavior in a controlled Discord test guild.

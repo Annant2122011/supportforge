@@ -8,6 +8,7 @@ import {
   MessageFlags,
   ModalBuilder,
   PermissionFlagsBits,
+  RoleSelectMenuBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuInteraction,
   RoleSelectMenuInteraction,
@@ -63,6 +64,21 @@ import { performFactoryReset } from '../services/factoryResetService';
 import { addUseCasePreset, USE_CASE_PRESETS } from '../services/useCasePresetService';
 import { enforcePriorityRoleHierarchy } from '../services/priorityRoleService';
 import { UI_THEMES, getThemeColor, getThemeDefinition, isGuildTheme } from '../services/uiThemeService';
+import {
+  createDefaultSupportHoursPolicy,
+  deleteSupportHoursPolicy,
+  evaluateSupportHours,
+  formatSupportHoursInstant,
+  formatSupportHoursWeeklySchedule,
+  getSupportHoursPolicy,
+  getSupportHoursPolicies,
+  resolveEffectiveSupportHoursPolicy,
+  parseSupportHoursWeeklySchedule,
+  saveSupportHoursPolicy,
+  SUPPORT_HOURS_DAYS,
+  type SupportHoursScopeType,
+  type SupportHoursContext,
+} from '../services/supportHoursService';
 import { normalizeDiscordEmoji } from '../core/domain/discordEmoji';
 import { handleTicketFormSettingsInteraction } from './ticketFormSettingsInteractions';
 import { handleCustomPanelSettingsInteraction } from './customPanelSettingsInteractions';
@@ -78,6 +94,7 @@ import {
   getEligibleRetentionTickets,
   runRetentionSweepForGuild,
 } from '../services/ticketRetentionService';
+import { clearTicketInactivityWarningsForGuild } from '../services/ticketInactivityService';
 
 import {
   ensureContainer,
@@ -90,7 +107,7 @@ import {
 
 const SETTINGS_TOPIC_PREFIX = 'supportforge:settings';
 
-type SettingsViewInteraction = ButtonInteraction | StringSelectMenuInteraction;
+type SettingsViewInteraction = ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction;
 
 function isAdministrator(interaction: ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction | ModalSubmitInteraction): boolean {
   return Boolean(
@@ -537,7 +554,7 @@ function isEphemeralSettingsMessage(interaction: ButtonInteraction): boolean {
 async function renderSettingsView(
   interaction: SettingsViewInteraction,
   embeds: EmbedBuilder[],
-  components: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>>,
+  components: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<RoleSelectMenuBuilder>>,
 ): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
   const themedEmbeds = embeds.map((embed) => embed.setColor(getThemeColor(config.theme)));
@@ -622,13 +639,17 @@ const SETTINGS_LAYOUT_LABELS: Record<SettingsDashboardButtonKey, string> = {
   premium: 'Premium & Demo',
   panels: 'Ticket Panels',
   'dashboard-builder': 'Settings Layout',
+  'support-hours': 'Support Hours',
+  'ticket-workspace': 'Ticket Workspace',
+  inactivity: 'Inactivity Automation',
 };
 
 const SETTINGS_LAYOUT_DEFAULT_EMOJIS: Record<SettingsDashboardButtonKey, string> = {
   panel: '🎛️', defaults: '🎟️', tags: '🏷️', usecases: '🧩', reports: '🚩',
   retention: '🧹', appearance: '🎨', storage: '🗄️', rules: '🛡️', repair: '🛠️',
   team: '👥', manual: '📖', forms: '🧾', refresh: '🔄', reset: '🚨', theme: '🌈',
-  premium: '💎', panels: '🧱', 'dashboard-builder': '🧰',
+  premium: '💎', panels: '🧱', 'dashboard-builder': '🧰', 'support-hours': '🕒', 'ticket-workspace': '🧵',
+  inactivity: '⏳',
 };
 
 function effectiveSettingsLayoutLabel(
@@ -766,6 +787,188 @@ async function showPremiumSettings(interaction: SettingsViewInteraction, notice 
         .setLabel('Switch to ' + tierLabel(next))
         .setEmoji('🔁')
         .setStyle(ButtonStyle.Primary),
+      backButton(),
+    ),
+  ]);
+}
+
+
+type SupportHoursSettingsScope = { scopeType: SupportHoursScopeType; scopeId: string | null };
+
+function supportHoursContext(scope: SupportHoursSettingsScope): SupportHoursContext {
+  if (scope.scopeType === 'department') return { departmentId: scope.scopeId ?? undefined };
+  if (scope.scopeType === 'panel') return { panelId: scope.scopeId ?? undefined };
+  return {};
+}
+
+function parseSupportHoursSettingsScope(parts: string[], typeIndex = 4): SupportHoursSettingsScope {
+  const rawType = parts[typeIndex];
+  const scopeType: SupportHoursScopeType =
+    rawType === 'department' || rawType === 'panel' ? rawType : 'guild';
+  const candidate = parts[typeIndex + 1];
+  return { scopeType, scopeId: scopeType === 'guild' || !candidate || candidate === '-' ? null : candidate };
+}
+
+function supportHoursScopedActionId(action: string, scope: SupportHoursSettingsScope): string {
+  return 'sf:settings:support-hours:' + action + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-');
+}
+
+async function showSupportHoursSettings(
+  interaction: SettingsViewInteraction,
+  notice = '',
+  scopeType: SupportHoursScopeType = 'guild',
+  scopeId: string | null = null,
+  departmentPage = 0,
+  panelPage = 0,
+): Promise<void> {
+  const guild = interaction.guild!;
+  const config = await getGuildConfig(guild.id);
+  const scope = { scopeType, scopeId: scopeType === 'guild' ? null : scopeId };
+  if (scope.scopeType !== 'guild' && !scope.scopeId) {
+    await renderSettingsView(interaction, [new EmbedBuilder().setTitle('🕒 Support Hours').setDescription('Choose a valid department or ticket panel to configure its override.')], [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()),
+    ]);
+    return;
+  }
+
+  const context = supportHoursContext(scope);
+  const [localPolicy, policies] = await Promise.all([
+    getSupportHoursPolicy(guild.id, scope.scopeType, scope.scopeId),
+    getSupportHoursPolicies(guild.id),
+  ]);
+  const effectivePolicy = resolveEffectiveSupportHoursPolicy(policies, context);
+  const decision = await evaluateSupportHours(guild.id, context);
+  const schedule = effectivePolicy
+    ? formatSupportHoursWeeklySchedule(effectivePolicy.weeklySchedule)
+    : SUPPORT_HOURS_DAYS.map((day) => day + '=closed').join('\n');
+  const status = !effectivePolicy
+    ? 'Not configured · new ticket creation is unrestricted'
+    : !decision.policyEnabled
+      ? 'Enforcement disabled'
+      : decision.isOpen
+        ? 'OPEN'
+        : decision.ticketCreationAllowed
+          ? 'CLOSED · new tickets allowed with notice'
+          : 'CLOSED · new ticket creation restricted';
+  const scopeLabel = scope.scopeType === 'guild'
+    ? 'Server default'
+    : scope.scopeType === 'department'
+      ? 'Department · ' + (config.departments[scope.scopeId!]?.name ?? scope.scopeId)
+      : 'Ticket panel · ' + scope.scopeId;
+  const inheritance = localPolicy
+    ? 'An override is saved for this scope.'
+    : effectivePolicy
+      ? 'No override is saved here; this scope inherits the ' + effectivePolicy.scopeType + ' schedule. Editing will create an override.'
+      : 'No schedule is configured for this scope.';
+
+  const embed = new EmbedBuilder()
+    .setTitle('🕒 Support Hours & Time Zone')
+    .setDescription(
+      (notice ? notice + '\n\n' : '') +
+      '**Scope:** ' + scopeLabel + '\n' + inheritance + '\n\n' +
+      '**Status:** ' + status + '\n' +
+      '**Time zone:** ' + (effectivePolicy?.timezone ?? 'Not configured') + '\n' +
+      '**Outside hours:** ' + (effectivePolicy?.outsideHoursBehavior ?? 'restrict') + '\n' +
+      '**Policy version:** ' + (localPolicy?.version !== undefined ? String(localPolicy.version) : effectivePolicy ? String(effectivePolicy.version) + ' (inherited)' : 'Not saved') + '\n\n' +
+      '**Weekly schedule**\n' + schedule +
+      (decision.nextOpeningAt ? '\n\n**Next opening:** ' + formatSupportHoursInstant(decision.nextOpeningAt, decision.timezone) : '') +
+      '\n\nUse 24-hour local times. Daylight-saving transitions are handled by the shared schedule service.',
+    );
+
+  const hasIntervals = Boolean(effectivePolicy && SUPPORT_HOURS_DAYS.some((day) => effectivePolicy.weeklySchedule[day].length > 0));
+  const currentBehavior = effectivePolicy?.outsideHoursBehavior ?? 'restrict';
+  const rows: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>> = [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(supportHoursScopedActionId('edit', scope)).setLabel('Edit Weekly Schedule').setEmoji('🗓️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(supportHoursScopedActionId('toggle', scope)).setLabel(decision.policyEnabled ? 'Disable Enforcement' : 'Enable Enforcement').setEmoji(decision.policyEnabled ? '⏸️' : '▶️').setStyle(decision.policyEnabled ? ButtonStyle.Danger : ButtonStyle.Success).setDisabled(!decision.policyEnabled && !hasIntervals),
+      new ButtonBuilder().setCustomId(supportHoursScopedActionId('behavior', scope)).setLabel(currentBehavior === 'allow' ? 'Restrict After Hours' : 'Allow After Hours').setEmoji('🚦').setStyle(ButtonStyle.Secondary).setDisabled(!effectivePolicy),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(supportHoursScopedActionId('clear', scope)).setLabel(scope.scopeType === 'guild' ? 'Clear Server Default' : 'Clear Override').setEmoji('🧹').setStyle(ButtonStyle.Secondary).setDisabled(!localPolicy),
+      backButton(),
+    ),
+  ];
+
+  const departments = Object.entries(config.departments ?? {});
+  const panels = Object.keys(config.customPanels ?? {});
+  const departmentPageCount = Math.max(1, Math.ceil(departments.length / 25));
+  const panelPageCount = Math.max(1, Math.ceil(panels.length / 25));
+  departmentPage = Math.min(Math.max(0, departmentPage), departmentPageCount - 1);
+  panelPage = Math.min(Math.max(0, panelPage), panelPageCount - 1);
+
+  if (departments.length) {
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId('sf:settings:support-hours:scope:department')
+      .setPlaceholder('Choose a department override · page ' + (departmentPage + 1) + '/' + departmentPageCount)
+      .addOptions(departments.slice(departmentPage * 25, departmentPage * 25 + 25).map(([id, department]) => ({
+        label: String(department.name || id).slice(0, 100),
+        value: id,
+        description: ('Department ID: ' + id).slice(0, 100),
+      })));
+    rows.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu));
+  }
+  if (panels.length) {
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId('sf:settings:support-hours:scope:panel')
+      .setPlaceholder('Choose a ticket-panel override · page ' + (panelPage + 1) + '/' + panelPageCount)
+      .addOptions(panels.slice(panelPage * 25, panelPage * 25 + 25).map((id) => ({
+        label: ('Panel ' + id).slice(0, 100),
+        value: id,
+        description: ('Ticket panel ID: ' + id).slice(0, 100),
+      })));
+    rows.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu));
+  }
+
+  const pageButtons: ButtonBuilder[] = [];
+  if (departmentPage > 0) {
+    pageButtons.push(new ButtonBuilder().setCustomId('sf:settings:support-hours:page:' + (departmentPage - 1) + ':' + panelPage + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-')).setLabel('Previous Departments').setStyle(ButtonStyle.Secondary));
+  }
+  if (departmentPage + 1 < departmentPageCount) {
+    pageButtons.push(new ButtonBuilder().setCustomId('sf:settings:support-hours:page:' + (departmentPage + 1) + ':' + panelPage + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-')).setLabel('Next Departments').setStyle(ButtonStyle.Secondary));
+  }
+  if (panelPage > 0) {
+    pageButtons.push(new ButtonBuilder().setCustomId('sf:settings:support-hours:page:' + departmentPage + ':' + (panelPage - 1) + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-')).setLabel('Previous Panels').setStyle(ButtonStyle.Secondary));
+  }
+  if (panelPage + 1 < panelPageCount) {
+    pageButtons.push(new ButtonBuilder().setCustomId('sf:settings:support-hours:page:' + departmentPage + ':' + (panelPage + 1) + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-')).setLabel('Next Panels').setStyle(ButtonStyle.Secondary));
+  }
+  if (pageButtons.length) rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(pageButtons));
+
+  await renderSettingsView(interaction, [embed], rows);
+}
+
+async function showTicketWorkspaceSettings(
+  interaction: SettingsViewInteraction,
+  notice = '',
+): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const privateThreads = settings.ticketWorkspace.mode === 'private-threads';
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('🧵 Ticket Workspace')
+      .setDescription(
+        (notice ? notice + '\n\n' : '') +
+        '**Current mode:** ' + (privateThreads ? 'Private threads' : 'Dedicated text channels') + '\n\n' +
+        (privateThreads
+          ? 'Each new ticket is a private thread under its department workspace. Only the ticket owner, the department staff with access to that workspace, administrators, and the bot can read the conversation. The parent is read-only to normal members; other customers cannot see this thread. Department staff roles must be configured for staff access.'
+          : 'Each new ticket is a private text channel, using the existing permission-overwrite model.') +
+        '\n\n**Scope:** This setting affects new tickets only. Existing tickets keep their current resource type. The parent workspace for a private-thread department is created lazily when its next ticket is opened.' +
+        '\n\nPrivate threads require the bot to have Manage Threads, Create Private Threads, View Channel and Send Messages in Threads. If setup fails, ticket creation is stopped rather than falling back to a less-private channel.',
+      ),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId('sf:settings:ticket-workspace:set:text-channels')
+        .setLabel('Use Text Channels')
+        .setEmoji('📁')
+        .setStyle(privateThreads ? ButtonStyle.Secondary : ButtonStyle.Success)
+        .setDisabled(!privateThreads),
+      new ButtonBuilder()
+        .setCustomId('sf:settings:ticket-workspace:set:private-threads')
+        .setLabel('Use Private Threads')
+        .setEmoji('🧵')
+        .setStyle(privateThreads ? ButtonStyle.Success : ButtonStyle.Secondary)
+        .setDisabled(privateThreads),
       backButton(),
     ),
   ]);
@@ -1269,6 +1472,53 @@ async function showRetention(interaction: ButtonInteraction): Promise<void> {
       new ButtonBuilder().setCustomId('sf:settings:retention:edit').setLabel('Edit Retention').setEmoji('🕒').setStyle(ButtonStyle.Primary),
       backButton(),
     ),
+  ]);
+}
+
+async function showInactivitySettings(interaction: SettingsViewInteraction, notice = ''): Promise<void> {
+  const guild = interaction.guild!;
+  const settings = await getAdvancedSettings(guild.id);
+  const config = await getGuildConfig(guild.id);
+  const defaultRoleIds = settings.inactivity.exemptRoleIds.filter((roleId) => guild.roles.cache.has(roleId));
+  const roleSelector = new RoleSelectMenuBuilder()
+    .setCustomId('sf:settings:inactivity:exempt-roles')
+    .setPlaceholder('Select roles exempt from inactivity closure')
+    .setMinValues(0)
+    .setMaxValues(25);
+  if (defaultRoleIds.length) roleSelector.setDefaultRoles(...defaultRoleIds);
+
+  const roleNames = settings.inactivity.exemptRoleIds
+    .map((roleId) => guild.roles.cache.get(roleId)?.name ?? roleId)
+    .join(', ') || 'None';
+  const departmentNames = settings.inactivity.exemptDepartmentIds
+    .map((departmentId) => config.departments[departmentId]?.name ?? departmentId)
+    .join(', ') || 'None';
+
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('⏳ Ticket Inactivity Automation')
+      .setDescription(
+        (notice ? notice + '\n\n' : '') +
+        'When enabled, active tickets with no recorded activity receive a visible warning. If nobody replies during the grace period, ResolveX creates or reuses a transcript and closes the ticket. Any new activity resets the warning. The scheduler and deadlines survive restarts.\n\n' +
+        '**Status:** ' + (settings.inactivity.enabled ? '🟢 Enabled' : '⚪ Disabled') + '\n' +
+        '**Warn after:** ' + settings.inactivity.idleHours + ' hours without activity\n' +
+        '**Grace after warning:** ' + settings.inactivity.graceHours + ' hours\n' +
+        '**Exempt roles:** ' + roleNames + '\n' +
+        '**Exempt departments:** ' + departmentNames + '\n\n' +
+        'A selected role exempts tickets whose owner or assigned staff holds that role. Department exemptions apply to every ticket in that department. An exemption takes effect immediately and clears any existing warning for the affected ticket.'
+      ),
+  ], [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId('sf:settings:inactivity:' + (settings.inactivity.enabled ? 'disable' : 'enable'))
+        .setLabel(settings.inactivity.enabled ? 'Disable Automation' : 'Enable Automation')
+        .setEmoji(settings.inactivity.enabled ? '⏸️' : '▶️')
+        .setStyle(settings.inactivity.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sf:settings:inactivity:edit').setLabel('Edit Thresholds').setEmoji('🕒').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:inactivity:departments').setLabel('Edit Departments').setEmoji('🗂️').setStyle(ButtonStyle.Secondary),
+      backButton(),
+    ),
+    new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(roleSelector),
   ]);
 }
 
@@ -1833,6 +2083,20 @@ export async function handleSettingsInteraction(
     return true;
   }
 
+  if (interaction.isRoleSelectMenu() && interaction.customId === 'sf:settings:inactivity:exempt-roles') {
+    const selectedRoleIds = [...new Set(interaction.values)].slice(0, 25);
+    await updateAdvancedSettings(guild.id, (settings) => {
+      settings.inactivity.exemptRoleIds = selectedRoleIds;
+      settings.inactivity.generation = Math.min(2147483647, settings.inactivity.generation + 1);
+    });
+    await clearTicketInactivityWarningsForGuild(guild);
+    await refreshSettingsChannel(guild);
+    await auditSettingsAction(guild, interaction, 'TICKET_INACTIVITY_EXEMPT_ROLES_CHANGED',
+      'Set inactivity-exempt roles to ' + (selectedRoleIds.join(', ') || 'none') + '.');
+    await showInactivitySettings(interaction, '✅ Inactivity role exemptions saved.');
+    return true;
+  }
+
   if (interaction.isButton()) {
     const id = interaction.customId;
 
@@ -2022,6 +2286,163 @@ export async function handleSettingsInteraction(
       await refreshSettingsChannel(guild);
       await auditSettingsAction(guild, interaction, 'SETTINGS_DASHBOARD_ORDER_CHANGED', 'Moved ' + SETTINGS_LAYOUT_LABELS[key as SettingsDashboardButtonKey] + ' ' + (movingUp ? 'up' : 'down') + ' in the Settings dashboard.');
       await showSettingsDashboardOrder(interaction, key as SettingsDashboardButtonKey);
+      return true;
+    }
+
+    if (id === 'sf:settings:ticket-workspace') {
+      await showTicketWorkspaceSettings(interaction);
+      return true;
+    }
+
+    if (id.startsWith('sf:settings:ticket-workspace:set:')) {
+      const mode = id.slice('sf:settings:ticket-workspace:set:'.length);
+      if (mode !== 'text-channels' && mode !== 'private-threads') {
+        await reject(interaction, 'That ticket workspace mode is not supported.');
+        return true;
+      }
+      const previous = (await getAdvancedSettings(guild.id)).ticketWorkspace.mode;
+      await interaction.deferUpdate();
+      await updateAdvancedSettings(guild.id, (current) => {
+        current.ticketWorkspace.mode = mode;
+      });
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'TICKET_WORKSPACE_MODE_CHANGED', 'Changed ticket workspace mode from ' + previous + ' to ' + mode + '. Existing tickets were not migrated.');
+      await showTicketWorkspaceSettings(interaction, '✅ New tickets will use **' + (mode === 'private-threads' ? 'private threads' : 'dedicated text channels') + '**. Existing tickets are unchanged.');
+      return true;
+    }
+
+    if (id === 'sf:settings:support-hours') {
+      await showSupportHoursSettings(interaction);
+      return true;
+    }
+
+    if (id.startsWith('sf:settings:support-hours:view:')) {
+      const scope = parseSupportHoursSettingsScope(id.split(':'));
+      await showSupportHoursSettings(interaction, '', scope.scopeType, scope.scopeId);
+      return true;
+    }
+
+    if (id.startsWith('sf:settings:support-hours:scope:') && interaction.isStringSelectMenu()) {
+      const parts = id.split(':');
+      const scopeType = parts[4] === 'department' || parts[4] === 'panel' ? parts[4] : null;
+      const scopeId = (interaction as StringSelectMenuInteraction).values[0]?.trim();
+      const config = await getGuildConfig(guild.id);
+      const exists = scopeType === 'department'
+        ? Boolean(scopeId && config.departments[scopeId])
+        : scopeType === 'panel'
+          ? Boolean(scopeId && config.customPanels[scopeId])
+          : false;
+      if (!scopeType || !scopeId || !exists) {
+        await reject(interaction, 'That department or ticket panel no longer exists. Refresh the Support Hours view and choose an existing entry.');
+        return true;
+      }
+      await showSupportHoursSettings(interaction, '', scopeType, scopeId);
+      return true;
+    }
+
+    if (id.startsWith('sf:settings:support-hours:page:') && interaction.isButton()) {
+      const parts = id.split(':');
+      const departmentPage = Number(parts[4]);
+      const panelPage = Number(parts[5]);
+      const scope = parseSupportHoursSettingsScope(parts, 6);
+      if (!Number.isInteger(departmentPage) || departmentPage < 0 || !Number.isInteger(panelPage) || panelPage < 0) {
+        await reject(interaction, 'That Support Hours page control has expired. Reopen Support Hours and try again.');
+        return true;
+      }
+      await showSupportHoursSettings(interaction, '', scope.scopeType, scope.scopeId, departmentPage, panelPage);
+      return true;
+    }
+
+    if (id === 'sf:settings:support-hours:edit' || id.startsWith('sf:settings:support-hours:edit:')) {
+      const scope = parseSupportHoursSettingsScope(id.split(':'));
+      const context = supportHoursContext(scope);
+      const local = await getSupportHoursPolicy(guild.id, scope.scopeType, scope.scopeId);
+      const policies = await getSupportHoursPolicies(guild.id);
+      const policy = local ?? resolveEffectiveSupportHoursPolicy(policies, context);
+      const timezone = new TextInputBuilder()
+        .setCustomId('timezone')
+        .setLabel('IANA time zone (e.g. Asia/Kolkata)')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(100)
+        .setValue((policy?.timezone ?? 'UTC').slice(0, 100));
+      const schedule = new TextInputBuilder()
+        .setCustomId('schedule')
+        .setLabel('All seven weekdays: day=intervals')
+        .setStyle(TextInputStyle.Paragraph)
+        .setPlaceholder('monday=09:00-17:00\ntuesday=09:00-17:00\n...\nsunday=closed')
+        .setRequired(true)
+        .setMaxLength(4000)
+        .setValue((policy ? formatSupportHoursWeeklySchedule(policy.weeklySchedule) : SUPPORT_HOURS_DAYS.map((day) => day + '=closed').join('\n')).slice(0, 4000));
+      await openModal(interaction, 'sf:settings:modal:support-hours:' + scope.scopeType + ':' + (scope.scopeId ?? '-'), 'Edit Support Hours', [timezone, schedule]);
+      return true;
+    }
+
+    if (id === 'sf:settings:support-hours:toggle' || id.startsWith('sf:settings:support-hours:toggle:')) {
+      const scope = parseSupportHoursSettingsScope(id.split(':'));
+      const context = supportHoursContext(scope);
+      const current = await getSupportHoursPolicy(guild.id, scope.scopeType, scope.scopeId);
+      const policies = await getSupportHoursPolicies(guild.id);
+      const effective = resolveEffectiveSupportHoursPolicy(policies, context);
+      const decision = await evaluateSupportHours(guild.id, context);
+      const enabling = !decision.policyEnabled;
+      const base = current ?? effective ?? createDefaultSupportHoursPolicy(scope.scopeType, scope.scopeId);
+      const hasIntervals = SUPPORT_HOURS_DAYS.some((day) => base.weeklySchedule[day].length > 0);
+      if (enabling && !hasIntervals) {
+        await showSupportHoursSettings(interaction, 'Add at least one opening interval before enabling enforcement.', scope.scopeType, scope.scopeId);
+        return true;
+      }
+      await interaction.deferUpdate();
+      const saved = await saveSupportHoursPolicy(guild.id, {
+        ...base,
+        scopeType: scope.scopeType,
+        scopeId: scope.scopeId,
+        enabled: enabling,
+        updatedBy: interaction.user.id,
+      });
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'SUPPORT_HOURS_CHANGED', 'Support-hours enforcement ' + (saved.enabled ? 'enabled' : 'disabled') + ' for ' + scope.scopeType + (scope.scopeId ? ' ' + scope.scopeId : '') + '; policy version=' + saved.version + '.');
+      await showSupportHoursSettings(interaction, saved.enabled ? '✅ Support-hours enforcement enabled.' : 'Support-hours enforcement disabled.', scope.scopeType, scope.scopeId);
+      return true;
+    }
+
+    if (id === 'sf:settings:support-hours:behavior' || id.startsWith('sf:settings:support-hours:behavior:')) {
+      const scope = parseSupportHoursSettingsScope(id.split(':'));
+      const current = await getSupportHoursPolicy(guild.id, scope.scopeType, scope.scopeId);
+      const policies = await getSupportHoursPolicies(guild.id);
+      const effective = resolveEffectiveSupportHoursPolicy(policies, supportHoursContext(scope));
+      const base = current ?? effective;
+      if (!base) {
+        await reject(interaction, 'Edit and save a weekly schedule first.');
+        return true;
+      }
+      await interaction.deferUpdate();
+      const behavior = base.outsideHoursBehavior === 'allow' ? 'restrict' : 'allow';
+      const saved = await saveSupportHoursPolicy(guild.id, {
+        ...base,
+        scopeType: scope.scopeType,
+        scopeId: scope.scopeId,
+        outsideHoursBehavior: behavior,
+        updatedBy: interaction.user.id,
+      });
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'SUPPORT_HOURS_CHANGED', 'Outside-hours behavior for ' + scope.scopeType + (scope.scopeId ? ' ' + scope.scopeId : '') + ' changed to ' + behavior + '; policy version=' + saved.version + '.');
+      await showSupportHoursSettings(interaction, '✅ Outside-hours behavior set to ' + behavior + '.', scope.scopeType, scope.scopeId);
+      return true;
+    }
+
+    if (id === 'sf:settings:support-hours:clear' || id.startsWith('sf:settings:support-hours:clear:')) {
+      const scope = parseSupportHoursSettingsScope(id.split(':'));
+      await interaction.deferUpdate();
+      const removed = await deleteSupportHoursPolicy(guild.id, scope.scopeType, scope.scopeId);
+      await refreshSettingsChannel(guild);
+      if (removed) await auditSettingsAction(guild, interaction, 'SUPPORT_HOURS_CHANGED', 'Removed the ' + scope.scopeType + (scope.scopeId ? ' ' + scope.scopeId : '') + ' support-hours policy; inherited schedules now apply.');
+      const notice = removed
+        ? scope.scopeType === 'guild'
+          ? '✅ Server default removed. More-specific overrides still apply.'
+          : '✅ Override removed. The inherited schedule now applies.'
+        : 'No support-hours policy existed at this scope.';
+      await showSupportHoursSettings(interaction, notice, scope.scopeType, scope.scopeId);
       return true;
     }
 
@@ -2301,6 +2722,53 @@ export async function handleSettingsInteraction(
 
     if (id === 'sf:settings:retention') {
       await showRetention(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:inactivity') {
+      await showInactivitySettings(interaction);
+      return true;
+    }
+
+    if (id === 'sf:settings:inactivity:enable' || id === 'sf:settings:inactivity:disable') {
+      const enabled = id.endsWith(':enable');
+      await interaction.deferUpdate();
+      await updateAdvancedSettings(guild.id, (settings) => {
+        settings.inactivity.enabled = enabled;
+        settings.inactivity.generation = Math.min(2147483647, settings.inactivity.generation + 1);
+      });
+      await clearTicketInactivityWarningsForGuild(guild);
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'TICKET_INACTIVITY_AUTOMATION_' + (enabled ? 'ENABLED' : 'DISABLED'),
+        (enabled ? 'Enabled' : 'Disabled') + ' inactivity auto-close with idle threshold ' +
+        (await getAdvancedSettings(guild.id)).inactivity.idleHours + ' hours and grace period ' +
+        (await getAdvancedSettings(guild.id)).inactivity.graceHours + ' hours.');
+      await showInactivitySettings(interaction, enabled
+        ? '✅ Inactivity automation is enabled.'
+        : '✅ Inactivity automation is disabled and outstanding grace periods were cleared.');
+      return true;
+    }
+
+    if (id === 'sf:settings:inactivity:departments') {
+      const settings = await getAdvancedSettings(guild.id);
+      const deptText = settings.inactivity.exemptDepartmentIds.join(', ');
+      const input = new TextInputBuilder()
+        .setCustomId('departments')
+        .setLabel('Comma-separated department IDs (max 25)')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(false)
+        .setMaxLength(1000);
+      if (deptText) input.setValue(deptText);
+      await openModal(interaction, 'sf:settings:modal:inactivity-departments', 'Department Exemptions', [input]);
+      return true;
+    }
+
+    if (id === 'sf:settings:inactivity:edit') {
+      const settings = await getAdvancedSettings(guild.id);
+      await openModal(interaction, 'sf:settings:modal:inactivity', 'Ticket Inactivity', [
+        new TextInputBuilder().setCustomId('idle').setLabel('Idle hours before warning (1–720)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.inactivity.idleHours)),
+        new TextInputBuilder().setCustomId('grace').setLabel('Grace hours after warning (1–168)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.inactivity.graceHours)),
+      ]);
       return true;
     }
 
@@ -3066,6 +3534,112 @@ export async function handleSettingsInteraction(
         '. Existing ticket staff role access migrated from ' +
         (oldStaffRoleId ?? 'none') + ' to ' + (staffRoleId ?? 'none') + '.',
       );
+      return true;
+    }
+
+    if (
+      interaction.customId === 'sf:settings:modal:support-hours' ||
+      interaction.customId.startsWith('sf:settings:modal:support-hours:')
+    ) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const scope = parseSupportHoursSettingsScope(interaction.customId.split(':'), 4);
+      const context = supportHoursContext(scope);
+      const timezone = interaction.fields.getTextInputValue('timezone').trim();
+      const scheduleText = interaction.fields.getTextInputValue('schedule');
+      let weeklySchedule: ReturnType<typeof parseSupportHoursWeeklySchedule>;
+      try {
+        weeklySchedule = parseSupportHoursWeeklySchedule(scheduleText);
+      } catch (error) {
+        await reject(interaction, error instanceof Error ? error.message : 'The weekly schedule is invalid.');
+        return true;
+      }
+      const current = await getSupportHoursPolicy(guild.id, scope.scopeType, scope.scopeId);
+      const policies = await getSupportHoursPolicies(guild.id);
+      const effective = resolveEffectiveSupportHoursPolicy(policies, context);
+      try {
+        const saved = await saveSupportHoursPolicy(guild.id, {
+          ...(current ?? effective ?? createDefaultSupportHoursPolicy(scope.scopeType, scope.scopeId)),
+          scopeType: scope.scopeType,
+          scopeId: scope.scopeId,
+          timezone,
+          weeklySchedule,
+          updatedBy: interaction.user.id,
+        });
+        await refreshSettingsChannel(guild);
+        const scopeLabel = scope.scopeType === 'guild'
+          ? 'server-default'
+          : scope.scopeType + ' ' + scope.scopeId;
+        await auditSettingsAction(guild, interaction, 'SUPPORT_HOURS_CHANGED', 'Updated ' + scopeLabel + ' weekly schedule in ' + saved.timezone + '; policy version=' + saved.version + '.');
+        await interaction.editReply({
+          content: '✅ ' + scopeLabel.charAt(0).toUpperCase() + scopeLabel.slice(1) + ' support schedule saved. Enforcement is ' + (saved.enabled ? 'enabled' : 'disabled') + '.',
+          components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId('sf:settings:support-hours:view:' + scope.scopeType + ':' + (scope.scopeId ?? '-')).setLabel('Open Support Hours').setEmoji('🕒').setStyle(ButtonStyle.Primary),
+            backButton(),
+          )],
+        });
+      } catch (error) {
+        await reject(interaction, error instanceof Error ? error.message : 'Could not save that support-hours schedule.');
+      }
+      return true;
+    }
+
+    if (interaction.customId === 'sf:settings:modal:inactivity-departments') {
+      const rawDepartmentIds = interaction.fields.getTextInputValue('departments');
+      const departmentIds = [...new Set(rawDepartmentIds.split(',').map((value) => value.trim()).filter(Boolean))];
+      if (departmentIds.length > 25) {
+        await reject(interaction, 'Choose no more than 25 department IDs.');
+        return true;
+      }
+      const config = await getGuildConfig(guild.id);
+      const missing = departmentIds.filter((departmentId) => !config.departments[departmentId]);
+      if (missing.length) {
+        await reject(interaction, 'These department IDs are not configured in this server: ' + missing.join(', '));
+        return true;
+      }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await updateAdvancedSettings(guild.id, (settings) => {
+        settings.inactivity.exemptDepartmentIds = departmentIds;
+        settings.inactivity.generation = Math.min(2147483647, settings.inactivity.generation + 1);
+      });
+      await clearTicketInactivityWarningsForGuild(guild);
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'TICKET_INACTIVITY_EXEMPT_DEPARTMENTS_CHANGED',
+        'Set inactivity-exempt department IDs to ' + (departmentIds.join(', ') || 'none') + '.');
+      await interaction.editReply({
+        content: '✅ Department inactivity exemptions saved.',
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId('sf:settings:inactivity').setLabel('Open Inactivity Settings').setEmoji('⏳').setStyle(ButtonStyle.Primary),
+          backButton(),
+        )],
+      });
+      return true;
+    }
+
+    if (interaction.customId === 'sf:settings:modal:inactivity') {
+      const idleHours = Number(interaction.fields.getTextInputValue('idle'));
+      const graceHours = Number(interaction.fields.getTextInputValue('grace'));
+      if (!Number.isInteger(idleHours) || idleHours < 1 || idleHours > 720 ||
+          !Number.isInteger(graceHours) || graceHours < 1 || graceHours > 168) {
+        await reject(interaction, 'Idle time must be 1–720 whole hours and grace time must be 1–168 whole hours.');
+        return true;
+      }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await updateAdvancedSettings(guild.id, (settings) => {
+        settings.inactivity.idleHours = idleHours;
+        settings.inactivity.graceHours = graceHours;
+        settings.inactivity.generation = Math.min(2147483647, settings.inactivity.generation + 1);
+      });
+      await clearTicketInactivityWarningsForGuild(guild);
+      await refreshSettingsChannel(guild);
+      await auditSettingsAction(guild, interaction, 'TICKET_INACTIVITY_THRESHOLDS_CHANGED',
+        'Set inactivity warning threshold to ' + idleHours + ' hours and grace period to ' + graceHours + ' hours.');
+      await interaction.editReply({
+        content: '✅ Inactivity thresholds saved: warn after ' + idleHours + ' idle hours, then allow ' + graceHours + ' additional hours before closing.',
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId('sf:settings:inactivity').setLabel('Open Inactivity Settings').setEmoji('⏳').setStyle(ButtonStyle.Primary),
+          backButton(),
+        )],
+      });
       return true;
     }
 

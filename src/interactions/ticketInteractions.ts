@@ -22,7 +22,9 @@ import {
   type ChatInputCommandInteraction,
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
+  type UserSelectMenuInteraction,
   type TextChannel,
+  type ThreadChannel,
 } from 'discord.js';
 
 import {
@@ -79,7 +81,12 @@ import {
   getTicketAuditHistory,
   logTicketEvent,
   logSystemEvent,
+  logSettingsEvent,
 } from '../services/auditLogService';
+import {
+  evaluateSupportHours,
+  formatSupportHoursInstant,
+} from '../services/supportHoursService';
 import {
   TICKET_FORM_MODAL_TTL_MS,
   getCachedActiveTicketFormById,
@@ -129,6 +136,9 @@ import {
 } from '../services/ticketPanelService';
 import { getCustomPanel } from '../services/panelBuilderService';
 import { parseCustomPanelInteractionId } from '../core/domain/customPanelInteraction';
+import { canPerformTicketAction, isTicketManager } from '../core/domain/ticketAuthorization';
+import { buildPrivateThreadTicketComponents, createPrivateThreadTicket, handlePrivateThreadTicketButton, registerInitialPrivateThreadTicket } from '../services/privateThreadTicketService';
+import { handlePrivateThreadAuxButton, handlePrivateThreadAuxComponent } from '../services/privateThreadTicketAuxService';
 
 function parseTicketPriority(value: string): TicketPriority | null {
   return value === 'low' ||
@@ -464,14 +474,20 @@ function getStaffContext(
       interaction,
     );
 
+  const authorization = {
+    actorId: interaction.user.id,
+    ownerId,
+    isConfiguredStaff: isStaff,
+    isAdministrator: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)),
+    canManageGuild: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)),
+  };
+
   return {
     ownerId,
     staffRole,
     isStaff,
     isAdmin: admin,
-    authorized:
-      isStaff ||
-      admin,
+    authorized: isTicketManager(authorization),
   };
 }
 
@@ -526,6 +542,7 @@ async function replyError(
     | ButtonInteraction
     | ChatInputCommandInteraction
     | StringSelectMenuInteraction
+    | UserSelectMenuInteraction
     | ModalSubmitInteraction,
   content: string,
 ): Promise<void> {
@@ -931,7 +948,7 @@ function buildOpenOverwrites(
 async function applyTicketVisibilityMode(
   channel: TextChannel,
   topic: string,
-  mode: 'unclaimed' | 'claimed',
+  mode: 'unclaimed' | 'claimed' | 'closed',
   formerClaimedBy?: string,
   options?: {
     topic?: string;
@@ -964,6 +981,8 @@ async function applyTicketVisibilityMode(
     existing,
     roleIds,
     staffRoleId,
+    everyoneRoleId: channel.guild.roles.everyone.id,
+    botId: channel.guild.members.me.id,
     ownerId,
     userIds: users,
     claimedModeratorIds: claimedModerators,
@@ -1023,13 +1042,51 @@ interface PreparedTicketFormData {
   description: string;
 }
 
+
+async function ensureSupportHoursAllows(
+  interaction: ButtonInteraction | ChatInputCommandInteraction | StringSelectMenuInteraction | ModalSubmitInteraction,
+  guildId: string,
+  departmentId: string,
+  panelId?: string,
+): Promise<boolean> {
+  const decision = await evaluateSupportHours(guildId, { departmentId, panelId });
+  if (decision.ticketCreationAllowed) return true;
+
+  const nextOpening = decision.nextOpeningAt
+    ? ' Next opening: ' + formatSupportHoursInstant(decision.nextOpeningAt, decision.timezone) + '.'
+    : ' No next opening is configured; contact a server administrator.';
+  const message = '⏰ Support is currently closed in ' + decision.timezone +
+    '. New tickets are restricted by the configured support-hours policy.' + nextOpening;
+  await replyError(interaction, message);
+
+  // Audit delivery must not delay Discord's initial acknowledgement.
+  void (async () => {
+    const guild = interaction.guild;
+    if (!guild) return;
+    const config = await getGuildConfig(guildId);
+    if (!config.supportCategoryId) return;
+    await logSettingsEvent(guild, config.supportCategoryId, {
+      action: 'SUPPORT_HOURS_BLOCKED',
+      actorId: interaction.user.id,
+      actorName: interaction.user.tag,
+      detail: 'Blocked new ticket intake for department ' + departmentId +
+        (panelId ? ' via panel ' + panelId : '') +
+        '; timezone=' + decision.timezone +
+        '; policy=' + (decision.scopeType ?? 'none') +
+        '; policyVersion=' + (decision.policyVersion ?? 'none') + '.',
+    });
+  })().catch((error) => console.warn('Support-hours block audit failed:', error));
+  return false;
+}
+
 async function createTicket(
   interaction: ModalSubmitInteraction,
   departmentId: string,
   tagId: string,
-  formRoute?: { formId: string; version: number; expiresAt: number; submissionId?: string },
+  formRoute?: { formId: string; version: number; expiresAt: number; submissionId?: string; panelId?: string },
   preparedForm?: PreparedTicketFormData,
   alreadyAcknowledged = false,
+  panelId?: string,
 ): Promise<void> {
   if (!alreadyAcknowledged && !(await safeDeferReply(interaction))) {
     return;
@@ -1067,6 +1124,7 @@ async function createTicket(
 
   let ticketChannel:
     | TextChannel
+    | ThreadChannel
     | undefined;
   let creationLease: string | null = null;
   let selectedForm: TicketFormVersion | undefined;
@@ -1113,6 +1171,10 @@ async function createTicket(
         interaction,
         '❌ This department/tag combination no longer exists. Please refresh the support panel.',
       );
+      return;
+    }
+
+    if (!(await ensureSupportHoursAllows(interaction, guild.id, departmentId, panelId ?? formRoute?.panelId))) {
       return;
     }
 
@@ -1201,7 +1263,7 @@ async function createTicket(
      * retained only as a compatibility fallback for legacy tickets that were
      * created before durable ticket persistence existed.
      */
-    let existing: TextChannel | undefined;
+    let existing: TextChannel | ThreadChannel | undefined;
 
     const persistedCandidates = await findActivePersistedTickets(
       guild.id,
@@ -1217,6 +1279,14 @@ async function createTicket(
       if (
         channel?.type === ChannelType.GuildText &&
         isTicketTopic(channel.topic ?? '')
+      ) {
+        existing = channel;
+        break;
+      }
+      if (
+        channel?.type === ChannelType.PrivateThread &&
+        candidate.metadata.workspaceKind === 'private-thread' &&
+        candidate.guildId === guild.id
       ) {
         existing = channel;
         break;
@@ -1371,25 +1441,44 @@ async function createTicket(
         guild.roles.everyone.id,
       );
 
+    let threadParentChannelId: string | null = null;
     try {
-      ticketChannel =
-        (await guild.channels.create({
-            name:
-              getTicketChannelName(
-                String(number).padStart(4, '0'),
-                'open',
-                advancedSettings.ticketDefaults.priority,
-              ),
-            type:
-              ChannelType.GuildText,
-            parent:
-              auditParentCategoryId,
-            topic,
-            permissionOverwrites:
-              overwrites,
-            reason:
-              `SupportForge ticket #${number}`,
-          })) as TextChannel;
+      if (advancedSettings.ticketWorkspace.mode === 'private-threads') {
+        const created = await createPrivateThreadTicket(
+          guild,
+          department,
+          String(number),
+          cleanSubject,
+          interaction.user.id,
+        );
+        ticketChannel = created.thread;
+        threadParentChannelId = created.parent.id;
+        await registerInitialPrivateThreadTicket(guild.id, created.thread, {
+          ticketNumber: String(number),
+          departmentId,
+          tagId,
+          ownerId: interaction.user.id,
+          priority: advancedSettings.ticketDefaults.priority,
+          createdAt: now,
+          staffRoleId: department.staffRoleId,
+          ticketTopic: topic,
+          threadParentChannelId: created.parent.id,
+          subject: cleanSubject,
+        });
+      } else {
+        ticketChannel = await guild.channels.create({
+          name: getTicketChannelName(
+            String(number).padStart(4, '0'),
+            'open',
+            advancedSettings.ticketDefaults.priority,
+          ),
+          type: ChannelType.GuildText,
+          parent: auditParentCategoryId,
+          topic,
+          permissionOverwrites: overwrites,
+          reason: `SupportForge ticket #${number}`,
+        }) as TextChannel;
+      }
 
       if (formDraftRecorded) {
         await setTicketFormSubmissionChannel(formRoute?.submissionId ?? interaction.id, ticketChannel.id).catch((error) => {
@@ -1409,11 +1498,9 @@ async function createTicket(
                 config,
               ),
             ],
-            components:
-              buildTicketPanelComponents(
-                'open',
-                topic,
-              ),
+            components: ticketChannel.type === ChannelType.PrivateThread
+              ? buildPrivateThreadTicketComponents('open', ticketChannel.id)
+              : buildTicketPanelComponents('open', topic),
           });
 
       const finalTopic =
@@ -1428,29 +1515,34 @@ async function createTicket(
        * native REST timeout must not make a successfully created ticket fail.
        * The full topic is still kept in runtime state for this process.
        */
-      try {
-        await setChannelTopic(
-          ticketChannel.id,
-          finalTopic,
-          'Ticket topic initialization',
-        );
-      } catch (error) {
-        console.warn(
-          '⚠️ Ticket topic initialization timed out or failed; keeping the ticket and scheduling a retry:',
-          error,
-        );
-
-        // Durable ticket registration emits an outbox event after this catch.
-        // The worker reconciles the topic with bounded, rate-limit-aware retry policy.
+      if (ticketChannel.type === ChannelType.GuildText) {
+        try {
+          await setChannelTopic(
+            ticketChannel.id,
+            finalTopic,
+            'Ticket topic initialization',
+          );
+        } catch (error) {
+          console.warn(
+            '⚠️ Ticket topic initialization timed out or failed; keeping the ticket and scheduling a retry:',
+            error,
+          );
+        }
+        ticketChannel.topic = finalTopic;
+        updateRuntimeTicketState(ticketChannel, finalTopic, 'open');
+      } else {
+        await updatePersistedTicketMetadata(ticketChannel.id, {
+          metadata: {
+            ticketTopic: finalTopic,
+            panelMessageId: panel.id,
+            panelChannelId: panel.channelId,
+          },
+        }, {
+          id: interaction.user.id,
+          attribution: 'actorKnown',
+          confidence: 'high',
+        });
       }
-
-      ticketChannel.topic = finalTopic;
-
-      updateRuntimeTicketState(
-        ticketChannel,
-        finalTopic,
-        'open',
-      );
 
       await registerTicket(
         ticketChannel.id,
@@ -1474,7 +1566,12 @@ async function createTicket(
             openedAt: now,
             lastActivityAt: now,
             lastCustomerMessageAt: now,
-            ticketChannelType: 'text',
+            ticketChannelType: ticketChannel.type === ChannelType.PrivateThread ? 'private-thread' : 'text',
+            ...(ticketChannel.type === ChannelType.PrivateThread ? {
+              workspaceKind: 'private-thread',
+              threadParentChannelId,
+              ticketTopic: finalTopic,
+            } : {}),
             ...(selectedForm ? {
               formSubmissionInteractionId: formRoute?.submissionId ?? interaction.id,
               formId: selectedForm.id,
@@ -1585,25 +1682,20 @@ async function createTicket(
         });
       }
 
-      let departmentCategoryName = department.name;
-      try {
-        // At this point the ticket channel, panel, customer request, and
-        // durable ticket record all exist. Only now may the department
-        // category be created or repaired.
-        const departmentCategory = await ensureDepartmentCategory(guild, department);
-        departmentCategoryName = departmentCategory.name;
-
-        // ensureDepartmentCategory reconciles all active tickets into the
-        // category, including this new ticket. This avoids a second redundant
-        // channel PATCH and lets the shared REST queue handle rate limits.
-      } catch (categoryError) {
-        // Preserve the ticket even if category provisioning fails. It remains
-        // in the main SupportForge category and can be reconciled by setup.
-        console.warn(
-          '⚠️ Ticket #' + number +
-            ' was created successfully, but department category provisioning is pending:',
-          categoryError,
-        );
+      let departmentCategoryName = advancedSettings.ticketWorkspace.mode === 'private-threads'
+        ? 'private thread workspace for ' + department.name
+        : department.name;
+      if (ticketChannel.type === ChannelType.GuildText) {
+        try {
+          const departmentCategory = await ensureDepartmentCategory(guild, department);
+          departmentCategoryName = departmentCategory.name;
+        } catch (categoryError) {
+          console.warn(
+            '⚠️ Ticket #' + number +
+              ' was created successfully, but department category provisioning is pending:',
+            categoryError,
+          );
+        }
       }
 
       await interaction.editReply({
@@ -1655,7 +1747,7 @@ async function createTicket(
        */
       if (ticketChannel) {
         console.error(
-          `⚠️ Ticket #${getField(ticketChannel.topic ?? '', 'number') ?? 'unknown'} was created but initialization did not complete. The channel has been preserved for recovery.`,
+          `⚠️ Ticket #${getField(ticketChannel.type === ChannelType.GuildText ? (ticketChannel.topic ?? '') : topic, 'number') ?? 'unknown'} was created but initialization did not complete. The channel/thread has been preserved for recovery.`,
           error,
         );
 
@@ -1984,41 +2076,29 @@ async function transition(
         oldTopic,
       );
 
-    /*
-     * Staff/admin-only transitions.
-     */
-    if (
-      (
-        newStatus ===
-          'claimed' ||
-        newStatus ===
-          'pending' ||
-        newStatus ===
-          'reopened' ||
-        newStatus ===
-          'archived'
-      ) &&
-      !staff.authorized
-    ) {
+    const lifecycleAction = newStatus === 'claimed'
+      ? 'claim'
+      : newStatus === 'pending'
+        ? 'pending'
+        : newStatus === 'open'
+          ? 'resume'
+          : newStatus === 'closed'
+            ? 'close'
+            : newStatus === 'reopened'
+              ? 'reopen'
+              : 'archive';
+    const authorization = {
+      actorId: interaction.user.id,
+      ownerId: staff.ownerId,
+      isConfiguredStaff: staff.isStaff,
+      isAdministrator: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)),
+      canManageGuild: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)),
+    };
+    if (!canPerformTicketAction(authorization, lifecycleAction, oldStatus)) {
       await interaction.editReply(
-        '❌ Only configured staff or administrators can perform this action.',
-      );
-      return;
-    }
-
-    /*
-     * Owner may resume their pending ticket.
-     * Staff/admin may also do it.
-     */
-    if (
-      newStatus ===
-        'open' &&
-      !staff.authorized &&
-      staff.ownerId !==
-        interaction.user.id
-    ) {
-      await interaction.editReply(
-        '❌ You are not authorized to resume this ticket.',
+        newStatus === 'open'
+          ? '❌ Only configured staff/admins or the ticket owner resuming their own pending ticket can resume it.'
+          : '❌ Only configured department staff or administrators can perform this action.',
       );
       return;
     }
@@ -2401,24 +2481,21 @@ async function transition(
       }
     } else {
       try {
-        // Closed/archived transitions do not change ticket ACLs, but their
-        // topic, name, and storage category still fit in a single PATCH.
-        await setChannelProperties(
-          channel.id,
+        await applyTicketVisibilityMode(
+          channel,
+          newTopic,
+          'closed',
+          getField(oldTopic, 'claimed_by'),
           {
             topic: newTopic,
-            name: desiredChannelName,
+            channelName: desiredChannelName,
             ...(destinationCategoryId ? { parentId: destinationCategoryId } : {}),
           },
-          new Set<string>(),
-          'Synchronize SupportForge closed/archived ticket channel metadata',
         );
-        channel.topic = newTopic;
-        channel.name = desiredChannelName;
       } catch (error) {
-        sideEffectFailures.push('ticket channel metadata/category/name');
+        sideEffectFailures.push('ticket channel metadata/category/read-only permissions');
         console.warn(
-          '⚠️ Closed/archived ticket channel synchronization is pending/failed; durable state will still be updated:',
+          '⚠️ Closed/archived ticket permissions or metadata are pending/failed; durable state will still be updated:',
           error,
         );
       }
@@ -2672,14 +2749,14 @@ async function closeTicket(
         topic,
       );
 
-    const owner =
-      staff.ownerId ===
-      interaction.user.id;
-
-    if (
-      !owner &&
-      !staff.authorized
-    ) {
+    const closeAuthorization = {
+      actorId: interaction.user.id,
+      ownerId: staff.ownerId,
+      isConfiguredStaff: staff.isStaff,
+      isAdministrator: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)),
+      canManageGuild: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)),
+    };
+    if (!canPerformTicketAction(closeAuthorization, 'close', status)) {
       await interaction.editReply(
         '❌ Only the ticket owner, configured staff, or an administrator can close this ticket.',
       );
@@ -2932,15 +3009,16 @@ async function closeTicket(
 
         try {
           const closedCategory = await ensureClosedCategory(interaction.guild!);
-          await setChannelProperties(
-            channel.id,
+          await applyTicketVisibilityMode(
+            channel,
+            closedTopic,
+            'closed',
+            getField(topic, 'claimed_by'),
             {
               topic: closedTopic,
-              name: closedChannelName,
+              channelName: closedChannelName,
               parentId: closedCategory.id,
             },
-            new Set<string>(),
-            'SupportForge persist closed ticket metadata and storage location',
           );
           channel.topic = closedTopic;
           channel.name = closedChannelName;
@@ -3059,9 +3137,8 @@ export async function showTicketCreationModalFromCommand(
   const tagId = interaction.options.getString('tag-id', true).trim();
 
   try {
-    // Do not perform database/network work before showModal(): Discord's
-    // initial interaction acknowledgement window is short. The modal-submit
-    // handler revalidates the department and tag before creating anything.
+    if (!(await ensureSupportHoursAllows(interaction, guild.id, departmentId))) return;
+    // The intake admission check uses preloaded policy state; ticket creation rechecks it after the form is submitted.
     const cachedForm = getCachedActiveTicketFormForRouting(guild.id, departmentId, tagId);
     if (!cachedForm.ready) {
       await interaction.reply({ content: 'Ticket forms are still loading. Please try again in a moment.', flags: MessageFlags.Ephemeral });
@@ -3107,12 +3184,15 @@ async function showTicketTagSelector(
   interaction: ButtonInteraction,
   departmentId: string,
   page = 0,
+  panelId?: string,
 ): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
   if (!interaction.guild) {
     await replyError(interaction, '❌ This action must be used inside a server.');
     return;
   }
+
+  if (!(await ensureSupportHoursAllows(interaction, interaction.guild.id, departmentId, panelId))) return;
 
   const config = await getGuildConfig(interaction.guild.id);
   const department = config.departments[departmentId];
@@ -3141,7 +3221,7 @@ async function showTicketTagSelector(
   );
 
   const menu = new StringSelectMenuBuilder()
-    .setCustomId('ticket:create-tag:select:' + departmentId)
+    .setCustomId('ticket:create-tag:select:' + departmentId + (panelId ? ':' + panelId : ''))
     .setPlaceholder('Choose a tag')
     .setMinValues(1)
     .setMaxValues(1)
@@ -3165,21 +3245,21 @@ async function showTicketTagSelector(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
           .setCustomId(
-            'ticket:create-tag:page:' + departmentId + ':' + (safePage - 1),
+            'ticket:create-tag:page:' + departmentId + ':' + (safePage - 1) + (panelId ? ':' + panelId : ''),
           )
           .setLabel('Previous')
           .setEmoji('⬅️')
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(safePage === 0),
         new ButtonBuilder()
-          .setCustomId('ticket:create-tag:page:' + departmentId + ':' + safePage)
+          .setCustomId('ticket:create-tag:page:' + departmentId + ':' + safePage + (panelId ? ':' + panelId : ''))
           .setLabel('Page ' + (safePage + 1) + ' / ' + pageCount)
           .setEmoji('📄')
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(true),
         new ButtonBuilder()
           .setCustomId(
-            'ticket:create-tag:page:' + departmentId + ':' + (safePage + 1),
+            'ticket:create-tag:page:' + departmentId + ':' + (safePage + 1) + (panelId ? ':' + panelId : ''),
           )
           .setLabel('Next')
           .setEmoji('➡️')
@@ -3201,6 +3281,7 @@ async function showTicketTagSelector(
 async function handleTicketTagSelection(interaction: StringSelectMenuInteraction): Promise<void> {
   const parts = interaction.customId.split(':');
   const departmentId = parts[3] ?? '';
+  const panelId = parts[4] || undefined;
   const tagId = interaction.values[0] ?? '';
 
   /*
@@ -3209,7 +3290,7 @@ async function handleTicketTagSelection(interaction: StringSelectMenuInteraction
    * interaction has a very short acknowledgement window. The modal submit
    * validates the department/tag again before creating the ticket.
    */
-  await showTicketCreationModal(interaction, departmentId, tagId);
+  await showTicketCreationModal(interaction, departmentId, tagId, panelId);
 }
 
 interface ParsedTicketFormModalId {
@@ -3219,6 +3300,7 @@ interface ParsedTicketFormModalId {
   sessionId: string;
   tagId: string;
   step: number;
+  panelId?: string;
 }
 
 function encodeFormIdForModal(formId: string): string {
@@ -3245,6 +3327,7 @@ function buildTicketFormModalCustomId(args: {
   sessionId: string;
   tagId: string;
   step: number;
+  panelId?: string;
 }): string {
   const customId = [
     'tf',
@@ -3254,6 +3337,7 @@ function buildTicketFormModalCustomId(args: {
     args.sessionId,
     Buffer.from(args.tagId, 'utf8').toString('base64url'),
     String(args.step),
+    ...(args.panelId ? [Buffer.from(args.panelId, 'utf8').toString('base64url')] : []),
   ].join(':');
   if (customId.length > 100) throw new Error('This form route is too long to fit Discord’s modal custom-id limit.');
   return customId;
@@ -3261,7 +3345,7 @@ function buildTicketFormModalCustomId(args: {
 
 function parseTicketFormModalCustomId(customId: string): ParsedTicketFormModalId | null {
   const parts = customId.split(':');
-  if (parts.length !== 7 || parts[0] !== 'tf') return null;
+  if ((parts.length !== 7 && parts.length !== 8) || parts[0] !== 'tf') return null;
   const formId = decodeFormIdFromModal(parts[1] ?? '');
   const version = Number(parts[2]);
   const expiresSeconds = Number.parseInt(parts[3] ?? '', 36);
@@ -3269,19 +3353,22 @@ function parseTicketFormModalCustomId(customId: string): ParsedTicketFormModalId
   const tagIdEncoded = parts[5] ?? '';
   const step = Number(parts[6]);
   let tagId = '';
+  let panelId: string | undefined;
   try {
     tagId = Buffer.from(tagIdEncoded, 'base64url').toString('utf8');
+    if (parts[7]) panelId = Buffer.from(parts[7], 'base64url').toString('utf8');
   } catch {
     return null;
   }
-  if (!formId || !Number.isSafeInteger(version) || version < 1 ||
+  if ((panelId !== undefined && !/^[A-Za-z0-9_-]{1,50}$/.test(panelId)) ||
+      !formId || !Number.isSafeInteger(version) || version < 1 ||
       !Number.isSafeInteger(expiresSeconds) || expiresSeconds < 1 ||
       !/^[A-Za-z0-9_-]{12,20}$/.test(sessionId) ||
       !tagId || tagId.length > 100 ||
       !Number.isInteger(step) || step < 1 || step > 10) {
     return null;
   }
-  return { formId, version, expiresAt: expiresSeconds * 1000, sessionId, tagId, step };
+  return { formId, version, expiresAt: expiresSeconds * 1000, sessionId, tagId, step, ...(panelId ? { panelId } : {}) };
 }
 
 function buildTicketFormModal(
@@ -3291,6 +3378,7 @@ function buildTicketFormModal(
   sessionId: string,
   step: number,
   priorAnswers: Record<string, unknown>,
+  panelId?: string,
 ): ModalBuilder {
   const customId = buildTicketFormModalCustomId({
     formId: form.id,
@@ -3299,6 +3387,7 @@ function buildTicketFormModal(
     sessionId,
     tagId,
     step,
+    panelId,
   });
   const modal = new ModalBuilder()
     .setCustomId(customId)
@@ -3433,6 +3522,7 @@ async function showTicketCreationModal(
   interaction: ButtonInteraction | StringSelectMenuInteraction,
   departmentId: string,
   tagId: string,
+  panelId?: string,
 ): Promise<void> {
   if (!interaction.guild) {
     await replyError(
@@ -3443,11 +3533,10 @@ async function showTicketCreationModal(
   }
 
   try {
+    if (!(await ensureSupportHoursAllows(interaction, interaction.guild.id, departmentId, panelId))) return;
     /*
-     * Do not load guild configuration before showModal(). A slow config
-     * read must never make a valid tag selection expire as Unknown
-     * interaction (10062). The modal submit revalidates the department/tag
-     * before any ticket is created.
+     * The support-hours service is initialized before login and evaluates its
+     * cached policy without a network call. Submission rechecks the policy.
      */
     /*
      * Form configuration is stored durably in Neon. Only the matching
@@ -3471,14 +3560,14 @@ async function showTicketCreationModal(
       const expiresAt = Date.now() + TICKET_FORM_MODAL_TTL_MS;
       const sessionId = randomBytes(10).toString('base64url');
       await interaction.showModal(
-        buildTicketFormModal(form, tagId, expiresAt, sessionId, 1, {}),
+        buildTicketFormModal(form, tagId, expiresAt, sessionId, 1, {}, panelId),
       );
       return;
     }
 
     // Keep the no-form legacy flow compact. Department and tag are validated
     // by createTicket after it acknowledges the modal submission.
-    const customId = `ticket:modal:${departmentId}:${tagId}`;
+    const customId = 'ticket:modal:' + departmentId + ':' + tagId + (panelId ? ':panel:' + panelId : '');
     const modal = new ModalBuilder()
       .setCustomId(customId)
       .setTitle('Support Request');
@@ -3642,6 +3731,7 @@ async function handleTicketFormWizardContinue(interaction: ButtonInteraction): P
         route.sessionId,
         route.step,
         session.answers,
+        route.panelId,
       ),
     );
   } catch (error) {
@@ -3770,6 +3860,7 @@ async function handleTicketFormWizardModal(interaction: ModalSubmitInteraction):
         sessionId: route.sessionId,
         tagId: route.tagId,
         step: nextStep,
+        panelId: route.panelId,
       });
       await interaction.editReply({
         content: '✅ Your answers are saved. Continue to the next section when ready.',
@@ -3794,6 +3885,7 @@ async function handleTicketFormWizardModal(interaction: ModalSubmitInteraction):
         version: currentForm.version,
         expiresAt: route.expiresAt,
         submissionId: route.sessionId,
+        panelId: route.panelId,
       },
       {
         form: currentForm,
@@ -3802,6 +3894,7 @@ async function handleTicketFormWizardModal(interaction: ModalSubmitInteraction):
         description: session.description ?? '',
       },
       true,
+      route.panelId,
     );
   } catch (error) {
     await replyError(
@@ -5934,6 +6027,7 @@ function hasRequiredPanelAccess(
 async function startCustomPanelTarget(
   interaction: ButtonInteraction,
   button: CustomSupportPanelButton,
+  panelId?: string,
 ): Promise<void> {
   if (!interaction.guild) {
     await replyError(interaction, 'This support panel can only be used inside a server.');
@@ -5959,10 +6053,11 @@ async function startCustomPanelTarget(
       await replyError(interaction, 'This panel points to a form version that was changed or deactivated. Ask an administrator to edit and republish the panel.');
       return;
     }
+    if (!(await ensureSupportHoursAllows(interaction, interaction.guild.id, button.departmentId, panelId))) return;
     const expiresAt = Date.now() + TICKET_FORM_MODAL_TTL_MS;
     const sessionId = randomBytes(10).toString('base64url');
     await interaction.showModal(
-      buildTicketFormModal(cached.form, button.tagId, expiresAt, sessionId, 1, {}),
+      buildTicketFormModal(cached.form, button.tagId, expiresAt, sessionId, 1, {}, panelId),
     );
     return;
   }
@@ -5972,9 +6067,9 @@ async function startCustomPanelTarget(
     return;
   }
   if (button.tagId) {
-    await showTicketCreationModal(interaction, button.departmentId, button.tagId);
+    await showTicketCreationModal(interaction, button.departmentId, button.tagId, panelId);
   } else {
-    await showTicketTagSelector(interaction, button.departmentId);
+    await showTicketTagSelector(interaction, button.departmentId, 0, panelId);
   }
 }
 
@@ -6039,6 +6134,7 @@ async function handleCustomPanelEntry(interaction: ButtonInteraction): Promise<v
     await replyError(interaction, 'You do not have a role allowed to use this support-panel option.');
     return;
   }
+  if (!(await ensureSupportHoursAllows(interaction, interaction.guild.id, button.departmentId, panelId))) return;
 
   if (!isConfirm && button.confirmationMessage) {
     const confirmation = new EmbedBuilder()
@@ -6072,7 +6168,7 @@ async function handleCustomPanelEntry(interaction: ButtonInteraction): Promise<v
     // A confirm click is accepted only after the private prompt owner, source
     // public message, published snapshot, role restrictions and target have
     // all been revalidated. The action then reuses the normal ticket flow.
-    await startCustomPanelTarget(interaction, button);
+    await startCustomPanelTarget(interaction, button, panelId);
   } catch (error) {
     console.error('Custom support-panel route failed:', error);
     await replyError(interaction, 'ResolveX could not open this ticket request. Please try again or use another support-panel option.');
@@ -6133,12 +6229,15 @@ async function handleTicketDeletionInteraction(interaction: ButtonInteraction): 
   const department = config.departments[departmentId];
   const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
   const isStaff = Boolean(member && department?.staffRoleId && member.roles.cache.has(department.staffRoleId));
-  const isAdmin = Boolean(
-    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
-    interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ||
-    interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels),
-  );
-  if (!isAdmin && !isStaff) {
+  const canDelete = canPerformTicketAction({
+    actorId: interaction.user.id,
+    ownerId: ticket?.ownerId ?? getField(topic, 'owner'),
+    isConfiguredStaff: isStaff,
+    isAdministrator: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)),
+    canManageGuild: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)),
+    canManageChannels: Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)),
+  }, 'delete', ticket?.status ?? getTicketStatus(topic));
+  if (!canDelete) {
     await interaction.editReply('Only configured department staff or administrators with Manage Channels can delete this ticket.');
     return;
   }
@@ -6290,9 +6389,19 @@ export async function handleTicketInteraction(
   interaction:
     | ButtonInteraction
     | StringSelectMenuInteraction
+    | UserSelectMenuInteraction
     | ModalSubmitInteraction,
 ): Promise<void> {
   try {
+    if (interaction.customId.startsWith('ticket:thread:')) {
+      if (interaction.isButton()) {
+        const handled = await handlePrivateThreadAuxButton(interaction);
+        if (!handled) await handlePrivateThreadTicketButton(interaction);
+      } else {
+        await handlePrivateThreadAuxComponent(interaction);
+      }
+      return;
+    }
     if (interaction.isButton() && interaction.customId.startsWith('ticket:delete:')) {
       await handleTicketDeletionInteraction(interaction);
       return;
@@ -6361,11 +6470,13 @@ export async function handleTicketInteraction(
       const parts = interaction.customId.split(':');
       const departmentId = parts[3] ?? '';
       const page = Number(parts[4] ?? '0');
+      const panelId = parts[5] || undefined;
 
       await showTicketTagSelector(
         interaction,
         departmentId,
         Number.isInteger(page) ? page : 0,
+        panelId,
       );
       return;
     }
@@ -6541,7 +6652,8 @@ export async function handleTicketInteraction(
           return;
         }
 
-        const formId = parts[4];
+        const panelId = parts[4] === 'panel' ? parts[5] : undefined;
+        const formId = parts[4] === 'panel' ? undefined : parts[4];
         const version = Number(parts[5]);
         const expiresAt = Number(parts[6]);
         const formRoute = formId
@@ -6563,6 +6675,9 @@ export async function handleTicketInteraction(
           departmentId,
           tagId,
           formRoute,
+          undefined,
+          false,
+          panelId,
         );
 
         return;
