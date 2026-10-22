@@ -1,6 +1,6 @@
-# SupportForge — Master Features, Requirements & Long-Term Product Specification
+# ResolvX — Master Features, Requirements & Long-Term Product Specification
 
-**Project:** SupportForge  
+**Project:** ResolvX  
 **Repository:** `Annant2122011/supportforge`  
 **Current Repository Version:** `2.0.0`  
 **Primary Runtime:** Node.js + TypeScript + discord.js  
@@ -13,7 +13,7 @@
 
 # 0. HOW TO USE THIS DOCUMENT
 
-This file is the long-term memory of SupportForge.
+This file is the long-term memory of ResolvX.
 
 It is intentionally much more detailed than an ordinary README. The goal is that development can stop for weeks or months and this document will still explain what the system is supposed to become, what has already been implemented, what remains incomplete, why a feature exists, what it depends on, and what “done” actually means.
 
@@ -27,15 +27,15 @@ Whenever possible, implementation should proceed in small, tested increments rat
 
 # 1. PRODUCT IDENTITY
 
-## 1.1 What SupportForge Is
+## 1.1 What ResolvX Is
 
-SupportForge is an advanced support and ticket-management platform initially delivered through Discord. It is intended to provide businesses, online communities, software projects, e-commerce operations, crypto communities, and similar organizations with a professional customer-support workflow inside Discord, eventually expanding into a full multi-tenant SaaS platform.
+ResolvX is an advanced support and ticket-management platform initially delivered through Discord. It is intended to provide businesses, online communities, software projects, e-commerce operations, crypto communities, and similar organizations with a professional customer-support workflow inside Discord, eventually expanding into a full multi-tenant SaaS platform.
 
 The Discord bot is the first interface and operational adapter. It should not become a permanent container for all business logic. Over time, the core support domain should be separated from Discord-specific code so that the same ticket, SLA, analytics, AI, and automation systems can serve Discord, a web dashboard, an API, and external integrations.
 
 ## 1.2 Product Vision
 
-SupportForge should evolve through these stages:
+ResolvX should evolve through these stages:
 
 ```text
 Discord Ticket Bot
@@ -237,7 +237,7 @@ Provide a visible entry point where customers can start a support interaction.
 
 ### Current behavior
 
-SupportForge can create a Support Center panel with ticket creation controls and department-related buttons.
+ResolvX can create a Support Center panel with ticket creation controls and department-related buttons.
 
 ### Required behavior
 
@@ -282,7 +282,7 @@ Discord bot, guild configuration, department configuration.
 
 Turn the generated Support Center into a true configurable panel builder rather than a mostly fixed bot-generated message.
 
-### Current implementation checkpoint (ResolveX Stage E)
+### Current implementation checkpoint (ResolvX Stage E)
 
 The Discord implementation supports multiple saved public ticket panels in the Neon-backed guild configuration document. Administrators can build and edit drafts through **Settings → Ticket Panels**, without writing JSON for routine work, and through the matching `/supportforge panel` command family. The visual builder supports panel name/title/instructions, accent color, author icon, thumbnail and banner URLs; up to 25 ordered buttons; public channel selection; private disabled preview; reordering; target changes; role restrictions; optional per-button confirmation text; and a confirmed delete flow. Button label, emoji, style and target can be managed independently.
 
@@ -1392,7 +1392,7 @@ Possible actions:
 **Status:** `PLANNED`  
 **Priority:** `P2`
 
-SupportForge should understand support calendars.
+ResolvX should understand support calendars.
 
 Example:
 
@@ -1619,7 +1619,7 @@ Concept:
 ```text
 Discord Bot
      ↓
-SupportForge Application Layer
+ResolvX Application Layer
      ↓
 AI Service Interface
      ↓
@@ -1631,7 +1631,7 @@ Possible model backends:
 - external API provider
 - self-hosted model
 - local model
-- custom SupportForge model
+- custom ResolvX model
 
 The bot should not contain provider-specific AI logic everywhere.
 
@@ -1902,16 +1902,16 @@ Do not choose a vendor merely because it appears popular today. The selection sh
 
 ---
 
-# 21. CUSTOM SUPPORTFORGE 8B MODEL
+# 21. CUSTOM RESOLVX 8B MODEL
 
-## F-058 — Custom SupportForge 8B-Class Model
+## F-058 — Custom ResolvX 8B-Class Model
 
 **Status:** `FUTURE / INFRASTRUCTURE REQUIRED`  
 **Priority:** `P3`
 
 ### Purpose
 
-Develop a specialized model for SupportForge support workflows.
+Develop a specialized model for ResolvX support workflows.
 
 ### Potential capabilities
 
@@ -1930,11 +1930,11 @@ The model is an intelligence component. It is not the authoritative database, pe
 ### Long-term architecture
 
 ```text
-SupportForge Backend
+ResolvX Backend
         ↓
 AI Gateway
         ↓
-SupportForge Model
+ResolvX Model
         ↓
 RAG / Tools / Policies
 ```
@@ -2157,7 +2157,7 @@ Connect Discord
  ↓
 Choose Guild
  ↓
-Authorize SupportForge
+Authorize ResolvX
  ↓
 Create Default Configuration
  ↓
@@ -2217,7 +2217,7 @@ Settings
 
 ### Goal
 
-Users should be able to configure SupportForge without manually editing JSON or source code.
+Users should be able to configure ResolvX without manually editing JSON or source code.
 
 ---
 
@@ -2255,7 +2255,7 @@ Potential methods:
 - email/password
 - Google or another OAuth provider
 
-Discord OAuth is the most natural initial method because SupportForge is Discord-centric.
+Discord OAuth is the most natural initial method because ResolvX is Discord-centric.
 
 Authentication must be tied to tenant membership and permissions.
 
@@ -2589,7 +2589,7 @@ The setup process should create or repair required Discord infrastructure.
 
 Potential resources:
 
-- SupportForge category
+- ResolvX category
 - support panel
 - transcript channel
 - audit channel
@@ -3321,7 +3321,7 @@ AI Layer
       ↓
 RAG
       ↓
-Custom SupportForge Model
+Custom ResolvX Model
       ↓
 Commercial SaaS
 ```
@@ -3355,7 +3355,7 @@ Automated Tests
 
 ### Exit criteria
 
-A normal business should be able to configure SupportForge entirely from Discord without editing source files, and the core ticket workflow should be testable and predictable.
+A normal business should be able to configure ResolvX entirely from Discord without editing source files, and the core ticket workflow should be testable and predictable.
 
 ---
 
@@ -3404,7 +3404,7 @@ Authentication
 
 ### Exit criteria
 
-SupportForge should be able to operate as a persistent backend service independently of a single bot process.
+ResolvX should be able to operate as a persistent backend service independently of a single bot process.
 
 ---
 
@@ -3456,7 +3456,7 @@ Enterprise Controls
 
 ### Exit criteria
 
-An external business should be able to sign up, connect Discord, configure SupportForge, select a plan, and operate support without developer intervention.
+An external business should be able to sign up, connect Discord, configure ResolvX, select a plan, and operate support without developer intervention.
 
 ---
 
@@ -3533,7 +3533,7 @@ The following items are known to exist in the present project foundation and sho
 [✓] Reply references in transcripts
 [✓] Ticket creation cooldown
 [✓] Add/remove users
-[✓] SupportForge setup
+[✓] ResolvX setup
 [✓] Category management
 [✓] Priority levels
 [✓] Ticket tags
@@ -3577,7 +3577,7 @@ The major gaps between the current Discord foundation and the complete product v
 [ ] AI routing
 [ ] AI translation
 [ ] RAG
-[ ] Custom SupportForge 8B model integration
+[ ] Custom ResolvX 8B model integration
 [ ] Production external database
 [ ] Database migrations
 [ ] Real multi-tenant backend
@@ -3837,7 +3837,7 @@ Do not rewrite working code unnecessarily while adding unrelated features.
 # 53. LONG-TERM REFERENCE ARCHITECTURE
 
 ```text
-                            SUPPORTFORGE
+                            RESOLVX
                                  │
            ┌─────────────────────┼─────────────────────┐
            │                     │                     │
@@ -3869,7 +3869,7 @@ Do not rewrite working code unnecessarily while adding unrelated features.
             │                    │                    │
             └────────────────────┼────────────────────┘
                                  │
-                     SupportForge Model Layer
+                     ResolvX Model Layer
                                  │
                          Custom 8B Model
 ```
@@ -3879,7 +3879,7 @@ Do not rewrite working code unnecessarily while adding unrelated features.
 # 54. LONG-TERM PRODUCT MODULE MAP
 
 ```text
-SUPPORTFORGE
+RESOLVX
 │
 ├── Ticketing
 │   ├── Creation
@@ -3952,7 +3952,7 @@ SUPPORTFORGE
 The final product should allow a business to:
 
 ```text
-1. Add SupportForge to Discord
+1. Add ResolvX to Discord
 2. Connect the server to the dashboard
 3. Configure departments
 4. Design support panels
@@ -3990,7 +3990,7 @@ toward:
 ```text
 Discord Bot
     ↓
-SupportForge Core
+ResolvX Core
     ↓
 Persistent Backend
 ```
@@ -4019,7 +4019,7 @@ The model may recommend or assist with these workflows, but deterministic system
 
 # 58. WHAT THE BOT SHOULD REMAIN GOOD AT
 
-Even after SupportForge becomes a SaaS platform, the Discord bot should continue to be excellent at:
+Even after ResolvX becomes a SaaS platform, the Discord bot should continue to be excellent at:
 
 - fast ticket creation
 - responsive interactions
@@ -4147,7 +4147,7 @@ Do not maintain two competing realities indefinitely.
 
 # 63. FINAL REFERENCE CHECKLIST
 
-Before declaring SupportForge “complete”, verify the following layers separately.
+Before declaring ResolvX “complete”, verify the following layers separately.
 
 ## Layer 1 — Discord Core
 
@@ -4226,7 +4226,7 @@ Before declaring SupportForge “complete”, verify the following layers separa
 
 # 64. FINAL PRODUCT STATEMENT
 
-SupportForge is not intended to remain a bot whose main trick is creating private Discord channels.
+ResolvX is not intended to remain a bot whose main trick is creating private Discord channels.
 
 The Discord ticket system is the foundation.
 
@@ -4270,7 +4270,7 @@ The system should grow deliberately, with working features preserved and documen
 # 65. DOCUMENT MAINTENANCE FOOTER
 
 **Last major specification update:** September 2026  
-**Purpose:** Long-term SupportForge product memory  
+**Purpose:** Long-term ResolvX product memory  
 **Authority:** Product roadmap and requirements reference  
 **Implementation authority:** Actual tested code takes precedence over stale documentation  
 
@@ -4291,7 +4291,7 @@ The audit channel includes a persistent control panel at the start of the audit 
 Initial state:
 
 ```text
-📒 SupportForge Audit Log
+📒 ResolvX Audit Log
 
 [ Summarise Everything ]
 ```
@@ -4330,7 +4330,7 @@ The summary combines:
 - Current custom-tag count.
 - Tag creation history and creation dates from audit records.
 - Current server channel count.
-- Current SupportForge-managed channel count.
+- Current ResolvX-managed channel count.
 - Ticket channels created to date.
 - Audit activity volume.
 - Settings activity volume.
@@ -4391,7 +4391,7 @@ Priority parsing is validated before it reaches the channel-name API, so the nam
 
 Priority roles are opt-in.
 
-No priority role is created during normal SupportForge setup.
+No priority role is created during normal ResolvX setup.
 
 Administrators can open:
 
@@ -4415,7 +4415,7 @@ The role colors match the priority visual system.
 Example:
 
 ```text
-SupportForge • Urgent Tickets
+ResolvX • Urgent Tickets
 ```
 
 uses the Urgent priority color.
@@ -4524,9 +4524,9 @@ Avoid:
 - Automatic retention deletion without approval.
 ```
 
-# 74. SUPPORTFORGE CHANNEL PURPOSE MESSAGES
+# 74. RESOLVX CHANNEL PURPOSE MESSAGES
 
-SupportForge-managed non-ticket text channels now receive a dedicated default purpose message explaining what the channel is for.
+ResolvX-managed non-ticket text channels now receive a dedicated default purpose message explaining what the channel is for.
 
 ## Current default purpose messages
 
@@ -4536,7 +4536,7 @@ The Settings channel explains that it is the private administrative control cent
 
 ### Audit log
 
-The Audit channel explains that it stores the durable SupportForge operational history, including ticket lifecycle actions, configuration changes, retention decisions, repairs, and other administrative events with responsible users and timestamps.
+The Audit channel explains that it stores the durable ResolvX operational history, including ticket lifecycle actions, configuration changes, retention decisions, repairs, and other administrative events with responsible users and timestamps.
 
 ### Transcripts
 
@@ -4544,13 +4544,13 @@ The Transcript channel explains that it is the private archive for exported HTML
 
 ## Public panel exception
 
-The public SupportForge panel intentionally receives no purpose-message embed. The panel is customer-facing and is reserved for the ticket creation experience.
+The public ResolvX panel intentionally receives no purpose-message embed. The panel is customer-facing and is reserved for the ticket creation experience.
 
-## Future SupportForge channels
+## Future ResolvX channels
 
-A central channel-purpose service now handles future SupportForge-managed text channels through their SupportForge metadata.
+A central channel-purpose service now handles future ResolvX-managed text channels through their ResolvX metadata.
 
-Any future non-ticket channel carrying a `supportforge:` topic marker is automatically given the generic SupportForge-managed purpose message unless it is a ticket channel or the public panel.
+Any future non-ticket channel carrying a `supportforge:` topic marker is automatically given the generic ResolvX-managed purpose message unless it is a ticket channel or the public panel.
 
 Future subsystems can also supply a custom purpose directly through the reusable purpose-message service. This keeps the default behavior automatic while leaving room for later AI-specific or subsystem-specific descriptions.
 
@@ -4558,14 +4558,14 @@ Purpose messages are idempotent and serialized per channel, so repair/setup runs
 
 # 75. DEDICATED OPEN CATEGORY
 
-SupportForge now provisions a separate **Open** ticket category.
+ResolvX now provisions a separate **Open** ticket category.
 
 The original **Support Forge** category is not repurposed or renamed.
 
 ## Category responsibilities
 
 **Support Forge**
-- Remains the primary SupportForge container for the existing public panel and internal system channels.
+- Remains the primary ResolvX container for the existing public panel and internal system channels.
 - Continues to be used by the existing configuration and support-system setup logic.
 - Existing permissions and identity remain unchanged.
 
@@ -4581,15 +4581,15 @@ Explicitly provisioned department categories continue to work as before, so depa
 
 The Open category ID is persisted per guild in `data/config.json`.
 
-If the configured category disappears or becomes full, SupportForge finds another matching Open category or provisions another suffixed category as needed to respect Discord's category channel limit.
+If the configured category disappears or becomes full, ResolvX finds another matching Open category or provisions another suffixed category as needed to respect Discord's category channel limit.
 
-The setup command repairs/provisions the Open category alongside the existing SupportForge system without altering the existing **Support Forge** category.
+The setup command repairs/provisions the Open category alongside the existing ResolvX system without altering the existing **Support Forge** category.
 
 # 76. REPEATED PANEL ACTIVITY REPOSITIONING
 
 Automatic ticket-panel compaction is now a repeating cycle rather than a one-time action.
 
-When the configured visual/message threshold is reached, SupportForge moves the compact Restore/Move control to the newest position.
+When the configured visual/message threshold is reached, ResolvX moves the compact Restore/Move control to the newest position.
 
 If conversation activity reaches the threshold again, the restore control is moved again instead of being treated as a completed one-time operation.
 
@@ -4599,17 +4599,17 @@ The panel therefore remains discoverable throughout long conversations without c
 
 # 77. EXPANDED AUDIT COVERAGE
 
-The audit system now records a much broader set of SupportForge mutations.
+The audit system now records a much broader set of ResolvX mutations.
 
 ## Discord infrastructure
 
-SupportForge-managed channel and category events include:
+ResolvX-managed channel and category events include:
 
 - Channel/category creation.
 - Channel renames.
 - Parent/category moves.
 - Category/channel reordering.
-- Topic and SupportForge metadata changes.
+- Topic and ResolvX metadata changes.
 - Permission-overwrite changes.
 - Text-channel settings changes such as NSFW and slowmode.
 - Channel/category deletion.
@@ -4621,7 +4621,7 @@ Managed priority-role events include:
 - Hoist and mentionability changes.
 - Role deletion.
 
-The system attempts to resolve the Discord audit-log executor for infrastructure changes. When Discord does not expose a usable executor or the bot cannot read audit logs, the entry identifies the actor as Discord/SupportForge rather than inventing a user.
+The system attempts to resolve the Discord audit-log executor for infrastructure changes. When Discord does not expose a usable executor or the bot cannot read audit logs, the entry identifies the actor as Discord/ResolvX rather than inventing a user.
 
 ## Ticket workflow
 
@@ -4692,16 +4692,16 @@ When neither day has recorded activity, no empty daily summary is created.
 
 ## Recovery after Discord-side deletion
 
-Persisted SupportForge configuration and audit history are not tied to the continued existence of the Discord channels themselves.
+Persisted ResolvX configuration and audit history are not tied to the continued existence of the Discord channels themselves.
 
-If SupportForge-managed Discord channels are manually deleted but the local SupportForge data files still exist:
+If ResolvX-managed Discord channels are manually deleted but the local ResolvX data files still exist:
 
-- `/supportforge setup` can recreate the SupportForge infrastructure.
+- `/supportforge setup` can recreate the ResolvX infrastructure.
 - The persisted audit history remains available.
 - The recreated audit channel can display the historical overall summary.
 - The setup workflow records the restoration/setup event.
 
-This does not apply after the deliberate three-step **Delete Everything** factory reset, because that operation intentionally removes the persisted SupportForge state.
+This does not apply after the deliberate three-step **Delete Everything** factory reset, because that operation intentionally removes the persisted ResolvX state.
 
 # 79. DISASTER-RECOVERY GUIDANCE FOR THE SETTINGS HUB
 
@@ -4715,37 +4715,37 @@ Use the standalone:
 
 command from another server channel.
 
-It does not require the Settings channel to exist and can recreate the core SupportForge infrastructure.
+It does not require the Settings channel to exist and can recreate the core ResolvX infrastructure.
 
 ## Recommended future backup plan
 
-A future recovery feature can provide a small administrator-only recovery beacon outside the SupportForge-managed channels, containing the setup command and a one-click recovery action.
+A future recovery feature can provide a small administrator-only recovery beacon outside the ResolvX-managed channels, containing the setup command and a one-click recovery action.
 
-A second, stronger backup is an exported SupportForge configuration snapshot stored outside Discord. This would preserve departments, categories, retention rules, appearance, tags and other configuration even if both Discord channels and local runtime data are lost.
+A second, stronger backup is an exported ResolvX configuration snapshot stored outside Discord. This would preserve departments, categories, retention rules, appearance, tags and other configuration even if both Discord channels and local runtime data are lost.
 
 These recovery mechanisms should remain separate from the normal Settings channel so deleting the Settings hub cannot remove every recovery path.
 
 # 80. AUDIT INTERPRETATION
 
-SupportForge now treats every meaningful SupportForge state-changing operation and managed Discord infrastructure mutation as auditable.
+ResolvX now treats every meaningful ResolvX state-changing operation and managed Discord infrastructure mutation as auditable.
 
 This includes channel/category lifecycle changes, permission/settings changes, managed role changes, ticket workflow mutations, ticket metadata changes, settings changes, retention decisions, repairs, panel repositioning, setup, and related operations.
 
 Read-only navigation such as opening a settings page or reading ticket history is intentionally not treated as a state-changing mutation. Ticket conversation messages themselves remain in the ticket record/transcript rather than being duplicated as one audit entry per message.
 
-Channel and category additions created manually by administrators are also detected when they match SupportForge-managed naming/configuration, not only when SupportForge creates them itself.
+Channel and category additions created manually by administrators are also detected when they match ResolvX-managed naming/configuration, not only when ResolvX creates them itself.
 
 
 
 # 76. EXPANDED AUDIT COVERAGE AND RECOVERY
 
-SupportForge auditing now observes the Discord mutations that affect SupportForge-managed infrastructure, not only the high-level settings/ticket functions.
+ResolvX auditing now observes the Discord mutations that affect ResolvX-managed infrastructure, not only the high-level settings/ticket functions.
 
 ## Newly audited infrastructure actions
 
-- SupportForge-managed channel creation.
-- SupportForge-managed category creation.
-- SupportForge-managed channel/category deletion.
+- ResolvX-managed channel creation.
+- ResolvX-managed category creation.
+- ResolvX-managed channel/category deletion.
 - Channel renames.
 - Channel/category moves.
 - Channel reordering.
@@ -4753,9 +4753,9 @@ SupportForge auditing now observes the Discord mutations that affect SupportForg
 - Permission-overwrite changes.
 - Text-channel NSFW changes.
 - Text-channel slowmode changes.
-- SupportForge-managed role creation.
-- SupportForge-managed role updates.
-- SupportForge-managed role deletion.
+- ResolvX-managed role creation.
+- ResolvX-managed role updates.
+- ResolvX-managed role deletion.
 - Manual ticket-panel movement.
 - Automatic ticket-panel movement.
 - Setup/repair completion.
@@ -4770,28 +4770,28 @@ Therefore repeated long-message activity can trigger panel movement repeatedly r
 
 ## Current-day setup summary
 
-The audit store records the date of the most recent SupportForge setup/repair.
+The audit store records the date of the most recent ResolvX setup/repair.
 
-If SupportForge is fully rebuilt today, the daily summary scheduler uses today's setup/activity date instead of incorrectly preferring an older previous-day summary.
+If ResolvX is fully rebuilt today, the daily summary scheduler uses today's setup/activity date instead of incorrectly preferring an older previous-day summary.
 
 ## Audit persistence after factory reset
 
-Factory reset removes SupportForge's Discord infrastructure and normal configuration/ticket state, but the durable audit database is intentionally preserved.
+Factory reset removes ResolvX's Discord infrastructure and normal configuration/ticket state, but the durable audit database is intentionally preserved.
 
 The audit database is stored in:
 
 - `data/audit-log.json`
 - `data/audit-log.backup.json`
 
-The second file is a continuously maintained local backup. If the primary audit file is missing or corrupted, SupportForge attempts to load the backup.
+The second file is a continuously maintained local backup. If the primary audit file is missing or corrupted, ResolvX attempts to load the backup.
 
 After a later `/supportforge setup`, the audit channel and audit panel can therefore be rebuilt while retaining the previous audit history.
 
 ## Settings-channel recovery
 
-If only the Settings channel is deleted manually while the main Support Forge category still exists, SupportForge automatically recreates the Settings channel and restores its dashboard.
+If only the Settings channel is deleted manually while the main Support Forge category still exists, ResolvX automatically recreates the Settings channel and restores its dashboard.
 
-If the entire SupportForge structure is deleted, use:
+If the entire ResolvX structure is deleted, use:
 
 `/supportforge setup`
 
@@ -4803,7 +4803,7 @@ The setup command provisions/repairs the Support Forge container, Open category,
 
 ## Stage A reliability and audit fixes
 
-- Normal Repair now detects SupportForge ticket channels that are missing a durable Neon/PostgreSQL ticket row and reconstructs only those missing rows from validated channel metadata.
+- Normal Repair now detects ResolvX ticket channels that are missing a durable Neon/PostgreSQL ticket row and reconstructs only those missing rows from validated channel metadata.
 - Existing durable ticket rows remain authoritative. Repair never overwrites their lifecycle status or metadata from the Discord channel topic.
 - Recovered records preserve ticket status, owner, department, tag, priority, claimants, participants, creation/update timestamps, panel message ID, and form-submission reference when available.
 - Ticket creation uses a PostgreSQL lease keyed by guild, requester, and department to prevent concurrent bot workers from creating duplicate tickets.
