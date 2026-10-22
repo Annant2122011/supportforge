@@ -357,13 +357,13 @@ export async function handleSettingsSlashCommand(
         .map((id) => currentConfig.departments[id]?.name ? currentConfig.departments[id].name + ' (' + id + ')' : id)
         .join(', ') || 'None';
       await interaction.editReply(
-        '**Ticket Inactivity Automation**\\n' +
-        'Status: **' + (inactivity.enabled ? 'Enabled' : 'Disabled') + '**\\n' +
-        'Warning threshold: **' + inactivity.idleHours + ' idle hours**\\n' +
-        'Grace period: **' + inactivity.graceHours + ' additional hours**\\n' +
-        'Exempt roles (owner or assigned staff): **' + roleNames + '**\\n' +
-        'Exempt departments: **' + departmentNames + '**\\n\\n' +
-        'Automation is opt-in. Warnings persist across restarts; closure requires a saved transcript, unchanged activity timestamp and no configured exemption.\\n' +
+        '**Ticket Inactivity Automation**\n' +
+        'Status: **' + (inactivity.enabled ? 'Enabled' : 'Disabled') + '**\n' +
+        'Warning threshold: **' + inactivity.idleHours + ' idle hours**\n' +
+        'Grace period: **' + inactivity.graceHours + ' additional hours**\n' +
+        'Exempt roles (owner or assigned staff): **' + roleNames + '**\n' +
+        'Exempt departments: **' + departmentNames + '**\n\n' +
+        'Automation is opt-in. Warnings persist across restarts; closure requires a saved transcript, unchanged activity timestamp and no configured exemption.\n' +
         'Use action:set-exempt-roles with exempt-roles, action:set-exempt-departments with exempt-departments, or action:clear-exemptions to manage exclusions.'
       );
       return;
