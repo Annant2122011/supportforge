@@ -34,8 +34,8 @@ import { refreshPrivateThreadPanel } from './privateThreadTicketService';
 import { logTicketEvent } from './auditLogService';
 
 const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
-const WARNING_MARKER_PREFIX = 'ResolveX inactivity warning';
-const TRANSCRIPT_MARKER_PREFIX = '[ResolveX inactivity transcript';
+const WARNING_MARKER_PREFIX = 'QueryFixr inactivity warning';
+const TRANSCRIPT_MARKER_PREFIX = '[QueryFixr inactivity transcript';
 const SYSTEM_ACTOR = {
   id: 'supportforge-system',
   attribution: 'actorKnown' as const,
@@ -191,7 +191,7 @@ function warningEmbed(
     .setDescription(
       'Ticket **#' + (ticket.ticketNumber ?? 'unknown') + '** has had no recorded activity for **' + idleHours + ' hours**. ' +
       'Reply in this ticket before <t:' + Math.floor(deadlineMs / 1000) + ':F> to keep it open. ' +
-      'If no one replies during the next **' + graceHours + ' hours**, ResolveX will save a transcript and close the ticket. ' +
+      'If no one replies during the next **' + graceHours + ' hours**, QueryFixr will save a transcript and close the ticket. ' +
       'Any new message resets this timer. If you still need support, please reply here.',
     )
     .setFooter({ text: marker })
@@ -396,12 +396,12 @@ async function synchronizePrivateThreadClosure(
   if (channel.type !== ChannelType.PrivateThread || !closedTopic) return;
   const thread = channel as ThreadChannel;
   try {
-    if (!thread.archived) await thread.setArchived(true, 'ResolveX inactivity auto-close');
-    if (!thread.locked) await thread.setLocked(true, 'ResolveX inactivity auto-close read-only protection');
+    if (!thread.archived) await thread.setArchived(true, 'QueryFixr inactivity auto-close');
+    if (!thread.locked) await thread.setLocked(true, 'QueryFixr inactivity auto-close read-only protection');
     await refreshPrivateThreadPanel(thread, closedTicket, closedTopic);
     // Panel recovery can wake a thread. Reassert durable closure after repair.
-    if (!thread.archived) await thread.setArchived(true, 'ResolveX reassert inactivity closure after panel refresh');
-    if (!thread.locked) await thread.setLocked(true, 'ResolveX reassert inactivity lock after panel refresh');
+    if (!thread.archived) await thread.setArchived(true, 'QueryFixr reassert inactivity closure after panel refresh');
+    if (!thread.locked) await thread.setLocked(true, 'QueryFixr reassert inactivity lock after panel refresh');
   } catch (error) {
     console.warn('Private-thread inactivity closure is durable; outbox reconciliation will retry Discord synchronization:', error);
   }
@@ -445,7 +445,7 @@ async function autoCloseInactiveTicket(
       subject,
       ownerId: fresh.ownerId ?? 'unknown',
       ownerName: fresh.ownerId ? '<@' + fresh.ownerId + '>' : 'Unknown owner',
-      closedBy: 'ResolveX inactivity automation',
+      closedBy: 'QueryFixr inactivity automation',
       openedAt,
       closedAt: new Date(),
     });
@@ -503,7 +503,7 @@ async function autoCloseInactiveTicket(
   const metadata: Record<string, unknown> = {
     closedAt,
     closedById: client.user?.id ?? 'supportforge-system',
-    closedByTag: 'ResolveX inactivity automation',
+    closedByTag: 'QueryFixr inactivity automation',
     transcriptId: transcriptMessage.id,
     transcriptDestinationId: destination.id,
     lastActivityAt: closedAt,
@@ -539,9 +539,9 @@ async function autoCloseInactiveTicket(
       ticketNumber: fresh.ticketNumber ?? 'unknown',
       ticketChannelId: fresh.channelId,
       event: 'ticket_auto_closed_inactivity',
-      actor: 'ResolveX inactivity automation',
+      actor: 'QueryFixr inactivity automation',
       actorId: SYSTEM_ACTOR.id,
-      actorName: 'ResolveX inactivity automation',
+      actorName: 'QueryFixr inactivity automation',
       detail: 'Closed after ' + idleHours + ' idle hours and a ' + graceHours +
         ' hour warning grace period. Transcript message=' + transcriptMessage.id + '.',
     }).catch((error) => console.warn('Could not write inactivity auto-close audit event:', error));
@@ -659,7 +659,7 @@ async function sweepTicket(
   if (channel.type === ChannelType.PrivateThread) {
     const thread = channel as ThreadChannel;
     if (thread.locked) return;
-    if (thread.archived) await thread.setArchived(false, 'ResolveX inactivity warning/check');
+    if (thread.archived) await thread.setArchived(false, 'QueryFixr inactivity warning/check');
   }
 
   if (decision.action === 'warn') {
