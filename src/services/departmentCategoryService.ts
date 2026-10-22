@@ -14,6 +14,7 @@ import { logSystemEvent } from './auditLogService';
 import { getPersistedTicketRecords, getPersistedTicketStatus } from './ticketPersistenceService';
 import { getField, isTicketTopic } from './ticketStateService';
 import { setChannelParent } from './discordChannelService';
+import { isManagedDepartmentCategoryName } from '../core/domain/legacyBrandRecognition';
 
 const MAX_CHANNELS_PER_CATEGORY = 50;
 const PREFIX = 'QueryFixr.';
@@ -124,6 +125,12 @@ export async function ensureDepartmentCategory(
     saved?.type === ChannelType.GuildCategory &&
     saved.children.cache.size < MAX_CHANNELS_PER_CATEGORY
   ) {
+    if (saved.name !== baseName && isManagedDepartmentCategoryName(saved.name)) {
+      await saved.setName(baseName, 'Normalize the managed department category to QueryFixr branding').catch((error) => {
+        console.warn('Could not rename the managed QueryFixr department category:', error);
+      });
+    }
+
     await saved.permissionOverwrites.edit(guild.roles.everyone.id, {
       ViewChannel: false,
       SendMessages: false,
