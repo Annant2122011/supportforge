@@ -12,7 +12,7 @@ function requireConnectionString(name: 'DATABASE_URL' | 'DATABASE_URL_UNPOOLED')
   const value = process.env[name]?.trim();
   if (!value) {
     throw new Error(
-      `ResolvX PostgreSQL configuration is missing ${name}. Configure Neon connection variables before enabling PostgreSQL persistence.`,
+      `QueryFixr PostgreSQL configuration is missing ${name}. Configure Neon connection variables before enabling PostgreSQL persistence.`,
     );
   }
 
@@ -66,7 +66,7 @@ function configurePool(): Pool {
   });
 
   instance.on('error', (error) => {
-    console.error('❌ ResolvX PostgreSQL pool error:', error);
+    console.error('❌ QueryFixr PostgreSQL pool error:', error);
   });
 
   return instance;
@@ -122,7 +122,7 @@ export async function withUnpooledPostgres<T>(
   });
 
   client.on('error', (error) => {
-    console.error('❌ ResolvX PostgreSQL migration connection error:', error);
+    console.error('❌ QueryFixr PostgreSQL migration connection error:', error);
   });
 
   await client.connect();
