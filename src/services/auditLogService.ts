@@ -1364,9 +1364,10 @@ async function removeHiddenAuditMessages(channel: TextChannel): Promise<void> {
     if (message.author.id !== channel.client.user?.id) continue;
 
     const title = message.embeds[0]?.title ?? '';
-    if (!title.startsWith('QueryFixr Audit • ')) continue;
+    const auditTitleMarker = title.indexOf('Audit • ');
+    if (auditTitleMarker < 0) continue;
 
-    const actionLabelFromTitle = title.slice('QueryFixr Audit • '.length);
+    const actionLabelFromTitle = title.slice(auditTitleMarker + 'Audit • '.length);
     const normalizedAction = actionLabelFromTitle
       .split(' ')
       .filter(Boolean)
