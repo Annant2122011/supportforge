@@ -9,6 +9,8 @@ import {
 
 import { getGuildConfig, newTagId, updateGuildConfig } from '../services/configService';
 import { getAdvancedSettings, updateAdvancedSettings, type TicketPriority } from '../services/advancedSettingsService';
+import { getLocaleLabel, isSupportedLocale } from '../i18n/localeRegistry';
+import { translate } from '../i18n/translationService';
 import { getTicketWorkspaceMode, setTicketWorkspaceMode } from '../services/privateThreadTicketService';
 import { ensureArchiveCategory, ensureClosedCategory, ensureOptionalStatusCategory, getOptionalStatusCategory } from '../services/ticketStorageService';
 import { refreshSettingsChannel } from '../services/settingsChannelService';
@@ -68,6 +70,37 @@ export async function handleSettingsSlashCommand(
   };
 
   try {
+    if (action === 'language') {
+      const current = await getAdvancedSettings(guild.id);
+      const permissions = interaction.memberPermissions;
+      if (
+        !permissions ||
+        (!permissions.has(PermissionFlagsBits.Administrator) &&
+          !permissions.has(PermissionFlagsBits.ManageGuild))
+      ) {
+        await interaction.editReply(translate(current.locale, 'errors.permissionDenied'));
+        return;
+      }
+      const selected = interaction.options.getString('locale');
+      if (!selected) {
+        await interaction.editReply(
+          translate(current.locale, 'settings.locale.current', { locale: getLocaleLabel(current.locale) }),
+        );
+        return;
+      }
+      if (!isSupportedLocale(selected)) {
+        await interaction.editReply(translate(current.locale, 'settings.locale.unknown'));
+        return;
+      }
+      await updateAdvancedSettings(guild.id, (settings) => { settings.locale = selected; });
+      await refreshSettingsChannel(guild);
+      audit('SERVER_LANGUAGE_CHANGED', 'Changed the server language to ' + selected + ' (' + getLocaleLabel(selected) + ').');
+      await interaction.editReply(
+        translate(selected, 'settings.locale.saved', { locale: getLocaleLabel(selected) }),
+      );
+      return;
+    }
+
     if (action === 'overview') {
       const settings = await getAdvancedSettings(guild.id);
       const departments = Object.values(config.departments);

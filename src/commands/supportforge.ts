@@ -30,6 +30,7 @@ import {
 import { executeTicketCommand } from '../interactions/ticketCommandTools';
 import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
 import { UI_THEMES, getThemeColor } from '../services/uiThemeService';
+import { LOCALE_OPTIONS } from '../i18n/localeRegistry';
 import { handleSettingsSlashCommand } from '../interactions/settingsCommandTools';
 import {
   applyTicketFormTemplate,
@@ -1294,6 +1295,18 @@ export const data =
         )
         .addSubcommand((subcommand) =>
           subcommand
+            .setName('language')
+            .setDescription('Show or change this server’s bot message language')
+            .addStringOption((option) => option
+              .setName('locale')
+              .setDescription('New language; omit this option to show the current setting')
+              .addChoices(...LOCALE_OPTIONS.map((locale) => ({
+                name: (locale.label + ' · ' + locale.nativeLabel).slice(0, 100),
+                value: locale.value,
+              })))),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
             .setName('theme')
             .setDescription('View or change this server’s ResolvX color theme')
             .addStringOption((option) => option.setName('action').setDescription('Show the current theme or set a new one').setRequired(true).addChoices(
@@ -1454,35 +1467,6 @@ export const data =
         )
         .addSubcommand((subcommand) =>
           subcommand
-            .setName('report-categories')
-            .setDescription('List report categories and inspect their subcategories')
-            .addStringOption((option) => option.setName('category-id').setDescription('Optional category ID to inspect').setRequired(false).setMaxLength(80))
-            .addIntegerOption((option) => option.setName('page').setDescription('Page number for the category list').setRequired(false).setMinValue(1).setMaxValue(999)),
-        )
-        .addSubcommand((subcommand) =>
-          subcommand
-            .setName('report-subcategory-add')
-            .setDescription('Add a report subcategory')
-            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
-            .addStringOption((option) => option.setName('name').setDescription('Subcategory name').setRequired(true).setMaxLength(80)),
-        )
-        .addSubcommand((subcommand) =>
-          subcommand
-            .setName('report-subcategory-edit')
-            .setDescription('Rename a report subcategory')
-            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
-            .addStringOption((option) => option.setName('subcategory-id').setDescription('Subcategory ID').setRequired(true).setMaxLength(80))
-            .addStringOption((option) => option.setName('name').setDescription('New subcategory name').setRequired(true).setMaxLength(80)),
-        )
-        .addSubcommand((subcommand) =>
-          subcommand
-            .setName('report-subcategory-remove')
-            .setDescription('Remove a report subcategory')
-            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
-            .addStringOption((option) => option.setName('subcategory-id').setDescription('Subcategory ID').setRequired(true).setMaxLength(80)),
-        )
-        .addSubcommand((subcommand) =>
-          subcommand
             .setName('repair')
             .setDescription('Repair ResolvX infrastructure')
             .addStringOption((option) => option.setName('mode').setDescription('Repair mode').setRequired(true).addChoices(
@@ -1567,6 +1551,40 @@ export const data =
             .setDescription('Factory-reset ResolvX after typed confirmation')
             .addStringOption((option) => option.setName('confirmation').setDescription('Type DELETE SUPPORT FORGE exactly').setRequired(true).setMinLength(20).setMaxLength(20))
             .addBooleanOption((option) => option.setName('accumulate-audit').setDescription('Keep individual audit events for future summaries').setRequired(true)),
+        ),
+    )
+    .addSubcommandGroup((group) =>
+      group
+        .setName('settings-reports')
+        .setDescription('Manage report categories and subcategories')
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('report-categories')
+            .setDescription('List report categories and inspect their subcategories')
+            .addStringOption((option) => option.setName('category-id').setDescription('Optional category ID to inspect').setRequired(false).setMaxLength(80))
+            .addIntegerOption((option) => option.setName('page').setDescription('Page number for the category list').setRequired(false).setMinValue(1).setMaxValue(999)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('report-subcategory-add')
+            .setDescription('Add a report subcategory')
+            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('name').setDescription('Subcategory name').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('report-subcategory-edit')
+            .setDescription('Rename a report subcategory')
+            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('subcategory-id').setDescription('Subcategory ID').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('name').setDescription('New subcategory name').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('report-subcategory-remove')
+            .setDescription('Remove a report subcategory')
+            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('subcategory-id').setDescription('Subcategory ID').setRequired(true).setMaxLength(80)),
         ),
     )
     .addSubcommandGroup((group) =>
@@ -1978,7 +1996,7 @@ export async function execute(
       throw new Error('Unknown custom panel action.');
     }
 
-    if (group === 'settings') {
+    if (group === 'settings' || group === 'settings-reports') {
       await handleSettingsSlashCommand(interaction, {
         syncPanel,
         repair: async (targetGuild, mode) => {

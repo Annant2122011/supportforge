@@ -22,6 +22,7 @@ The four-stage improvement programme covers Stage A–H stabilization, operation
 - [Four-stage programme architecture](docs/four-stage-excellence-programme.md)
 - [Stage 1 stabilization and acceptance checklist](docs/stage-1-acceptance-checklist.md)
 - [Stage 1 source audit and acceptance report](docs/stage-1-audit-and-acceptance-report.md)
+- [Stage 2 administration and operational diagnostics](docs/stage-2-admin-operational-diagnostics.md)
 
 These docs describe planned delivery and acceptance criteria, not a claim that every listed feature is already implemented or production-accepted.
 
@@ -91,7 +92,7 @@ Settings-channel customization is stored separately from the public ticket panel
 ## Verification and rollout
 
 The Build and ResolvX CI workflows run the TypeScript build, automated tests, and database verification. Keep PR #12 open until its final checks pass and live acceptance has been completed. Deploy to a test guild and non-production bot first. Do not merge or deploy a production build solely because a CI workflow is green.
-The Build and SupportForge CI workflows run the TypeScript build, automated tests, and database verification. Stages A–G remain an open, stacked pull-request chain; PR #17 contains the consolidated source review and UI polish. Use a test guild and non-production bot before promotion. Do not merge or deploy a production build solely because a CI workflow is green.
+The Build and ResolvX CI workflows run the TypeScript build, automated tests, and PostgreSQL verification. Stages A–G and Stage H Part 1 are under source review; Stage H Part 2 adds locale controls and localized ticket/form interactions. Green CI is necessary but not sufficient for production readiness. Verify slash-command registration, dashboard interactions, locale persistence, permissions, and translated rendering in a non-production Discord guild before promotion.
 
 - [Stage A–E inspection](docs/stages-a-to-e-audit.md)
 - [Ticket archive and recovery behavior](docs/recovery-archive.md)

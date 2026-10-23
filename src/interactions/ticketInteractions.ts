@@ -60,6 +60,8 @@ import {
 import { resetPanelActivity } from '../services/panelActivityService';
 import { getAdvancedSettings, type TicketPriority } from '../services/advancedSettingsService';
 import { getThemeColor } from '../services/uiThemeService';
+import { translate } from '../i18n/translationService';
+import type { TranslationKey } from '../i18n/locales/en-US';
 import { ensureDepartmentCategory } from '../services/departmentCategoryService';
 import { endTicketVoiceMode, startTicketVoiceMode, syncTicketVoiceParticipants } from '../services/voiceModeService';
 import { getUserFlagCount, isTicketCreationRestricted, recordReport } from '../services/reportService';
@@ -1052,11 +1054,16 @@ async function ensureSupportHoursAllows(
   const decision = await evaluateSupportHours(guildId, { departmentId, panelId });
   if (decision.ticketCreationAllowed) return true;
 
+  const locale = (await getAdvancedSettings(guildId)).locale;
   const nextOpening = decision.nextOpeningAt
-    ? ' Next opening: ' + formatSupportHoursInstant(decision.nextOpeningAt, decision.timezone) + '.'
-    : ' No next opening is configured; contact a server administrator.';
-  const message = '⏰ Support is currently closed in ' + decision.timezone +
-    '. New tickets are restricted by the configured support-hours policy.' + nextOpening;
+    ? translate(locale, 'ticket.intake.nextOpening', {
+        nextOpening: formatSupportHoursInstant(decision.nextOpeningAt, decision.timezone),
+      })
+    : translate(locale, 'ticket.intake.noNextOpening');
+  const message = translate(locale, 'ticket.intake.outsideHours', {
+    timezone: decision.timezone,
+    nextOpening,
+  });
   await replyError(interaction, message);
 
   // Audit delivery must not delay Discord's initial acknowledgement.
@@ -1702,7 +1709,9 @@ async function createTicket(
 
       await interaction.editReply({
         content:
-          `✅ Your ticket has been created: ${ticketChannel}`,
+          '✅ ' + translate(advancedSettings.locale, 'ticket.created.title', { ticketNumber: number }) +
+          ': ' + ticketChannel + '\n' +
+          translate(advancedSettings.locale, 'ticket.created.description'),
       });
 
       /*
@@ -1984,6 +1993,10 @@ async function transition(
   );
 
   try {
+    // Load guild policy before changing durable ticket state so localization
+    // cannot make a committed transition appear to have failed.
+    const advancedSettings = await getAdvancedSettings(interaction.guild.id);
+
     /*
      * Always read the latest channel topic before changing state.
      * This prevents stale runtime data from becoming authoritative.
@@ -2110,7 +2123,7 @@ async function transition(
         .split(',')
         .map((id) => id.trim())
         .filter(Boolean);
-      const settings = await getAdvancedSettings(interaction.guild!.id);
+      const settings = advancedSettings;
 
       if (claimedIds.includes(interaction.user.id)) {
         await interaction.editReply('ℹ️ You are already assisting on this ticket.');
@@ -2535,14 +2548,15 @@ async function transition(
       );
     }
 
+    const locale = advancedSettings.locale;
+    const statusLabel = translate(locale, ('ticket.status.' + newStatus) as TranslationKey);
     await interaction.editReply(
       sideEffectFailures.length
-        ? `⚠️ Ticket status changed to **${capitalize(
-            newStatus,
-          )}** in durable storage. Discord could not immediately apply: ${sideEffectFailures.join(', ')}. The durable ticket state was preserved.`
-        : `✅ Ticket status changed to **${capitalize(
-            newStatus,
-          )}**.`,
+        ? '⚠️ ' + translate(locale, 'ticket.status.syncWarning', {
+            status: statusLabel,
+            details: sideEffectFailures.join(', '),
+          })
+        : '✅ ' + translate(locale, 'ticket.status.changed', { status: statusLabel }),
     );
 
     /*
@@ -2550,9 +2564,11 @@ async function transition(
      */
     void channel
       .send(
-        `📌 Ticket status changed to **${capitalize(
-          newStatus,
-        )}** by ${interaction.user}.`,
+        '📌 ' + translate(locale, 'ticket.status.announcement', {
+          ticketNumber: getField(newTopic, 'number') ?? 'unknown',
+          status: statusLabel,
+          actor: interaction.user.toString(),
+        }),
       )
       .catch((error) => {
         console.error(
@@ -2671,6 +2687,8 @@ async function closeTicket(
   let closeSyncRunningInBackground = false;
 
   try {
+    // Read the display locale before transcript and lifecycle mutations begin.
+    const locale = (await getAdvancedSettings(interaction.guild.id)).locale;
     /*
      * Always use the latest topic.
      */
@@ -2960,7 +2978,7 @@ async function closeTicket(
     updateRuntimeTicketState(channel, closedTopic, 'closed');
     await editReplyOrFollowUp(
       interaction,
-      `✅ Ticket **#${ticketNumber}** is closed and its transcript has been saved. Discord channel organization is syncing in the background.`,
+      '✅ ' + translate(locale, 'ticket.closed.saved', { ticketNumber }),
     );
 
     closeSyncRunningInBackground = true;
@@ -3057,7 +3075,10 @@ async function closeTicket(
           });
 
           void channel
-            .send(`🔒 Ticket **#${ticketNumber}** has been closed by ${interaction.user}.`)
+            .send('🔒 ' + translate(locale, 'ticket.closed.announcement', {
+              ticketNumber,
+              actor: interaction.user.toString(),
+            }))
             .catch((error) => {
               console.error('⚠️ Close announcement failed:', error);
             });
@@ -3688,7 +3709,7 @@ async function validateTicketFormPrincipals(
 async function handleTicketFormWizardContinue(interaction: ButtonInteraction): Promise<void> {
   const route = parseTicketFormModalCustomId(interaction.customId);
   if (!interaction.guild || !route) {
-    await replyError(interaction, 'This form continuation is invalid. Reopen the support panel and start again.');
+    await replyError(interaction, translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'forms.continuation.invalid'));
     return;
   }
   if (route.expiresAt <= Date.now()) {
@@ -3759,7 +3780,7 @@ async function handleTicketFormWizardModal(interaction: ModalSubmitInteraction):
     return;
   }
   if (route.expiresAt <= Date.now()) {
-    await replyError(interaction, '⌛ This form expired. Reopen the support panel and submit the current form.');
+    await replyError(interaction, '⌛ ' + translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'forms.expired'));
     return;
   }
 
@@ -3865,7 +3886,7 @@ async function handleTicketFormWizardModal(interaction: ModalSubmitInteraction):
         panelId: route.panelId,
       });
       await interaction.editReply({
-        content: '✅ Your answers are saved. Continue to the next section when ready.',
+        content: '✅ ' + translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'forms.answers.saved'),
         components: [
           new ActionRowBuilder<ButtonBuilder>().addComponents(
             new ButtonBuilder()
@@ -4827,6 +4848,9 @@ async function applyTicketPriority(
     return;
   }
 
+  // Load locale before committing priority, so a settings read cannot turn a
+  // successful durable mutation into a misleading failure response.
+  const locale = (await getAdvancedSettings(channel.guild.id)).locale;
   const transitionAt = new Date().toISOString();
   const newTopic = setField(
     setField(topic, 'priority', priority),
@@ -4863,8 +4887,15 @@ async function applyTicketPriority(
    * are the source of truth for priority.
    */
 
+  const priorityLabel = ({
+    low: '🟢 ' + translate(locale, 'priority.low'),
+    normal: '🟡 ' + translate(locale, 'priority.normal'),
+    high: '🟠 ' + translate(locale, 'priority.high'),
+    urgent: '🔴 ' + translate(locale, 'priority.urgent'),
+    critical: '🟣 ' + translate(locale, 'priority.critical'),
+  } as Record<TicketPriority, string>)[priority];
   await interaction.editReply({
-    content: `✅ Ticket priority changed to **${({ low: '🟢 Low', normal: '🟡 Normal', high: '🟠 High', urgent: '🔴 Urgent', critical: '🟣 Critical' } as Record<TicketPriority, string>)[priority]}**.`,
+    content: '✅ ' + translate(locale, 'ticket.priority.changed', { priority: priorityLabel }),
     components: [],
   });
 
@@ -5212,7 +5243,7 @@ async function handlePanelButton(
       id.slice('ticket:priority:set:'.length),
     );
     if (!priority) {
-      await replyError(interaction, '❌ Invalid ticket priority.');
+      await replyError(interaction, '❌ ' + translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'errors.invalidInput'));
       return;
     }
     await applyTicketPriority(interaction, priority);
