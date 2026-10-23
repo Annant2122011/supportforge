@@ -16,8 +16,11 @@ interface CommandOption {
 test('Stage H2 exposes exactly the supported locale set through the Settings slash command', async () => {
   const { data } = await import('../src/commands/supportforge');
   const root = data.toJSON().options as unknown as CommandOption[];
-  const language = root.find((option) => option.name === 'language' && option.type === 1);
-  assert.ok(language, 'Expected /supportforge language');
+  const settings = root.find((option) => option.name === 'settings' && option.type === 2);
+  assert.ok(settings, 'Expected the Settings command group');
+
+  const language = settings.options?.find((option) => option.name === 'language' && option.type === 1);
+  assert.ok(language, 'Expected /supportforge settings language');
 
   const locale = language.options?.find((option) => option.name === 'locale' && option.type === 3);
   assert.ok(locale, 'Expected the optional locale selector');
