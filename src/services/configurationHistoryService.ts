@@ -157,6 +157,42 @@ function metadata(snapshot: ConfigurationSnapshot): ConfigurationSnapshotMetadat
   return meta;
 }
 
+/**
+ * Keep the checkpoint being restored alongside the automatic pre-restore
+ * checkpoint, even when restoring the oldest item in a full history.
+ */
+export function arrangeConfigurationSnapshotHistory<T extends { id: string }>(
+  existing: readonly T[],
+  entry: T,
+  preserveId?: string,
+  limit = MAX_SNAPSHOTS_PER_GUILD,
+): T[] {
+  if (!Number.isInteger(limit) || limit < 1) throw new Error('Snapshot history limit must be a positive integer.');
+  if (!preserveId) return [entry, ...existing.filter((snapshot) => snapshot.id !== entry.id)].slice(0, limit);
+  const preserved = existing.find((snapshot) => snapshot.id === preserveId);
+  if (!preserved) {
+    throw new Error('The selected restore snapshot disappeared from history. No checkpoint or configuration was changed.');
+  }
+  return [
+    entry,
+    preserved,
+    ...existing.filter((snapshot) => snapshot.id !== entry.id && snapshot.id !== preserveId),
+  ].slice(0, limit);
+}
+
+export function assertConfigurationSnapshotUnchanged<T>(
+  before: T,
+  current: T,
+  checkpointId: string,
+): void {
+  if (stableSerialize(before) !== stableSerialize(current)) {
+    throw new Error(
+      'Configuration changed while restore was being prepared. No restore was applied. ' +
+      'A checkpoint was saved as ' + checkpointId + '; reopen the preview and confirm again.',
+    );
+  }
+}
+
 function countTags(config: GuildConfig): number {
   return Object.values(config.departments ?? {}).reduce(
     (total, department) => total + Object.keys(department.tags ?? {}).length,
@@ -179,6 +215,7 @@ async function savePayloadSnapshot(
   actor: { id: string; name: string },
   reason: string,
   payload: ConfigurationSnapshot['payload'],
+  preserveSnapshotId?: string,
 ): Promise<ConfigurationSnapshotMetadata> {
   const entry: ConfigurationSnapshot = {
     id: 'cfg_' + randomUUID().replace(/-/g, '').slice(0, 16),
@@ -197,8 +234,12 @@ async function savePayloadSnapshot(
 
   return mutateDocument((document) => {
     const snapshots = document.guilds[guildId] ?? [];
-    snapshots.unshift(entry);
-    document.guilds[guildId] = snapshots.slice(0, MAX_SNAPSHOTS_PER_GUILD);
+    document.guilds[guildId] = arrangeConfigurationSnapshotHistory(
+      snapshots,
+      entry,
+      preserveSnapshotId,
+      MAX_SNAPSHOTS_PER_GUILD,
+    );
     return metadata(entry);
   });
 }
@@ -361,7 +402,14 @@ export async function restoreConfigurationSnapshot(
     actor,
     'Automatic checkpoint before restoring ' + snapshotId,
     before,
+    snapshotId,
   );
+
+  // Detect changes made while the preview/checkpoint was being prepared. This
+  // is a guard, not a cross-service transaction; operators should still avoid
+  // running concurrent configuration edits during an active restore.
+  const preflight = await capturePayload(guildId);
+  assertConfigurationSnapshotUnchanged(before, preflight, checkpoint.id);
 
   const apply = async (payload: ConfigurationSnapshot['payload']): Promise<void> => {
     await updateGuildConfig(guildId, (current) => {
