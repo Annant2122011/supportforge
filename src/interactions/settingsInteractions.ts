@@ -95,6 +95,7 @@ import { handleTicketFormSettingsInteraction } from './ticketFormSettingsInterac
 import { handleCustomPanelSettingsInteraction } from './customPanelSettingsInteractions';
 import {
   answerTicketDeletionReview,
+  getTicketRecoveryPreview,
   listTicketRecoveryCandidates,
   restoreArchivedTicket,
   type TicketRecoveryCandidate,
@@ -1848,6 +1849,33 @@ async function showRecoveryCandidateDetail(
     return;
   }
 
+  let preview;
+  try {
+    preview = await getTicketRecoveryPreview(guild.id, ticketId, source);
+  } catch (error) {
+    await interaction.editReply({
+      content: '',
+      embeds: [await recoveryEmbed(guild, 'Recovery preview unavailable', error instanceof Error ? error.message : 'The archive summary could not be loaded safely.')],
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:' + (source === 'discord_native' ? 'channels' : 'review'), 'Back to list', ButtonStyle.Secondary, '↩️'))],
+    });
+    return;
+  }
+
+  const previewLines = [
+    '**Read-only recovery preview**',
+    'Archive snapshot: **' + (preview.channelSnapshotAvailable ? 'available' : 'missing, safe channel defaults will be used') + '**',
+    'Historic message scan: **' + (preview.historicalBackfillComplete ? 'complete' : 'incomplete') + '**',
+    'Archived message records: **' + preview.archivedMessageCount + '** (source-deleted: ' + preview.deletedMessageCount + ')',
+    'Attachments: **' + preview.totalAttachmentCount + '** metadata; **' + preview.restorableAttachmentCount + '** with archived bytes; **' + preview.tooLargeAttachmentCount + '** oversized; **' + preview.metadataOnlyAttachmentCount + '** metadata-only; **' + preview.pendingAttachmentCount + '** pending; **' + preview.failedAttachmentCount + '** failed',
+    'Attachment archive rows: **' + preview.trackedAttachmentCount + ' / ' + preview.totalAttachmentCount + '**; missing rows: **' + preview.attachmentRecordsMissing + '**',
+    'Previously replayed message records: **' + preview.alreadyReplayedMessageCount + '**',
+    'Restore eligibility: **' + (preview.eligibleToRestore ? 'eligible' : 'not eligible') + '**',
+    ...(preview.latestArchivedAt ? ['Latest archived message: <t:' + Math.floor(Date.parse(preview.latestArchivedAt) / 1000) + ':F>'] : []),
+    ...(preview.warnings.length ? ['', '**Recovery limitations**', ...preview.warnings.map((warning) => '• ' + warning)] : []),
+    '',
+    'Restoration creates a replacement channel with a new Discord ID. Replayed content is posted by the bot and labelled with original author, channel, message ID and timestamp; historical users are never impersonated. Existing ticket controls are rebuilt from current safe actions.',
+  ].join('\\n');
+
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
   if (source === 'discord_native') {
     rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -1867,7 +1895,7 @@ async function showRecoveryCandidateDetail(
     ));
   }
 
-  const text = source === 'discord_native'
+  const context = source === 'discord_native'
     ? 'This channel was deleted outside the ResolvX ticket Delete button. Native deletion is recorded separately and does not trigger the accidental-deletion question.'
     : item.accidentalAnswer === 'yes'
       ? 'Review answer: **Yes, it was deleted by mistake.** This ticket is eligible for restoration through this review workflow.'
@@ -1875,6 +1903,7 @@ async function showRecoveryCandidateDetail(
         '\\nTicket creator ID: ' + item.ownerId +
         '\\nArchived messages: ' + item.messageCount +
         '\\n\\nYour answer will be saved in Neon and logged in both the ticket audit stream and developer/system audit stream.';
+  const text = context + '\\n\\n' + previewLines;
   const embed = await recoveryEmbed(guild, (source === 'discord_native' ? '♻️ Restore Channel' : '🛡️ Ticket Deletion Review') + ' • Ticket #' + item.ticketNumber, text);
   await interaction.editReply({ content: '', embeds: [embed], components: rows });
 }
