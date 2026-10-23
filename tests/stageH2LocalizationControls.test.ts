@@ -34,5 +34,12 @@ test('locale labels and language-control copy are safe for all supported locales
   assert.match(getLocaleLabel('bn-IN'), /বাংলা/);
   assert.equal(translate('hi-IN', 'settings.locale.current', { locale: getLocaleLabel('hi-IN') }).includes('{locale}'), false);
   assert.equal(translate('bn-IN', 'settings.locale.prompt').length > 0, true);
+  assert.equal(translate('hi-IN', 'ticket.created.title', { ticketNumber: 42 }), 'टिकट #42 बनाया गया');
+  const outsideHours = translate('hi-IN', 'ticket.intake.outsideHours', {
+    timezone: 'Asia/Kolkata',
+    nextOpening: translate('hi-IN', 'ticket.intake.nextOpening', { nextOpening: '9:00 AM' }),
+  });
+  assert.match(outsideHours, /Asia\/Kolkata/);
+  assert.equal(outsideHours.includes('{timezone}'), false);
   assert.equal(translate('invalid-locale', 'settings.locale.unknown'), 'That language is not supported. Choose one of the available options.');
 });
