@@ -8,6 +8,7 @@ import {
 import { getGuildConfig } from './configService';
 import { getAdvancedSettings } from './advancedSettingsService';
 import { getPostgresPool, pingPostgres } from '../core/persistence/postgresDatabase';
+import { CURRENT_POSTGRES_MIGRATION_ID } from '../core/persistence/postgresMigrations';
 
 export type DiagnosticSeverity = 'ok' | 'info' | 'warning' | 'error';
 
@@ -182,6 +183,61 @@ export async function runSystemDiagnostics(
       detail: 'The database health probe failed. Connection details are deliberately not included in the Discord report.',
       remedy: 'Verify DATABASE_URL, provider configuration, network reachability and migration state in the deployment environment. Never paste credentials into Discord.',
     });
+  }
+
+  if (dbConnected) {
+    try {
+      const migrationQuery = await getPostgresPool().query(
+        'SELECT COALESCE(MAX(id), 0)::int AS latest_id, COUNT(*)::int AS migration_count FROM schema_migrations',
+      );
+      const migrationRow = migrationQuery.rows[0] as {
+        latest_id?: number | string;
+        migration_count?: number | string;
+      } | undefined;
+      if (!migrationRow) throw new Error('Migration status query returned no row.');
+      const latestId = Number(migrationRow.latest_id ?? 0);
+      const migrationCount = Number(migrationRow.migration_count ?? 0);
+      if (latestId < CURRENT_POSTGRES_MIGRATION_ID) {
+        add({
+          area: 'Database migrations',
+          severity: 'error',
+          title: 'Database schema is behind this application version',
+          detail: 'Latest applied migration is ' + latestId + '; this application expects migration ' + CURRENT_POSTGRES_MIGRATION_ID + '.',
+          remedy: 'Back up the intended non-production database, then run the documented PostgreSQL migration workflow. Do not point migration tooling at production without a verified backup and rollout plan.',
+        });
+      } else if (latestId > CURRENT_POSTGRES_MIGRATION_ID) {
+        add({
+          area: 'Database migrations',
+          severity: 'warning',
+          title: 'Database schema is newer than this application build',
+          detail: 'Latest applied migration is ' + latestId + '; this build knows through migration ' + CURRENT_POSTGRES_MIGRATION_ID + '.',
+          remedy: 'Verify that the deployed application version matches the database migration level before using this bot build.',
+        });
+      } else if (migrationCount < latestId) {
+        add({
+          area: 'Database migrations',
+          severity: 'warning',
+          title: 'Migration history may contain gaps',
+          detail: 'The latest migration marker is ' + latestId + ', but only ' + migrationCount + ' marker(s) were found.',
+          remedy: 'Review schema_migrations and the migration history; do not manually insert markers without checking actual schema objects.',
+        });
+      } else {
+        add({
+          area: 'Database migrations',
+          severity: 'ok',
+          title: 'Database migration level matches this application',
+          detail: migrationCount + ' migration marker(s) found; latest required ID is ' + CURRENT_POSTGRES_MIGRATION_ID + '.',
+        });
+      }
+    } catch {
+      add({
+        area: 'Database migrations',
+        severity: 'warning',
+        title: 'Database migration status could not be verified',
+        detail: 'The schema_migrations check failed. Connectivity may be available while the schema is uninitialized or incomplete.',
+        remedy: 'Run the documented database verification against a disposable test database and confirm the expected migration markers.',
+      });
+    }
   }
 
   if (dbConnected) {
@@ -452,8 +508,8 @@ export async function runSystemDiagnostics(
   add({
     area: 'Data safety',
     severity: 'info',
-    title: 'Diagnostics are read-only',
-    detail: 'This report does not repair, delete, rename or publish Discord resources and does not mutate ticket records.',
+    title: 'Diagnostics run checks only',
+    detail: 'This report does not execute repairs, delete/rename/publish Discord resources or modify ticket records. Existing configuration readers may initialize missing default documents.',
   });
 
   return report;
@@ -472,7 +528,7 @@ export function buildSystemDiagnosticsEmbed(
       '**Overall status:** ' + status +
       '\n**Generated:** <t:' + Math.floor(Date.parse(report.generatedAt) / 1000) + ':F>' +
       '\n**Checks:** ' + report.findings.length +
-      '\n\nThis is a read-only report. A green result is not a substitute for the live acceptance checklist.',
+      '\n\nThis report does not execute repairs. A green result is not a substitute for the live acceptance checklist.',
     )
     .setFooter({ text: 'Guild ' + report.guildId + ' • secrets and connection strings are never shown' });
 
