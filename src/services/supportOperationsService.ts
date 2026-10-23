@@ -265,6 +265,7 @@ export async function evaluateTicketSla(
   return {
     ticketId: ticket.id,
     channelId: ticket.channelId,
+    ticketNumber: ticket.ticketNumber,
     status: ticket.status,
     policy,
     firstResponseAt,
