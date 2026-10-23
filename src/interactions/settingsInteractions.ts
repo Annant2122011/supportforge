@@ -1823,7 +1823,7 @@ async function showRecoveryCandidates(
   const embed = await recoveryEmbed(
     guild,
     native ? '♻️ Restore Channel' : '🛡️ Ticket Deletion Review',
-    description + (lines.length ? lines.join('\\n') : 'Nothing to display on this page.') + '\\n\\nPage ' + page + ' / ' + pages,
+    description + (lines.length ? lines.join('\n') : 'Nothing to display on this page.') + '\\n\\nPage ' + page + ' / ' + pages,
   );
   await interaction.editReply({ content: '', embeds: [embed], components: rows });
 }
