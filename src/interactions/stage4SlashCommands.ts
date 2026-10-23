@@ -258,12 +258,17 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         }
         const article = await getKnowledgeArticle(guildId, interaction.options.getString('article-id', true).trim(), access);
         if (!article || article.status !== 'published') throw new Error('Published article not found or you do not have permission to share it.');
+        const shareBody = article.body.slice(0, 2600);
+        const truncated = article.body.length > shareBody.length;
         await requireTextChannel(interaction).send({
           embeds: [new EmbedBuilder().setTitle('📚 Suggested article: ' + article.title)
-            .setDescription((article.summary ? article.summary + '\\n\\n' : '') +
-              'Category: ' + article.category + '\\n' +
-              'Tags: ' + (article.tags.join(', ') || 'none') + '\\n\\n' +
-              'This is a suggested resource, not a replacement for human support. The ticket remains open for follow-up.')
+            .setDescription(
+              (article.summary ? article.summary + '\n\n' : '') +
+              '**Category:** ' + article.category + '\n' +
+              '**Tags:** ' + (article.tags.join(', ') || 'none') + '\n\n' +
+              shareBody + (truncated ? '\n\n… Open /supportforge knowledge view with article ID ' + article.id + ' for the full article.' : '') +
+              '\n\n_This is a suggested resource, not a replacement for human support. The ticket remains open for follow-up._',
+            )
             .setFooter({ text: 'Knowledge Base article ' + article.id + ' • revision ' + article.revision })],
           allowedMentions: { parse: [] },
         });
