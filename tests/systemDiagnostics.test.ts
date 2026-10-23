@@ -24,6 +24,7 @@ test('system diagnostics report status escalates on errors and warnings without 
   assert.equal(diagnosticsOverallStatus([ok]), 'HEALTHY');
   assert.equal(diagnosticsOverallStatus([ok, warning]), 'DEGRADED');
   assert.equal(diagnosticsOverallStatus([warning, error]), 'ACTION REQUIRED');
+  assert.equal(diagnosticsOverallStatus([{ ...warning, severity: 'unknown' }]), 'DEGRADED');
 });
 
 test('outbox diagnostics report failed delivery as an error rather than healthy', () => {
