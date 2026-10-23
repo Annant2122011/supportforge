@@ -156,8 +156,11 @@ export async function saveSupportSlaPolicy(
 }
 
 export async function deleteSupportSlaPolicy(guildId: string, policyId: string): Promise<boolean> {
+  // Retire rather than physically delete. Alert rows and their policy-version references
+  // are historical evidence and must not disappear via ON DELETE CASCADE.
   const result = await getPostgresPool().query(
-    'DELETE FROM support_sla_policies WHERE guild_id=$1 AND id=$2',
+    'UPDATE support_sla_policies SET enabled=FALSE,version=version+1,updated_at=NOW() ' +
+      'WHERE guild_id=$1 AND id=$2 AND enabled=TRUE',
     [guildId, policyId],
   );
   return (result.rowCount ?? 0) > 0;
