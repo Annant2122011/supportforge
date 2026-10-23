@@ -17,6 +17,8 @@ export function isAllowedRestoreTargetLabel(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   const label = value.trim();
   return label.length >= 3 && label.length <= 80 &&
+    /^[a-z0-9](?:[a-z0-9 _.-]*[a-z0-9])$/i.test(label) &&
+    !label.includes('..') &&
     LABEL_ALLOW.test(label) && !LABEL_DENY.test(label);
 }
 
