@@ -2969,9 +2969,10 @@ async function closeTicket(
      * The outbox also retries failed channel reconciliation.
      */
     updateRuntimeTicketState(channel, closedTopic, 'closed');
+    const locale = (await getAdvancedSettings(interaction.guild.id)).locale;
     await editReplyOrFollowUp(
       interaction,
-      `✅ Ticket **#${ticketNumber}** is closed and its transcript has been saved. Discord channel organization is syncing in the background.`,
+      '✅ ' + translate(locale, 'ticket.closed.saved', { ticketNumber }),
     );
 
     closeSyncRunningInBackground = true;
@@ -3068,7 +3069,10 @@ async function closeTicket(
           });
 
           void channel
-            .send(`🔒 Ticket **#${ticketNumber}** has been closed by ${interaction.user}.`)
+            .send('🔒 ' + translate(locale, 'ticket.closed.announcement', {
+              ticketNumber,
+              actor: interaction.user.toString(),
+            }))
             .catch((error) => {
               console.error('⚠️ Close announcement failed:', error);
             });
