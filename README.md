@@ -15,6 +15,15 @@ ResolvX is a Discord-first support ticket system. It uses Neon PostgreSQL as the
 
 Some roadmap areas remain partial: Stage E supports department and pinned-form workflows, while a general-purpose user-defined workflow graph remains future scope. Actual Discord permissions, role selects, publishing and confirmation interactions still require live test-guild acceptance before calling the product production-complete. See [the Stage A–E audit](docs/stages-a-to-e-audit.md) and [FEATURES.md](FEATURES.md).
 
+## Product excellence programme
+
+The four-stage improvement programme covers Stage A–H stabilization, operational diagnostics and safer administration, recovery and support operations, then the non-AI Knowledge Base and productivity features.
+
+- [Four-stage programme architecture](docs/four-stage-excellence-programme.md)
+- [Stage 1 stabilization and acceptance checklist](docs/stage-1-acceptance-checklist.md)
+
+These docs describe planned delivery and acceptance criteria, not a claim that every listed feature is already implemented or production-accepted.
+
 ## Requirements
 
 - Node.js 22.5 or newer.
