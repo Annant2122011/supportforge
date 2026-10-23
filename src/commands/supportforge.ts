@@ -1999,7 +1999,7 @@ export async function execute(
       throw new Error('Unknown custom panel action.');
     }
 
-    if (group === 'settings' || (!group && subcommand === 'language')) {
+    if (group === 'settings' || group === 'settings-reports' || (!group && subcommand === 'language')) {
       await handleSettingsSlashCommand(interaction, {
         syncPanel,
         repair: async (targetGuild, mode) => {
