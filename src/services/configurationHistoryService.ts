@@ -86,11 +86,13 @@ export function normalizeConfigurationHistoryDocument(stored: unknown): Configur
         Number.isInteger(item.departmentCount) && item.departmentCount >= 0 &&
         Number.isInteger(item.panelCount) && item.panelCount >= 0 &&
         Number.isInteger(item.tagCount) && item.tagCount >= 0 &&
+        Number.isInteger(item.formCount) && item.formCount >= 0 &&
+        Number.isInteger(item.supportHoursPolicyCount) && item.supportHoursPolicyCount >= 0 &&
         item.payload && typeof item.payload === 'object' && !Array.isArray(item.payload) &&
         item.payload.guildConfig && typeof item.payload.guildConfig === 'object' && !Array.isArray(item.payload.guildConfig) &&
         item.payload.advancedSettings && typeof item.payload.advancedSettings === 'object' && !Array.isArray(item.payload.advancedSettings) &&
-        (item.payload.supportHours === undefined || Array.isArray(item.payload.supportHours)) &&
-        (item.payload.ticketForms === undefined || Array.isArray(item.payload.ticketForms))
+        Array.isArray(item.payload.supportHours) &&
+        Array.isArray(item.payload.ticketForms)
       );
       if (!validSnapshot) {
         throw new Error('Configuration history contains a malformed snapshot for guild ' + guildId + '. Existing history was not overwritten.');
