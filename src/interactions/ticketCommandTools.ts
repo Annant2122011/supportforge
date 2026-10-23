@@ -26,6 +26,7 @@ import { executePrivateThreadTicketCommand } from '../services/privateThreadTick
 import { executePrivateThreadAuxCommand } from '../services/privateThreadTicketAuxService';
 import { projectDurableTicketTopic } from '../services/ticketTopicProjectionService';
 import { getThemeColor } from '../services/uiThemeService';
+import { translate } from '../i18n/translationService';
 
 import {
   getOrCreateAuditChannel,
@@ -779,8 +780,12 @@ export async function executeTicketCommand(
         `Ticket claimed by ${interaction.user.tag}`,
       );
 
+      const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
       await interaction.editReply(
-        `✅ Ticket #${context.ticketNumber} is now **claimed by you**.`,
+        '✅ ' + translate(locale, 'ticket.status.commandSuccess', {
+          ticketNumber: context.ticketNumber,
+          status: translate(locale, 'ticket.status.claimed'),
+        }),
       );
 
       return;
@@ -1085,8 +1090,12 @@ export async function executeTicketCommand(
         `Ticket marked pending by ${interaction.user.tag}`,
       );
 
+      const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
       await interaction.editReply(
-        `⏳ Ticket #${context.ticketNumber} is now **pending**.`,
+        '⏳ ' + translate(locale, 'ticket.status.commandSuccess', {
+          ticketNumber: context.ticketNumber,
+          status: translate(locale, 'ticket.status.pending'),
+        }),
       );
 
       return;
@@ -1131,8 +1140,12 @@ export async function executeTicketCommand(
         `Ticket resumed by ${interaction.user.tag}`,
       );
 
+      const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
       await interaction.editReply(
-        `✅ Ticket #${context.ticketNumber} is now **open** again.`,
+        '✅ ' + translate(locale, 'ticket.status.commandSuccess', {
+          ticketNumber: context.ticketNumber,
+          status: translate(locale, 'ticket.status.open'),
+        }),
       );
 
       return;
@@ -1277,8 +1290,19 @@ export async function executeTicketCommand(
         `Priority changed to ${level}`,
       );
 
+      const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
+      const priorityLabel = ({
+        low: translate(locale, 'priority.low'),
+        normal: translate(locale, 'priority.normal'),
+        high: translate(locale, 'priority.high'),
+        urgent: translate(locale, 'priority.urgent'),
+        critical: translate(locale, 'priority.critical'),
+      } as Record<TicketPriority, string>)[priority];
       await interaction.editReply(
-        `✅ Ticket #${context.ticketNumber} priority is now **${level}**.`,
+        '✅ ' + translate(locale, 'ticket.priority.commandSuccess', {
+          ticketNumber: context.ticketNumber,
+          priority: priorityLabel,
+        }),
       );
 
       return;
