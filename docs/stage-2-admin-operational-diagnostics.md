@@ -1,6 +1,6 @@
 # Stage 2 — Administration and Operational Diagnostics
 
-**Branch:** `feature/stage-2-operational-excellence`  
+**Branch:** `feature/stage-2-operational-excellence-release`  
 **Production store:** existing Neon PostgreSQL configuration and outbox tables. No new live database, SQL migration or AI dependency is introduced by this diagnostic slice.
 
 ## Delivered in this increment
@@ -57,8 +57,8 @@ Outbox heuristics currently warn for failed jobs, more than 50 pending jobs, a p
 
 ## Required acceptance before Stage 2 can be called production-complete
 
-- [x] Build, full tests and PostgreSQL verification passed on an earlier combined Stage 2/Stage 1 head: 140 tests passed, 0 failed, 0 skipped.
-- [ ] Re-run build, full tests and PostgreSQL verification after the configuration-history guard, rollback preview and diagnostic-pagination additions.
+- [x] The current Stage 2 source/test tree passed [ResolvX CI #1953](https://github.com/Annant2122011/supportforge/actions/runs/39958020465): TypeScript build, 151 tests passed, 0 failed, 0 skipped, and PostgreSQL verification.
+- [ ] Re-confirm these checks on the final stacked branch head after copying the report metadata update from Stage 1; this should be the last code-CI gate before test-guild acceptance.
 - [ ] Test guild: missing/deleted panel, transcript, audit and Settings destinations show correct statuses without destructive action.
 - [ ] Verify paginated health output shows every finding across all pages, including a server with many departments and custom panels.
 - [ ] Test guild: deliberately remove bot permissions and verify clear warnings for each destination.
