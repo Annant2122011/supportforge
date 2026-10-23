@@ -10,7 +10,7 @@
 - `/supportforge diagnostics health`
 - Settings → Repair System → Run Diagnostics.
 - Reports gateway/guild availability, Neon/PostgreSQL connectivity and migration level, guild-scoped outbox queue health, managed channel targets and permission gaps, default/custom panel messages, draft/published panel role and routing consistency, form version/mapping consistency, department roles/tags, support-hours scopes/time zones, retention ranges, inactivity thresholds/exemptions, and private-thread setup when applicable.
-- Reports are grouped by area and have severity, details and suggested next steps.
+- Every finding has a stable reference ID, severity, details and suggested next step. Results are paginated at 10 findings per embed so a large server cannot silently hide later failures by overflowing one category field. The slash commands accept an optional `page`; the Settings dashboard has Previous/Next controls.
 - Failed database or queue checks are reported as failed/unknown, never marked healthy by default.
 - Connection strings, passwords and raw database errors are not displayed in Discord.
 
@@ -57,10 +57,10 @@ Outbox heuristics currently warn for failed jobs, more than 50 pending jobs, a p
 
 ## Required acceptance before Stage 2 can be called production-complete
 
-- [x] Build and full tests pass on the last verified Stage 2 head before the latest Stage 1 role-regression addition: 139 tests passed, 0 failed.
-- [x] PostgreSQL verification passed on that same verified Stage 2 head.
-- [ ] Re-run build, full tests and PostgreSQL verification on the final head after the latest panel-role regression addition.
+- [x] Build, full tests and PostgreSQL verification passed on an earlier combined Stage 2/Stage 1 head: 140 tests passed, 0 failed, 0 skipped.
+- [ ] Re-run build, full tests and PostgreSQL verification after the configuration-history guard, rollback preview and diagnostic-pagination additions.
 - [ ] Test guild: missing/deleted panel, transcript, audit and Settings destinations show correct statuses without destructive action.
+- [ ] Verify paginated health output shows every finding across all pages, including a server with many departments and custom panels.
 - [ ] Test guild: deliberately remove bot permissions and verify clear warnings for each destination.
 - [ ] Test guild: private-thread mode checks parent and thread permissions.
 - [ ] Inject database connection failure and outbox-query failure; confirm reports say Error/Unknown.
