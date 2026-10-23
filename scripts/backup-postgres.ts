@@ -59,11 +59,11 @@ async function main(): Promise<void> {
   if (!isSafeBackupFilename(filename)) throw new Error('Generated backup filename failed validation.');
   const finalPath = join(directory, filename);
   const temporaryPath = join(directory, '.' + filename + '.partial');
-  const env: NodeJS.ProcessEnv = { ...process.env, PGDATABASE: source.toString() };
+  const env: NodeJS.ProcessEnv = { ...process.env };
 
   try {
     // A custom-format dump is compressed by pg_dump and can be inspected by pg_restore.
-    await runTool('pg_dump', ['--format=custom', '--no-owner', '--no-acl', '--file', temporaryPath], env);
+    await runTool('pg_dump', ['--format=custom', '--no-owner', '--no-acl', '--file', temporaryPath, '--dbname', source.toString()], env);
     const backupStat = await stat(temporaryPath);
     if (!backupStat.isFile() || backupStat.size <= 0) throw new Error('pg_dump produced an empty backup; no manifest was written.');
     await runTool('pg_restore', ['--list', temporaryPath], env);
