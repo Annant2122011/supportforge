@@ -64,6 +64,7 @@ import { performFactoryReset } from '../services/factoryResetService';
 import { addUseCasePreset, USE_CASE_PRESETS } from '../services/useCasePresetService';
 import { enforcePriorityRoleHierarchy } from '../services/priorityRoleService';
 import { UI_THEMES, getThemeColor, getThemeDefinition, isGuildTheme } from '../services/uiThemeService';
+import { buildSystemDiagnosticsEmbed, runSystemDiagnostics } from '../services/systemDiagnosticsService';
 import {
   createDefaultSupportHoursPolicy,
   deleteSupportHoursPolicy,
@@ -2100,6 +2101,45 @@ export async function handleSettingsInteraction(
   if (interaction.isButton()) {
     const id = interaction.customId;
 
+    if (
+      id === 'sf:settings:diagnostics' ||
+      id === 'sf:settings:diagnostics:refresh' ||
+      id === 'sf:settings:diagnostics:setup-doctor'
+    ) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        const mode = id.endsWith(':setup-doctor') ? 'setup-doctor' : 'health';
+        const report = await runSystemDiagnostics(interaction.guild!, mode);
+        const config = await getGuildConfig(interaction.guild!.id).catch(() => null);
+        await interaction.editReply({
+          embeds: [buildSystemDiagnosticsEmbed(report, getThemeColor(config?.theme ?? 'midnight'))],
+          components: [
+            new ActionRowBuilder<ButtonBuilder>().addComponents(
+              new ButtonBuilder()
+                .setCustomId('sf:settings:diagnostics:refresh')
+                .setLabel('Refresh Checks')
+                .setEmoji('🔄')
+                .setStyle(ButtonStyle.Primary),
+              new ButtonBuilder()
+                .setCustomId('sf:settings:diagnostics:setup-doctor')
+                .setLabel('Setup Doctor')
+                .setEmoji('🩺')
+                .setStyle(ButtonStyle.Secondary),
+              new ButtonBuilder()
+                .setCustomId('sf:settings:repair:back')
+                .setLabel('Repair System')
+                .setEmoji('↩️')
+                .setStyle(ButtonStyle.Secondary),
+            ),
+          ],
+        });
+      } catch (error) {
+        console.error('System diagnostics failed:', error);
+        await interaction.editReply('Diagnostics could not complete. The bot did not attempt any repair. Check the bot logs for a sanitized diagnostic error.');
+      }
+      return true;
+    }
+
     if (id === 'sf:settings:repair:back') {
       await showRepairSystem(interaction);
       return true;
@@ -3928,6 +3968,16 @@ async function showRepairSystem(interaction: ButtonInteraction): Promise<void> {
           .setLabel('Ticket Deletion Review')
           .setEmoji('🛡️')
           .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('sf:settings:diagnostics')
+          .setLabel('Run Diagnostics')
+          .setEmoji('🩺')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId('sf:settings:diagnostics:setup-doctor')
+          .setLabel('Setup Doctor')
+          .setEmoji('🧭')
+          .setStyle(ButtonStyle.Secondary),
         backButton(),
       ),
     ],
