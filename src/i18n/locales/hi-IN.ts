@@ -28,6 +28,7 @@ const hiIN: Partial<Record<TranslationKey, string>> = {
   'ticket.closed': 'टिकट #{ticketNumber} बंद कर दिया गया है।',
   'ticket.reopened': 'टिकट #{ticketNumber} फिर से खोल दिया गया है।',
   'ticket.priority.changed': 'टिकट की प्राथमिकता {priority} कर दी गई है।',
+  'ticket.priority.commandSuccess': 'टिकट #{ticketNumber} की प्राथमिकता अब {priority} है।',
   'ticket.intake.outsideHours': '⏰ {timezone} समय-क्षेत्र में सहायता सेवा अभी बंद है। निर्धारित सहायता-समय नीति के कारण नए टिकट नहीं बनाए जा सकते। {nextOpening}',
   'ticket.intake.nextOpening': 'अगला खुलने का समय: {nextOpening}.',
   'ticket.intake.noNextOpening': 'अगले खुलने का समय निर्धारित नहीं है; सर्वर व्यवस्थापक से संपर्क करें।',
