@@ -1905,7 +1905,7 @@ export async function execute(
             .setDescription(
               'Restored snapshot `' + result.restored.id + '`.\n' +
               'A pre-restore checkpoint was also saved: `' + result.checkpoint.id + '`.\n\n' +
-              'Ticket records, messages, transcripts, audit history and other servers were not intentionally changed.' +
+              'Restored settings, support-hours policies and current form definitions using new immutable form versions. Existing submissions and their historical versions remain intact; forms created after the checkpoint were not deleted.' +
               (refreshFailures.length ? '\n\n⚠️ Could not refresh: ' + refreshFailures.join(', ') + '. Use the Settings Refresh control after inspecting permissions.' : ''),
             )
             .setFooter({ text: 'Restore operations are audited; earlier snapshots remain available.' })],
