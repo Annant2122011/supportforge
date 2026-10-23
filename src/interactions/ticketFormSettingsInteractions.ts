@@ -16,6 +16,7 @@ import {
 } from 'discord.js';
 
 import { getGuildConfig } from '../services/configService';
+import { buildTicketFormHomePresentation, formatTicketFormSchemaPageDescription } from '../services/ticketFormPresentation';
 import { getGuildTheme } from '../services/uiThemeService';
 import { logSettingsEvent } from '../services/auditLogService';
 import {
@@ -33,6 +34,18 @@ import {
 
 type FormSettingsInteraction = ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction;
 type ViewComponents = Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>>;
+type FormEmbedField = { name: string; value: string; inline?: boolean };
+const DEFAULT_FORM_THEME = { label: 'Midnight Indigo', color: 0x5865f2 } as const;
+
+async function formTheme(guildId?: string): Promise<{ label: string; color: number }> {
+  if (!guildId) return DEFAULT_FORM_THEME;
+  try {
+    return await getGuildTheme(guildId);
+  } catch (error) {
+    console.warn('Could not load the QueryFixr form theme; using the default palette.', error);
+    return DEFAULT_FORM_THEME;
+  }
+}
 
 const PREFIX = 'sf:settings:forms:';
 // Keep generated form-list messages comfortably under Discord's 2,000-character limit.
@@ -63,10 +76,13 @@ async function prepare(interaction: FormSettingsInteraction): Promise<void> {
   }
 }
 
-async function render(interaction: FormSettingsInteraction, content: string, components: ViewComponents = []): Promise<void> {
-  const theme = interaction.guild
-    ? await getGuildTheme(interaction.guild.id)
-    : { label: 'Midnight Indigo', color: 0x5865f2 };
+async function render(
+  interaction: FormSettingsInteraction,
+  content: string,
+  components: ViewComponents = [],
+  summaryFields: FormEmbedField[] = [],
+): Promise<void> {
+  const theme = await formTheme(interaction.guild?.id);
   const heading = content.match(/^\*\*(.{1,240}?)\*\*/m);
   const title = heading?.[1]?.slice(0, 256) ?? 'Ticket Forms & Templates';
   const description = heading ? content.replace(heading[0], '').trim() : content;
@@ -76,14 +92,19 @@ async function render(interaction: FormSettingsInteraction, content: string, com
     .setTitle(title)
     .setDescription((description || 'Use the controls below to continue.').slice(0, 4096))
     .setFooter({ text: theme.label + ' theme • Guided setup and advanced schema tools' });
+  if (summaryFields.length) {
+    embed.addFields(...summaryFields.slice(0, 25).map((field) => ({
+      name: field.name.slice(0, 256),
+      value: (field.value || '—').slice(0, 1024),
+      ...(field.inline !== undefined ? { inline: field.inline } : {}),
+    })));
+  }
   await interaction.editReply({ content: '', embeds: [embed], components });
 }
 
 async function showFailure(interaction: FormSettingsInteraction, error: unknown): Promise<void> {
   const detail = error instanceof Error ? error.message : 'Unknown error.';
-  const theme = interaction.guild
-    ? await getGuildTheme(interaction.guild.id)
-    : { label: 'Midnight Indigo', color: 0x5865f2 };
+  const theme = await formTheme(interaction.guild?.id);
   const embed = new EmbedBuilder()
     .setColor(theme.color)
     .setTitle('Could not complete that action')
@@ -167,8 +188,31 @@ async function quickBuilderTagPicker(interaction: FormSettingsInteraction, guild
   const department = config.departments[departmentId];
   if (!department) throw new Error('That department no longer exists. Start the guided builder again.');
   const tags = Object.values(department.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
-  const options = [{ label: 'All tags in ' + department.name, value: '*', description: 'Use this form for every tag in the department.' }, ...tags.slice(0, 24).map((tag) => ({ label: tag.name.slice(0, 100), value: tag.id, description: 'Use this form only for this tag.' }))];
-  await render(interaction, '**Guided Form Builder · 2 of 3**\n\nDepartment: **' + department.name + '**\nChoose whether this form applies to all tags or one tag.\n\nThe guided builder creates simple text questions. Use Advanced Schema for dropdowns, attachments, conditional questions, and custom validation.', [selectRow(new StringSelectMenuBuilder().setCustomId(PREFIX + 'quick:tag:' + departmentId).setPlaceholder('Choose a tag or all tags').addOptions(options)), buttonRow(button(PREFIX + 'quick-builder', 'Change Department', ButtonStyle.Secondary, '↩️'), button(PREFIX + 'home', 'Cancel', ButtonStyle.Secondary, '✖️'))]);
+  const options = [
+    { label: 'All tags in ' + department.name, value: '*', description: 'Use this form for every tag in the department.' },
+    ...tags.slice(0, 24).map((tag) => ({
+      label: tag.name.slice(0, 100),
+      value: tag.id,
+      description: 'Use this form only for this tag.',
+    })),
+  ];
+  const tagLimitNotice = tags.length > 24
+    ? '\n\n⚠️ This department has ' + tags.length + ' tags. Discord allows 25 menu options, so this picker shows “All tags” plus the first 24. For a hidden tag, use /qf form quick-create with its ID from Routing IDs.'
+    : '';
+  await render(
+    interaction,
+    '**Guided Form Builder · 2 of 3**\n\nDepartment: **' + department.name + '**\nChoose whether this form applies to all tags or one tag.\n\nThe guided builder creates simple text questions. Use Advanced Schema for dropdowns, attachments, conditional questions, and custom validation.' + tagLimitNotice,
+    [
+      selectRow(new StringSelectMenuBuilder()
+        .setCustomId(PREFIX + 'quick:tag:' + departmentId)
+        .setPlaceholder('Choose a tag or all tags')
+        .addOptions(options)),
+      buttonRow(
+        button(PREFIX + 'quick-builder', 'Change Department', ButtonStyle.Secondary, '↩️'),
+        button(PREFIX + 'home', 'Cancel', ButtonStyle.Secondary, '✖️'),
+      ),
+    ],
+  );
 }
 
 async function quickBuilderConfirm(interaction: FormSettingsInteraction, guildId: string, departmentId: string, tagId: string): Promise<void> {
@@ -195,22 +239,40 @@ async function openQuickFormModal(interaction: ButtonInteraction, departmentId: 
 }
 
 async function home(interaction: FormSettingsInteraction): Promise<void> {
-  await render(interaction,
-    '**🧾 Ticket Forms & Templates**\n\n' +
-    'Manage the same versioned forms available through /qf form commands. Both the slash commands and this Settings panel use the same validation and Neon PostgreSQL records.\n\n' +
-    '**Forms:** list, inspect details, view paginated schema JSON, read the field guide, create, version, activate, and deactivate.\n' +
-    '**Templates:** save reusable schemas, list and inspect them, create forms from them, and delete templates without changing forms already created.\n\n' +
-    'The Settings modal accepts up to 4,000 characters of field JSON. Use the slash command for longer schemas.',
+  const guildId = interaction.guild?.id;
+  if (!guildId) throw new Error('Open Ticket Forms from a server Settings panel.');
+  const [forms, templates, config] = await Promise.all([
+    listTicketForms(guildId),
+    listTicketFormTemplates(guildId),
+    getGuildConfig(guildId),
+  ]);
+  const departments = Object.values(config.departments);
+  const tagCount = departments.reduce((total, department) => total + Object.keys(department.tags ?? {}).length, 0);
+  const presentation = buildTicketFormHomePresentation({
+    totalForms: forms.length,
+    activeForms: forms.filter((form) => form.active).length,
+    totalTemplates: templates.length,
+    departmentCount: departments.length,
+    tagCount,
+  });
+
+  await render(
+    interaction,
+    '**🧾 Ticket Forms & Templates**\n\n' + presentation.description,
     [
       buttonRow(
         button(PREFIX + 'list:page:1', 'List & Manage Forms', ButtonStyle.Primary, '📋'),
-        button(PREFIX + 'modal:create', 'Create Form', ButtonStyle.Success, '➕'),
-        button(PREFIX + 'templates:page:1', 'Templates', ButtonStyle.Secondary, '🧩'),
+        button(PREFIX + 'modal:create', 'Advanced Schema', ButtonStyle.Success, '🧩'),
+        button(PREFIX + 'templates:page:1', 'Templates', ButtonStyle.Secondary, '📚'),
         button(PREFIX + 'routing:page:1', 'Routing IDs', ButtonStyle.Secondary, '🪪'),
         button('sf:settings:home', 'Settings', ButtonStyle.Secondary, '↩️'),
       ),
-      buttonRow(button(PREFIX + 'quick-builder', 'Guided Form Builder', ButtonStyle.Success, '✨'), button(PREFIX + 'guide', 'Advanced Schema Guide', ButtonStyle.Secondary, '📘')),
+      buttonRow(
+        button(PREFIX + 'quick-builder', 'Guided Form Builder', ButtonStyle.Success, '✨'),
+        button(PREFIX + 'guide', 'Schema Guide', ButtonStyle.Secondary, '📘'),
+      ),
     ],
+    presentation.fields,
   );
 }
 
@@ -316,9 +378,7 @@ async function schemaPage(interaction: FormSettingsInteraction, guildId: string,
   }
   nav.push(button(PREFIX + 'form:' + formId, 'Back to Form', ButtonStyle.Primary, '↩️'));
   await render(interaction,
-    '**Current schema for ' + form.name + ' · Page ' + page + ' / ' + pages + '**\n' +
-    (pages > 1 ? 'For long schemas, copy the JSON text from each page in order without the surrounding markers.\n\n' : '') +
-    'JSON:\n' + chunk,
+    formatTicketFormSchemaPageDescription({ formName: form.name, page, pages, chunk }),
     [buttonRow(...nav)],
   );
 }
