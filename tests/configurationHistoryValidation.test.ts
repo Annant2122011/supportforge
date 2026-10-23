@@ -25,8 +25,8 @@ function snapshot(id: string, guildId = '123456789012345678') {
   };
 }
 
-test('empty configuration-history storage initializes a versioned empty document', () => {
-  assert.deepEqual(normalizeConfigurationHistoryDocument(null), {
+test('missing configuration-history storage initializes a versioned empty document', () => {
+  assert.deepEqual(normalizeConfigurationHistoryDocument(undefined), {
     version: 1,
     guilds: {},
   });
@@ -101,5 +101,13 @@ test('non-array snapshots and blank guild keys fail closed', () => {
   assert.throws(
     () => normalizeConfigurationHistoryDocument({ version: 1, guilds: { '   ': [] } }),
     /malformed guild entry/,
+  );
+});
+
+
+test('explicit null history payload is treated as corruption, not an empty history', () => {
+  assert.throws(
+    () => normalizeConfigurationHistoryDocument(null),
+    /Configuration history document is malformed/,
   );
 });
