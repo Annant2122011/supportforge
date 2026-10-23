@@ -1908,7 +1908,7 @@ async function showRecoveryCandidateDetail(
           '',
           'Your answer will be saved in Neon and logged in both the ticket audit stream and developer/system audit stream.',
         ].join('\\n');
-  const text = [context, '', ...previewLines].join('\\n');
+  const text = [context, '', ...previewLines].join('\n');
   const embed = await recoveryEmbed(guild, (source === 'discord_native' ? '♻️ Restore Channel' : '🛡️ Ticket Deletion Review') + ' • Ticket #' + item.ticketNumber, text);
   await interaction.editReply({ content: '', embeds: [embed], components: rows });
 }
