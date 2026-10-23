@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { arrangeConfigurationSnapshotHistory, assertConfigurationSnapshotUnchanged, normalizeConfigurationHistoryDocument, restoreConfigurationSnapshot } from '../src/services/configurationHistoryService';
+import { arrangeConfigurationSnapshotHistory, assertConfigurationSnapshotUnchanged, assertCurrentConfigurationFingerprint, configurationFingerprint, normalizeConfigurationHistoryDocument, restoreConfigurationSnapshot } from '../src/services/configurationHistoryService';
 
 function snapshot(id: string, guildId = '123456789012345678') {
   return {
@@ -88,6 +88,7 @@ test('configuration restore rejects an incorrect confirmation before reading or 
       'cfg_expected',
       'RESTORE cfg_typo',
       { id: '223456789012345678', name: 'Test administrator' },
+      '0000000000000000',
     ),
     /Restore confirmation did not match/,
   );
@@ -152,4 +153,22 @@ test('stale configuration detected during rollback preparation requires a fresh 
     () => assertConfigurationSnapshotUnchanged(before, changed, 'cfg_checkpoint'),
     /No restore was applied/,
   );
+});
+
+
+test('configuration fingerprints are stable across object key order and change with values', () => {
+  const first = configurationFingerprint({ guild: { departments: 2, theme: 'midnight' }, forms: ['a', 'b'] });
+  const reordered = configurationFingerprint({ forms: ['a', 'b'], guild: { theme: 'midnight', departments: 2 } });
+  const changed = configurationFingerprint({ forms: ['a', 'b'], guild: { theme: 'ocean', departments: 2 } });
+
+  assert.match(first, /^[a-f0-9]{16}$/);
+  assert.equal(first, reordered);
+  assert.notEqual(first, changed);
+});
+
+test('restore fingerprint guard rejects malformed and stale preview values', () => {
+  const current = configurationFingerprint({ departments: 3, panelMessageId: '123' });
+  assert.doesNotThrow(() => assertCurrentConfigurationFingerprint(current, current));
+  assert.throws(() => assertCurrentConfigurationFingerprint('not-a-fingerprint', current), /Nothing was restored/);
+  assert.throws(() => assertCurrentConfigurationFingerprint('0000000000000000', current), /Nothing was restored/);
 });
