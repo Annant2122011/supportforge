@@ -662,12 +662,12 @@ export function buildSettingsSummary(
 ): string {
   const closed =
     settings.retention.closedDays === 0
-      ? 'Unlimited'
+      ? 'No timer (365-day maximum)'
       : settings.retention.closedDays + ' days';
 
   const archived =
     settings.retention.archiveDays === 0
-      ? 'Unlimited'
+      ? 'No timer (365-day maximum)'
       : settings.retention.archiveDays + ' days';
 
   const claimedCategory = settings.statusCategories.claimedCategoryId
