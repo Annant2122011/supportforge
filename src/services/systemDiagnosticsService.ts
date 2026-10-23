@@ -12,6 +12,7 @@ import { getPostgresPool, pingPostgres } from '../core/persistence/postgresDatab
 import { CURRENT_POSTGRES_MIGRATION_ID } from '../core/persistence/postgresMigrations';
 import { listTicketForms, type TicketFormVersion } from './ticketFormService';
 import { getSupportHoursPolicies, type SupportHoursPolicy } from './supportHoursService';
+import { getDiscordRateLimitSummary } from './discordRateLimitTelemetry';
 
 export type DiagnosticSeverity = 'ok' | 'info' | 'warning' | 'error';
 
@@ -177,6 +178,38 @@ export async function runSystemDiagnostics(
     detail: guild.client.isReady() && guild.available ? 'The command is executing through a ready Discord client.' : 'The Discord client is not ready or this guild is not available.',
     remedy: 'Check the process and gateway connection; a live interaction alone does not prove database or channel readiness.',
   });
+
+const rateLimitSummary = getDiscordRateLimitSummary();
+  const rateLimitSeverity: DiagnosticSeverity =
+    rateLimitSummary.globalEventCount >= 3 || rateLimitSummary.eventCount >= 20
+      ? 'error'
+      : rateLimitSummary.eventCount >= 5
+        ? 'warning'
+        : 'info';
+  const routeSummary = rateLimitSummary.topRoutes
+    .map((item) => item.route + ' (' + item.count + ')')
+    .join('; ');
+  add({
+    area: 'Discord REST rate limits',
+    severity: rateLimitSeverity,
+    title: rateLimitSummary.eventCount === 0
+      ? 'No recent REST rate limits recorded'
+      : rateLimitSeverity === 'error'
+        ? 'Repeated Discord REST rate limits detected'
+        : rateLimitSeverity === 'warning'
+          ? 'Discord REST rate limits are recurring'
+          : 'Recent Discord REST rate limits recorded',
+    detail: rateLimitSummary.eventCount === 0
+      ? 'No HTTP 429 events were observed by this running process in the last ' + rateLimitSummary.windowMinutes + ' minutes. This is a process-local window, not a historical guarantee.'
+      : rateLimitSummary.eventCount + ' rate-limit event(s) in the last ' + rateLimitSummary.windowMinutes +
+        ' minutes; global events=' + rateLimitSummary.globalEventCount +
+        '; longest retry/sub-limit delay=' + Math.ceil(rateLimitSummary.longestRetryAfterMs / 1000) + 's.' +
+        (routeSummary ? ' Most frequent normalized routes: ' + routeSummary + '.' : ''),
+    remedy: rateLimitSummary.eventCount
+      ? 'Check repeated channel renames, edits and other REST operations. Keep event-specific Retry-After and durable retry/outbox behavior; do not add fixed-delay retries.'
+      : undefined,
+  });
+
 
   let dbConnected = false;
   try {
