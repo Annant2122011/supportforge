@@ -5,6 +5,7 @@ import {
   addDiagnosticReferences,
   buildSystemDiagnosticsEmbed,
   diagnosticsOverallStatus,
+  diagnosticsPageCount,
   evaluateOutboxCounts,
   type DiagnosticFinding,
 } from '../src/services/systemDiagnosticsService';
@@ -99,4 +100,33 @@ test('empty diagnostic reports are explicitly unknown, never presented as health
   }).toJSON();
   assert.ok(embed.description?.includes('UNKNOWN'));
   assert.ok(embed.description?.includes('no checks produced results'));
+});
+
+
+test('large diagnostic reports paginate findings without silently dropping later checks', () => {
+  const report = {
+    guildId: 'guild-large',
+    reportId: 'DX-LARGE001',
+    generatedAt: '2026-10-23T12:00:00.000Z',
+    mode: 'setup-doctor' as const,
+    findings: Array.from({ length: 23 }, (_, index) => ({
+      area: index % 2 === 0 ? 'Custom panels' : 'Departments',
+      severity: index % 3 === 0 ? 'error' as const : 'warning' as const,
+      title: 'Finding ' + (index + 1),
+      detail: 'Detail for finding ' + (index + 1),
+    })),
+  };
+  addDiagnosticReferences(report);
+
+  assert.equal(diagnosticsPageCount(report), 3);
+  const pages = [1, 2, 3].map((page) => buildSystemDiagnosticsEmbed(report, 0x3b82f6, page).toJSON());
+  assert.deepEqual(pages.map((page) => page.fields?.length), [10, 10, 3]);
+
+  const displayedNames = pages.flatMap((page) => page.fields?.map((field) => field.name) ?? []);
+  for (let index = 1; index <= 23; index += 1) {
+    assert.ok(displayedNames.some((name) => name.includes('DX-LARGE001-' + String(index).padStart(3, '0'))));
+  }
+  assert.equal(new Set(displayedNames).size, 23);
+  assert.ok(pages[0]?.description?.includes('Page:** 1 of 3'));
+  assert.ok(pages[2]?.description?.includes('Page:** 3 of 3'));
 });
