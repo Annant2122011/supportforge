@@ -26,6 +26,8 @@ const hiIN: Partial<Record<TranslationKey, string>> = {
   'ticket.created.description': 'आपका सहायता टिकट तैयार है। टीम का कोई सदस्य यहाँ जवाब देगा।',
   'ticket.claimed': 'यह टिकट {staffName} ने संभाल लिया है।',
   'ticket.closed': 'टिकट #{ticketNumber} बंद कर दिया गया है।',
+  'ticket.closed.saved': 'टिकट #{ticketNumber} बंद है और उसका ट्रांसक्रिप्ट सहेज लिया गया है। Discord चैनल का प्रबंधन पृष्ठभूमि में समन्वित हो रहा है।',
+  'ticket.closed.announcement': '{actor} ने टिकट #{ticketNumber} बंद कर दिया है।',
   'ticket.reopened': 'टिकट #{ticketNumber} फिर से खोल दिया गया है।',
   'ticket.priority.changed': 'टिकट की प्राथमिकता {priority} कर दी गई है।',
   'ticket.priority.commandSuccess': 'टिकट #{ticketNumber} की प्राथमिकता अब {priority} है।',
