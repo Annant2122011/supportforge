@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { normalizeConfigurationHistoryDocument, restoreConfigurationSnapshot } from '../src/services/configurationHistoryService';
+import { arrangeConfigurationSnapshotHistory, assertConfigurationSnapshotUnchanged, normalizeConfigurationHistoryDocument, restoreConfigurationSnapshot } from '../src/services/configurationHistoryService';
 
 function snapshot(id: string, guildId = '123456789012345678') {
   return {
@@ -123,5 +123,33 @@ test('incomplete snapshots cannot be restored without saved form and support-hou
       guilds: { [guildId]: [incomplete] },
     }),
     /malformed snapshot/,
+  );
+});
+
+
+test('rollback keeps the selected old checkpoint and new pre-restore checkpoint inside the bounded history', () => {
+  const history = Array.from({ length: 10 }, (_, index) => ({ id: 'cfg_' + (index + 1) }));
+  const next = arrangeConfigurationSnapshotHistory(history, { id: 'cfg_pre_restore' }, 'cfg_10', 10);
+  assert.equal(next.length, 10);
+  assert.equal(next[0]?.id, 'cfg_pre_restore');
+  assert.equal(next[1]?.id, 'cfg_10');
+  assert.ok(next.some((item) => item.id === 'cfg_10'));
+});
+
+test('rollback-history update fails closed when the requested checkpoint disappeared', () => {
+  assert.throws(
+    () => arrangeConfigurationSnapshotHistory([{ id: 'cfg_other' }], { id: 'cfg_new' }, 'cfg_missing', 10),
+    /disappeared from history/,
+  );
+});
+
+test('stale configuration detected during rollback preparation requires a fresh preview', () => {
+  const before = { departments: { billing: { name: 'Billing' } }, theme: 'midnight' };
+  const same = { theme: 'midnight', departments: { billing: { name: 'Billing' } } };
+  const changed = { departments: { billing: { name: 'Payments' } }, theme: 'midnight' };
+  assert.doesNotThrow(() => assertConfigurationSnapshotUnchanged(before, same, 'cfg_checkpoint'));
+  assert.throws(
+    () => assertConfigurationSnapshotUnchanged(before, changed, 'cfg_checkpoint'),
+    /No restore was applied/,
   );
 });
