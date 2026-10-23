@@ -948,9 +948,6 @@ export async function restoreTicketFormCatalogSnapshot(
   });
 
   if (!prepared.length) return;
-  for (const form of prepared) {
-    await ensureValidMapping(guildId, form.departmentId, form.tagId);
-  }
 
   const activeTargets = prepared.filter((form) => form.active);
   for (let i = 0; i < activeTargets.length; i += 1) {
@@ -980,7 +977,11 @@ export async function restoreTicketFormCatalogSnapshot(
       );
     }
 
-    const targetIds = new Set(ids);
+    // The guild configuration document has already been restored before this
+    // service is called, so validate saved routing against the target mapping.
+    for (const form of prepared) {
+      await ensureValidMapping(guildId, form.departmentId, form.tagId);
+    }
     const activeOutside = await client.query<{ id: string; name: string; department_id: string; tag_id: string | null }>(
       'SELECT id, name, department_id, tag_id FROM ticket_forms WHERE guild_id=$1 AND active=TRUE AND NOT (id = ANY($2::text[]))',
       [guildId, ids],
