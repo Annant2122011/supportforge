@@ -3,7 +3,7 @@
 **Programme:** ResolveX four-stage product excellence  
 **Stage 1 branch:** `feature/stage-1-localization-acceptance`  
 **Pull request:** [#31, Stage 1 configuration integrity, localization and acceptance](https://github.com/Annant2122011/supportforge/pull/31)  
-**Current status:** Source and automated checks pass. Live Discord acceptance and an isolated Neon restore drill remain blocked pending access to a non-production environment.
+**Current status:** Prior source-changing checks passed; the updated slash-command limit test is being rerun against the cleanup base. Live Discord acceptance and an isolated Neon restore drill remain blocked pending access to a non-production environment.
 
 ## Evidence summary
 
@@ -31,11 +31,11 @@
 
 ## Branch / PR reconciliation
 
-- [PR #31 is the clean Stage 1 + Stage H2 review branch](https://github.com/Annant2122011/supportforge/pull/31), based on the current `main` baseline. It replaces the older diverged Stage 1 draft for review.
-- [PR #32 is the H2-aware Stage 2 review branch](https://github.com/Annant2122011/supportforge/pull/32), stacked on this Stage 1 branch. It combines localization with Setup Doctor and configuration rollback.
+- [PR #33](https://github.com/Annant2122011/supportforge/pull/33) is a CI-baseline cleanup for the dangling Stage 2 history test currently present on `main` without its service. [PR #31](https://github.com/Annant2122011/supportforge/pull/31) temporarily targets that cleanup branch so the Stage 1 merge-test tree does not re-import the orphaned test. After #33 is reviewed/merged, retarget #31 to `main` before merging Stage 1. No direct change to `main` was made.
+- [PR #32 is the H2-aware Stage 2 review branch](https://github.com/Annant2122011/supportforge/pull/32), stacked on this Stage 1 branch. It combines localization with Setup Doctor, operational task telemetry and configuration rollback. It carries the full configuration-history service plus its test, so that suite returns with Stage 2 rather than remaining orphaned on the baseline.
 - Older drafts #24–#30 are superseded by the clean current PRs #31 and #32. Their histories remain intact; review the current PRs instead.
 - [PR #23, Stage H Part 2 localization](https://github.com/Annant2122011/supportforge/pull/23) provided the H2 source increment ported into this branch. Its remaining Settings pages, panel previews, selected reports and live locale acceptance remain open in the translation checklist. [PR #22, the QueryFixr rebrand/localization branch](https://github.com/Annant2122011/supportforge/pull/22) remains separate because it changes visible branding and the root command name.
-- No production deployment or database change was performed. The accidental Stage 2 file on `main` was removed with a normal corrective commit; comparing the resulting `main` tree against its prior baseline shows no net source/document changes from this programme on `main`.
+- No production deployment, live database change, direct `main` edit, force-push or history rewrite was performed. PR #33 isolates the baseline test cleanup as a reviewable dependency.
 
 ## Release gate
 
