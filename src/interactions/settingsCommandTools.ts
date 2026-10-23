@@ -72,7 +72,12 @@ export async function handleSettingsSlashCommand(
   try {
     if (action === 'language') {
       const current = await getAdvancedSettings(guild.id);
-      if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+      const permissions = interaction.memberPermissions;
+      if (
+        !permissions ||
+        (!permissions.has(PermissionFlagsBits.Administrator) &&
+          !permissions.has(PermissionFlagsBits.ManageGuild))
+      ) {
         await interaction.editReply(translate(current.locale, 'errors.permissionDenied'));
         return;
       }
