@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { getLocaleLabel, LOCALE_OPTIONS, isSupportedLocale } from '../src/i18n/localeRegistry';
 import { translate } from '../src/i18n/translationService';
+import { buildSettingsDashboardComponents } from '../src/services/settingsChannelService';
 
 process.env.DISCORD_TOKEN ??= 'test-only-command-registration-token';
 
@@ -26,6 +27,11 @@ test('Stage H2 exposes exactly the supported locale set through the Settings sla
   assert.ok(locale, 'Expected the optional locale selector');
   assert.deepEqual(locale.choices?.map((choice) => choice.value), LOCALE_OPTIONS.map((option) => option.value));
   assert.equal(LOCALE_OPTIONS.every((option) => isSupportedLocale(option.value)), true);
+
+  const dashboardHasLanguage = buildSettingsDashboardComponents().some((row) =>
+    row.components.some((button) => button.data.custom_id === 'sf:settings:language'),
+  );
+  assert.equal(dashboardHasLanguage, true, 'The Settings dashboard must expose the same locale capability');
 });
 
 test('locale labels and language-control copy are safe for all supported locales', () => {
