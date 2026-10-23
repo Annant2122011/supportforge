@@ -1709,7 +1709,7 @@ async function createTicket(
       await interaction.editReply({
         content:
           '✅ ' + translate(advancedSettings.locale, 'ticket.created.title', { ticketNumber: number }) +
-          ': ' + ticketChannel + '\\n' +
+          ': ' + ticketChannel + '\n' +
           translate(advancedSettings.locale, 'ticket.created.description'),
       });
 
