@@ -33,6 +33,42 @@ import { UI_THEMES, getThemeColor } from '../services/uiThemeService';
 import { buildSystemDiagnosticsEmbed, runSystemDiagnostics } from '../services/systemDiagnosticsService';
 import { getTicketRecoveryPreview } from '../services/ticketArchiveService';
 import {
+  createKnowledgeArticle,
+  getKnowledgeArticle,
+  getKnowledgeBaseMetrics,
+  listKnowledgeArticles,
+  listKnowledgeArticleRevisions,
+  recordKnowledgeArticleFeedback,
+  restoreKnowledgeArticleRevision,
+  searchKnowledgeBase,
+  setKnowledgeArticleStatus,
+  setKnowledgeSynonyms,
+  listKnowledgeSynonyms,
+  deleteKnowledgeSynonyms,
+  updateKnowledgeArticle,
+} from '../services/knowledgeBaseService';
+import {
+  deleteQuickReply,
+  getQuickReply,
+  listQuickReplies,
+  renderQuickReply,
+  saveQuickReply,
+} from '../services/quickReplyService';
+import {
+  linkRelatedTickets,
+  listRelatedTickets,
+  unlinkRelatedTickets,
+} from '../services/relatedTicketService';
+import {
+  deleteWorkflowTemplate,
+  listWorkflowTemplates,
+  previewWorkflowTemplateById,
+  saveWorkflowTemplate,
+  setWorkflowTemplateEnabled,
+} from '../services/workflowTemplateService';
+import { validateWorkflowTemplateDefinition } from '../core/domain/workflowSafety';
+import { getPersistedTicket } from '../services/ticketPersistenceService';
+import {
   deleteSupportSlaPolicy,
   evaluateTicketSla,
   getCsatSummary,
@@ -280,6 +316,36 @@ function isAdminLike(
         PermissionFlagsBits.ManageGuild,
       ),
   );
+}
+
+interface ServerAccess {
+  isAdmin: boolean;
+  isStaff: boolean;
+  roleIds: string[];
+}
+
+function roleIdsFromInteraction(interaction: ChatInputCommandInteraction): string[] {
+  const member = interaction.member;
+  if (!member) return [];
+  return Array.isArray(member.roles) ? member.roles : member.roles.cache.map((role) => role.id);
+}
+
+async function resolveServerAccess(interaction: ChatInputCommandInteraction): Promise<ServerAccess> {
+  const config = await getGuildConfig(interaction.guildId!);
+  const roleIds = roleIdsFromInteraction(interaction);
+  const staffRoles = new Set(
+    Object.values(config.departments).map((department) => department.staffRoleId).filter((id): id is string => Boolean(id)),
+  );
+  const isAdmin = isAdminLike(interaction);
+  const isStaff = isAdmin || roleIds.some((id) => staffRoles.has(id));
+  return { isAdmin, isStaff, roleIds };
+}
+
+function parseCommaList(value: string | null, field: string, maxItems: number): string[] {
+  if (!value?.trim()) return [];
+  const items = [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))];
+  if (items.length > maxItems) throw new Error(field + ' accepts at most ' + maxItems + ' comma-separated values.');
+  return items;
 }
 
 function categoryButton(
