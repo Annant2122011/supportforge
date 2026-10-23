@@ -60,6 +60,7 @@ import {
 import { resetPanelActivity } from '../services/panelActivityService';
 import { getAdvancedSettings, type TicketPriority } from '../services/advancedSettingsService';
 import { getThemeColor } from '../services/uiThemeService';
+import { translate } from '../i18n/translationService';
 import { ensureDepartmentCategory } from '../services/departmentCategoryService';
 import { endTicketVoiceMode, startTicketVoiceMode, syncTicketVoiceParticipants } from '../services/voiceModeService';
 import { getUserFlagCount, isTicketCreationRestricted, recordReport } from '../services/reportService';
@@ -1052,11 +1053,16 @@ async function ensureSupportHoursAllows(
   const decision = await evaluateSupportHours(guildId, { departmentId, panelId });
   if (decision.ticketCreationAllowed) return true;
 
+  const locale = (await getAdvancedSettings(guildId)).locale;
   const nextOpening = decision.nextOpeningAt
-    ? ' Next opening: ' + formatSupportHoursInstant(decision.nextOpeningAt, decision.timezone) + '.'
-    : ' No next opening is configured; contact a server administrator.';
-  const message = '⏰ Support is currently closed in ' + decision.timezone +
-    '. New tickets are restricted by the configured support-hours policy.' + nextOpening;
+    ? translate(locale, 'ticket.intake.nextOpening', {
+        nextOpening: formatSupportHoursInstant(decision.nextOpeningAt, decision.timezone),
+      })
+    : translate(locale, 'ticket.intake.noNextOpening');
+  const message = translate(locale, 'ticket.intake.outsideHours', {
+    timezone: decision.timezone,
+    nextOpening,
+  });
   await replyError(interaction, message);
 
   // Audit delivery must not delay Discord's initial acknowledgement.
@@ -1702,7 +1708,9 @@ async function createTicket(
 
       await interaction.editReply({
         content:
-          `✅ Your ticket has been created: ${ticketChannel}`,
+          '✅ ' + translate(advancedSettings.locale, 'ticket.created.title', { ticketNumber: number }) +
+          ': ' + ticketChannel + '\\n' +
+          translate(advancedSettings.locale, 'ticket.created.description'),
       });
 
       /*
