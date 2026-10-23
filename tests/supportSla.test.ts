@@ -58,6 +58,7 @@ test('pending time is excluded from SLA elapsed time and pending clock is labell
 
 test('resolution SLA clock resets at the latest reopen and then pauses on pending', () => {
   const result = evaluateSlaTarget(input({
+    clockKind: 'resolution',
     currentStatus: 'open',
     startedAt: start,
     observedAt: '2026-10-23T12:00:00.000Z',
