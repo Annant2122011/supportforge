@@ -611,13 +611,15 @@ export async function recordTicketChannelDeleted(channel: TextChannel | ThreadCh
 /** Return a read-only, privacy-safe preview of what a recovery can reconstruct. */
 export async function getTicketRecoveryPreview(
   guildId: string,
-  ticketId: string,
+  ticketIdOrChannelId: string,
   source: RecoverySource,
 ): Promise<RecoveryPreviewSummary> {
-  const ticket = await getPersistedTicketById(ticketId);
+  let ticket = await getPersistedTicketById(ticketIdOrChannelId);
+  if (!ticket) ticket = await getPersistedTicket(ticketIdOrChannelId);
   if (!ticket || ticket.guildId !== guildId) {
     throw new Error('Ticket recovery record was not found in this server.');
   }
+  const ticketId = ticket.id;
 
   const pool = getPostgresPool();
   const eventResult = await pool.query<QueryResultRow & {
@@ -665,7 +667,7 @@ export async function getTicketRecoveryPreview(
         "COUNT(*) FILTER (WHERE archive_status='too_large')::int AS too_large_attachment_count, " +
         "COUNT(*) FILTER (WHERE archive_status='metadata_only')::int AS metadata_only_attachment_count, " +
         "COUNT(*) FILTER (WHERE archive_status='pending')::int AS pending_attachment_count, " +
-        "COUNT(*) FILTER (WHERE archive_status='failed' OR archive_error IS NOT NULL)::int AS failed_attachment_count " +
+        "COUNT(*) FILTER (WHERE archive_status='failed' OR (archive_error IS NOT NULL AND archive_status NOT IN ('too_large','metadata_only')))::int AS failed_attachment_count " +
         'FROM ticket_message_archive_attachments WHERE guild_id=$1 AND message_id IN ' +
         '(SELECT message_id FROM ticket_message_archive WHERE ticket_id=$2 AND guild_id=$1)',
       [guildId, ticketId],
