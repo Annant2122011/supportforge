@@ -33,6 +33,14 @@
 - Form restoration appends a new immutable version for each form present in the checkpoint; it never rewrites prior form versions or submissions. Forms created after the checkpoint are not deleted; if one conflicts with the restored active route, rollback fails closed and asks the administrator to resolve the newer mapping first. The selected checkpoint is retained alongside the automatic pre-restore checkpoint even when restoring the oldest of ten saved entries. A fresh preflight comparison rejects changes detected while the restore is being prepared. A rollback does not restore Discord channel names, original messages or role state. Ticket records, transcripts and other guilds are not intentionally modified.
 - The history document is bounded by checkpoint count; extremely large panel/config payloads still need stress testing before large multi-tenant scale.
 
+### Background-task and reconciliation health
+
+- System Health/Setup Doctor now includes tracked outcomes for the durable outbox worker, hourly retention sweep, inactivity sweep, daily audit summary/reconciliation, GitHub update monitor, active-form cache refresh, pending form-submission recovery, ticket-archive backfill, managed-resource startup reconciliation and developer-audit startup reconciliation.
+- A scheduled task with no observed run is a warning rather than a false green. One-time reconciliation that was intentionally skipped because a guild has no prior managed setup is informational. Repeated failures escalate after three consecutive failures; a later success clears the consecutive-failure state.
+- Findings contain only task name, elapsed duration, generic error class and a safe next step. Raw exception text, connection strings and credentials are not retained in operational task telemetry.
+- This telemetry is process-local and resets on restart. It is meant to spot stalled/failing workers during a running process, not to replace persistent alerting, external uptime monitoring, or the durable outbox records. Diagnostics remain read-only.
+- Added deterministic tests for unknown/stale/running task states, per-guild isolation, repeated failure escalation, recovery after success, intentional skips, and secret-safe error reporting.
+
 ### Existing Stage A–H capabilities reused instead of duplicated
 
 - The ticket-history control already queries the audit/event trail; the Stage 2 work reuses it instead of creating a second timeline store.
@@ -58,8 +66,8 @@ Outbox heuristics currently warn for failed jobs, more than 50 pending jobs, a p
 
 ## Required acceptance before Stage 2 can be called production-complete
 
-- [x] Prior Stage 2-only source passed [ResolvX CI #1961](https://github.com/Annant2122011/supportforge/actions/runs/39958534108): TypeScript build, 151 tests passed, 0 failed, 0 skipped, and PostgreSQL verification.
-- [ ] Re-run build, full tests and PostgreSQL verification on this H2-aware Stage 2 branch head.
+- [x] The pre-telemetry Stage 2 + H2 head passed [ResolvX CI #2002](https://github.com/Annant2122011/supportforge/actions/runs/39962985648): build and PostgreSQL verification succeeded, and the test step passed on that earlier head.
+- [ ] Re-run Build, the full test suite (including `tests/operationalTaskTelemetry.test.ts`), and PostgreSQL verification on the final telemetry-enabled Stage 2 head.
 - [ ] Test guild: missing/deleted panel, transcript, audit and Settings destinations show correct statuses without destructive action.
 - [ ] Verify paginated health output shows every finding across all pages, including a server with many departments and custom panels.
 - [ ] Test guild: deliberately remove bot permissions and verify clear warnings for each destination.
@@ -78,6 +86,7 @@ Outbox heuristics currently warn for failed jobs, more than 50 pending jobs, a p
 ## Known limits
 
 - This increment does not expose an HTTP health endpoint; diagnostics are available inside Discord to authorized administrators.
+- Background-task last-run tracking is process-local and resets on restart. It can detect failures/staleness during the current process but cannot prove that a task was healthy before the last restart.
 - A health command is a point-in-time probe, not continuous monitoring.
 - Outbox aggregate checks rely on the current PostgreSQL schema and guild_id column.
 - Diagnostics use the existing configuration-reader APIs; on a completely new guild, those APIs may initialize default JSON configuration documents. They do not repair or delete Discord resources.
