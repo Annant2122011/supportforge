@@ -341,6 +341,7 @@ export async function getCsatSummary(guildId: string, from: string, to: string):
 
 
 let slaScheduler: ReturnType<typeof setInterval> | null = null;
+const slaSweepCursorByGuild = new Map<string, string>();
 
 /**
  * Persist one alert per policy version, lifecycle cycle, target and severity.
@@ -376,11 +377,29 @@ export async function sweepSupportSlaAlerts(client: Client): Promise<number> {
   let alerts = 0;
   for (const guild of client.guilds.cache.values()) {
     await runTrackedOperationalTask('ticket-sla-monitor', guild.id, async () => {
-      const active = await getPostgresPool().query<QueryResultRow & { id: string }>(
+      const pool = getPostgresPool();
+      let cursor = slaSweepCursorByGuild.get(guild.id) ?? null;
+      let active = await pool.query<QueryResultRow & { id: string }>(
         "SELECT id FROM tickets WHERE guild_id=$1 AND deleted_at IS NULL " +
-          "AND status IN ('open','claimed','pending','reopened') ORDER BY created_at ASC LIMIT 250",
-        [guild.id],
+          "AND status IN ('open','claimed','pending','reopened') AND ($2::text IS NULL OR id > $2) ORDER BY id ASC LIMIT 250",
+        [guild.id, cursor],
       );
+      if (!active.rows.length && cursor !== null) {
+        cursor = null;
+        slaSweepCursorByGuild.delete(guild.id);
+        active = await pool.query<QueryResultRow & { id: string }>(
+          "SELECT id FROM tickets WHERE guild_id=$1 AND deleted_at IS NULL " +
+            "AND status IN ('open','claimed','pending','reopened') ORDER BY id ASC LIMIT 250",
+          [guild.id],
+        );
+      }
+      if (!active.rows.length) {
+        slaSweepCursorByGuild.delete(guild.id);
+        return;
+      }
+      const lastId = active.rows[active.rows.length - 1]?.id;
+      if (active.rows.length === 250 && lastId) slaSweepCursorByGuild.set(guild.id, lastId);
+      else slaSweepCursorByGuild.delete(guild.id);
       const config = await getGuildConfig(guild.id);
       for (const row of active.rows) {
         try {
