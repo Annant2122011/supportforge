@@ -2046,7 +2046,7 @@ export async function handleSettingsInteraction(
           '**Snapshot:** `' + snapshot.id + '`\n' +
           '**Saved:** <t:' + Math.floor(Date.parse(snapshot.createdAt) / 1000) + ':F>\n' +
           '**Reason:** ' + snapshot.reason + '\n' +
-          '**Departments:** ' + snapshot.departmentCount + ' · **Panels:** ' + snapshot.panelCount + ' · **Tags:** ' + snapshot.tagCount +
+          '**Departments:** ' + snapshot.departmentCount + ' · **Panels:** ' + snapshot.panelCount + ' · **Tags:** ' + snapshot.tagCount + ' · **Forms:** ' + (snapshot.formCount ?? 0) + ' · **Support-hours policies:** ' + (snapshot.supportHoursPolicyCount ?? 0) +
           '\n\nRestoring replaces this server’s guild configuration and advanced settings. It does not intentionally delete ticket records, messages, transcripts or audit history. A checkpoint of the current configuration is saved first. Review the values, then confirm in the next step.'
         )],
       components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -2252,7 +2252,7 @@ export async function handleSettingsInteraction(
           .setPlaceholder('Choose a checkpoint to review')
           .addOptions(snapshots.slice(0, 10).map((snapshot) => ({
             label: (snapshot.reason || 'Configuration checkpoint').slice(0, 100),
-            description: (snapshot.id + ' · ' + snapshot.departmentCount + ' departments · ' + snapshot.panelCount + ' panels').slice(0, 100),
+            description: (snapshot.id + ' · ' + snapshot.departmentCount + ' departments · ' + snapshot.panelCount + ' panels · ' + (snapshot.formCount ?? 0) + ' forms').slice(0, 100),
             value: snapshot.id,
           })));
         await interaction.editReply({
@@ -2340,7 +2340,7 @@ export async function handleSettingsInteraction(
             .setDescription(
               '**Restored:** `' + result.restored.id + '`\n' +
               '**Pre-restore checkpoint:** `' + result.checkpoint.id + '`\n\n' +
-              'This operation changed configuration only. Ticket records, messages, transcripts and other guilds were not intentionally changed.' +
+              'Restored guild/advanced settings, support-hours policies and current schemas for forms present in the checkpoint using new immutable versions. Existing submissions, historical form versions and forms created after the checkpoint were not deleted.' +
               (failures.length ? '\n\n⚠️ Refresh failed for: ' + failures.join(', ') + '. Use the Settings Refresh action after checking permissions.' : ''),
             )],
         });
