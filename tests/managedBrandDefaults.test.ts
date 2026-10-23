@@ -5,6 +5,7 @@ import { normalizeManagedBrandDefault } from '../src/core/domain/managedBrandDef
 import { normalizeDiscordSnowflakeIds } from '../src/core/domain/discordSnowflake';
 import {
   normalizeLegacyManagedPanelFooters,
+  normalizePersistedPanelRoleRestrictions,
   type GuildConfig,
 } from '../src/services/configService';
 import {
@@ -198,4 +199,30 @@ test('panel migration keeps valid panel and button role restrictions', () => {
   assert.deepEqual(panel.buttons[0]?.allowedRoleIds, [roleB, roleA]);
   assert.deepEqual(panel.publishedConfig?.allowedRoleIds, [roleA]);
   assert.deepEqual(panel.publishedConfig?.buttons[0]?.allowedRoleIds, [roleB]);
+});
+
+
+test('persisted custom-panel role restrictions are normalized in drafts and published snapshots', () => {
+  const validA = '12345678901234567';
+  const validB = '987654321098765432';
+  const normalized = normalizePersistedPanelRoleRestrictions({
+    allowedRoleIds: [validA, 'malformed', validA],
+    buttons: [{ label: 'Billing', allowedRoleIds: [validB, 'too-short'] }],
+    publishedConfig: {
+      allowedRoleIds: [validA, 'bad-published-id'],
+      buttons: [{ label: 'Published Billing', allowedRoleIds: [validB, 'bad-published-button-id'] }],
+    },
+  }) as {
+    allowedRoleIds: string[];
+    buttons: Array<{ allowedRoleIds: string[] }>;
+    publishedConfig: {
+      allowedRoleIds: string[];
+      buttons: Array<{ allowedRoleIds: string[] }>;
+    };
+  };
+
+  assert.deepEqual(normalized.allowedRoleIds, [validA]);
+  assert.deepEqual(normalized.buttons[0]?.allowedRoleIds, [validB]);
+  assert.deepEqual(normalized.publishedConfig.allowedRoleIds, [validA]);
+  assert.deepEqual(normalized.publishedConfig.buttons[0]?.allowedRoleIds, [validB]);
 });
