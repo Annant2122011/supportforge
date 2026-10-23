@@ -58,7 +58,7 @@ function normalizeReason(reason: string): string {
 }
 
 export function normalizeConfigurationHistoryDocument(stored: unknown): ConfigurationHistoryDocument {
-  if (stored === undefined || stored === null) return { version: HISTORY_VERSION, guilds: {} };
+  if (stored === undefined) return { version: HISTORY_VERSION, guilds: {} };
   if (!stored || typeof stored !== 'object' || Array.isArray(stored) || !('guilds' in stored)) {
     throw new Error('Configuration history document is malformed. Existing history was not overwritten.');
   }
