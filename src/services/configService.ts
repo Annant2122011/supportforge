@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { getJsonDocument, setJsonDocument } from './jsonDocumentPersistenceService';
+import { normalizeManagedBrandDefault } from '../core/domain/managedBrandDefaults';
 
 export type SupportForgeTier = 'free' | 'premium-demo' | 'pro-demo';
 
@@ -121,19 +122,69 @@ const DEFAULT_CONFIG: GuildConfig = {
 let state: ConfigFile | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 
-function normalizeBrandTextDeep<T>(value: T): T {
-  if (typeof value === 'string') {
-    return value.replace(/\b(?:SupportForge|ResolveX|SUPPORTFORGE)\b/g, 'ResolvX') as unknown as T;
-  }
-  if (Array.isArray(value)) return value.map((entry) => normalizeBrandTextDeep(entry)) as unknown as T;
-  if (value && typeof value === 'object') {
-    const normalized: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-      normalized[key] = normalizeBrandTextDeep(entry);
-    }
-    return normalized as unknown as T;
-  }
-  return value;
+const CANONICAL_CUSTOM_PANEL_FOOTER = 'ResolvX • Customer Support';
+
+/**
+ * Upgrade only a known application-owned default footer. Every other panel
+ * field (including names, descriptions, button labels and confirmation copy)
+ * is administrator-authored data and must survive branding changes verbatim.
+ */
+function normalizeLegacyManagedPanelFooters(
+  guilds: Record<string, GuildConfig>,
+): Record<string, GuildConfig> {
+  let changedAnyGuild = false;
+  const normalizedGuilds = Object.fromEntries(
+    Object.entries(guilds).map(([guildId, guild]) => {
+      if (!guild || typeof guild !== 'object' || Array.isArray(guild)) {
+        return [guildId, guild];
+      }
+      const panels = guild.customPanels;
+      if (!panels || typeof panels !== 'object' || Array.isArray(panels)) {
+        return [guildId, guild];
+      }
+
+      let changedGuild = false;
+      const normalizedPanels = Object.fromEntries(
+        Object.entries(panels).map(([panelId, panel]) => {
+          if (!panel || typeof panel !== 'object' || Array.isArray(panel)) {
+            return [panelId, panel];
+          }
+
+          let normalizedPanel = panel;
+          const footer = normalizeManagedBrandDefault(
+            panel.footer,
+            CANONICAL_CUSTOM_PANEL_FOOTER,
+          );
+          if (typeof panel.footer === 'string' && footer !== panel.footer) {
+            normalizedPanel = { ...normalizedPanel, footer: footer as string };
+          }
+
+          const published = panel.publishedConfig;
+          if (published && typeof published === 'object' && !Array.isArray(published)) {
+            const publishedFooter = normalizeManagedBrandDefault(
+              published.footer,
+              CANONICAL_CUSTOM_PANEL_FOOTER,
+            );
+            if (typeof published.footer === 'string' && publishedFooter !== published.footer) {
+              normalizedPanel = {
+                ...normalizedPanel,
+                publishedConfig: { ...published, footer: publishedFooter as string },
+              };
+            }
+          }
+
+          if (normalizedPanel !== panel) changedGuild = true;
+          return [panelId, normalizedPanel];
+        }),
+      );
+
+      if (!changedGuild) return [guildId, guild];
+      changedAnyGuild = true;
+      return [guildId, { ...guild, customPanels: normalizedPanels }];
+    }),
+  );
+
+  return changedAnyGuild ? normalizedGuilds as Record<string, GuildConfig> : guilds;
 }
 
 function cloneDefaultConfig(): GuildConfig {
@@ -162,12 +213,12 @@ async function loadState(): Promise<ConfigFile> {
         'ResolvX database configuration document is malformed. Existing data was not overwritten.',
       );
     }
-    const normalizedGuilds = normalizeBrandTextDeep(persisted.guilds) as Record<string, GuildConfig>;
+    const normalizedGuilds = normalizeLegacyManagedPanelFooters(persisted.guilds as Record<string, GuildConfig>);
     state = {
       version: 1,
       guilds: normalizedGuilds,
     };
-    // Migrate legacy visible brand text in saved panels/configuration without renaming IDs or keys.
+    // Migrate exact built-in footer defaults only; preserve custom server copy and stable IDs.
     if (JSON.stringify(persisted.guilds) !== JSON.stringify(normalizedGuilds)) await persistState();
     return state;
   }
