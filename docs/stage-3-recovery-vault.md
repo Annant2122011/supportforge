@@ -71,3 +71,10 @@ The Stage 3 implementation head `aef0b1501dccf52ac55aff041a033a23fd7ddcf0` passe
 6. Expand recovery tests to large histories, unavailable channels/members/attachments, restart between each persisted step and concurrent restore attempts.
 
 **Release rule:** source changes and green CI are not a substitute for non-production Discord acceptance or a successful isolated Neon restore drill. No feature should be marked production-accepted until the evidence is recorded.
+
+
+## Latest Stage 3 verification — 2026-10-23
+
+The current Stage 3 PR head `ba16f7a80ab3ea1dd048ac204558612c905ae6d5` passed [ResolvX CI #2234](https://github.com/Annant2122011/supportforge/actions/runs/40007138117): TypeScript build passed, **186/186 tests passed**, zero skipped, and disposable PostgreSQL schema/integrity verification passed, including SLA policy, CSAT response and SLA alert tables.
+
+Follow-up reliability hardening included a rotating bounded SLA scan cursor (so a guild with more than one batch is not permanently stuck on the first 250 IDs) and deactivation rather than physical deletion of SLA policies, preserving alert history. This still does not prove real-guild SLA timing/load behavior or an actual Neon backup/restore drill.
