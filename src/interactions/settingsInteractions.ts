@@ -2305,11 +2305,12 @@ export async function handleSettingsInteraction(
             ', tags ' + snapshot.tagCount + ' → ' + review.currentCounts.tagCount +
             ', forms ' + (snapshot.formCount ?? 0) + ' → ' + review.currentCounts.formCount +
             ', support-hours ' + (snapshot.supportHoursPolicyCount ?? 0) + ' → ' + review.currentCounts.supportHoursPolicyCount + '.\n\n' +
+            '**Current configuration fingerprint:** `' + review.currentFingerprint + '`. If settings change after this preview, confirmation will be rejected and you must review again.\n\n' +
             'ResolveX will first save a checkpoint of current settings, then restore the saved guild configuration and advanced settings. This does not restore old Discord channel names/messages or change ticket/transcript records.\n\n' +
             'Review this preview, then confirm. The restore is restricted to this server and is reversible through the automatic checkpoint.'          )],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
           new ButtonBuilder()
-            .setCustomId('sf:settings:diagnostics:restore-confirm:' + snapshot.id + ':' + interaction.user.id)
+            .setCustomId('sf:settings:diagnostics:restore-confirm:' + snapshot.id + ':' + interaction.user.id + ':' + review.currentFingerprint)
             .setLabel('Confirm Restore')
             .setEmoji('⚠️')
             .setStyle(ButtonStyle.Danger),
@@ -2327,6 +2328,11 @@ export async function handleSettingsInteraction(
       const tail = id.slice('sf:settings:diagnostics:restore-confirm:'.length).split(':');
       const snapshotId = tail[0] ?? '';
       const actorId = tail[1] ?? '';
+      const expectedCurrentFingerprint = tail[2] ?? '';
+      if (!/^[a-f0-9]{16}$/i.test(expectedCurrentFingerprint)) {
+        await interaction.reply({ content: 'This restore confirmation is missing a valid preview fingerprint. Re-open Configuration History and review the snapshot again.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
       if (actorId !== interaction.user.id) {
         await interaction.reply({ content: 'This confirmation belongs to another administrator. Return to Settings and initiate your own restore.', flags: MessageFlags.Ephemeral });
         return true;
@@ -2338,6 +2344,7 @@ export async function handleSettingsInteraction(
           snapshotId,
           'RESTORE ' + snapshotId,
           { id: interaction.user.id, name: interaction.user.tag },
+          expectedCurrentFingerprint,
         );
         const config = await getGuildConfig(guild.id).catch(() => null);
         if (config?.supportCategoryId) {
