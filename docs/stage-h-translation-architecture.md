@@ -72,6 +72,7 @@ The guild setting is a simple supported-locale tag and defaults to en-US. Existi
 
 ### H2
 - [x] Every locale can be selected through both Settings dashboard buttons and slash commands.
-- [x] Initial translated surfaces preserve existing command IDs and interaction routing.
-- [x] Tests cover interpolation, Discord component limits, locale fallback, and button/slash parity for this increment.
-- [ ] Complete localization of remaining high-traffic surfaces and non-production Discord guild acceptance for each supported locale.
+- [x] Ticket intake/creation, support-hours restriction, lifecycle outcomes/announcements, close confirmation, priority confirmation, and common expired/invalid form responses use the selected guild locale.
+- [x] Equivalent button and slash-command lifecycle confirmations reuse the same localized status/priority vocabulary.
+- [x] Automated tests cover command/button capability parity, localized status/priority/form copy, interpolation and fallback.
+- [ ] Finish localization of the remaining Settings pages, panel previews and selected report surfaces; then complete non-production Discord guild acceptance for each supported locale.
