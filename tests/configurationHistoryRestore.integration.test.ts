@@ -54,6 +54,37 @@ interface StoredHistory {
 }
 
 test(
+  'configuration snapshots remain newest-first and isolated by guild in PostgreSQL',
+  { skip: !postgresIntegrationEnabled },
+  async () => {
+    await migratePostgres();
+    const nonce = BigInt(Date.now()) * 100_000n;
+    const guildA = String(nonce);
+    const guildB = String(nonce + 1n);
+    const actor = { id: '223456789012345678', name: 'CI snapshot isolation test' };
+
+    try {
+      const first = await createConfigurationSnapshot(guildA, actor, 'first guild A checkpoint');
+      await updateGuildConfig(guildA, (config) => {
+        config.theme = 'ocean';
+      });
+      const second = await createConfigurationSnapshot(guildA, actor, 'second guild A checkpoint');
+      const otherGuild = await createConfigurationSnapshot(guildB, actor, 'separate guild B checkpoint');
+
+      const listA = await listConfigurationSnapshots(guildA);
+      const listB = await listConfigurationSnapshots(guildB);
+
+      assert.deepEqual(listA.map((item) => item.id), [second.id, first.id]);
+      assert.deepEqual(listB.map((item) => item.id), [otherGuild.id]);
+      assert.ok(listA.every((item) => item.guildId === guildA));
+      assert.ok(listB.every((item) => item.guildId === guildB));
+    } finally {
+      await closePostgresDatabase();
+    }
+  },
+);
+
+test(
   'configuration restore compensates prior writes when a later service rejects the snapshot',
   { skip: !postgresIntegrationEnabled },
   async () => {
