@@ -13,6 +13,7 @@ import { CURRENT_POSTGRES_MIGRATION_ID } from '../core/persistence/postgresMigra
 import { listTicketForms, type TicketFormVersion } from './ticketFormService';
 import { getSupportHoursPolicies, type SupportHoursPolicy } from './supportHoursService';
 import { getDiscordRateLimitSummary } from './discordRateLimitTelemetry';
+import { getOperationalTaskFindings } from './operationalTaskTelemetry';
 
 export type DiagnosticSeverity = 'ok' | 'info' | 'warning' | 'error';
 
@@ -179,7 +180,9 @@ export async function runSystemDiagnostics(
     remedy: 'Check the process and gateway connection; a live interaction alone does not prove database or channel readiness.',
   });
 
-const rateLimitSummary = getDiscordRateLimitSummary();
+  findings.push(...getOperationalTaskFindings(guild.id));
+
+  const rateLimitSummary = getDiscordRateLimitSummary();
   const rateLimitSeverity: DiagnosticSeverity =
     rateLimitSummary.globalEventCount >= 3 || rateLimitSummary.eventCount >= 20
       ? 'error'
