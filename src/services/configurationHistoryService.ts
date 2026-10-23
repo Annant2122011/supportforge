@@ -11,6 +11,7 @@ import {
   updateAdvancedSettings,
   type AdvancedGuildSettings,
 } from './advancedSettingsService';
+import { getSupportHoursPolicies, replaceSupportHoursPolicies, type SupportHoursPolicy } from './supportHoursService';
 
 const DOCUMENT_KEY = 'configuration-history';
 const HISTORY_VERSION = 1;
@@ -32,6 +33,7 @@ interface ConfigurationSnapshot extends ConfigurationSnapshotMetadata {
   payload: {
     guildConfig: GuildConfig;
     advancedSettings: AdvancedGuildSettings;
+    supportHours: SupportHoursPolicy[];
   };
 }
 
@@ -65,7 +67,7 @@ async function readDocument(): Promise<ConfigurationHistoryDocument> {
           typeof item.id === 'string' &&
           item.guildId === guildId &&
           item.payload && typeof item.payload === 'object' &&
-          item.payload.guildConfig && item.payload.advancedSettings),
+          item.payload.guildConfig && item.payload.advancedSettings && Array.isArray(item.payload.supportHours)),
       ).slice(0, MAX_SNAPSHOTS_PER_GUILD);
     }
   }
@@ -99,11 +101,12 @@ function countTags(config: GuildConfig): number {
 }
 
 async function capturePayload(guildId: string): Promise<ConfigurationSnapshot['payload']> {
-  const [guildConfig, advancedSettings] = await Promise.all([
+  const [guildConfig, advancedSettings, supportHours] = await Promise.all([
     getGuildConfig(guildId),
     getAdvancedSettings(guildId),
+    getSupportHoursPolicies(guildId),
   ]);
-  return cloneJson({ guildConfig, advancedSettings });
+  return cloneJson({ guildConfig, advancedSettings, supportHours });
 }
 
 async function savePayloadSnapshot(
@@ -163,7 +166,7 @@ export async function getConfigurationSnapshot(
 }
 
 /**
- * Restore only the requesting guild's two configuration records. Tickets,
+ * Restore only the requesting guild's configuration documents and support-hours policies. Tickets,
  * transcripts, audit events, message archives and other guilds are not changed.
  * A pre-restore checkpoint is saved first; partial failures attempt compensation.
  */
@@ -200,6 +203,7 @@ export async function restoreConfigurationSnapshot(
     await updateAdvancedSettings(guildId, (current) => {
       Object.assign(current, cloneJson(payload.advancedSettings));
     });
+    await replaceSupportHoursPolicies(guildId, cloneJson(payload.supportHours ?? []), actor.id);
   };
 
   try {
