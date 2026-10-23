@@ -23,6 +23,35 @@ function postgresUrl(value: string, variable: string): URL {
   return url;
 }
 
+
+function postgresClientEnvironment(url: URL): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = { ...process.env };
+  const database = decodeURIComponent(url.pathname.replace(/^\\//, ''));
+  if (!database) throw new Error('PostgreSQL connection URL must include a database name.');
+  environment.PGHOST = url.hostname;
+  environment.PGPORT = url.port || '5432';
+  environment.PGDATABASE = database;
+  if (url.username) environment.PGUSER = decodeURIComponent(url.username);
+  if (url.password) environment.PGPASSWORD = decodeURIComponent(url.password);
+  const queryToEnvironment: Record<string, string> = {
+    sslmode: 'PGSSLMODE',
+    sslrootcert: 'PGSSLROOTCERT',
+    sslcert: 'PGSSLCERT',
+    sslkey: 'PGSSLKEY',
+    application_name: 'PGAPPNAME',
+    connect_timeout: 'PGCONNECT_TIMEOUT',
+    target_session_attrs: 'PGTARGETSESSIONATTRS',
+    channel_binding: 'PGCHANNELBINDING',
+  };
+  for (const [queryName, environmentName] of Object.entries(queryToEnvironment)) {
+    const value = url.searchParams.get(queryName);
+    if (value) environment[environmentName] = value;
+  }
+  if (!environment.PGSSLMODE) environment.PGSSLMODE = 'verify-full';
+  if (environment.PGSSLMODE === 'require') environment.PGSSLMODE = 'verify-full';
+  return environment;
+}
+
 async function sha256File(path: string): Promise<string> {
   const hash = createHash('sha256');
   await new Promise<void>((resolvePromise, reject) => {
@@ -59,11 +88,11 @@ async function main(): Promise<void> {
   if (!isSafeBackupFilename(filename)) throw new Error('Generated backup filename failed validation.');
   const finalPath = join(directory, filename);
   const temporaryPath = join(directory, '.' + filename + '.partial');
-  const env: NodeJS.ProcessEnv = { ...process.env };
+  const env = postgresClientEnvironment(source);
 
   try {
     // A custom-format dump is compressed by pg_dump and can be inspected by pg_restore.
-    await runTool('pg_dump', ['--format=custom', '--no-owner', '--no-acl', '--file', temporaryPath, '--dbname', source.toString()], env);
+    await runTool('pg_dump', ['--format=custom', '--no-owner', '--no-acl', '--file', temporaryPath, '--dbname', env.PGDATABASE!], env);
     const backupStat = await stat(temporaryPath);
     if (!backupStat.isFile() || backupStat.size <= 0) throw new Error('pg_dump produced an empty backup; no manifest was written.');
     await runTool('pg_restore', ['--list', temporaryPath], env);
