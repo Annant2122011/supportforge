@@ -273,7 +273,7 @@ let writeQueue: Promise<void> = Promise.resolve();
  * tags, descriptions, dashboard button labels and custom copy are immutable
  * user data for this migration, even when they contain a historical brand.
  */
-function normalizeLegacyManagedSettingsDefaults(
+export function normalizeLegacyManagedSettingsDefaults(
   guilds: Record<string, AdvancedGuildSettings>,
 ): Record<string, AdvancedGuildSettings> {
   let changedAnyGuild = false;
