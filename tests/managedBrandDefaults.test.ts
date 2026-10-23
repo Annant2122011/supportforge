@@ -7,6 +7,7 @@ import {
   type GuildConfig,
 } from '../src/services/configService';
 import {
+  buildSettingsSummary,
   normalizeLegacyManagedSettingsDefaults,
   type AdvancedGuildSettings,
 } from '../src/services/advancedSettingsService';
@@ -131,4 +132,24 @@ test('advanced settings migration updates exact managed defaults but preserves c
   assert.equal(migrated.guild!.customTags.custom!.name, 'SupportForge');
   assert.equal(migrated.guild!.customTags.custom!.description, 'SupportForge tag description');
   assert.equal(original.guild!.appearance.panelTitle, '🎫 SupportForge Support Center');
+});
+
+
+test('settings summary describes a disabled retention timer accurately', () => {
+  const settings = {
+    inactivity: { enabled: false, idleHours: 72, graceHours: 24 },
+    panelActivity: { enabled: true, visualLineBudget: 18, messageBudget: 12 },
+    ticketDefaults: { priority: 'normal', maxClaimedModerators: 2 },
+    reports: { enabled: true, categories: {}, flagRules: {} },
+    priorityRoles: {},
+    customTags: {},
+    retention: { closedDays: 0, archiveDays: 0 },
+    statusCategories: { claimedCategoryId: null, pendingCategoryId: null },
+  } as unknown as AdvancedGuildSettings;
+
+  const summary = buildSettingsSummary(settings);
+  assert.ok(summary.includes('• Closed: No timer (365-day maximum)'));
+  assert.ok(summary.includes('• Archived: No timer (365-day maximum)'));
+  assert.equal(summary.includes('Unlimited'), false);
+  assert.equal(summary.includes('forever'), false);
 });
