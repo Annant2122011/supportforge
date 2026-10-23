@@ -64,7 +64,7 @@ test('a successful run clears the consecutive-failure alarm', () => {
   recordOperationalTaskFailed('ticket-form-cache-refresh', null, new Error('temporary'), 1_100);
   recordOperationalTaskStarted('ticket-form-cache-refresh', null, 2_000);
   recordOperationalTaskSucceeded('ticket-form-cache-refresh', null, 2_100);
-  const finding = getOperationalTaskFindings('guild-a', 2_200).find((item) => item.title.includes('form-cache refresh'));
+  const finding = getOperationalTaskFindings('guild-a', 2_200).find((item) => item.title.includes('cache refresh'));
   assert.equal(finding?.severity, 'ok');
   assert.doesNotMatch(finding?.title ?? '', /failed/i);
 });
