@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { getJsonDocument, setJsonDocument } from './jsonDocumentPersistenceService';
 import { normalizeManagedBrandDefault } from '../core/domain/managedBrandDefaults';
+import { normalizeDiscordSnowflakeIds } from '../core/domain/discordSnowflake';
 
 export type SupportForgeTier = 'free' | 'premium-demo' | 'pro-demo';
 
@@ -275,9 +276,7 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
           ? item.id
           : 'legacy_' + panelId.slice(0, 6) + '_' + (index + 1);
         const targetType = item.targetType === 'form' && typeof item.formId === 'string' ? 'form' : 'department';
-        const roleIds = Array.isArray(item.allowedRoleIds)
-          ? item.allowedRoleIds.filter((id): id is string => typeof id === 'string' && /^\\d{17,20}$/.test(id)).slice(0, 25)
-          : [];
+        const roleIds = normalizeDiscordSnowflakeIds(item.allowedRoleIds);
         return {
           id: stableId,
           targetType,
@@ -294,9 +293,7 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
           allowedRoleIds: [...new Set(roleIds)],
         } satisfies CustomSupportPanelButton;
       });
-    const panelRoleIds = Array.isArray(candidate.allowedRoleIds)
-      ? candidate.allowedRoleIds.filter((id): id is string => typeof id === 'string' && /^\\d{17,20}$/.test(id)).slice(0, 25)
-      : [];
+    const panelRoleIds = normalizeDiscordSnowflakeIds(candidate.allowedRoleIds);
     const iconUrl = typeof candidate.iconUrl === 'string' ? candidate.iconUrl : null;
     const publishedConfig = candidate.publishedConfig && typeof candidate.publishedConfig === 'object'
       ? candidate.publishedConfig as CustomSupportPanel['publishedConfig']
