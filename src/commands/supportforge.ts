@@ -1632,7 +1632,8 @@ export const data =
             .setName('restore-snapshot')
             .setDescription('Restore a saved configuration checkpoint after typed confirmation')
             .addStringOption((option) => option.setName('snapshot-id').setDescription('Snapshot ID from diagnostics snapshots').setRequired(true).setMaxLength(40))
-            .addStringOption((option) => option.setName('confirmation').setDescription('Type RESTORE followed by the exact snapshot ID').setRequired(true).setMaxLength(60)),
+            .addStringOption((option) => option.setName('confirmation').setDescription('Type RESTORE followed by the exact snapshot ID').setRequired(true).setMaxLength(60))
+            .addStringOption((option) => option.setName('expected-current-fingerprint').setDescription('Current fingerprint from preview-snapshot; blocks stale rollback').setRequired(true).setMinLength(16).setMaxLength(16)),
         ),
     )
     .addSubcommandGroup((group) =>
@@ -1930,6 +1931,8 @@ export async function execute(
               '**Reason:** ' + saved.reason + '\n\n' +
               '**Detected differences**\n' + changedSections + '\n\n' +
               '**Saved counts → current counts**\n' +
+              '**Current fingerprint:** \`' + review.currentFingerprint + '\`\n' +
+              'Copy this exact fingerprint into the restore-snapshot command. A mismatch means settings changed and restoration is refused.\n' +
               'Departments: ' + saved.departmentCount + ' → ' + current.departmentCount + '\n' +
               'Panels: ' + saved.panelCount + ' → ' + current.panelCount + '\n' +
               'Tags: ' + saved.tagCount + ' → ' + current.tagCount + '\n' +
@@ -1945,11 +1948,13 @@ export async function execute(
       if (subcommand === 'restore-snapshot') {
         const snapshotId = interaction.options.getString('snapshot-id', true).trim();
         const confirmation = interaction.options.getString('confirmation', true).trim();
+        const expectedCurrentFingerprint = interaction.options.getString('expected-current-fingerprint', true).trim();
         const result = await restoreConfigurationSnapshot(
           guild.id,
           snapshotId,
           confirmation,
           { id: interaction.user.id, name: interaction.user.tag },
+          expectedCurrentFingerprint,
         );
         const config = await getGuildConfig(guild.id);
         if (config.supportCategoryId) {
