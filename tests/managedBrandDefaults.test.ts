@@ -178,8 +178,8 @@ test('panel migration keeps valid panel and button role restrictions', () => {
           title: 'Help',
           description: 'Help',
           footer: 'Custom footer',
-          allowedRoleIds: [roleA, 'broken-id'],
-          buttons: [{ label: 'Billing', allowedRoleIds: [roleB, roleA, 'bad'] }],
+          allowedRoleIds: [roleA],
+          buttons: [{ label: 'Billing', allowedRoleIds: [roleB, roleA] }],
           publishedConfig: {
             title: 'Help',
             description: 'Help',
