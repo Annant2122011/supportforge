@@ -64,7 +64,7 @@ import { performFactoryReset } from '../services/factoryResetService';
 import { addUseCasePreset, USE_CASE_PRESETS } from '../services/useCasePresetService';
 import { enforcePriorityRoleHierarchy } from '../services/priorityRoleService';
 import { UI_THEMES, getThemeColor, getThemeDefinition, isGuildTheme } from '../services/uiThemeService';
-import { buildSystemDiagnosticsEmbed, runSystemDiagnostics } from '../services/systemDiagnosticsService';
+import { buildSystemDiagnosticsEmbed, diagnosticsPageCount, runSystemDiagnostics } from '../services/systemDiagnosticsService';
 import {
   createConfigurationSnapshot,
   getConfigurationSnapshot,
@@ -2157,44 +2157,71 @@ export async function handleSettingsInteraction(
     if (
       id === 'sf:settings:diagnostics' ||
       id === 'sf:settings:diagnostics:refresh' ||
-      id === 'sf:settings:diagnostics:setup-doctor'
+      id === 'sf:settings:diagnostics:setup-doctor' ||
+      id.startsWith('sf:settings:diagnostics:page:')
     ) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
-        const mode = id.endsWith(':setup-doctor') ? 'setup-doctor' : 'health';
+        const pageMatch = id.match(/^sf:settings:diagnostics:page:(health|setup-doctor):([1-9][0-9]{0,2})$/);
+        const mode: 'health' | 'setup-doctor' = pageMatch
+          ? pageMatch[1] as 'health' | 'setup-doctor'
+          : id === 'sf:settings:diagnostics:setup-doctor' ? 'setup-doctor' : 'health';
+        const requestedPage = pageMatch ? Number(pageMatch[2]) : 1;
         const report = await runSystemDiagnostics(interaction.guild!, mode);
         const config = await getGuildConfig(interaction.guild!.id).catch(() => null);
+        const themeColor = getThemeColor(config?.theme ?? 'midnight');
+        const pageCount = diagnosticsPageCount(report);
+        const page = Math.min(pageCount, Math.max(1, requestedPage));
+        const components: Array<ActionRowBuilder<ButtonBuilder>> = [];
+
+        if (pageCount > 1) {
+          components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setCustomId('sf:settings:diagnostics:page:' + mode + ':' + Math.max(1, page - 1))
+              .setLabel('Previous Checks')
+              .setEmoji('◀️')
+              .setStyle(ButtonStyle.Secondary)
+              .setDisabled(page <= 1),
+            new ButtonBuilder()
+              .setCustomId('sf:settings:diagnostics:page:' + mode + ':' + Math.min(pageCount, page + 1))
+              .setLabel('Next Checks')
+              .setEmoji('▶️')
+              .setStyle(ButtonStyle.Secondary)
+              .setDisabled(page >= pageCount),
+            new ButtonBuilder()
+              .setCustomId('sf:settings:diagnostics:refresh')
+              .setLabel('Refresh All Checks')
+              .setEmoji('🔄')
+              .setStyle(ButtonStyle.Primary),
+          ));
+        }
+
+        components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId('sf:settings:diagnostics:setup-doctor')
+            .setLabel('Setup Doctor')
+            .setEmoji('🩺')
+            .setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder()
+            .setCustomId('sf:settings:diagnostics:snapshot')
+            .setLabel('Save Snapshot')
+            .setEmoji('📸')
+            .setStyle(ButtonStyle.Success),
+          new ButtonBuilder()
+            .setCustomId('sf:settings:diagnostics:snapshots')
+            .setLabel('View Snapshots')
+            .setEmoji('🗂️')
+            .setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder()
+            .setCustomId('sf:settings:repair:back')
+            .setLabel('Repair System')
+            .setEmoji('↩️')
+            .setStyle(ButtonStyle.Secondary),
+        ));
+
         await interaction.editReply({
-          embeds: [buildSystemDiagnosticsEmbed(report, getThemeColor(config?.theme ?? 'midnight'))],
-          components: [
-            new ActionRowBuilder<ButtonBuilder>().addComponents(
-              new ButtonBuilder()
-                .setCustomId('sf:settings:diagnostics:refresh')
-                .setLabel('Refresh Checks')
-                .setEmoji('🔄')
-                .setStyle(ButtonStyle.Primary),
-              new ButtonBuilder()
-                .setCustomId('sf:settings:diagnostics:setup-doctor')
-                .setLabel('Setup Doctor')
-                .setEmoji('🩺')
-                .setStyle(ButtonStyle.Secondary),
-              new ButtonBuilder()
-                .setCustomId('sf:settings:diagnostics:snapshot')
-                .setLabel('Save Snapshot')
-                .setEmoji('📸')
-                .setStyle(ButtonStyle.Success),
-              new ButtonBuilder()
-                .setCustomId('sf:settings:diagnostics:snapshots')
-                .setLabel('View Snapshots')
-                .setEmoji('🗂️')
-                .setStyle(ButtonStyle.Secondary),
-              new ButtonBuilder()
-                .setCustomId('sf:settings:repair:back')
-                .setLabel('Repair System')
-                .setEmoji('↩️')
-                .setStyle(ButtonStyle.Secondary),
-            ),
-          ],
+          embeds: [buildSystemDiagnosticsEmbed(report, themeColor, page)],
+          components,
         });
       } catch (error) {
         console.error('System diagnostics failed:', error);
