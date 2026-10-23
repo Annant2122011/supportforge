@@ -1849,7 +1849,7 @@ async function showRecoveryCandidateDetail(
     return;
   }
 
-  let preview;
+  let preview: Awaited<ReturnType<typeof getTicketRecoveryPreview>>;
   try {
     preview = await getTicketRecoveryPreview(guild.id, ticketId, source);
   } catch (error) {
@@ -1899,11 +1899,16 @@ async function showRecoveryCandidateDetail(
     ? 'This channel was deleted outside the ResolvX ticket Delete button. Native deletion is recorded separately and does not trigger the accidental-deletion question.'
     : item.accidentalAnswer === 'yes'
       ? 'Review answer: **Yes, it was deleted by mistake.** This ticket is eligible for restoration through this review workflow.'
-      : 'Was this ticket deleted by mistake?\\n\\nOriginal channel ID: ' + item.originalChannelId +
-        '\\nTicket creator ID: ' + item.ownerId +
-        '\\nArchived messages: ' + item.messageCount +
-        '\\n\\nYour answer will be saved in Neon and logged in both the ticket audit stream and developer/system audit stream.';
-  const text = context + '\\n\\n' + previewLines;
+      : [
+          'Was this ticket deleted by mistake?',
+          '',
+          'Original channel ID: ' + item.originalChannelId,
+          'Ticket creator ID: ' + item.ownerId,
+          'Archived messages: ' + item.messageCount,
+          '',
+          'Your answer will be saved in Neon and logged in both the ticket audit stream and developer/system audit stream.',
+        ].join('\\n');
+  const text = [context, '', ...previewLines].join('\\n');
   const embed = await recoveryEmbed(guild, (source === 'discord_native' ? '♻️ Restore Channel' : '🛡️ Ticket Deletion Review') + ' • Ticket #' + item.ticketNumber, text);
   await interaction.editReply({ content: '', embeds: [embed], components: rows });
 }
