@@ -80,12 +80,12 @@ async function prepare(interaction: ChatInputCommandInteraction): Promise<{ acce
   return { access: accessFor(interaction, staffRoles), config };
 }
 
-async function requireTicketInCurrentChannel(interaction: ChatInputCommandInteraction) {
+async function requireTicketInCurrentChannel(interaction: ChatInputCommandInteraction, requireActive = true) {
   const ticket = await getPersistedTicket(interaction.channelId);
   if (!ticket || ticket.guildId !== interaction.guildId || ticket.deletedAt) {
     throw new Error('Use this command inside an active managed ticket channel or private ticket thread.');
   }
-  if (!activeTicketStatus(ticket.status)) throw new Error('This operation is available only while the ticket is active.');
+  if (requireActive && !activeTicketStatus(ticket.status)) throw new Error('This operation is available only while the ticket is active.');
   return ticket;
 }
 
@@ -435,7 +435,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
     }
 
     if (group === 'related') {
-      const ticket = await requireTicketInCurrentChannel(interaction);
+      const ticket = await requireTicketInCurrentChannel(interaction, false);
       if (!access.isStaff) throw accessDenied('a configured department staff role');
       if (subcommand === 'link') {
         const other = interaction.options.getString('other-ticket-id', true).trim();
