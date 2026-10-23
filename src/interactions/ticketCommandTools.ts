@@ -720,8 +720,9 @@ export async function executeTicketCommand(
         return;
       }
 
+      const settings = await getAdvancedSettings(interaction.guild!.id);
+      const locale = settings.locale;
       if (context.status === 'claimed') {
-        const settings = await getAdvancedSettings(interaction.guild!.id);
         if (claimedIds.length >= settings.ticketDefaults.maxClaimedModerators) {
           await interaction.editReply(
             `❌ Ticket #${context.ticketNumber} already has the maximum of **${settings.ticketDefaults.maxClaimedModerators}** moderators assisting.`,
@@ -770,7 +771,6 @@ export async function executeTicketCommand(
         confidence: 'high',
       });
 
-      const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
       await context.channel.send(
         '🎯 ' + translate(locale, 'ticket.status.announcement', {
           ticketNumber: context.ticketNumber,
@@ -1056,6 +1056,7 @@ export async function executeTicketCommand(
         return;
       }
 
+      const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
       let topic = setField(
         context.topic,
         'status',
@@ -1084,7 +1085,6 @@ export async function executeTicketCommand(
         confidence: 'high',
       });
 
-      const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
       await context.channel.send(
         '⏳ ' + translate(locale, 'ticket.status.announcement', {
           ticketNumber: context.ticketNumber,
@@ -1121,6 +1121,7 @@ export async function executeTicketCommand(
         return;
       }
 
+      const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
       let topic = setField(
         context.topic,
         'status',
@@ -1138,7 +1139,6 @@ export async function executeTicketCommand(
         confidence: 'high',
       });
 
-      const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
       await context.channel.send(
         '▶️ ' + translate(locale, 'ticket.status.announcement', {
           ticketNumber: context.ticketNumber,
@@ -1263,6 +1263,7 @@ export async function executeTicketCommand(
       }
 
       const priority = level as TicketPriority;
+      const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
       const transitionAt = new Date().toISOString();
       const topic = setField(
         setField(context.topic, 'priority', priority),
@@ -1302,7 +1303,6 @@ export async function executeTicketCommand(
         `Priority changed to ${level}`,
       );
 
-      const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
       const priorityLabel = ({
         low: translate(locale, 'priority.low'),
         normal: translate(locale, 'priority.normal'),
