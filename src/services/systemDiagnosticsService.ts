@@ -148,7 +148,7 @@ function checkBotPermissions(
     .map(([name]) => name);
 }
 
-function addDiagnosticReferences(report: SystemDiagnosticsReport): void {
+export function addDiagnosticReferences(report: SystemDiagnosticsReport): void {
   report.findings.forEach((finding, index) => {
     finding.referenceId ??= report.reportId + '-' + String(index + 1).padStart(3, '0');
   });
