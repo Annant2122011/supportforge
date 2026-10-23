@@ -20,7 +20,7 @@ test('system diagnostics report status escalates on errors and warnings without 
     area: 'Database', severity: 'error', title: 'Disconnected', detail: 'Probe failed.',
   };
 
-  assert.equal(diagnosticsOverallStatus([]), 'HEALTHY');
+  assert.equal(diagnosticsOverallStatus([]), 'UNKNOWN');
   assert.equal(diagnosticsOverallStatus([ok]), 'HEALTHY');
   assert.equal(diagnosticsOverallStatus([ok, warning]), 'DEGRADED');
   assert.equal(diagnosticsOverallStatus([warning, error]), 'ACTION REQUIRED');
@@ -85,4 +85,18 @@ test('diagnostic findings receive stable references and embed output displays th
   assert.ok(embed.description?.includes('DX-ABC12345'));
   assert.ok(embed.fields?.some((field) => field.value.includes('DX-ABC12345-001')));
   assert.ok(embed.fields?.some((field) => field.value.includes('DX-ABC12345-002')));
+});
+
+
+test('empty diagnostic reports are explicitly unknown, never presented as healthy', () => {
+  assert.equal(diagnosticsOverallStatus([]), 'UNKNOWN');
+  const embed = buildSystemDiagnosticsEmbed({
+    guildId: 'guild-test',
+    reportId: 'DX-EMPTY001',
+    generatedAt: '2026-10-23T12:00:00.000Z',
+    mode: 'setup-doctor',
+    findings: [],
+  }).toJSON();
+  assert.ok(embed.description?.includes('UNKNOWN'));
+  assert.ok(embed.description?.includes('no checks produced results'));
 });
