@@ -3,6 +3,8 @@ import type { QueryResultRow } from 'pg';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
 import { previewWorkflowTemplate, validateWorkflowTemplateDefinition, type WorkflowTemplateDefinition } from '../core/domain/workflowSafety';
+import { getGuildConfig } from './configService';
+import { listQuickReplies } from './quickReplyService';
 
 export interface WorkflowTemplate {
   id: string;
@@ -28,6 +30,25 @@ function fromRow(row:WorkflowRow):WorkflowTemplate {
   enabled:Boolean(row.enabled),version:Number(row.version),createdBy:row.created_by,updatedBy:row.updated_by,
   createdAt:iso(row.created_at),updatedAt:iso(row.updated_at)};
 }
+async function assertWorkflowReferencesExist(guildId: string, definition: WorkflowTemplateDefinition): Promise<void> {
+  const config = await getGuildConfig(guildId);
+  const departmentIds = new Set(Object.entries(config.departments).flatMap(([key, department]) => [key, department.id]));
+  const tagIds = new Set(Object.values(config.departments).flatMap((department) => Object.values(department.tags).map((tag) => tag.id)));
+  const replies = await listQuickReplies(guildId, { isAdmin: true, roleIds: [] });
+  const replyIds = new Set(replies.map((reply) => reply.id));
+  for (const action of definition.actions) {
+    if (action.type === 'assign_department' && !departmentIds.has(action.value)) {
+      throw new Error('Workflow references a department that does not exist in this server: ' + action.value);
+    }
+    if (action.type === 'add_tag' && !tagIds.has(action.value)) {
+      throw new Error('Workflow references a tag that does not exist in this server: ' + action.value);
+    }
+    if (action.type === 'send_quick_reply' && !replyIds.has(action.value)) {
+      throw new Error('Workflow references a quick reply that does not exist in this server: ' + action.value);
+    }
+  }
+}
+
 function validName(name:string):string {
  const value=name.trim().replace(/\s+/g,' ');
  if(value.length<2||value.length>80) throw new Error('Workflow names must be 2–80 characters.');
@@ -39,6 +60,7 @@ export async function listWorkflowTemplates(guildId:string):Promise<WorkflowTemp
 }
 export async function saveWorkflowTemplate(guildId:string,actorId:string,name:string,definition:unknown):Promise<WorkflowTemplate> {
  const safeName=validName(name),safeDefinition=validateWorkflowTemplateDefinition(definition);
+ await assertWorkflowReferencesExist(guildId, safeDefinition);
  const result=await getPostgresPool().query<WorkflowRow>(
   'INSERT INTO workflow_templates (id,guild_id,name,definition,enabled,version,created_by,updated_by) VALUES ($1,$2,$3,$4::jsonb,FALSE,1,$5,$5) '+
   'ON CONFLICT (guild_id,name) DO UPDATE SET definition=EXCLUDED.definition,enabled=FALSE,version=workflow_templates.version+1,updated_by=EXCLUDED.updated_by,updated_at=NOW() RETURNING '+COLUMNS,
@@ -47,13 +69,18 @@ export async function saveWorkflowTemplate(guildId:string,actorId:string,name:st
 }
 export async function setWorkflowTemplateEnabled(guildId:string,templateId:string,expectedVersion:number,enabled:boolean,actorId:string):Promise<WorkflowTemplate> {
  if(!Number.isInteger(expectedVersion)||expectedVersion<1) throw new Error('Expected version must be a positive integer.');
- const result=await getPostgresPool().query<WorkflowRow>(
+ const pool = getPostgresPool();
+ const current = await pool.query<WorkflowRow>(
+  'SELECT '+COLUMNS+' FROM workflow_templates WHERE guild_id=$1 AND id=$2 AND version=$3 LIMIT 1',
+  [guildId,templateId,expectedVersion]);
+ if(!current.rows[0]) throw new Error('Workflow template was not found or its version changed. Refresh the list before retrying.');
+ const templateBefore = fromRow(current.rows[0]);
+ if(enabled) await assertWorkflowReferencesExist(guildId, templateBefore.definition);
+ const result=await pool.query<WorkflowRow>(
   'UPDATE workflow_templates SET enabled=$4,version=version+1,updated_by=$5,updated_at=NOW() WHERE guild_id=$1 AND id=$2 AND version=$3 RETURNING '+COLUMNS,
   [guildId,templateId,expectedVersion,enabled,actorId]);
- if(!result.rows[0]) throw new Error('Workflow template was not found or its version changed. Refresh the list before retrying.');
- const template=fromRow(result.rows[0]);
- if(template.enabled) return template;
- return template;
+ if(!result.rows[0]) throw new Error('Workflow template changed while being updated. Refresh the list before retrying.');
+ return fromRow(result.rows[0]);
 }
 export async function previewWorkflowTemplateById(guildId:string,templateId:string):Promise<ReturnType<typeof previewWorkflowTemplate>> {
  const result=await getPostgresPool().query<WorkflowRow>('SELECT '+COLUMNS+' FROM workflow_templates WHERE guild_id=$1 AND id=$2 LIMIT 1',[guildId,templateId]);
