@@ -1879,12 +1879,12 @@ async function showRecoveryCandidateDetail(
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
   if (source === 'discord_native') {
     rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-      recoveryButton('sf:settings:recovery:channels:restore:' + ticketId, 'Restore Channel', ButtonStyle.Success, '♻️'),
+      recoveryButton('sf:settings:recovery:channels:restore:' + ticketId, 'Restore Channel', ButtonStyle.Success, '♻️', !preview.eligibleToRestore),
       recoveryButton('sf:settings:recovery:channels', 'Back to list', ButtonStyle.Secondary, '↩️'),
     ));
   } else if (item.accidentalAnswer === 'yes') {
     rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-      recoveryButton('sf:settings:recovery:review:restore:' + ticketId, 'Restore Ticket', ButtonStyle.Success, '♻️'),
+      recoveryButton('sf:settings:recovery:review:restore:' + ticketId, 'Restore Ticket', ButtonStyle.Success, '♻️', !preview.eligibleToRestore),
       recoveryButton('sf:settings:recovery:review', 'Back to list', ButtonStyle.Secondary, '↩️'),
     ));
   } else {
