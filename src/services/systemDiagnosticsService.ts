@@ -11,6 +11,7 @@ import { getAdvancedSettings } from './advancedSettingsService';
 import { getPostgresPool, pingPostgres } from '../core/persistence/postgresDatabase';
 import { CURRENT_POSTGRES_MIGRATION_ID } from '../core/persistence/postgresMigrations';
 import { listTicketForms, type TicketFormVersion } from './ticketFormService';
+import { getSupportHoursPolicies, type SupportHoursPolicy } from './supportHoursService';
 
 export type DiagnosticSeverity = 'ok' | 'info' | 'warning' | 'error';
 
@@ -437,7 +438,112 @@ export async function runSystemDiagnostics(
       remedy: 'Verify the PostgreSQL schema and form catalog before publishing or retargeting form-based panel buttons.',
     });
   }
+  try {
+    const policies = await getSupportHoursPolicies(guild.id);
+    const policyProblems: string[] = [];
+    for (const policy of policies) {
+      if (policy.scopeType === 'department' && !config.departments[policy.scopeId ?? '']) {
+        policyProblems.push('department-scoped schedule ' + policy.id + ' refers to a missing department');
+      }
+      if (policy.scopeType === 'panel' && !config.customPanels[policy.scopeId ?? '']) {
+        policyProblems.push('panel-scoped schedule ' + policy.id + ' refers to a missing custom panel');
+      }
+      try {
+        new Intl.DateTimeFormat('en', { timeZone: policy.timezone }).format(new Date());
+      } catch {
+        policyProblems.push('schedule ' + policy.id + ' has invalid time zone "' + policy.timezone + '"');
+      }
+      if (policy.outsideHoursBehavior !== 'allow' && policy.outsideHoursBehavior !== 'restrict') {
+        policyProblems.push('schedule ' + policy.id + ' has unsupported outside-hours behaviour');
+      }
+    }
+    add({
+      area: 'Support hours',
+      severity: policyProblems.length ? 'warning' : 'ok',
+      title: policyProblems.length ? 'Support-hours policies need review' : 'Support-hours policies look consistent',
+      detail: policyProblems.slice(0, 8).join('; ') || policies.length + ' schedule(s) checked, including IANA time zones and scope targets.',
+      remedy: policyProblems.length ? 'Open Settings → Support Hours, correct missing department/panel targets or invalid time zones, then recheck. Existing tickets are not changed by diagnostics.' : undefined,
+    });
+  } catch {
+    add({
+      area: 'Support hours',
+      severity: 'warning',
+      title: 'Support-hours configuration could not be inspected',
+      detail: 'The persisted support-hours document could not be read or validated.',
+      remedy: 'Check app_documents for the support-hours record and inspect the service error before changing policies.',
+    });
+  }
+
+  const retention = advanced.retention;
+  const retentionProblems: string[] = [];
+  for (const [label, days] of [['closed', retention.closedDays], ['archive', retention.archiveDays]] as const) {
+    if (!Number.isInteger(days) || days < 0 || days > 365) {
+      retentionProblems.push(label + ' retention days must be an integer from 0 to 365');
+    }
+  }
+  for (const [label, dateValue] of [['closed', retention.closedEffectiveFrom], ['archive', retention.archiveEffectiveFrom]] as const) {
+    if (dateValue !== null && (typeof dateValue !== 'string' || !Number.isFinite(Date.parse(dateValue)))) {
+      retentionProblems.push(label + ' retention effective date is invalid');
+    }
+  }
+  add({
+    area: 'Retention',
+    severity: retentionProblems.length ? 'warning' : 'ok',
+    title: retentionProblems.length ? 'Retention settings need review' : 'Retention settings are structurally valid',
+    detail: retentionProblems.join('; ') || 'Closed/archive retention ranges and effective dates passed basic validation. This does not perform a deletion eligibility sweep.',
+    remedy: retentionProblems.length ? 'Open Settings → Retention and correct the reported values. No ticket or transcript was deleted by this check.' : undefined,
+  });
+
+  const inactivityProblems: string[] = [];
+  if (!Number.isInteger(advanced.inactivity.idleHours) || advanced.inactivity.idleHours < 1 || advanced.inactivity.idleHours > 720) {
+    inactivityProblems.push('warning threshold must be between 1 and 720 hours');
+  }
+  if (!Number.isInteger(advanced.inactivity.graceHours) || advanced.inactivity.graceHours < 1 || advanced.inactivity.graceHours > 168) {
+    inactivityProblems.push('grace threshold must be between 1 and 168 hours');
+  }
+  for (const roleId of advanced.inactivity.exemptRoleIds) {
+    if (!guild.roles.cache.has(roleId)) inactivityProblems.push('inactivity exemption references missing role ' + roleId);
+  }
+  for (const departmentId of advanced.inactivity.exemptDepartmentIds) {
+    if (!config.departments[departmentId]) inactivityProblems.push('inactivity exemption references missing department ' + departmentId);
+  }
+  add({
+    area: 'Inactivity automation',
+    severity: inactivityProblems.length ? 'warning' : 'ok',
+    title: inactivityProblems.length ? 'Inactivity automation needs review' : 'Inactivity policy passed structural checks',
+    detail: (advanced.inactivity.enabled ? 'Automation is enabled. ' : 'Automation is disabled. ') +
+      (inactivityProblems.slice(0, 8).join('; ') || 'Thresholds and role/department exemptions are valid.'),
+    remedy: inactivityProblems.length ? 'Open Settings → Inactivity, correct missing role/department references and thresholds, then recheck.' : undefined,
+  });
+
   const ticketFormsById = new Map(ticketForms.map((form) => [form.id, form]));
+  if (formsReadable) {
+    const formProblems: string[] = [];
+    for (const form of ticketForms) {
+      const department = config.departments[form.departmentId];
+      if (!department) {
+        formProblems.push('form "' + form.name + '" references missing department ' + form.departmentId);
+        continue;
+      }
+      if (form.tagId && !department.tags?.[form.tagId]) {
+        formProblems.push('form "' + form.name + '" references missing tag ' + form.tagId);
+      }
+      if (!Number.isInteger(form.currentVersion) || form.currentVersion < 1 || form.version !== form.currentVersion) {
+        formProblems.push('form "' + form.name + '" has inconsistent current/version pointers');
+      }
+      if (form.active && form.fields.length === 0) {
+        formProblems.push('active form "' + form.name + '" has no fields');
+      }
+    }
+    add({
+      area: 'Ticket forms',
+      severity: formProblems.length ? 'warning' : 'ok',
+      title: formProblems.length ? 'Ticket form routing needs review' : 'Ticket form catalog looks consistent',
+      detail: formProblems.slice(0, 8).join('; ') || ticketForms.length + ' saved form(s) checked for department/tag mapping and current version pointer.',
+      remedy: formProblems.length ? 'Open Settings → Forms or use /supportforge form list. Fix mappings and preview the affected panel before publishing.' : undefined,
+    });
+  }
+
   const customPanels = Object.values(config.customPanels ?? {});
   if (customPanels.length > 25) {
     add({
