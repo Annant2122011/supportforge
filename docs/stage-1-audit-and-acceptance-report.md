@@ -3,15 +3,15 @@
 **Programme:** ResolveX four-stage product excellence  
 **Stage 1 branch:** `feature/stage-1-localization-acceptance`  
 **Pull request:** [#31, Stage 1 configuration integrity, localization and acceptance](https://github.com/Annant2122011/supportforge/pull/31)  
-**Current status:** Prior source-changing checks passed; the updated slash-command limit test is being rerun against the cleanup base. Live Discord acceptance and an isolated Neon restore drill remain blocked pending access to a non-production environment.
+**Current status:** The updated source and command-limit regression test passed CI on the cleanup base: TypeScript build succeeded, 138/138 tests passed with zero skips, and disposable PostgreSQL verification succeeded. Live Discord acceptance and an isolated Neon restore drill remain blocked pending access to a non-production environment.
 
 ## Evidence summary
 
 | Area | Result | Evidence / limit |
 |---|---|---|
-| TypeScript build | **PASS** | [Build run #1198](https://github.com/Annant2122011/supportforge/actions/runs/39961674679) succeeded on the prior source-changing Stage 1 + H2 head. The current follow-up adds a slash-command option-limit regression test; CI on the updated head is tracked separately. |
-| Automated tests | **PASS** | [ResolvX CI run #1983](https://github.com/Annant2122011/supportforge/actions/runs/39961674673) succeeded on the prior source-changing Stage 1 + H2 head. The current follow-up adds command-registration regression coverage; re-run CI on the final head before closing the source/CI gate. |
-| PostgreSQL verification | **PASS** | Same CI run verified required tables, referential integrity and the active outbox lease state against disposable CI PostgreSQL. This is not a connection to production Neon. |
+| TypeScript build | **PASS** | [ResolvX CI #2045](https://github.com/Annant2122011/supportforge/actions/runs/39972325121) passed the TypeScript build on the updated Stage 1 + H2 test head. |
+| Automated tests | **PASS** | [ResolvX CI #2045](https://github.com/Annant2122011/supportforge/actions/runs/39972325121) passed the expanded suite: 138 passed, 0 failed, 0 skipped, including slash-command option-limit coverage. |
+| PostgreSQL verification | **PASS** | [ResolvX CI #2045](https://github.com/Annant2122011/supportforge/actions/runs/39972325121) verified required tables, referential integrity and the active outbox lease state against disposable CI PostgreSQL. This is not a connection to production Neon. |
 | Managed branding migration | **PASS in unit tests** | Exact application-owned defaults are migrated; custom department names, tags, descriptions, panel text, button labels, confirmation copy and custom footers are preserved. |
 | Panel role restrictions | **PASS in unit tests** | Role restrictions are normalized at the editable draft, button, published configuration and published-button layers. Valid Snowflake IDs remain strings, malformed IDs are rejected and duplicates are removed. |
 | Localization controls/lifecycle copy | **PASS in CI; partial acceptance** | Stage H2 locale selection and focused Hindi/Bengali/English lifecycle/form copy are included on this branch. Remaining Settings pages, panel previews and selected report surfaces are still open in the translation architecture checklist.
