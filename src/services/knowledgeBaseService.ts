@@ -526,6 +526,20 @@ export async function searchKnowledgeBase(
   return results;
 }
 
+export async function getKnowledgeArticleForShare(
+  guildId: string,
+  articleId: string,
+  access: KnowledgeAccess,
+  actorId: string,
+): Promise<KnowledgeBaseArticle> {
+  const article = await getKnowledgeArticle(guildId, articleId, access);
+  if (!article || article.status !== 'published') {
+    throw new Error('Published article not found or you do not have permission to share it.');
+  }
+  await recordKnowledgeUsage(guildId, article.id, actorId, 'shared');
+  return article;
+}
+
 export async function recordKnowledgeArticleFeedback(
   guildId: string,
   articleId: string,
