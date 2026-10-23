@@ -790,21 +790,6 @@ export const data =
         ),
     )
 
-    // Keep the locale command at the root because Discord limits each command
-    // group to 25 subcommands and the Settings group already uses that budget.
-    .addSubcommand((subcommand) =>
-      subcommand
-        .setName('language')
-        .setDescription('Show or change this server’s bot message language')
-        .addStringOption((option) => option
-          .setName('locale')
-          .setDescription('New language; omit this option to show the current setting')
-          .addChoices(...LOCALE_OPTIONS.map((locale) => ({
-            name: (locale.label + ' · ' + locale.nativeLabel).slice(0, 100),
-            value: locale.value,
-          })))),
-    )
-
     // ─────────────────────────────────────────────
     // CATEGORY MANAGEMENT
     // ─────────────────────────────────────────────
@@ -1307,6 +1292,18 @@ export const data =
         .setDescription('Manage ResolvX settings from slash commands')
         .addSubcommand((subcommand) =>
           subcommand.setName('overview').setDescription('Show a Settings overview and current configuration'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('language')
+            .setDescription('Show or change this server’s bot message language')
+            .addStringOption((option) => option
+              .setName('locale')
+              .setDescription('New language; omit this option to show the current setting')
+              .addChoices(...LOCALE_OPTIONS.map((locale) => ({
+                name: (locale.label + ' · ' + locale.nativeLabel).slice(0, 100),
+                value: locale.value,
+              })))),
         )
         .addSubcommand((subcommand) =>
           subcommand
