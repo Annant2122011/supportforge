@@ -37,6 +37,12 @@
 - [PR #23, Stage H Part 2 localization](https://github.com/Annant2122011/supportforge/pull/23) provided the H2 source increment ported into this branch. Its remaining Settings pages, panel previews, selected reports and live locale acceptance remain open in the translation checklist. [PR #22, the QueryFixr rebrand/localization branch](https://github.com/Annant2122011/supportforge/pull/22) remains separate because it changes visible branding and the root command name.
 - No production deployment, live database change, direct `main` edit, force-push or history rewrite was performed. PR #33 isolates the baseline test cleanup as a reviewable dependency.
 
+## Re-audit addendum — 2026-10-23
+
+The current review chain is PR #33 → PR #31 → PR #32. PR #33, #31 and #32 remain open drafts; none is merged. Current recorded Stage 1 evidence is [ResolvX CI #2052](https://github.com/Annant2122011/supportforge/actions/runs/39972706424): build passed, 138/138 tests passed, zero skipped, and disposable PostgreSQL verification passed. This supersedes older CI runs for the same Stage 1 acceptance claim.
+
+Remaining limits are unchanged: Stage H2 coverage still omits some Settings pages, panel previews and selected reports; actual test-guild interaction/permission and command-registration acceptance remains blocked; successful restore into an isolated non-production Neon target remains unverified. Automated checks passed, but Stage 1 remains **not production-accepted**. Review #33 first, then retarget #31 to `main`, then review #32 against integrated Stage 1.
+
 ## Release gate
 
 Stage 1 is **not production-accepted** until the checklist in [stage-1-acceptance-checklist.md](stage-1-acceptance-checklist.md) is executed in an authorized non-production Discord guild, its results are recorded, and a backup is restored into a separate non-production Neon target.
