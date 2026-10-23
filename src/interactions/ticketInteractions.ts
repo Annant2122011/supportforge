@@ -2561,6 +2561,7 @@ async function transition(
     void channel
       .send(
         '📌 ' + translate(locale, 'ticket.status.announcement', {
+          ticketNumber: getField(newTopic, 'number') ?? 'unknown',
           status: statusLabel,
           actor: interaction.user.toString(),
         }),
