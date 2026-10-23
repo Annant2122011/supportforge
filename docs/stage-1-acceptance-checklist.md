@@ -4,7 +4,7 @@ This checklist is for a non-production bot and test guild. Do not use production
 
 ## Current evidence snapshot (2026-10-23)
 
-- **Source/CI baseline:** PASS for the clean Stage 1 + Stage H2 branch at [PR #31](https://github.com/Annant2122011/supportforge/pull/31). [Build #1194](https://github.com/Annant2122011/supportforge/actions/runs/39959732876) passed; [ResolvX CI #1970](https://github.com/Annant2122011/supportforge/actions/runs/39959732860) passed with 137 tests, zero failures/skips, and disposable PostgreSQL verification.
+- **Source/CI baseline:** The prior source-changing Stage 1 + H2 head passed [Build #1198](https://github.com/Annant2122011/supportforge/actions/runs/39961674679) and [ResolvX CI #1983](https://github.com/Annant2122011/supportforge/actions/runs/39961674673). The current head adds a slash-command option-limit regression test and temporarily targets [PR #33](https://github.com/Annant2122011/supportforge/pull/33), which removes an orphaned Stage 2 test from the merge-test tree until Stage 2 restores it with its service. CI on this exact Stage 1 head remains a separate gate.
 - **Production store:** source checks preserve Neon/PostgreSQL; the CI database is disposable and does not establish production Neon connectivity or backup recoverability.
 - **Discord acceptance:** BLOCKED / NOT RUN. No authorized non-production guild session was available for interaction, permission, published command, rate-limit and restart tests.
 - **Neon restore drill:** BLOCKED / NOT RUN. No authorized isolated non-production Neon target or backup artifact was available.
@@ -22,9 +22,9 @@ The checkboxes below separate source/CI evidence from live-environment acceptanc
 
 ## 2. Automated checks
 
-- [x] TypeScript build passes on PR #31 head. [Build #1194](https://github.com/Annant2122011/supportforge/actions/runs/39959732876).
-- [x] Full node:test suite passes on PR #31 head: 137 passed, 0 failed, 0 skipped. [CI #1970](https://github.com/Annant2122011/supportforge/actions/runs/39959732860).
-- [x] PostgreSQL verification passes against disposable CI/test data. [CI #1970](https://github.com/Annant2122011/supportforge/actions/runs/39959732860).
+- [ ] TypeScript build passes on the current PR #31 merge-test tree after the command-limit guard and cleanup-base dependency. The prior passing build is recorded above.
+- [ ] Full node:test suite passes on the current PR #31 merge-test tree with the new slash-command option-limit guard. The previous passing suite does not cover the latest head.
+- [ ] PostgreSQL verification passes on the current PR #31 merge-test tree. The earlier disposable CI PostgreSQL check is not a live Neon restore drill.
 - [x] Provider tests reject SQLite as the live production provider.
 - [x] State-machine, metadata-only activity updates, transaction/outbox, retry and reconciliation regressions pass.
 - [x] Forms: validation, conditional fields, stale sessions, version changes and attachment metadata tests pass.
@@ -32,7 +32,8 @@ The checkboxes below separate source/CI evidence from live-environment acceptanc
 - [x] Support hours: scope inheritance, overnight intervals, invalid/overlapping intervals and DST-boundary tests pass.
 - [x] Inactivity: activity reset, exemptions, stale anchors, policy changes, transcript failure and compare-and-close regressions pass.
 - [x] Translation: supported locales, per-key English fallback, safe interpolation, formatting and preserved custom content tests pass. H2 page/command live acceptance remains open.
-- [ ] Command registration stays within Discord's application command/component limits.
+- [x] Slash-command option lists are recursively checked against Discord's 25-option cap and duplicate sibling names by `tests/commandRegistrationLimits.test.ts`. The updated test still requires CI on this exact head.
+- [ ] Live component-row limits and actual published command registration remain part of non-production Discord acceptance.
 
 ## 3. Test-guild acceptance
 
