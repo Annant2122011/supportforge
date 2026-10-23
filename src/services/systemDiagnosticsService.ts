@@ -14,7 +14,7 @@ import { listTicketForms, type TicketFormVersion } from './ticketFormService';
 import { getSupportHoursPolicies, type SupportHoursPolicy } from './supportHoursService';
 import { getDiscordRateLimitSummary } from './discordRateLimitTelemetry';
 
-export type DiagnosticSeverity = 'ok' | 'info' | 'warning' | 'error';
+export type DiagnosticSeverity = 'ok' | 'info' | 'unknown' | 'warning' | 'error';
 
 export interface DiagnosticFinding {
   area: string;
@@ -50,6 +50,7 @@ function severityRank(severity: DiagnosticSeverity): number {
   switch (severity) {
     case 'error': return 3;
     case 'warning': return 2;
+    case 'unknown': return 1;
     case 'info': return 1;
     default: return 0;
   }
@@ -57,8 +58,9 @@ function severityRank(severity: DiagnosticSeverity): number {
 
 export function diagnosticsOverallStatus(findings: readonly DiagnosticFinding[]): 'HEALTHY' | 'DEGRADED' | 'ACTION REQUIRED' | 'UNKNOWN' {
   if (findings.length === 0) return 'UNKNOWN';
-  const maxSeverity = findings.reduce((rank, finding) => Math.max(rank, severityRank(finding.severity)), 0);
-  return maxSeverity >= 3 ? 'ACTION REQUIRED' : maxSeverity >= 2 ? 'DEGRADED' : 'HEALTHY';
+  if (findings.some((finding) => finding.severity === 'error')) return 'ACTION REQUIRED';
+  if (findings.some((finding) => finding.severity === 'warning' || finding.severity === 'unknown')) return 'DEGRADED';
+  return 'HEALTHY';
 }
 
 export function evaluateOutboxCounts(input: {
@@ -277,7 +279,7 @@ export async function runSystemDiagnostics(
     } catch {
       add({
         area: 'Database migrations',
-        severity: 'warning',
+        severity: 'unknown',
         title: 'Database migration status could not be verified',
         detail: 'The schema_migrations check failed. Connectivity may be available while the schema is uninitialized or incomplete.',
         remedy: 'Run the documented database verification against a disposable test database and confirm the expected migration markers.',
@@ -322,7 +324,7 @@ export async function runSystemDiagnostics(
     } catch {
       add({
         area: 'Queue',
-        severity: 'warning',
+        severity: 'unknown',
         title: 'Outbox health could not be inspected',
         detail: 'The database responded, but the outbox status query failed. Queue health is unknown, not healthy.',
         remedy: 'Verify that PostgreSQL migrations are current and inspect the outbox worker logs.',
@@ -331,7 +333,7 @@ export async function runSystemDiagnostics(
   } else {
     add({
       area: 'Queue',
-      severity: 'warning',
+      severity: 'unknown',
       title: 'Outbox health was not checked',
       detail: 'Queue status is unknown because the database health probe failed.',
       remedy: 'Restore database connectivity before trusting queue health.',
@@ -359,7 +361,7 @@ export async function runSystemDiagnostics(
   if (!roleInventoryAvailable) {
     add({
       area: 'Discord roles',
-      severity: 'warning',
+      severity: 'unknown',
       title: 'Role inventory could not be refreshed',
       detail: 'Missing-role checks are incomplete because Discord did not return the current guild role list.',
       remedy: 'Verify the bot can access the guild and role list, then rerun diagnostics. Unverified role references are not labelled missing.',
@@ -370,7 +372,7 @@ export async function runSystemDiagnostics(
   if (!botMemberAvailable) {
     add({
       area: 'Discord permissions',
-      severity: 'warning',
+      severity: 'unknown',
       title: 'Bot member permissions could not be fully resolved',
       detail: 'Effective permission checks may be incomplete because the current guild bot member could not be fetched.',
       remedy: 'Verify bot membership and gateway/API access, then rerun diagnostics before relying on permission results.',
@@ -490,7 +492,7 @@ export async function runSystemDiagnostics(
     formsReadable = false;
     add({
       area: 'Ticket forms',
-      severity: 'warning',
+      severity: 'unknown',
       title: 'Form routing could not be inspected',
       detail: 'The saved form catalog could not be read. Panel-to-form mappings are unknown, not healthy.',
       remedy: 'Verify the PostgreSQL schema and form catalog before publishing or retargeting form-based panel buttons.',
@@ -525,7 +527,7 @@ export async function runSystemDiagnostics(
   } catch {
     add({
       area: 'Support hours',
-      severity: 'warning',
+      severity: 'unknown',
       title: 'Support-hours configuration could not be inspected',
       detail: 'The persisted support-hours document could not be read or validated.',
       remedy: 'Check app_documents for the support-hours record and inspect the service error before changing policies.',
@@ -861,7 +863,7 @@ export function buildSystemDiagnosticsEmbed(
   }
   for (const [area, group] of grouped) {
     const lines = group.map((finding) => {
-      const icon = finding.severity === 'error' ? '🔴' : finding.severity === 'warning' ? '🟠' : finding.severity === 'info' ? 'ℹ️' : '🟢';
+      const icon = finding.severity === 'error' ? '🔴' : finding.severity === 'warning' ? '🟠' : finding.severity === 'unknown' ? '⚪' : finding.severity === 'info' ? 'ℹ️' : '🟢';
       return icon + ' **' + finding.title + '**' + (finding.referenceId ? ' \`' + finding.referenceId + '\`' : '') + '\n' + finding.detail +
         (finding.remedy ? '\n*Next step:* ' + finding.remedy : '');
     });
