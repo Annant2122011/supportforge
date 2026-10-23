@@ -23,9 +23,6 @@ const bnIN: Partial<Record<TranslationKey, string>> = {
   'ticket.closed': 'টিকিট #{ticketNumber} বন্ধ করা হয়েছে।',
   'ticket.reopened': 'টিকিট #{ticketNumber} আবার খোলা হয়েছে।',
   'ticket.priority.changed': 'টিকিটের অগ্রাধিকার {priority} করা হয়েছে।',
-  'ticket.intake.outsideHours': '⏰ {timezone} সময় অঞ্চলে সহায়তা পরিষেবা এখন বন্ধ। নির্ধারিত সহায়তা-সময়ের নীতির কারণে নতুন টিকিট তৈরি করা যাচ্ছে না। {nextOpening}',
-  'ticket.intake.nextOpening': 'পরবর্তী খোলার সময়: {nextOpening}।',
-  'ticket.intake.noNextOpening': 'পরবর্তী খোলার সময় নির্ধারিত নেই; সার্ভার প্রশাসকের সঙ্গে যোগাযোগ করুন।',
   'supportHours.open': 'সহায়তা পরিষেবা এখন খোলা।'
   'supportHours.closed': 'সহায়তা পরিষেবা এখন বন্ধ।',
   'forms.submit': 'উত্তর জমা দিন',
