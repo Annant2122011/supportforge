@@ -918,6 +918,126 @@ export async function createTicketForm(args: {
   });
 }
 
+/**
+ * Restore schemas/routing for forms that existed at a saved checkpoint by
+ * appending immutable versions, never by rewinding version numbers or editing
+ * historical submissions. Forms created after the checkpoint are left intact.
+ *
+ * The entire catalog change is one PostgreSQL transaction. Missing forms or
+ * invalid/deleted department/tag mappings fail before any row is modified.
+ */
+export async function restoreTicketFormCatalogSnapshot(
+  guildId: string,
+  snapshotForms: readonly TicketFormVersion[],
+  actorId: string,
+): Promise<void> {
+  if (!Array.isArray(snapshotForms)) throw new Error('Ticket form checkpoint is malformed.');
+  const ids = snapshotForms.map((form) => form.id);
+  if (new Set(ids).size !== ids.length) throw new Error('Ticket form checkpoint contains duplicate IDs.');
+  const prepared = snapshotForms.map((form) => {
+    if (!form || form.guildId !== guildId || typeof form.id !== 'string' ||
+        typeof form.name !== 'string' || !form.name.trim() || form.name.length > 80 ||
+        typeof form.active !== 'boolean') {
+      throw new Error('Ticket form checkpoint contains invalid identity or status data.');
+    }
+    return {
+      ...form,
+      name: form.name.trim(),
+      fields: parseTicketFormFields(form.fields),
+    };
+  });
+
+  if (!prepared.length) return;
+
+  const activeTargets = prepared.filter((form) => form.active);
+  for (let i = 0; i < activeTargets.length; i += 1) {
+    for (let j = i + 1; j < activeTargets.length; j += 1) {
+      const left = activeTargets[i]!;
+      const right = activeTargets[j]!;
+      const overlaps = left.departmentId === right.departmentId &&
+        (left.tagId === null || right.tagId === null || left.tagId === right.tagId);
+      if (overlaps) {
+        throw new Error('The saved form checkpoint contains overlapping active department/tag mappings. No forms were changed.');
+      }
+    }
+  }
+
+  await transaction(async (client) => {
+    const selected = await client.query<TicketFormRow>(
+      'SELECT ' + FORM_COLUMNS + ' FROM ticket_forms WHERE guild_id=$1 AND id = ANY($2::text[]) FOR UPDATE',
+      [guildId, ids],
+    );
+    const currentById = new Map(selected.rows.map((row) => [row.id, row]));
+    const missing = prepared.filter((form) => !currentById.has(form.id));
+    if (missing.length) {
+      throw new Error(
+        'Cannot restore form checkpoint because these saved form IDs no longer exist: ' +
+        missing.map((form) => form.id).slice(0, 10).join(', ') +
+        '. No forms were changed.',
+      );
+    }
+
+    // The guild configuration document has already been restored before this
+    // service is called, so validate saved routing against the target mapping.
+    for (const form of prepared) {
+      await ensureValidMapping(guildId, form.departmentId, form.tagId);
+    }
+    const activeOutside = await client.query<{ id: string; name: string; department_id: string; tag_id: string | null }>(
+      'SELECT id, name, department_id, tag_id FROM ticket_forms WHERE guild_id=$1 AND active=TRUE AND NOT (id = ANY($2::text[]))',
+      [guildId, ids],
+    );
+    for (const target of activeTargets) {
+      const collision = activeOutside.rows.find((other) =>
+        other.department_id === target.departmentId &&
+        (other.tag_id === null || target.tagId === null || other.tag_id === target.tagId),
+      );
+      if (collision) {
+        throw new Error(
+          'Cannot restore active form "' + target.name + '" because a newer form "' + collision.name +
+          '" uses an overlapping department/tag mapping. Disable or retarget the newer form, then retry. No forms were changed.',
+        );
+      }
+    }
+
+    await client.query(
+      'UPDATE ticket_forms SET active=FALSE WHERE guild_id=$1 AND id = ANY($2::text[])',
+      [guildId, ids],
+    );
+
+    for (const form of prepared) {
+      const current = currentById.get(form.id)!;
+      const version = Number(current.current_version) + 1;
+      const snapshot = snapshotFor({
+        id: form.id,
+        name: form.name,
+        departmentId: form.departmentId,
+        tagId: form.tagId,
+      }, version, form.fields);
+      await client.query(
+        'INSERT INTO ticket_form_versions (form_id, version, schema, snapshot, created_by, created_at) VALUES ($1,$2,$3::jsonb,$4::jsonb,$5,NOW())',
+        [form.id, version, JSON.stringify({ fields: form.fields }), JSON.stringify(snapshot), actorId],
+      );
+      await client.query(
+        'UPDATE ticket_forms SET name=$3, department_id=$4, tag_id=$5, current_version=$6, updated_at=NOW() WHERE guild_id=$1 AND id=$2',
+        [guildId, form.id, form.name, form.departmentId, form.tagId, version],
+      );
+    }
+
+    for (const form of prepared) {
+      if (!form.active) continue;
+      const activated = await client.query(
+        'UPDATE ticket_forms SET active=TRUE WHERE guild_id=$1 AND id=$2',
+        [guildId, form.id],
+      );
+      if ((activated.rowCount ?? 0) !== 1) {
+        throw new Error('Failed to reactivate restored ticket form ' + form.id + '.');
+      }
+    }
+  });
+
+  await refreshActiveTicketFormCacheForGuild(guildId);
+}
+
 export async function listTicketForms(guildId: string): Promise<TicketFormVersion[]> {
   await initializePersistence();
   const result = await getPostgresPool().query<TicketFormRow>(
