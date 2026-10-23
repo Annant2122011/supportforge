@@ -561,13 +561,7 @@ const MIGRATIONS: readonly PostgresMigration[] = [
           status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','published','archived')),
           visibility TEXT NOT NULL DEFAULT 'public' CHECK (visibility IN ('public','staff')),
           allowed_role_ids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
-          search_vector TSVECTOR GENERATED ALWAYS AS (
-            setweight(to_tsvector('english'::regconfig, COALESCE(title,'')), 'A') ||
-            setweight(to_tsvector('english'::regconfig, COALESCE(category,'')), 'A') ||
-            setweight(to_tsvector('english'::regconfig, COALESCE(array_to_string(tags,' '),'')), 'B') ||
-            setweight(to_tsvector('english'::regconfig, COALESCE(summary,'')), 'B') ||
-            setweight(to_tsvector('english'::regconfig, COALESCE(body,'')), 'C')
-          ) STORED,
+          search_vector TSVECTOR NOT NULL DEFAULT ''::TSVECTOR,
           revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
           created_by TEXT NOT NULL,
           updated_by TEXT NOT NULL,
@@ -577,6 +571,24 @@ const MIGRATIONS: readonly PostgresMigration[] = [
           archived_at TIMESTAMPTZ,
           UNIQUE (guild_id,slug)
         );
+        CREATE OR REPLACE FUNCTION resolvx_refresh_knowledge_search_vector() RETURNS TRIGGER
+        LANGUAGE plpgsql AS $search$
+        BEGIN
+          NEW.search_vector :=
+            setweight(to_tsvector('english', COALESCE(NEW.title,'')), 'A') ||
+            setweight(to_tsvector('english', COALESCE(NEW.category,'')), 'A') ||
+            setweight(to_tsvector('english', COALESCE(array_to_string(NEW.tags,' '),'')), 'B') ||
+            setweight(to_tsvector('english', COALESCE(NEW.summary,'')), 'B') ||
+            setweight(to_tsvector('english', COALESCE(NEW.body,'')), 'C');
+          RETURN NEW;
+        END;
+        $search$;
+
+        DROP TRIGGER IF EXISTS trg_knowledge_base_search_vector ON knowledge_base_articles;
+        CREATE TRIGGER trg_knowledge_base_search_vector
+          BEFORE INSERT OR UPDATE OF title,summary,body,category,tags ON knowledge_base_articles
+          FOR EACH ROW EXECUTE FUNCTION resolvx_refresh_knowledge_search_vector();
+
         CREATE INDEX IF NOT EXISTS idx_knowledge_base_articles_search
           ON knowledge_base_articles USING GIN (search_vector);
         CREATE INDEX IF NOT EXISTS idx_knowledge_base_articles_browse
