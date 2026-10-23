@@ -20,7 +20,7 @@ export function normalizeKnowledgeText(value: string): string {
 }
 
 function tokens(value: string): string[] {
-  return normalizeKnowledgeText(value).split(' ').filter((token) => token.length > 1);
+  return normalizeKnowledgeText(value).split(' ').filter((token) => token.length > 1).slice(0, 12);
 }
 
 function editDistance(left: string, right: string): number {
@@ -46,7 +46,7 @@ function wordSimilarity(left: string, right: string): number {
   if (left === right) return 1;
   if (!left || !right) return 0;
   const largest = Math.max(left.length, right.length);
-  if (largest > 48) return 0;
+  if (largest > 32) return 0;
   return Math.max(0, 1 - editDistance(left, right) / largest);
 }
 
