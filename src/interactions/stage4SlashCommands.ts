@@ -6,7 +6,6 @@ import { logSettingsEvent, logTicketEvent } from '../services/auditLogService';
 import {
   createKnowledgeArticle,
   getKnowledgeArticle,
-  getKnowledgeArticle,
   recordKnowledgeArticleShare,
   getKnowledgeBaseMetrics,
   listKnowledgeArticles,
