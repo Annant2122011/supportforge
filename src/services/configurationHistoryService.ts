@@ -229,6 +229,106 @@ export async function getConfigurationSnapshot(
   const snapshot = (document.guilds[guildId] ?? []).find((item) => item.id === snapshotId);
   return snapshot ? metadata(snapshot) : null;
 }
+export interface ConfigurationSnapshotReview {
+  snapshot: ConfigurationSnapshotMetadata;
+  currentCounts: {
+    departmentCount: number;
+    panelCount: number;
+    tagCount: number;
+    formCount: number;
+    supportHoursPolicyCount: number;
+  };
+  /** Names of configuration areas whose current values differ from the saved checkpoint. */
+  changedSections: string[];
+}
+
+function stableSerialize(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'undefined';
+  if (Array.isArray(value)) return '[' + value.map(stableSerialize).join(',') + ']';
+  const record = value as Record<string, unknown>;
+  return '{' + Object.keys(record).sort().map((key) =>
+    JSON.stringify(key) + ':' + stableSerialize(record[key]),
+  ).join(',') + '}';
+}
+
+function withoutKeys(value: Record<string, unknown>, excluded: readonly string[]): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !excluded.includes(key)));
+}
+
+/**
+ * Read-only preview for rollback. It reports changed areas and counts without
+ * exposing message content or mutating settings. Call again immediately before
+ * restore because another administrator may have changed configuration since
+ * the preview was generated.
+ */
+export async function reviewConfigurationSnapshot(
+  guildId: string,
+  snapshotId: string,
+): Promise<ConfigurationSnapshotReview | null> {
+  await writeQueue.catch(() => undefined);
+  const document = await readDocument();
+  const target = (document.guilds[guildId] ?? []).find((item) => item.id === snapshotId);
+  if (!target) return null;
+
+  const current = await capturePayload(guildId);
+  const savedConfig = target.payload.guildConfig as unknown as Record<string, unknown>;
+  const currentConfig = current.guildConfig as unknown as Record<string, unknown>;
+  const sections: Array<{ label: string; saved: unknown; current: unknown }> = [
+    {
+      label: 'Departments and tags',
+      saved: target.payload.guildConfig.departments ?? {},
+      current: current.guildConfig.departments ?? {},
+    },
+    {
+      label: 'Custom panels and published panel pointers',
+      saved: {
+        panels: target.payload.guildConfig.customPanels ?? {},
+        channelId: target.payload.guildConfig.panelChannelId ?? null,
+        messageId: target.payload.guildConfig.panelMessageId ?? null,
+      },
+      current: {
+        panels: current.guildConfig.customPanels ?? {},
+        channelId: current.guildConfig.panelChannelId ?? null,
+        messageId: current.guildConfig.panelMessageId ?? null,
+      },
+    },
+    {
+      label: 'General guild settings and managed destinations',
+      saved: withoutKeys(savedConfig, ['departments', 'customPanels', 'panelChannelId', 'panelMessageId']),
+      current: withoutKeys(currentConfig, ['departments', 'customPanels', 'panelChannelId', 'panelMessageId']),
+    },
+    {
+      label: 'Advanced settings and dashboard layout',
+      saved: target.payload.advancedSettings,
+      current: current.advancedSettings,
+    },
+    {
+      label: 'Support-hours policies',
+      saved: target.payload.supportHours ?? [],
+      current: current.supportHours ?? [],
+    },
+    {
+      label: 'Form definitions and routing',
+      saved: target.payload.ticketForms ?? [],
+      current: current.ticketForms ?? [],
+    },
+  ];
+
+  return {
+    snapshot: metadata(target),
+    currentCounts: {
+      departmentCount: Object.keys(current.guildConfig.departments ?? {}).length,
+      panelCount: Object.keys(current.guildConfig.customPanels ?? {}).length,
+      tagCount: countTags(current.guildConfig),
+      formCount: current.ticketForms?.length ?? 0,
+      supportHoursPolicyCount: current.supportHours?.length ?? 0,
+    },
+    changedSections: sections
+      .filter((section) => stableSerialize(section.saved) !== stableSerialize(section.current))
+      .map((section) => section.label),
+  };
+}
+
 
 /**
  * Restore only the requesting guild's configuration documents, support-hours policies and existing form schemas. Tickets,
