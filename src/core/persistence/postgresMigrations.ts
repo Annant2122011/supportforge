@@ -522,6 +522,22 @@ const MIGRATIONS: readonly PostgresMigration[] = [
           ON support_csat_responses (guild_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_support_csat_ticket
           ON support_csat_responses (ticket_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS support_sla_alerts (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+          policy_id TEXT NOT NULL REFERENCES support_sla_policies(id) ON DELETE CASCADE,
+          target_type TEXT NOT NULL CHECK (target_type IN ('first_response','resolution')),
+          progress TEXT NOT NULL CHECK (progress IN ('warning','breached')),
+          policy_version INTEGER NOT NULL CHECK (policy_version > 0),
+          cycle_started_at TIMESTAMPTZ NOT NULL,
+          observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          detail TEXT NOT NULL DEFAULT '',
+          UNIQUE (guild_id,ticket_id,policy_id,target_type,progress,policy_version,cycle_started_at)
+        );
+        CREATE INDEX IF NOT EXISTS idx_support_sla_alerts_guild_observed
+          ON support_sla_alerts (guild_id, observed_at DESC);
       `);
     },
   },
