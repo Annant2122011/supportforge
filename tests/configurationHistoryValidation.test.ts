@@ -111,3 +111,17 @@ test('explicit null history payload is treated as corruption, not an empty histo
     /Configuration history document is malformed/,
   );
 });
+
+
+test('incomplete snapshots cannot be restored without saved form and support-hours state', () => {
+  const guildId = '123456789012345678';
+  const incomplete = snapshot('incomplete', guildId);
+  delete (incomplete.payload as Record<string, unknown>).ticketForms;
+  assert.throws(
+    () => normalizeConfigurationHistoryDocument({
+      version: 1,
+      guilds: { [guildId]: [incomplete] },
+    }),
+    /malformed snapshot/,
+  );
+});
