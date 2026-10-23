@@ -61,6 +61,7 @@ import { resetPanelActivity } from '../services/panelActivityService';
 import { getAdvancedSettings, type TicketPriority } from '../services/advancedSettingsService';
 import { getThemeColor } from '../services/uiThemeService';
 import { translate } from '../i18n/translationService';
+import type { TranslationKey } from '../i18n/locales/en-US';
 import { ensureDepartmentCategory } from '../services/departmentCategoryService';
 import { endTicketVoiceMode, startTicketVoiceMode, syncTicketVoiceParticipants } from '../services/voiceModeService';
 import { getUserFlagCount, isTicketCreationRestricted, recordReport } from '../services/reportService';
@@ -2543,14 +2544,15 @@ async function transition(
       );
     }
 
+    const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
+    const statusLabel = translate(locale, ('ticket.status.' + newStatus) as TranslationKey);
     await interaction.editReply(
       sideEffectFailures.length
-        ? `⚠️ Ticket status changed to **${capitalize(
-            newStatus,
-          )}** in durable storage. Discord could not immediately apply: ${sideEffectFailures.join(', ')}. The durable ticket state was preserved.`
-        : `✅ Ticket status changed to **${capitalize(
-            newStatus,
-          )}**.`,
+        ? '⚠️ ' + translate(locale, 'ticket.status.syncWarning', {
+            status: statusLabel,
+            details: sideEffectFailures.join(', '),
+          })
+        : '✅ ' + translate(locale, 'ticket.status.changed', { status: statusLabel }),
     );
 
     /*
@@ -2558,9 +2560,10 @@ async function transition(
      */
     void channel
       .send(
-        `📌 Ticket status changed to **${capitalize(
-          newStatus,
-        )}** by ${interaction.user}.`,
+        '📌 ' + translate(locale, 'ticket.status.announcement', {
+          status: statusLabel,
+          actor: interaction.user.toString(),
+        }),
       )
       .catch((error) => {
         console.error(
@@ -4871,8 +4874,16 @@ async function applyTicketPriority(
    * are the source of truth for priority.
    */
 
+  const locale = (await getAdvancedSettings(channel.guild.id)).locale;
+  const priorityLabel = ({
+    low: '🟢 ' + translate(locale, 'priority.low'),
+    normal: '🟡 ' + translate(locale, 'priority.normal'),
+    high: '🟠 ' + translate(locale, 'priority.high'),
+    urgent: '🔴 ' + translate(locale, 'priority.urgent'),
+    critical: '🟣 ' + translate(locale, 'priority.critical'),
+  } as Record<TicketPriority, string>)[priority];
   await interaction.editReply({
-    content: `✅ Ticket priority changed to **${({ low: '🟢 Low', normal: '🟡 Normal', high: '🟠 High', urgent: '🔴 Urgent', critical: '🟣 Critical' } as Record<TicketPriority, string>)[priority]}**.`,
+    content: '✅ ' + translate(locale, 'ticket.priority.changed', { priority: priorityLabel }),
     components: [],
   });
 
