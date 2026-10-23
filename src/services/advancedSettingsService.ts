@@ -1,6 +1,7 @@
 import type { Guild } from 'discord.js';
 import { normalizeDiscordEmoji } from '../core/domain/discordEmoji';
 import { normalizeInactivityExemptionIds } from '../core/domain/ticketInactivityExemptions';
+import { normalizeManagedBrandDefault } from '../core/domain/managedBrandDefaults';
 import { getJsonDocument, setJsonDocument } from './jsonDocumentPersistenceService';
 import { resolveLocale, type SupportedLocale } from '../i18n/localeRegistry';
 
@@ -267,19 +268,78 @@ const DEFAULTS: AdvancedGuildSettings = {
 let state: SettingsFile | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 
-function normalizeBrandTextDeep<T>(value: T): T {
-  if (typeof value === 'string') {
-    return value.replace(/\b(?:SupportForge|ResolveX|SUPPORTFORGE)\b/g, 'ResolvX') as unknown as T;
-  }
-  if (Array.isArray(value)) return value.map((entry) => normalizeBrandTextDeep(entry)) as unknown as T;
-  if (value && typeof value === 'object') {
-    const normalized: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-      normalized[key] = normalizeBrandTextDeep(entry);
-    }
-    return normalized as unknown as T;
-  }
-  return value;
+/**
+ * Migrate only exact application-owned title/footer defaults. User-defined
+ * tags, descriptions, dashboard button labels and custom copy are immutable
+ * user data for this migration, even when they contain a historical brand.
+ */
+function normalizeLegacyManagedSettingsDefaults(
+  guilds: Record<string, AdvancedGuildSettings>,
+): Record<string, AdvancedGuildSettings> {
+  let changedAnyGuild = false;
+  const normalizedGuilds = Object.fromEntries(
+    Object.entries(guilds).map(([guildId, settings]) => {
+      if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+        return [guildId, settings];
+      }
+
+      let normalizedSettings = settings;
+      const appearance = settings.appearance;
+      if (appearance && typeof appearance === 'object' && !Array.isArray(appearance)) {
+        const panelTitle = normalizeManagedBrandDefault(
+          appearance.panelTitle,
+          DEFAULTS.appearance.panelTitle,
+        );
+        const panelFooter = normalizeManagedBrandDefault(
+          appearance.panelFooter,
+          DEFAULTS.appearance.panelFooter,
+        );
+        if (
+          (typeof appearance.panelTitle === 'string' && panelTitle !== appearance.panelTitle) ||
+          (typeof appearance.panelFooter === 'string' && panelFooter !== appearance.panelFooter)
+        ) {
+          normalizedSettings = {
+            ...normalizedSettings,
+            appearance: {
+              ...appearance,
+              ...(typeof appearance.panelTitle === 'string' ? { panelTitle: panelTitle as string } : {}),
+              ...(typeof appearance.panelFooter === 'string' ? { panelFooter: panelFooter as string } : {}),
+            },
+          };
+        }
+      }
+
+      const dashboard = settings.settingsDashboard;
+      if (dashboard && typeof dashboard === 'object' && !Array.isArray(dashboard)) {
+        const title = normalizeManagedBrandDefault(
+          dashboard.title,
+          DEFAULTS.settingsDashboard.title,
+        );
+        const footer = normalizeManagedBrandDefault(
+          dashboard.footer,
+          DEFAULTS.settingsDashboard.footer,
+        );
+        if (
+          (typeof dashboard.title === 'string' && title !== dashboard.title) ||
+          (typeof dashboard.footer === 'string' && footer !== dashboard.footer)
+        ) {
+          normalizedSettings = {
+            ...normalizedSettings,
+            settingsDashboard: {
+              ...dashboard,
+              ...(typeof dashboard.title === 'string' ? { title: title as string } : {}),
+              ...(typeof dashboard.footer === 'string' ? { footer: footer as string } : {}),
+            },
+          };
+        }
+      }
+
+      if (normalizedSettings !== settings) changedAnyGuild = true;
+      return [guildId, normalizedSettings];
+    }),
+  );
+
+  return changedAnyGuild ? normalizedGuilds as Record<string, AdvancedGuildSettings> : guilds;
 }
 
 function cloneDefaults(): AdvancedGuildSettings {
@@ -351,9 +411,9 @@ async function load(): Promise<SettingsFile> {
         'ResolvX advanced settings database document is malformed. Existing data was not overwritten.',
       );
     }
-    const normalizedGuilds = normalizeBrandTextDeep(persisted.guilds) as Record<string, AdvancedGuildSettings>;
+    const normalizedGuilds = normalizeLegacyManagedSettingsDefaults(persisted.guilds as Record<string, AdvancedGuildSettings>);
     state = { version: 5, guilds: normalizedGuilds };
-    // Normalize previously saved visible labels/footers while preserving setting keys and structure.
+    // Migrate only exact built-in title/footer defaults while preserving custom server content.
     if (JSON.stringify(persisted.guilds) !== JSON.stringify(normalizedGuilds)) await persist();
     return state;
   }
