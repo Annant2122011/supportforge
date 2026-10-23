@@ -41,6 +41,17 @@ test('locale labels and language-control copy are safe for all supported locales
   assert.equal(translate('hi-IN', 'settings.locale.current', { locale: getLocaleLabel('hi-IN') }).includes('{locale}'), false);
   assert.equal(translate('bn-IN', 'settings.locale.prompt').length > 0, true);
   assert.equal(translate('hi-IN', 'ticket.created.title', { ticketNumber: 42 }), 'टिकट #42 बनाया गया');
+  assert.equal(translate('hi-IN', 'ticket.status.reopened'), 'फिर से खोला गया');
+  assert.equal(
+    translate('hi-IN', 'ticket.status.commandSuccess', { ticketNumber: 42, status: translate('hi-IN', 'ticket.status.pending') }),
+    'टिकट #42 अब लंबित है।',
+  );
+  assert.equal(
+    translate('bn-IN', 'ticket.priority.commandSuccess', { ticketNumber: 17, priority: translate('bn-IN', 'priority.urgent') }),
+    'টিকিট #17-এর অগ্রাধিকার এখন জরুরি।',
+  );
+  assert.equal(translate('hi-IN', 'forms.expired').includes('समय-सीमा समाप्त'), true);
+  assert.equal(translate('bn-IN', 'forms.continuation.invalid').includes('আবার খুলে'), true);
   const outsideHours = translate('hi-IN', 'ticket.intake.outsideHours', {
     timezone: 'Asia/Kolkata',
     nextOpening: translate('hi-IN', 'ticket.intake.nextOpening', { nextOpening: '9:00 AM' }),
