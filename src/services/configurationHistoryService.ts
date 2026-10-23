@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
-import { getJsonDocument, setJsonDocument } from './jsonDocumentPersistenceService';
+import { getPostgresPool } from '../core/persistence/postgresDatabase';
+import { initializePersistence } from '../core/persistence/provider';
 import {
   getGuildConfig,
   updateGuildConfig,
@@ -56,15 +57,17 @@ function normalizeReason(reason: string): string {
   return reason.trim().replace(/\s+/g, ' ').slice(0, 180) || 'Manual configuration checkpoint';
 }
 
-async function readDocument(): Promise<ConfigurationHistoryDocument> {
-  const stored = await getJsonDocument<Partial<ConfigurationHistoryDocument>>(DOCUMENT_KEY);
-  if (stored === undefined) return { version: HISTORY_VERSION, guilds: {} };
-  if (!stored || typeof stored !== 'object' || !stored.guilds ||
-      typeof stored.guilds !== 'object' || Array.isArray(stored.guilds)) {
+function normalizeHistoryDocument(stored: unknown): ConfigurationHistoryDocument {
+  if (stored === undefined || stored === null) return { version: HISTORY_VERSION, guilds: {} };
+  if (!stored || typeof stored !== 'object' || !('guilds' in stored)) {
     throw new Error('Configuration history document is malformed. Existing history was not overwritten.');
   }
+  const raw = stored as Partial<ConfigurationHistoryDocument>;
+  if (!raw.guilds || typeof raw.guilds !== 'object' || Array.isArray(raw.guilds)) {
+    throw new Error('Configuration history guild index is malformed. Existing history was not overwritten.');
+  }
   const guilds: Record<string, ConfigurationSnapshot[]> = {};
-  for (const [guildId, snapshots] of Object.entries(stored.guilds)) {
+  for (const [guildId, snapshots] of Object.entries(raw.guilds)) {
     if (Array.isArray(snapshots)) {
       guilds[guildId] = snapshots.filter((item): item is ConfigurationSnapshot =>
         Boolean(item && typeof item === 'object' &&
@@ -78,14 +81,49 @@ async function readDocument(): Promise<ConfigurationHistoryDocument> {
   return { version: HISTORY_VERSION, guilds };
 }
 
+async function readDocument(): Promise<ConfigurationHistoryDocument> {
+  await initializePersistence();
+  const result = await getPostgresPool().query<{ payload: unknown }>(
+    'SELECT payload FROM app_documents WHERE document_key = $1',
+    [DOCUMENT_KEY],
+  );
+  return normalizeHistoryDocument(result.rows[0]?.payload);
+}
+
+/**
+ * PostgreSQL advisory transaction locking makes history updates safe across
+ * multiple bot processes. The document is read, modified and upserted in one
+ * transaction, so simultaneous snapshots for different guilds cannot clobber
+ * each other inside the shared JSON document.
+ */
 async function mutateDocument<T>(
   mutate: (document: ConfigurationHistoryDocument) => T | Promise<T>,
 ): Promise<T> {
   let result!: T;
   const operation = writeQueue.catch(() => undefined).then(async () => {
-    const document = await readDocument();
-    result = await mutate(document);
-    await setJsonDocument(DOCUMENT_KEY, document);
+    await initializePersistence();
+    const client = await getPostgresPool().connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock($1, $2)', [1836027238, 1]);
+      const stored = await client.query<{ payload: unknown }>(
+        'SELECT payload FROM app_documents WHERE document_key = $1 FOR UPDATE',
+        [DOCUMENT_KEY],
+      );
+      const document = normalizeHistoryDocument(stored.rows[0]?.payload);
+      result = await mutate(document);
+      await client.query(
+        'INSERT INTO app_documents (document_key, payload, updated_at) VALUES ($1, $2::jsonb, NOW()) ' +
+        'ON CONFLICT(document_key) DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW()',
+        [DOCUMENT_KEY, JSON.stringify(document)],
+      );
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
   });
   writeQueue = operation;
   await operation;
@@ -205,10 +243,14 @@ export async function restoreConfigurationSnapshot(
 
   const apply = async (payload: ConfigurationSnapshot['payload']): Promise<void> => {
     await updateGuildConfig(guildId, (current) => {
-      Object.assign(current, cloneJson(payload.guildConfig));
+      const target = current as unknown as Record<string, unknown>;
+      for (const key of Object.keys(target)) delete target[key];
+      Object.assign(target, cloneJson(payload.guildConfig));
     });
     await updateAdvancedSettings(guildId, (current) => {
-      Object.assign(current, cloneJson(payload.advancedSettings));
+      const target = current as unknown as Record<string, unknown>;
+      for (const key of Object.keys(target)) delete target[key];
+      Object.assign(target, cloneJson(payload.advancedSettings));
     });
     if (payload.supportHours !== undefined) {
       await replaceSupportHoursPolicies(guildId, cloneJson(payload.supportHours), actor.id);
