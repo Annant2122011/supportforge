@@ -9,7 +9,7 @@
 
 - `/supportforge diagnostics health`
 - Settings → Repair System → Run Diagnostics.
-- Reports gateway/guild availability, Neon/PostgreSQL connectivity, guild-scoped outbox queue health, managed channel targets, permission gaps, panel message health, department roles/tags and private-thread setup when applicable.
+- Reports gateway/guild availability, Neon/PostgreSQL connectivity and migration level, guild-scoped outbox queue health, managed channel targets and permission gaps, default/custom panel messages, draft/published panel role and routing consistency, form version/mapping consistency, department roles/tags, support-hours scopes/time zones, retention ranges, inactivity thresholds/exemptions, and private-thread setup when applicable.
 - Reports are grouped by area and have severity, details and suggested next steps.
 - Failed database or queue checks are reported as failed/unknown, never marked healthy by default.
 - Connection strings, passwords and raw database errors are not displayed in Discord.
@@ -27,9 +27,9 @@
 - `/supportforge diagnostics snapshots`
 - `/supportforge diagnostics restore-snapshot snapshot-id:<id> confirmation:"RESTORE <id>"`
 - Settings has Save Snapshot and View Snapshots controls; selecting a snapshot opens a two-step review/confirmation flow.
-- Each checkpoint stores this guild's existing guild-config and advanced-settings documents in the existing JSON-document persistence system. The latest 10 checkpoints per guild are retained.
-- Restore requires the exact confirmation phrase, saves a pre-restore checkpoint, attempts compensation if one of the two document writes fails, refreshes the public panel and Settings dashboard, and logs the actor/action.
-- A configuration rollback does not restore Discord's old channel names, original messages or role state. It restores saved configuration documents only. Ticket records, transcripts and other guilds are not intentionally modified.
+- Each checkpoint stores this guild's existing guild-config and advanced-settings documents, support-hours policies, and the latest version/routing definition for existing forms in the current Neon/PostgreSQL-backed app-document system. The latest 10 checkpoints per guild are retained. History writes use a PostgreSQL transaction advisory lock so separate bot processes do not overwrite each other's checkpoint list.
+- Restore requires the exact confirmation phrase, saves a pre-restore checkpoint, attempts compensation if a configuration/service step fails, refreshes the public panel and Settings dashboard, and logs the actor/action. Guild and advanced-setting documents are replaced from the snapshot rather than merged with newer keys.
+- Form restoration appends a new immutable version for each form present in the checkpoint; it never rewrites prior form versions or submissions. Forms created after the checkpoint are not deleted; if one conflicts with the restored active route, rollback fails closed and asks the administrator to resolve the newer mapping first. A rollback does not restore Discord channel names, original messages or role state. Ticket records, transcripts and other guilds are not intentionally modified.
 - The history document is bounded by checkpoint count; extremely large panel/config payloads still need stress testing before large multi-tenant scale.
 
 ### Existing Stage A–H capabilities reused instead of duplicated
@@ -57,15 +57,17 @@ Outbox heuristics currently warn for failed jobs, more than 50 pending jobs, a p
 
 ## Required acceptance before Stage 2 can be called production-complete
 
-- [ ] Build and full tests pass on the final branch head.
-- [ ] PostgreSQL verification passes in CI.
+- [x] Build and full tests pass on the last verified Stage 2 head before the latest Stage 1 role-regression addition: 139 tests passed, 0 failed.
+- [x] PostgreSQL verification passed on that same verified Stage 2 head.
+- [ ] Re-run build, full tests and PostgreSQL verification on the final head after the latest panel-role regression addition.
 - [ ] Test guild: missing/deleted panel, transcript, audit and Settings destinations show correct statuses without destructive action.
 - [ ] Test guild: deliberately remove bot permissions and verify clear warnings for each destination.
 - [ ] Test guild: private-thread mode checks parent and thread permissions.
 - [ ] Inject database connection failure and outbox-query failure; confirm reports say Error/Unknown.
-- [ ] Create two configuration snapshots, confirm list order and per-guild isolation.
-- [ ] Restore a snapshot with correct and incorrect confirmation phrases.
-- [ ] Force a test-only failure between config-document writes and verify the checkpoint compensation path.
+- [ ] Create two configuration snapshots, confirm list order and per-guild isolation in the live test-guild.
+- [ ] Restore a snapshot with correct and incorrect confirmation phrases in the live test-guild.
+- [ ] Inject a test-only failure between configuration-document writes and verify checkpoint compensation in an isolated integration test.
+- [ ] Exercise rollback of form routing and support-hours policies, including a newer active-form conflict.
 - [ ] Confirm restore is audited and refreshes the public panel and Settings dashboard.
 - [ ] Verify the restore leaves ticket records, transcripts, history and other guild configuration intact.
 - [ ] Check Discord command registration and button routing in a non-production bot.
