@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { normalizeManagedBrandDefault } from '../src/core/domain/managedBrandDefaults';
+import { normalizeDiscordSnowflakeIds } from '../src/core/domain/discordSnowflake';
 import {
   normalizeLegacyManagedPanelFooters,
   type GuildConfig,
@@ -152,4 +153,49 @@ test('settings summary describes a disabled retention timer accurately', () => {
   assert.ok(summary.includes('• Archived: No timer (365-day maximum)'));
   assert.equal(summary.includes('Unlimited'), false);
   assert.equal(summary.includes('forever'), false);
+});
+
+
+test('Discord snowflake normalization preserves valid string IDs and rejects malformed values', () => {
+  const validA = '12345678901234567';
+  const validB = '987654321098765432';
+  assert.deepEqual(
+    normalizeDiscordSnowflakeIds([validA, validB, validA, '1234', 'not-an-id', 12345678901234567, null]),
+    [validA, validB],
+  );
+  assert.deepEqual(normalizeDiscordSnowflakeIds([validA, validB], 1), [validA]);
+  assert.deepEqual(normalizeDiscordSnowflakeIds('not-an-array'), []);
+  assert.deepEqual(normalizeDiscordSnowflakeIds([validA], -1), []);
+});
+
+test('panel migration keeps valid panel and button role restrictions', () => {
+  const roleA = '12345678901234567';
+  const roleB = '987654321098765432';
+  const original = {
+    guild: {
+      customPanels: {
+        restricted: {
+          title: 'Help',
+          description: 'Help',
+          footer: 'Custom footer',
+          allowedRoleIds: [roleA, 'broken-id'],
+          buttons: [{ label: 'Billing', allowedRoleIds: [roleB, roleA, 'bad'] }],
+          publishedConfig: {
+            title: 'Help',
+            description: 'Help',
+            footer: 'Custom footer',
+            allowedRoleIds: [roleA],
+            buttons: [{ label: 'Billing', allowedRoleIds: [roleB] }],
+          },
+        },
+      },
+    },
+  } as unknown as Record<string, GuildConfig>;
+
+  const migrated = normalizeLegacyManagedPanelFooters(original);
+  const panel = migrated.guild!.customPanels.restricted!;
+  assert.deepEqual(panel.allowedRoleIds, [roleA]);
+  assert.deepEqual(panel.buttons[0]?.allowedRoleIds, [roleB, roleA]);
+  assert.deepEqual(panel.publishedConfig?.allowedRoleIds, [roleA]);
+  assert.deepEqual(panel.publishedConfig?.buttons[0]?.allowedRoleIds, [roleB]);
 });
