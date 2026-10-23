@@ -250,7 +250,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
             .setFooter({ text: 'Knowledge Base article ' + article.id + ' • revision ' + article.revision })],
           allowedMentions: { parse: [] },
         });
-        await recordKnowledgeArticleShare(guildId, article.id, actorId);
+        await recordKnowledgeArticleShare(guildId, article.id, access, actorId);
         if (config.supportCategoryId) {
           await logTicketEvent(interaction.guild!, config.supportCategoryId, {
             ticketNumber: ticket.ticketNumber ?? ticket.id,
