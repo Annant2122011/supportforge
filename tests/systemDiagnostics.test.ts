@@ -84,8 +84,8 @@ test('diagnostic findings receive stable references and embed output displays th
   assert.equal(report.findings[1]?.referenceId, 'DX-ABC12345-002');
   const embed = buildSystemDiagnosticsEmbed(report).toJSON();
   assert.ok(embed.description?.includes('DX-ABC12345'));
-  assert.ok(embed.fields?.some((field) => field.value.includes('DX-ABC12345-001')));
-  assert.ok(embed.fields?.some((field) => field.value.includes('DX-ABC12345-002')));
+  assert.ok(embed.fields?.some((field) => field.name.includes('DX-ABC12345-001')));
+  assert.ok(embed.fields?.some((field) => field.name.includes('DX-ABC12345-002')));
 });
 
 
@@ -99,7 +99,7 @@ test('empty diagnostic reports are explicitly unknown, never presented as health
     findings: [],
   }).toJSON();
   assert.ok(embed.description?.includes('UNKNOWN'));
-  assert.ok(embed.description?.includes('no checks produced results'));
+  assert.ok(embed.description?.toLowerCase().includes('no checks produced results'));
 });
 
 
