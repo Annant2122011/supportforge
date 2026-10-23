@@ -64,3 +64,10 @@
 5. Stage 1/2 live environment gates remain blocked; CI-only evidence is not production acceptance.
 
 **Completion policy:** All implementation, CI, test-guild and database restore evidence must be reported separately. Do not mark the programme complete merely because all feature files exist.
+
+
+## Latest combined Stage 4 CI — 2026-10-23
+
+The current Stage 4 PR head `106b25a399d13a1012b093131b1c7719bd25529d` passed [ResolvX CI #2249](https://github.com/Annant2122011/supportforge/actions/runs/40007820017): TypeScript build passed, **196/196 tests passed**, zero skipped, and disposable PostgreSQL verification passed. The database verification checks the Stage 3 and Stage 4 tables and performs insert/update smoke tests against the Knowledge Base search-vector trigger inside a rolled-back transaction. Synthetic rows are not retained.
+
+This is combined-code CI evidence only. Test-guild role/command acceptance and an isolated non-production Neon backup/restore drill remain unrun. The Knowledge Base/quick-reply commands now check the staff role configured for the current ticket’s department before sharing or sending into that ticket.
