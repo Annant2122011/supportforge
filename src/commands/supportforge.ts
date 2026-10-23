@@ -2139,6 +2139,10 @@ export async function execute(
     group === 'form' ||
     group === 'panel' ||
     group === 'diagnostics' ||
+    group === 'workflow' ||
+    group === 'related' ||
+    (group === 'quick-reply' && ['save', 'delete'].includes(subcommand)) ||
+    (group === 'knowledge' && ['create', 'update', 'publish', 'archive', 'revisions', 'restore-revision', 'synonyms-set', 'synonyms-delete', 'metrics'].includes(subcommand)) ||
     (group === 'feedback' && subcommand === 'summary')
   ) {
     if (!isAdminLike(interaction)) {
