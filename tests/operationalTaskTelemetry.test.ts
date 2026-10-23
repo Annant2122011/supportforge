@@ -18,6 +18,18 @@ test('unobserved background jobs are UNKNOWN/INFO instead of falsely healthy', (
   assert.match(outbox?.detail ?? '', /resets after restart/);
 });
 
+test('a long-running task is reported as running or potentially stuck', () => {
+  resetOperationalTaskTelemetryForTests();
+  recordOperationalTaskStarted('ticket-archive-backfill', null, 1_000);
+  let finding = getOperationalTaskFindings('guild-a', 2_000).find((item) => item.title.includes('Ticket archive backfill'));
+  assert.equal(finding?.severity, 'info');
+  assert.match(finding?.title ?? '', /is running/);
+
+  finding = getOperationalTaskFindings('guild-a', 122_000).find((item) => item.title.includes('Ticket archive backfill'));
+  assert.equal(finding?.severity, 'warning');
+  assert.match(finding?.title ?? '', /may be stuck/);
+});
+
 test('a successful task reports completion and isolates per-guild state', () => {
   resetOperationalTaskTelemetryForTests();
   recordOperationalTaskStarted('ticket-retention', 'guild-a', 1_000);
