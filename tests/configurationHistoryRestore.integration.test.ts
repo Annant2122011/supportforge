@@ -19,9 +19,10 @@ const hasPostgres =
   process.env.SUPPORTFORGE_POSTGRES_TEST === '1' &&
   Boolean(process.env.DATABASE_URL) &&
   Boolean(process.env.DATABASE_URL_UNPOOLED);
-const isLocalPostgres =
-  /@(localhost|127\\.0\\.0\\.1)(:\\d+)?\\//i.test(process.env.DATABASE_URL ?? '') ||
-  /@(localhost|127\\.0\\.0\\.1)(:\\d+)?\\//i.test(process.env.DATABASE_URL ?? '');
+const isLocalPostgres = [
+  process.env.DATABASE_URL,
+  process.env.DATABASE_URL_UNPOOLED,
+].every((url) => /@(localhost|127\\.0\\.0\\.1)(:\\d+)?\\//i.test(url ?? ''));
 const postgresIntegrationEnabled = hasPostgres && isLocalPostgres;
 
 if (hasPostgres && !isLocalPostgres) {
