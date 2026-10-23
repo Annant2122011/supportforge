@@ -33,6 +33,15 @@ import { UI_THEMES, getThemeColor } from '../services/uiThemeService';
 import { buildSystemDiagnosticsEmbed, runSystemDiagnostics } from '../services/systemDiagnosticsService';
 import { getTicketRecoveryPreview } from '../services/ticketArchiveService';
 import {
+  deleteSupportSlaPolicy,
+  evaluateTicketSla,
+  getCsatSummary,
+  getSupportMetrics,
+  listSupportSlaPolicies,
+  recordCsatResponse,
+  saveSupportSlaPolicy,
+} from '../services/supportOperationsService';
+import {
   createConfigurationSnapshot,
   reviewConfigurationSnapshot,
   listConfigurationSnapshots,
@@ -795,6 +804,26 @@ export const data =
         .setName('restore')
         .setDescription(
           'Restore ResolvX after accidental deletion',
+        ),
+    )
+
+    .addSubcommandGroup((group) =>
+      group
+        .setName('feedback')
+        .setDescription('Submit ticket feedback and review customer satisfaction')
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('rate')
+            .setDescription('Rate a closed ticket from 1 to 5; only the ticket creator can vote once')
+            .addStringOption((option) => option.setName('ticket-id').setDescription('Durable ticket ID or original ticket channel ID').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('rating').setDescription('1 = very dissatisfied, 5 = very satisfied').setRequired(true).setMinValue(1).setMaxValue(5))
+            .addStringOption((option) => option.setName('comment').setDescription('Optional private feedback, max 500 characters').setRequired(false).setMaxLength(500)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('summary')
+            .setDescription('Show privacy-aware customer satisfaction results (admin only)')
+            .addIntegerOption((option) => option.setName('days').setDescription('Reporting window in days').setRequired(false).setMinValue(1).setMaxValue(366)),
         ),
     )
 
@@ -1623,6 +1652,47 @@ export const data =
         )
         .addSubcommand((subcommand) =>
           subcommand
+            .setName('metrics')
+            .setDescription('Show measured ticket volume, response/resolution time and backlog (admin only)')
+            .addIntegerOption((option) => option.setName('days').setDescription('Reporting window in days').setRequired(false).setMinValue(1).setMaxValue(366)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('sla-list')
+            .setDescription('List this server’s SLA policies')
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('sla-set')
+            .setDescription('Create or update an SLA policy for a department and priority')
+            .addStringOption((option) => option.setName('department-id').setDescription('Department ID; omit or use * for all').setRequired(false).setMaxLength(80))
+            .addStringOption((option) => option.setName('priority').setDescription('Priority scope; omit or use * for all').setRequired(false).addChoices(
+              { name: 'All priorities', value: '*' },
+              { name: 'Low', value: 'low' },
+              { name: 'Normal', value: 'normal' },
+              { name: 'High', value: 'high' },
+              { name: 'Urgent', value: 'urgent' },
+              { name: 'Critical', value: 'critical' },
+            ))
+            .addIntegerOption((option) => option.setName('first-response-minutes').setDescription('Target minutes for first human response').setRequired(true).setMinValue(1).setMaxValue(43200))
+            .addIntegerOption((option) => option.setName('resolution-minutes').setDescription('Target minutes to resolve a ticket').setRequired(true).setMinValue(1).setMaxValue(43200))
+            .addBooleanOption((option) => option.setName('pause-while-pending').setDescription('Pause both clocks while status is Pending (default true)').setRequired(false))
+            .addNumberOption((option) => option.setName('warning-ratio').setDescription('Warning fraction of target, from 0.5 to 0.99 (default 0.8)').setRequired(false).setMinValue(0.5).setMaxValue(0.99)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('sla-delete')
+            .setDescription('Delete an SLA policy by ID')
+            .addStringOption((option) => option.setName('policy-id').setDescription('Policy ID from sla-list').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('sla-check')
+            .setDescription('Evaluate first-response and resolution clocks for one ticket')
+            .addStringOption((option) => option.setName('ticket-id').setDescription('Durable ticket ID').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
             .setName('snapshot')
             .setDescription('Save a versioned checkpoint of this server configuration')
             .addStringOption((option) => option.setName('reason').setDescription('Why this checkpoint is being saved').setMaxLength(180)),
@@ -1847,7 +1917,8 @@ export async function execute(
     group === 'premium' ||
     group === 'form' ||
     group === 'panel' ||
-    group === 'diagnostics'
+    group === 'diagnostics' ||
+    (group === 'feedback' && subcommand === 'summary')
   ) {
     if (!isAdminLike(interaction)) {
       await interaction.reply({
@@ -1861,6 +1932,56 @@ export async function execute(
   }
 
   try {
+    if (group === 'feedback') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        if (subcommand === 'rate') {
+          const response = await recordCsatResponse(
+            guild.id,
+            interaction.options.getString('ticket-id', true).trim(),
+            interaction.user.id,
+            interaction.options.getInteger('rating', true),
+            interaction.options.getString('comment') ?? '',
+          );
+          await interaction.editReply(
+            'Thank you for your feedback. Your rating of **' + response.rating + '/5** was saved for ticket ' +
+            response.ticketId + '. A second vote for the same ticket is not allowed.',
+          );
+          return;
+        }
+
+        if (subcommand === 'summary') {
+          const days = interaction.options.getInteger('days') ?? 30;
+          const now = Date.now();
+          const from = new Date(now - days * 24 * 60 * 60 * 1000).toISOString();
+          const to = new Date(now + 1000).toISOString();
+          const summary = await getCsatSummary(guild.id, from, to);
+          const config = await getGuildConfig(guild.id);
+          await interaction.editReply({
+            embeds: [new EmbedBuilder()
+              .setColor(getThemeColor(config.theme))
+              .setTitle('📬 Customer Satisfaction')
+              .setDescription(
+                '**Window:** ' + days + ' days\n' +
+                '**Responses:** ' + summary.responses + '\n' +
+                '**Average rating:** ' + (summary.averageRating === null ? 'No ratings yet' : summary.averageRating.toFixed(2) + '/5') + '\n\n' +
+                'Positive (4–5): **' + summary.positiveCount + '**\n' +
+                'Neutral (3): **' + summary.neutralCount + '**\n' +
+                'Negative (1–2): **' + summary.negativeCount + '**\n\n' +
+                'Only aggregate counts are shown. Comments and individual customers are not exposed in this report.',
+              )
+              .setFooter({ text: 'ResolvX • CSAT definitions: positive >=4, neutral 3, negative <=2' })],
+          });
+          return;
+        }
+      } catch (error) {
+        await interaction.editReply(
+          error instanceof Error ? error.message : 'The feedback operation failed safely. Please retry later.',
+        );
+        return;
+      }
+    }
+
     if (group === 'diagnostics') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
@@ -1894,6 +2015,127 @@ export async function execute(
             .setTitle('🧰 Ticket Recovery Preview')
             .setDescription(lines.join('\n').slice(0, 4000))
             .setFooter({ text: 'Read-only. This command does not restore, delete, or mutate ticket data.' })],
+        });
+        return;
+      }
+
+      if (subcommand === 'metrics') {
+        const days = interaction.options.getInteger('days') ?? 30;
+        const now = Date.now();
+        const summary = await getSupportMetrics(
+          guild.id,
+          new Date(now - days * 24 * 60 * 60 * 1000).toISOString(),
+          new Date(now + 1000).toISOString(),
+        );
+        const minutes = (value: number | null): string => value === null ? 'Not enough archived data' : value.toFixed(1) + ' minutes';
+        const config = await getGuildConfig(guild.id);
+        await interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setColor(getThemeColor(config.theme))
+            .setTitle('📈 Support Operations • ' + days + '-day window')
+            .setDescription(
+              '**Tickets created:** ' + summary.createdTickets + '\n' +
+              '**Closed during window:** ' + summary.closedTickets + '\n' +
+              '**Current active backlog:** ' + summary.activeBacklog + '\n' +
+              '**Reopened backlog:** ' + summary.reopenedBacklog + '\n' +
+              '**Active tickets older than 24h:** ' + summary.agedBacklog + '\n' +
+              '**Failed outbox events now:** ' + summary.failedOutboxEvents,
+            )
+            .addFields(
+              { name: 'First response', value: 'Measured: ' + summary.measuredFirstResponses + '\nAverage: ' + minutes(summary.averageFirstResponseMinutes) + '\nMedian: ' + minutes(summary.medianFirstResponseMinutes), inline: true },
+              { name: 'Resolution duration', value: 'Average: ' + minutes(summary.averageResolutionMinutes) + '\nMedian: ' + minutes(summary.medianResolutionMinutes), inline: true },
+              { name: 'Metric definitions', value: summary.metricDefinitions.slice(0, 4).map((line) => '• ' + line).join('\n').slice(0, 1000) },
+            )
+            .setFooter({ text: 'Counts are server-scoped. First response relies on archived non-bot messages and may be incomplete for historic tickets.' })],
+        });
+        return;
+      }
+
+      if (subcommand === 'sla-list') {
+        const policies = await listSupportSlaPolicies(guild.id);
+        const config = await getGuildConfig(guild.id);
+        const description = policies.length
+          ? policies.slice(0, 18).map((policy) =>
+              '**' + policy.id + '** • department: ' + policy.departmentId + ' • priority: **' + policy.priority + '**\n' +
+              'First response: ' + policy.firstResponseMinutes + ' min • resolution: ' + policy.resolutionMinutes + ' min • pending pauses: ' + (policy.pauseWhilePending ? 'yes' : 'no') +
+              ' • warning: ' + Math.round(policy.warningRatio * 100) + '% • ' + (policy.enabled ? 'enabled' : 'disabled') +
+              ' • version ' + policy.version,
+            ).join('\n\n')
+          : 'No SLA policies exist yet. Use /supportforge diagnostics sla-set to create one.';
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setColor(getThemeColor(config.theme)).setTitle('⏱️ SLA Policies')
+            .setDescription(description.slice(0, 4000))
+            .setFooter({ text: policies.length + ' policy/policies • showing up to 18 • changes are versioned' })],
+        });
+        return;
+      }
+
+      if (subcommand === 'sla-set') {
+        const policy = await saveSupportSlaPolicy(
+          guild.id,
+          {
+            departmentId: interaction.options.getString('department-id'),
+            priority: (interaction.options.getString('priority') ?? '*') as '*' | 'low' | 'normal' | 'high' | 'urgent' | 'critical',
+            firstResponseMinutes: interaction.options.getInteger('first-response-minutes', true),
+            resolutionMinutes: interaction.options.getInteger('resolution-minutes', true),
+            pauseWhilePending: interaction.options.getBoolean('pause-while-pending') ?? true,
+            warningRatio: interaction.options.getNumber('warning-ratio') ?? 0.8,
+            enabled: true,
+          },
+          interaction.user.id,
+        );
+        const config = await getGuildConfig(guild.id);
+        if (config.supportCategoryId) {
+          await logSettingsEvent(guild, config.supportCategoryId, {
+            action: 'SUPPORT_SLA_POLICY_SAVED',
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Saved SLA policy ' + policy.id + ' for department=' + policy.departmentId + ', priority=' + policy.priority + ', first-response=' + policy.firstResponseMinutes + 'm, resolution=' + policy.resolutionMinutes + 'm, pending-pauses=' + policy.pauseWhilePending + ', version=' + policy.version + '.',
+          });
+        }
+        await interaction.editReply('Saved SLA policy ' + policy.id + ' (version ' + policy.version + '). First response: ' + policy.firstResponseMinutes + ' minutes; resolution: ' + policy.resolutionMinutes + ' minutes; pending pause: ' + policy.pauseWhilePending + '.');
+        return;
+      }
+
+      if (subcommand === 'sla-delete') {
+        const policyId = interaction.options.getString('policy-id', true).trim();
+        const deleted = await deleteSupportSlaPolicy(guild.id, policyId);
+        if (!deleted) {
+          await interaction.editReply('No SLA policy with that ID exists in this server.');
+          return;
+        }
+        const config = await getGuildConfig(guild.id);
+        if (config.supportCategoryId) {
+          await logSettingsEvent(guild, config.supportCategoryId, {
+            action: 'SUPPORT_SLA_POLICY_DELETED',
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Deleted SLA policy ' + policyId + '.',
+          });
+        }
+        await interaction.editReply('Deleted SLA policy ' + policyId + '. Past event history is unchanged.');
+        return;
+      }
+
+      if (subcommand === 'sla-check') {
+        const ticketId = interaction.options.getString('ticket-id', true).trim();
+        const evaluation = await evaluateTicketSla(guild.id, ticketId);
+        const config = await getGuildConfig(guild.id);
+        if (!evaluation.policy || !evaluation.firstResponse || !evaluation.resolution) {
+          await interaction.editReply(evaluation.warning ?? 'No SLA policy applies to this ticket.');
+          return;
+        }
+        const fmt = (result: { progress: string; elapsedMinutes: number; targetMinutes: number; remainingMinutes: number; pausedMinutes: number }) =>
+          '**' + result.progress.toUpperCase() + '** • elapsed ' + result.elapsedMinutes + 'm / target ' + result.targetMinutes + 'm • remaining ' + result.remainingMinutes + 'm • paused ' + result.pausedMinutes + 'm';
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setColor(getThemeColor(config.theme)).setTitle('⏱️ Ticket SLA Evaluation')
+            .setDescription(
+              'Ticket: <#' + evaluation.channelId + '>\nStatus: **' + evaluation.status + '**\nPolicy: ' + evaluation.policy.id + ' (version ' + evaluation.policy.version + ')\n\n' +
+              '**First response**\n' + fmt(evaluation.firstResponse) + '\n\n' +
+              '**Resolution**\n' + fmt(evaluation.resolution) + '\n\n' +
+              (evaluation.warning ? 'Warning: ' + evaluation.warning : 'No active SLA warning.'),
+            )
+            .setFooter({ text: 'Pending pauses and reopen resets follow the selected SLA policy; this command is read-only.' })],
         });
         return;
       }
