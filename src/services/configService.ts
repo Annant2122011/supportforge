@@ -129,7 +129,7 @@ const CANONICAL_CUSTOM_PANEL_FOOTER = 'ResolvX • Customer Support';
  * field (including names, descriptions, button labels and confirmation copy)
  * is administrator-authored data and must survive branding changes verbatim.
  */
-function normalizeLegacyManagedPanelFooters(
+export function normalizeLegacyManagedPanelFooters(
   guilds: Record<string, GuildConfig>,
 ): Record<string, GuildConfig> {
   let changedAnyGuild = false;
