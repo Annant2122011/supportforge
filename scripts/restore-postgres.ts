@@ -114,8 +114,8 @@ async function main(): Promise<void> {
     process.env.DATABASE_URL_UNPOOLED = target.toString();
     await runTool(
       'pg_restore',
-      ['--no-owner', '--no-acl', '--exit-on-error', '--single-transaction', backupPath],
-      { ...process.env, PGDATABASE: target.toString() },
+      ['--no-owner', '--no-acl', '--exit-on-error', '--single-transaction', '--dbname', target.toString(), backupPath],
+      { ...process.env },
     );
     await migrateAndVerifyPostgres();
 
