@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { normalizeConfigurationHistoryDocument } from '../src/services/configurationHistoryService';
+import {
+  assertCurrentConfigurationFingerprint,
+  configurationFingerprint,
+  normalizeConfigurationHistoryDocument,
+} from '../src/services/configurationHistoryService';
 
 function snapshot(id: string, guildId = '123456789012345678') {
   return {
@@ -78,4 +82,22 @@ test('a snapshot stored under the wrong guild key is rejected', () => {
     }),
     /malformed snapshot/,
   );
+});
+
+
+test('configuration fingerprints are stable across object key ordering and change with values', () => {
+  const first = configurationFingerprint({ guild: { departments: 2, theme: 'midnight' }, forms: ['a', 'b'] });
+  const reordered = configurationFingerprint({ forms: ['a', 'b'], guild: { theme: 'midnight', departments: 2 } });
+  const changed = configurationFingerprint({ forms: ['a', 'b'], guild: { theme: 'ocean', departments: 2 } });
+
+  assert.match(first, /^[a-f0-9]{16}$/);
+  assert.equal(first, reordered);
+  assert.notEqual(first, changed);
+});
+
+test('restore fingerprint guard rejects malformed and stale confirmations before mutation', () => {
+  const current = configurationFingerprint({ departments: 3, panelMessageId: '123' });
+  assert.doesNotThrow(() => assertCurrentConfigurationFingerprint(current, current));
+  assert.throws(() => assertCurrentConfigurationFingerprint('not-a-fingerprint', current), /Nothing was restored/);
+  assert.throws(() => assertCurrentConfigurationFingerprint('0000000000000000', current), /Nothing was restored/);
 });
