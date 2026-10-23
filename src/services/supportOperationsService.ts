@@ -175,7 +175,8 @@ export async function evaluateTicketSla(
   ticketId: string,
   now = new Date().toISOString(),
 ): Promise<SupportSlaEvaluation> {
-  const ticket = await getPersistedTicketById(ticketId);
+  let ticket = await getPersistedTicketById(ticketId);
+  if (!ticket) ticket = await (await import('./ticketPersistenceService')).getPersistedTicket(ticketId);
   if (!ticket || ticket.guildId !== guildId || ticket.deletedAt) {
     throw new Error('An active durable ticket in this server is required for SLA evaluation.');
   }
@@ -279,7 +280,8 @@ export async function recordCsatResponse(
   }
   const safeComment = comment.trim();
   if (safeComment.length > 500) throw new Error('Feedback comments must be 500 characters or fewer.');
-  const ticket = await getPersistedTicketById(ticketId);
+  let ticket = await getPersistedTicketById(ticketId);
+  if (!ticket) ticket = await (await import('./ticketPersistenceService')).getPersistedTicket(ticketId);
   if (!ticket || ticket.guildId !== guildId || ticket.deletedAt) {
     throw new Error('Ticket was not found in this server.');
   }
@@ -294,7 +296,7 @@ export async function recordCsatResponse(
     }>(
       'INSERT INTO support_csat_responses (id,guild_id,ticket_id,user_id,rating,comment) VALUES ($1,$2,$3,$4,$5,$6) ' +
         'RETURNING id,ticket_id,rating,created_at',
-      [randomUUID(), guildId, ticketId, userId, rating, safeComment],
+      [randomUUID(), guildId, ticket.id, userId, rating, safeComment],
     );
     const row = result.rows[0];
     return { id: row.id, ticketId: row.ticket_id, rating: Number(row.rating), createdAt: toIso(row.created_at) ?? new Date().toISOString() };
