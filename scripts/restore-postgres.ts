@@ -36,7 +36,7 @@ function postgresUrl(value: string, variable: string): URL {
 
 function postgresClientEnvironment(url: URL): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = { ...process.env };
-  const database = decodeURIComponent(url.pathname.replace(/^\\//, ''));
+  const database = decodeURIComponent(url.pathname.replace(/^\//, ''));
   if (!database) throw new Error('PostgreSQL connection URL must include a database name.');
   environment.PGHOST = url.hostname;
   environment.PGPORT = url.port || '5432';
