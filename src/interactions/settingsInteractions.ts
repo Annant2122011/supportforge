@@ -1823,7 +1823,7 @@ async function showRecoveryCandidates(
   const embed = await recoveryEmbed(
     guild,
     native ? '♻️ Restore Channel' : '🛡️ Ticket Deletion Review',
-    description + (lines.length ? lines.join('\n') : 'Nothing to display on this page.') + '\\n\\nPage ' + page + ' / ' + pages,
+    description + (lines.length ? lines.join('\n') : 'Nothing to display on this page.') + '\n\nPage ' + page + ' / ' + pages,
   );
   await interaction.editReply({ content: '', embeds: [embed], components: rows });
 }
@@ -1907,7 +1907,7 @@ async function showRecoveryCandidateDetail(
           'Archived messages: ' + item.messageCount,
           '',
           'Your answer will be saved in Neon and logged in both the ticket audit stream and developer/system audit stream.',
-        ].join('\\n');
+        ].join('\n');
   const text = [context, '', ...previewLines].join('\n');
   const embed = await recoveryEmbed(guild, (source === 'discord_native' ? '♻️ Restore Channel' : '🛡️ Ticket Deletion Review') + ' • Ticket #' + item.ticketNumber, text);
   await interaction.editReply({ content: '', embeds: [embed], components: rows });
