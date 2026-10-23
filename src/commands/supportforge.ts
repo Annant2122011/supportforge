@@ -1858,7 +1858,9 @@ export async function execute(
               '**Reason:** ' + snapshot.reason + '\n' +
               '**Departments:** ' + snapshot.departmentCount + '\n' +
               '**Custom panels:** ' + snapshot.panelCount + '\n' +
-              '**Tags:** ' + snapshot.tagCount + '\n\n' +
+              '**Tags:** ' + snapshot.tagCount + '\n' +
+              '**Forms:** ' + (snapshot.formCount ?? 0) + '\n' +
+              '**Support-hours policies:** ' + (snapshot.supportHoursPolicyCount ?? 0) + '\n\n' +
               'Use `/supportforge diagnostics snapshots` to review saved checkpoints.',
             )
             .setFooter({ text: 'Ticket records and transcripts are not modified by configuration snapshots.' })],
@@ -1873,7 +1875,8 @@ export async function execute(
           ? snapshots.map((snapshot) =>
               '**`' + snapshot.id + '`** · <t:' + Math.floor(Date.parse(snapshot.createdAt) / 1000) + ':R>\n' +
               snapshot.reason + '\nDepartments: ' + snapshot.departmentCount +
-              ' · Panels: ' + snapshot.panelCount + ' · Tags: ' + snapshot.tagCount,
+              ' · Panels: ' + snapshot.panelCount + ' · Tags: ' + snapshot.tagCount +
+              ' · Forms: ' + (snapshot.formCount ?? 0) + ' · Hours policies: ' + (snapshot.supportHoursPolicyCount ?? 0),
             ).join('\n\n')
           : 'No configuration checkpoints have been saved for this server yet. Run `/supportforge diagnostics snapshot` before a risky change.';
         await interaction.editReply({
