@@ -10,6 +10,8 @@ const bnIN: Partial<Record<TranslationKey, string>> = {
   'settings.locale.title': 'সার্ভারের ভাষা',
   'settings.locale.current': 'বর্তমান ভাষা: {locale}',
   'settings.locale.saved': 'সার্ভারের ভাষা {locale} করা হয়েছে।',
+  'settings.locale.prompt': 'এই সার্ভারে সমর্থিত বট বার্তাগুলির ডিফল্ট ভাষা বেছে নিন। ব্যবহারকারীর দেওয়া বিষয়বস্তু ও স্থায়ী কমান্ডের নাম অনুবাদ করা হবে না।',
+  'settings.locale.unknown': 'এই ভাষাটি সমর্থিত নয়। উপলভ্য বিকল্পগুলির মধ্যে থেকে একটি ভাষা বেছে নিন।',
   'ticket.status.open': 'খোলা',
   'ticket.status.claimed': 'কর্মীর দায়িত্বে',
   'ticket.status.pending': 'অপেক্ষমাণ',
