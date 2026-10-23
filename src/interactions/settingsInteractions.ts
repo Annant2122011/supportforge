@@ -2058,7 +2058,7 @@ export async function handleSettingsInteraction(
           'Tags: ' + snapshot.tagCount + ' → ' + review.currentCounts.tagCount + '\n' +
           'Forms: ' + (snapshot.formCount ?? 0) + ' → ' + review.currentCounts.formCount + '\n' +
           'Support-hours policies: ' + (snapshot.supportHoursPolicyCount ?? 0) + ' → ' + review.currentCounts.supportHoursPolicyCount +
-          '\n\nThis preview is read-only. Restoring replaces this server’s guild configuration and advanced settings, but does not intentionally delete ticket records, messages, transcripts or audit history. A checkpoint of current configuration is saved before restore.
+          '\n\nThis preview is read-only. Restoring replaces this server’s guild configuration and advanced settings, but does not intentionally delete ticket records, messages, transcripts or audit history. A checkpoint of current configuration is saved before restore.'
         )],
       components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
