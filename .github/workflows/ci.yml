@@ -1,4 +1,4 @@
-name: ResolvX CI
+name: QueryFixr CI
 
 on:
   push:

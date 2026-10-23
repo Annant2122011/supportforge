@@ -17,6 +17,7 @@ test('Settings dashboard layout preserves server order while retaining every bui
       buttonOrder: ['reset', 'repair', 'dashboard-builder'],
     },
   } as unknown as AdvancedGuildSettings;
+  assert.equal(new Set(SETTINGS_DASHBOARD_BUTTON_KEYS).size, SETTINGS_DASHBOARD_BUTTON_KEYS.length);
   const rows = buildSettingsDashboardComponents(partial);
   const ids = rows.flatMap((row) => row.components.map((button) => button.data.custom_id as string));
 
@@ -88,9 +89,9 @@ test('Settings dashboard custom labels and emojis override presentation but keep
 test('Settings dashboard summarizes inactivity/workspace policy and explains retention limits', () => {
   const partial = {
     settingsDashboard: {
-      title: 'ResolveX Settings',
+      title: 'QueryFixr Settings',
       description: 'Server settings',
-      footer: 'ResolveX',
+      footer: 'QueryFixr',
     },
     priorityRoles: {},
     retention: { closedDays: 0, archiveDays: 7 },
@@ -107,7 +108,7 @@ test('Settings dashboard summarizes inactivity/workspace policy and explains ret
     appearance: {
       panelTitle: 'Support center',
       panelDescription: 'Open a support ticket.',
-      panelFooter: 'ResolveX',
+      panelFooter: 'QueryFixr',
     },
   } as unknown as AdvancedGuildSettings;
 

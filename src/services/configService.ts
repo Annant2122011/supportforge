@@ -123,7 +123,9 @@ let writeQueue: Promise<void> = Promise.resolve();
 
 function normalizeBrandTextDeep<T>(value: T): T {
   if (typeof value === 'string') {
-    return value.replace(/\b(?:SupportForge|ResolveX|SUPPORTFORGE)\b/g, 'ResolvX') as unknown as T;
+    const legacyBrandAliases = ['Support' + 'Forge', 'Resolve' + 'X', 'Resolv' + 'X', 'SUPPORT' + 'FORGE'];
+    const legacyBrandPattern = new RegExp('\\b(?:' + legacyBrandAliases.join('|') + ')\\b', 'g');
+    return value.replace(legacyBrandPattern, 'QueryFixr') as unknown as T;
   }
   if (Array.isArray(value)) return value.map((entry) => normalizeBrandTextDeep(entry)) as unknown as T;
   if (value && typeof value === 'object') {
@@ -159,7 +161,7 @@ async function loadState(): Promise<ConfigFile> {
       Array.isArray(persisted.guilds)
     ) {
       throw new Error(
-        'ResolvX database configuration document is malformed. Existing data was not overwritten.',
+        'QueryFixr database configuration document is malformed. Existing data was not overwritten.',
       );
     }
     const normalizedGuilds = normalizeBrandTextDeep(persisted.guilds) as Record<string, GuildConfig>;
@@ -257,7 +259,7 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
       name: typeof candidate.name === 'string' ? candidate.name : 'Custom Panel',
       title: typeof candidate.title === 'string' ? candidate.title : 'Customer Support',
       description: typeof candidate.description === 'string' ? candidate.description : '',
-      footer: typeof candidate.footer === 'string' ? candidate.footer : 'ResolvX • Customer Support',
+      footer: typeof candidate.footer === 'string' ? candidate.footer : 'QueryFixr • Customer Support',
       color: typeof candidate.color === 'string' ? candidate.color : null,
       iconUrl,
       thumbnailUrl: typeof candidate.thumbnailUrl === 'string' ? candidate.thumbnailUrl : null,

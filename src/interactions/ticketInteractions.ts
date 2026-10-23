@@ -59,6 +59,7 @@ import {
 
 import { resetPanelActivity } from '../services/panelActivityService';
 import { getAdvancedSettings, type TicketPriority } from '../services/advancedSettingsService';
+import { translate } from '../i18n/translationService';
 import { getThemeColor } from '../services/uiThemeService';
 import { ensureDepartmentCategory } from '../services/departmentCategoryService';
 import { endTicketVoiceMode, startTicketVoiceMode, syncTicketVoiceParticipants } from '../services/voiceModeService';
@@ -696,7 +697,7 @@ async function removePreviousTicketTranscript(
 
   /*
    * Legacy fallback: older tickets did not store the transcript message ID.
-   * Remove matching ResolvX transcript posts from the recent transcript
+   * Remove matching QueryFixr transcript posts from the recent transcript
    * history, without touching unrelated files/messages.
    */
   const ticketNumber = getField(topic, 'number') ?? 'unknown';
@@ -769,6 +770,7 @@ async function updateMainMessage(
       await getGuildConfig(
           channel.guild.id,
         );
+    const locale = (await getAdvancedSettings(channel.guild.id)).locale;
 
     let message;
     try {
@@ -792,7 +794,7 @@ async function updateMainMessage(
           candidate.embeds.some(
             (embed) =>
               embed.title ===
-              `🎫 ResolvX Ticket #${ticketNumber}`,
+              `🎫 QueryFixr Ticket #${ticketNumber}`,
           ),
       );
     }
@@ -858,10 +860,7 @@ async function updateMainMessage(
           ),
         ],
         components:
-          buildTicketPanelComponents(
-            status,
-            effectivePanelTopic,
-          ),
+          buildTicketPanelComponents(status, effectivePanelTopic, locale),
       });
   } catch (error) {
     console.error(
@@ -1024,7 +1023,7 @@ async function applyTicketVisibilityMode(
     channel.id,
     properties,
     roleIds,
-    'Synchronize ResolvX ticket metadata and privacy in one channel update',
+    'Synchronize QueryFixr ticket metadata and privacy in one channel update',
     { deferLongRateLimit: false },
   );
   if (properties.topic !== undefined) channel.topic = properties.topic;
@@ -1052,11 +1051,16 @@ async function ensureSupportHoursAllows(
   const decision = await evaluateSupportHours(guildId, { departmentId, panelId });
   if (decision.ticketCreationAllowed) return true;
 
+  const locale = (await getAdvancedSettings(guildId)).locale;
   const nextOpening = decision.nextOpeningAt
-    ? ' Next opening: ' + formatSupportHoursInstant(decision.nextOpeningAt, decision.timezone) + '.'
-    : ' No next opening is configured; contact a server administrator.';
-  const message = '⏰ Support is currently closed in ' + decision.timezone +
-    '. New tickets are restricted by the configured support-hours policy.' + nextOpening;
+    ? translate(locale, 'supportHours.nextOpening', {
+        nextOpening: formatSupportHoursInstant(decision.nextOpeningAt, decision.timezone),
+      })
+    : translate(locale, 'supportHours.noNextOpening');
+  const message = '⏰ ' + translate(locale, 'ticket.intake.outsideHours', {
+    timezone: decision.timezone,
+    nextOpening,
+  });
   await replyError(interaction, message);
 
   // Audit delivery must not delay Discord's initial acknowledgement.
@@ -1102,6 +1106,9 @@ async function createTicket(
 
   const guild =
     interaction.guild;
+  const serverLocale = await getAdvancedSettings(guild.id)
+    .then((settings) => settings.locale)
+    .catch(() => 'en-US' as const);
 
   const lockKey =
     `${guild.id}:${interaction.user.id}:${departmentId}`;
@@ -1113,7 +1120,7 @@ async function createTicket(
   ) {
     await replyError(
       interaction,
-      '⏳ Your ticket request is already being processed.',
+      translate(serverLocale, 'ticket.intake.inProgress'),
     );
     return;
   }
@@ -1140,7 +1147,7 @@ async function createTicket(
     if (!creationLease) {
       await replyError(
         interaction,
-        '⏳ Another ticket request for this department is already being processed. Please wait a moment and try again.',
+        translate(serverLocale, 'ticket.intake.inProgress'),
       );
       return;
     }
@@ -1149,7 +1156,7 @@ async function createTicket(
       const flags = await getUserFlagCount(guild.id, interaction.user.id);
       await replyError(
         interaction,
-        `🚫 You are currently restricted from opening new ResolvX tickets because your account has reached **${flags}** moderation flag(s).`,
+        `🚫 You are currently restricted from opening new QueryFixr tickets because your account has reached **${flags}** moderation flag(s).`,
       );
       return;
     }
@@ -1169,7 +1176,7 @@ async function createTicket(
     if (!department || !tag) {
       await replyError(
         interaction,
-        '❌ This department/tag combination no longer exists. Please refresh the support panel.',
+        translate(serverLocale, 'ticket.intake.invalidDepartment'),
       );
       return;
     }
@@ -1252,7 +1259,7 @@ async function createTicket(
     if (!auditParentCategoryId) {
       await replyError(
         interaction,
-        '❌ ResolvX is not configured. Run `/supportforge setup` first.',
+        '❌ QueryFixr is not configured. Run `/qf setup` first.',
       );
       return;
     }
@@ -1324,7 +1331,7 @@ async function createTicket(
     if (existing) {
       await replyError(
         interaction,
-        `❌ You already have an active **${department.name}** ticket: ${existing}`,
+        translate(serverLocale, 'ticket.intake.alreadyActive', { department: department.name, ticketChannel: existing.toString() }),
       );
       return;
     }
@@ -1349,7 +1356,7 @@ async function createTicket(
     }
 
     /*
-     * Create the ticket in the existing ResolvX parent first. The
+     * Create the ticket in the existing QueryFixr parent first. The
      * department-specific category is provisioned only after the ticket,
      * its panel, and its durable record have been created successfully.
      */
@@ -1427,7 +1434,7 @@ async function createTicket(
 
     if (!bot) {
       throw new Error(
-        'ResolvX bot member could not be resolved.',
+        'QueryFixr bot member could not be resolved.',
       );
     }
 
@@ -1476,7 +1483,7 @@ async function createTicket(
           parent: auditParentCategoryId,
           topic,
           permissionOverwrites: overwrites,
-          reason: `SupportForge ticket #${number}`,
+          reason: `QueryFixr ticket #${number}`,
         }) as TextChannel;
       }
 
@@ -1500,7 +1507,7 @@ async function createTicket(
             ],
             components: ticketChannel.type === ChannelType.PrivateThread
               ? buildPrivateThreadTicketComponents('open', ticketChannel.id)
-              : buildTicketPanelComponents('open', topic),
+              : buildTicketPanelComponents('open', topic, advancedSettings.locale),
           });
 
       const finalTopic =
@@ -1702,7 +1709,7 @@ async function createTicket(
 
       await interaction.editReply({
         content:
-          `✅ Your ticket has been created: ${ticketChannel}`,
+          translate(advancedSettings.locale, 'ticket.created.confirmation', { channel: ticketChannel.toString() }),
       });
 
       /*
@@ -1758,7 +1765,7 @@ async function createTicket(
           embeds: [
             new EmbedBuilder()
               .setColor(recoveryThemeColor)
-              .setTitle('⚠️ ResolvX Ticket Recovery')
+              .setTitle('⚠️ QueryFixr Ticket Recovery')
               .setDescription(
                 'The ticket channel was created successfully, but one initialization step did not complete. The ticket has **not** been deleted. An administrator can use **Repair System** or refresh the ticket panel to complete recovery.',
               )
@@ -1774,7 +1781,7 @@ async function createTicket(
         await interaction.editReply({
           content:
             `✅ Your ticket channel was created: ${ticketChannel}
-⚠️ One setup step did not complete, so ResolvX preserved the ticket for recovery instead of reporting a false creation failure.`,
+⚠️ One setup step did not complete, so QueryFixr preserved the ticket for recovery instead of reporting a false creation failure.`,
         }).catch(() => undefined);
 
         return;
@@ -1790,7 +1797,7 @@ async function createTicket(
 
     await replyError(
       interaction,
-      '❌ ResolvX could not create the ticket. Please try again.',
+      '❌ QueryFixr could not create the ticket. Please try again.',
     );
   } finally {
     if (creationLease) {
@@ -1800,7 +1807,7 @@ async function createTicket(
         departmentId,
         creationLease,
       ).catch((error) => {
-        console.warn('Could not release ResolvX ticket creation lease:', error);
+        console.warn('Could not release QueryFixr ticket creation lease:', error);
       });
     }
     ticketCreationLocks.delete(lockKey);
@@ -1984,6 +1991,7 @@ async function transition(
   );
 
   try {
+    const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
     /*
      * Always read the latest channel topic before changing state.
      * This prevents stale runtime data from becoming authoritative.
@@ -2019,7 +2027,7 @@ async function transition(
       )
     ) {
       throw new Error(
-        'Invalid ResolvX ticket topic.',
+        'Invalid QueryFixr ticket topic.',
       );
     }
 
@@ -2366,7 +2374,7 @@ async function transition(
         channel,
         newTopic,
         newStatus,
-        'ResolvX voice mode ended because ticket status changed',
+        'QueryFixr voice mode ended because ticket status changed',
         { deferTicketTopicUpdate: true, queueRename: false },
       );
     }
@@ -2535,14 +2543,24 @@ async function transition(
       );
     }
 
+    const ticketNumber = getField(newTopic, 'number') ?? 'unknown';
+    const localizedStatusMessage = newStatus === 'claimed'
+      ? translate(locale, 'ticket.claimed', { staffName: interaction.user.tag })
+      : newStatus === 'pending'
+        ? translate(locale, 'ticket.pending', { ticketNumber })
+        : newStatus === 'open'
+          ? translate(locale, 'ticket.resumed', { ticketNumber })
+          : newStatus === 'closed'
+            ? translate(locale, 'ticket.closed', { ticketNumber })
+            : newStatus === 'reopened'
+              ? translate(locale, 'ticket.reopened', { ticketNumber })
+              : translate(locale, 'ticket.archived', { ticketNumber });
     await interaction.editReply(
       sideEffectFailures.length
-        ? `⚠️ Ticket status changed to **${capitalize(
-            newStatus,
-          )}** in durable storage. Discord could not immediately apply: ${sideEffectFailures.join(', ')}. The durable ticket state was preserved.`
-        : `✅ Ticket status changed to **${capitalize(
-            newStatus,
-          )}**.`,
+        ? '⚠️ ' + localizedStatusMessage + ' ' +
+          translate(locale, 'errors.actionFailed') + ' ' + sideEffectFailures.join(', ') +
+          '. The durable ticket state was preserved.'
+        : '✅ ' + localizedStatusMessage,
     );
 
     /*
@@ -2550,9 +2568,7 @@ async function transition(
      */
     void channel
       .send(
-        `📌 Ticket status changed to **${capitalize(
-          newStatus,
-        )}** by ${interaction.user}.`,
+        localizedStatusMessage + ' • ' + interaction.user.tag,
       )
       .catch((error) => {
         console.error(
@@ -2707,7 +2723,7 @@ async function closeTicket(
       )
     ) {
       throw new Error(
-        'Invalid ResolvX ticket topic.',
+        'Invalid QueryFixr ticket topic.',
       );
     }
 
@@ -2976,7 +2992,7 @@ async function closeTicket(
               channel,
               closedTopic,
               'closed',
-              'ResolvX voice mode ended because ticket was closed',
+              'QueryFixr voice mode ended because ticket was closed',
               { deferTicketTopicUpdate: true, queueRename: false },
             );
             closedTopic = setField(closedTopic, 'updated_at', closeTimestamp);
@@ -3177,7 +3193,7 @@ export async function showTicketCreationModalFromCommand(
   } catch (error) {
     console.error('Failed to open ticket creation modal from slash command:', error);
     if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: 'ResolvX could not open the ticket form. Please try again.', flags: MessageFlags.Ephemeral }).catch(() => undefined);
+      await interaction.reply({ content: 'QueryFixr could not open the ticket form. Please try again.', flags: MessageFlags.Ephemeral }).catch(() => undefined);
     }
   }
 }
@@ -3623,7 +3639,7 @@ async function showTicketCreationModal(
      */
     await replyError(
       interaction,
-      '❌ ResolvX could not open the ticket creation form. Please try again.',
+      '❌ QueryFixr could not open the ticket creation form. Please try again.',
     );
   }
 }
@@ -3934,7 +3950,7 @@ async function showReportTargetSelector(interaction: ButtonInteraction, page = 0
   const reportSettings = await getAdvancedSettings(interaction.guild.id);
 
   if (!isTicketTopic(topic) || !isActiveTicketStatus(getTicketStatus(topic))) {
-    await replyError(interaction, '❌ Reporting is only available on an active ResolvX ticket.');
+    await replyError(interaction, '❌ Reporting is only available on an active QueryFixr ticket.');
     return;
   }
 
@@ -4028,7 +4044,7 @@ async function handleReportTargetSelection(interaction: StringSelectMenuInteract
 
   const rows = Object.values(settings.reports.categories).slice(0, 25);
   await interaction.editReply({
-    content: '🚩 **Report category**\nChoose the category that best describes the behaviour. The category set is built into ResolvX and is separate from ticket use-case/departments.',
+    content: '🚩 **Report category**\nChoose the category that best describes the behaviour. The category set is built into QueryFixr and is separate from ticket use-case/departments.',
     components: [
       new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
         new StringSelectMenuBuilder()
@@ -4202,7 +4218,7 @@ async function handleReportModal(interaction: ModalSubmitInteraction): Promise<v
   }
 
   if (!isTicketTopic(topic) || !isActiveTicketStatus(getTicketStatus(topic))) {
-    await replyError(interaction, '❌ Reporting is only available on an active ResolvX ticket.');
+    await replyError(interaction, '❌ Reporting is only available on an active QueryFixr ticket.');
     return;
   }
 
@@ -4397,7 +4413,7 @@ async function showTicketHistory(
     await interaction.editReply({ content: '', embeds });
   } catch (error) {
     console.error('❌ Failed to load ticket history:', error);
-    await replyError(interaction, '❌ ResolvX could not load this ticket history.');
+    await replyError(interaction, '❌ QueryFixr could not load this ticket history.');
   }
 }
 
@@ -4427,14 +4443,14 @@ async function renderDepartmentSelector(interaction: ButtonInteraction | StringS
 export async function executeTicketReportCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
-    await replyError(interaction, 'Reporting must be run inside an active ResolvX ticket.');
+    await replyError(interaction, 'Reporting must be run inside an active QueryFixr ticket.');
     return;
   }
   const channel = interaction.channel as TextChannel;
   const topic = await getEffectiveTicketTopic(channel, channel.topic ?? '');
   const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
   if (!isTicketTopic(topic) || !isActiveTicketStatus(status)) {
-    await replyError(interaction, 'Reporting is only available inside an active ResolvX ticket.');
+    await replyError(interaction, 'Reporting is only available inside an active QueryFixr ticket.');
     return;
   }
   const staff = getStaffContext(interaction, topic);
@@ -4521,14 +4537,14 @@ export async function executeTicketRoutingCommand(
 ): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
-    await replyError(interaction, 'This command must be used inside a ResolvX ticket channel.');
+    await replyError(interaction, 'This command must be used inside a QueryFixr ticket channel.');
     return;
   }
   const channel = interaction.channel as TextChannel;
   const topic = await getEffectiveTicketTopic(channel, channel.topic ?? '');
   const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
   if (!isTicketTopic(topic) || !isActiveTicketStatus(status)) {
-    await replyError(interaction, 'Only active ResolvX tickets can be rerouted.');
+    await replyError(interaction, 'Only active QueryFixr tickets can be rerouted.');
     return;
   }
   const staff = getStaffContext(interaction, topic);
@@ -4544,7 +4560,7 @@ export async function executeTicketRoutingCommand(
   const department = departmentId ? config.departments[departmentId] : undefined;
   if (!department) {
     await replyError(interaction, mode === 'department'
-      ? 'Department ID not found. Use /supportforge form list to view department IDs.'
+      ? 'Department ID not found. Use /qf form list to view department IDs.'
       : 'The current ticket department could not be resolved.');
     return;
   }
@@ -4552,7 +4568,7 @@ export async function executeTicketRoutingCommand(
     ? requestedTagId
     : requestedTagId ?? (department.tags[getField(topic, 'tags') ?? ''] ? getField(topic, 'tags')! : Object.keys(department.tags)[0]);
   if (!tagId || !department.tags[tagId]) {
-    await replyError(interaction, 'Tag ID is not valid for that department. Use /supportforge form list to view department and tag IDs.');
+    await replyError(interaction, 'Tag ID is not valid for that department. Use /qf form list to view department and tag IDs.');
     return;
   }
   await applyTicketRouting(interaction, department, tagId, status, topic);
@@ -4955,7 +4971,7 @@ async function handleTicketVoiceStart(interaction: ButtonInteraction | ChatInput
     }
   } catch (error) {
     console.error('❌ Failed to start ticket voice mode:', error);
-    await replyError(interaction, '❌ ResolvX could not start private voice mode. The ticket itself was not changed.');
+    await replyError(interaction, '❌ QueryFixr could not start private voice mode. The ticket itself was not changed.');
   }
 }
 
@@ -4982,7 +4998,7 @@ async function handleTicketVoiceEnd(interaction: ButtonInteraction | ChatInputCo
     return;
   }
   try {
-    const newTopic = await endTicketVoiceMode(interaction.guild, channel, topic, status, 'ResolvX voice mode ended');
+    const newTopic = await endTicketVoiceMode(interaction.guild, channel, topic, status, 'QueryFixr voice mode ended');
     channel.topic = newTopic;
     await updateMainMessage(channel, getField(newTopic, 'message'), status, newTopic);
     const voiceEndThemeColor = getThemeColor((await getGuildConfig(interaction.guild.id)).theme);
@@ -5008,7 +5024,7 @@ async function handleTicketVoiceEnd(interaction: ButtonInteraction | ChatInputCo
     }
   } catch (error) {
     console.error('❌ Failed to end ticket voice mode:', error);
-    await replyError(interaction, '❌ ResolvX could not end voice mode safely.');
+    await replyError(interaction, '❌ QueryFixr could not end voice mode safely.');
   }
 }
 
@@ -5078,7 +5094,7 @@ async function handlePanelButton(
       if (!isSupportPanel) {
         await replyError(
           interaction,
-          '❌ This pagination control can only be used on the ResolvX support panel.',
+          '❌ This pagination control can only be used on the QueryFixr support panel.',
         );
         return;
       }
@@ -5166,7 +5182,7 @@ async function handlePanelButton(
       await interaction.editReply({}).catch(() => undefined);
     } catch (error) {
       console.error('❌ Failed to change support panel page:', error);
-      await replyError(interaction, '❌ ResolvX could not change the support panel page.');
+      await replyError(interaction, '❌ QueryFixr could not change the support panel page.');
     }
     return;
   }
@@ -5409,7 +5425,7 @@ async function handlePanelButton(
       console.error('❌ Failed to move ticket panel manually:', error);
       await replyError(
         interaction,
-        '❌ ResolvX could not move the ticket panel.',
+        '❌ QueryFixr could not move the ticket panel.',
       );
     }
 
@@ -5572,7 +5588,7 @@ async function handlePanelButton(
   } else {
     await replyError(
       interaction,
-      '❌ This ResolvX ticket control is no longer available. Please refresh the ticket panel.',
+      '❌ This QueryFixr ticket control is no longer available. Please refresh the ticket panel.',
     );
   }
 }
@@ -5624,7 +5640,7 @@ async function handlePanelModal(
   ) {
     await replyError(
       interaction,
-      '❌ This is not a valid ResolvX ticket.',
+      '❌ This is not a valid QueryFixr ticket.',
     );
     return;
   }
@@ -6143,7 +6159,7 @@ async function handleCustomPanelEntry(interaction: ButtonInteraction): Promise<v
       .setColor(getThemeColor((await getGuildConfig(interaction.guild.id)).theme))
       .setTitle('Confirm support request')
       .setDescription(button.confirmationMessage.slice(0, 4096))
-      .setFooter({ text: 'ResolvX • No ticket is created until you confirm' });
+      .setFooter({ text: 'QueryFixr • No ticket is created until you confirm' });
     const confirmationPrefix = 'ticket:custom:';
     await interaction.reply({
       embeds: [confirmation],
@@ -6173,7 +6189,7 @@ async function handleCustomPanelEntry(interaction: ButtonInteraction): Promise<v
     await startCustomPanelTarget(interaction, button, panelId);
   } catch (error) {
     console.error('Custom support-panel route failed:', error);
-    await replyError(interaction, 'ResolvX could not open this ticket request. Please try again or use another support-panel option.');
+    await replyError(interaction, 'QueryFixr could not open this ticket request. Please try again or use another support-panel option.');
   }
 }
 
@@ -6221,7 +6237,7 @@ async function handleTicketDeletionInteraction(interaction: ButtonInteraction): 
   const channel = interaction.channel as TextChannel;
   const topic = channel.topic ?? '';
   if (!isTicketTopic(topic)) {
-    await interaction.editReply('This channel is not a managed ResolvX ticket.');
+    await interaction.editReply('This channel is not a managed QueryFixr ticket.');
     return;
   }
 
@@ -6267,9 +6283,9 @@ async function handleTicketDeletionInteraction(interaction: ButtonInteraction): 
           .setTitle('⚠️ Confirm ticket deletion · Step 1 of 2')
           .setDescription(
             'You are about to delete **#' + (ticket?.ticketNumber ?? getField(topic, 'number') ?? 'unknown') +
-            '**. ResolvX will archive the available conversation and then delete this channel. This action removes the current channel URL and cannot be undone in place.',
+            '**. QueryFixr will archive the available conversation and then delete this channel. This action removes the current channel URL and cannot be undone in place.',
           )
-          .setFooter({ text: 'ResolvX • Two-step deletion protection' }),
+          .setFooter({ text: 'QueryFixr • Two-step deletion protection' }),
       ],
       components: [
         new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -6288,9 +6304,9 @@ async function handleTicketDeletionInteraction(interaction: ButtonInteraction): 
           .setColor(color)
           .setTitle('🚨 Final confirmation · Step 2 of 2')
           .setDescription(
-            'This is the second confirmation. ResolvX will finish archiving the ticket history before deleting the channel. If archival fails, deletion will be cancelled. A separate deletion-review record will be created.',
+            'This is the second confirmation. QueryFixr will finish archiving the ticket history before deleting the channel. If archival fails, deletion will be cancelled. A separate deletion-review record will be created.',
           )
-          .setFooter({ text: 'ResolvX • Final confirmation required' }),
+          .setFooter({ text: 'QueryFixr • Final confirmation required' }),
       ],
       components: [
         new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -6315,8 +6331,8 @@ async function handleTicketDeletionInteraction(interaction: ButtonInteraction): 
         new EmbedBuilder()
           .setColor(color)
           .setTitle('📦 Preparing ticket archive')
-          .setDescription('ResolvX is saving message history, edits, attachment metadata and accessible attachment files before deletion. The channel will remain if archival cannot finish.')
-          .setFooter({ text: 'ResolvX • Durable recovery' }),
+          .setDescription('QueryFixr is saving message history, edits, attachment metadata and accessible attachment files before deletion. The channel will remain if archival cannot finish.')
+          .setFooter({ text: 'QueryFixr • Durable recovery' }),
       ],
       components: [],
     });
@@ -6350,21 +6366,21 @@ async function handleTicketDeletionInteraction(interaction: ButtonInteraction): 
     // Neon intent is durable before the destructive Discord API call.
     await beginTicketButtonDeletion(channel, interaction.user.id, interaction.user.tag);
     intentRecorded = true;
-    await channel.delete('ResolvX ticket Delete button; actor ' + interaction.user.id + '; two confirmations completed');
+    await channel.delete('QueryFixr ticket Delete button; actor ' + interaction.user.id + '; two confirmations completed');
     channelDeleted = true;
   } catch (error) {
     if (intentRecorded && !channelDeleted) {
       await cancelTicketButtonDeletion(channel.id).catch(() => undefined);
     }
     const detail = error instanceof Error ? error.message : 'Unknown deletion error.';
-    console.error('ResolvX ticket-button deletion failed:', error);
+    console.error('QueryFixr ticket-button deletion failed:', error);
     await interaction.editReply({
       embeds: [
         new EmbedBuilder()
           .setColor(color)
           .setTitle('❌ Ticket deletion did not complete')
-          .setDescription(detail.slice(0, 3500) + '\n\nThe ticket channel was not intentionally deleted by ResolvX. Check the archive and bot permissions before retrying.')
-          .setFooter({ text: 'ResolvX • Database and channel state are preserved where possible' }),
+          .setDescription(detail.slice(0, 3500) + '\n\nThe ticket channel was not intentionally deleted by QueryFixr. Check the archive and bot permissions before retrying.')
+          .setFooter({ text: 'QueryFixr • Database and channel state are preserved where possible' }),
       ],
       components: [],
     }).catch(() => undefined);
@@ -6379,7 +6395,7 @@ async function handleTicketDeletionInteraction(interaction: ButtonInteraction): 
         .setColor(color)
         .setTitle('✅ Ticket channel deleted')
         .setDescription('The channel was deleted after the durable archive step. Open **Settings → Repair System → Ticket Deletion Review** to answer “Was this ticket deleted by mistake?” The original channel ID and recovered-message attribution remain in the archive.')
-        .setFooter({ text: 'ResolvX • The replacement channel will have a new ID and URL if restored.' }),
+        .setFooter({ text: 'QueryFixr • The replacement channel will have a new ID and URL if restored.' }),
     ],
     components: [],
   }).catch((error) => {
@@ -6612,12 +6628,12 @@ export async function handleTicketInteraction(
        * Do not silently leave the interaction unacknowledged.
        */
       console.warn(
-        `⚠️ Unhandled ResolvX button: ${interaction.customId}`,
+        `⚠️ Unhandled QueryFixr button: ${interaction.customId}`,
       );
 
       await replyError(
         interaction,
-        '❌ This ResolvX button is no longer available. Please refresh the panel.',
+        '❌ This QueryFixr button is no longer available. Please refresh the panel.',
       );
 
       return;
@@ -6708,25 +6724,25 @@ export async function handleTicketInteraction(
        * Unknown modal.
        */
       console.warn(
-        `⚠️ Unhandled ResolvX modal: ${interaction.customId}`,
+        `⚠️ Unhandled QueryFixr modal: ${interaction.customId}`,
       );
 
       await replyError(
         interaction,
-        '❌ This ResolvX form is no longer available. Please try again.',
+        '❌ This QueryFixr form is no longer available. Please try again.',
       );
 
       return;
     }
   } catch (error) {
     console.error(
-      '❌ Unhandled ResolvX interaction error:',
+      '❌ Unhandled QueryFixr interaction error:',
       error,
     );
 
     await replyError(
       interaction,
-      '❌ ResolvX encountered an unexpected error while processing this action.',
+      '❌ QueryFixr encountered an unexpected error while processing this action.',
     );
   }
 }

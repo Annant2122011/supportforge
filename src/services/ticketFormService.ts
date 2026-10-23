@@ -180,7 +180,7 @@ function rejectUnsafePattern(pattern: string): void {
 }
 
 /**
- * Parse and normalize the JSON configuration used by /supportforge form.
+ * Parse and normalize the JSON configuration used by /qf form.
  * Custom questions are grouped into steps of at most three fields, leaving
  * room for Subject and Description in step one within Discord's five-component
  * modal limit. Conditional questions may only depend on earlier steps.
@@ -730,7 +730,7 @@ function snapshotFor(form: Pick<TicketForm, 'id' | 'name' | 'departmentId' | 'ta
 async function ensureValidMapping(guildId: string, departmentId: string, tagId: string | null): Promise<void> {
   const config = await getGuildConfig(guildId);
   const department = config.departments[departmentId];
-  if (!department) throw new Error('That department no longer exists. Choose an existing department id from /supportforge form list.');
+  if (!department) throw new Error('That department no longer exists. Choose an existing department id from /qf form list.');
   if (tagId && !department.tags?.[tagId]) {
     throw new Error('That tag does not belong to the selected department. Use "*" for all tags or provide a tag id belonging to this department.');
   }
@@ -1642,9 +1642,9 @@ export function startTicketFormSubmissionRecovery(client: Client, intervalMs = 6
     running = true;
     void recoverPendingTicketFormSubmissions(client)
       .then((count) => {
-        if (count > 0) console.info('Recovered ' + count + ' pending ResolvX form submission(s).');
+        if (count > 0) console.info('Recovered ' + count + ' pending QueryFixr form submission(s).');
       })
-      .catch((error) => console.warn('ResolvX form submission recovery is temporarily unavailable:', error instanceof Error ? error.message : 'unknown database error'))
+      .catch((error) => console.warn('QueryFixr form submission recovery is temporarily unavailable:', error instanceof Error ? error.message : 'unknown database error'))
       .finally(() => { running = false; });
   };
   tick();

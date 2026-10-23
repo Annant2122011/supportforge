@@ -30,6 +30,7 @@ import {
 import { executeTicketCommand } from '../interactions/ticketCommandTools';
 import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
 import { UI_THEMES, getThemeColor } from '../services/uiThemeService';
+import { LOCALE_OPTIONS } from '../i18n/localeRegistry';
 import { handleSettingsSlashCommand } from '../interactions/settingsCommandTools';
 import {
   applyTicketFormTemplate,
@@ -93,10 +94,10 @@ import {
   getTicketStatus,
 } from '../services/ticketStateService';
 
-const SUPPORT_CATEGORY_NAME = 'Support Forge';
-const PANEL_CHANNEL_NAME = 'support-panel';
+const SUPPORT_CATEGORY_NAME = 'QueryFixr Support';
+const PANEL_CHANNEL_NAME = 'qf-panel';
 const PANEL_TOPIC = 'supportforge:panel';
-const TRANSCRIPT_NAME = '📄 support-transcripts';
+const TRANSCRIPT_NAME = '📄 qf-transcripts';
 const TRANSCRIPT_TOPIC = 'supportforge:transcript';
 const TICKET_PREFIX = 'supportforge:ticket';
 
@@ -317,7 +318,7 @@ async function ensureContainer(guild: Guild) {
 
   if (!bot) {
     throw new Error(
-      'ResolvX bot member could not be resolved.',
+      'QueryFixr bot member could not be resolved.',
     );
   }
 
@@ -349,7 +350,7 @@ async function ensureContainer(guild: Guild) {
           ViewChannel: true,
           ReadMessageHistory: true,
           SendMessages: false,
-        }, { reason: 'Repair ResolvX container permissions' });
+        }, { reason: 'Repair QueryFixr container permissions' });
       }
       if (!containerOverwriteMatches(channel, bot.id, botAllow, [])) {
         await channel.permissionOverwrites.edit(bot.id, {
@@ -360,7 +361,12 @@ async function ensureContainer(guild: Guild) {
           ManageMessages: true,
           EmbedLinks: true,
           AttachFiles: true,
-        }, { reason: 'Allow ResolvX to manage its container' });
+        }, { reason: 'Allow QueryFixr to manage its container' });
+      }
+      if (channel.name !== SUPPORT_CATEGORY_NAME) {
+        await channel.setName(SUPPORT_CATEGORY_NAME, 'Rename the managed category for QueryFixr branding').catch((error) => {
+          console.warn('Could not rename the managed QueryFixr category:', error);
+        });
       }
       return channel;
     }
@@ -419,7 +425,7 @@ async function ensureTranscriptChannel(
 
   if (!bot) {
     throw new Error(
-      'ResolvX bot member could not be resolved.',
+      'QueryFixr bot member could not be resolved.',
     );
   }
 
@@ -444,12 +450,18 @@ async function ensureTranscriptChannel(
         parentId,
         `${TRANSCRIPT_TOPIC} guild=${guild.id}`,
         transcriptChannelOverwrites(guild, bot.id, staffRoleIds),
-        'Repair ResolvX transcript channel parent, topic and access',
+        'Repair QueryFixr transcript channel parent, topic and access',
       );
+
+      if (saved.name !== TRANSCRIPT_NAME) {
+        await saved.setName(TRANSCRIPT_NAME, 'Rename the managed transcript channel for QueryFixr branding').catch((error) => {
+          console.warn('Could not rename the QueryFixr transcript channel:', error);
+        });
+      }
 
       await ensureChannelPurposeMessage(
         saved,
-        'This private channel is the ResolvX transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
+        'This private channel is the QueryFixr transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
       );
       return saved;
     }
@@ -471,8 +483,14 @@ async function ensureTranscriptChannel(
       parentId,
       `${TRANSCRIPT_TOPIC} guild=${guild.id}`,
       transcriptChannelOverwrites(guild, bot.id, staffRoleIds),
-      'Repair recovered ResolvX transcript channel parent, topic and access',
+      'Repair recovered QueryFixr transcript channel parent, topic and access',
     );
+
+    if (existing.name !== TRANSCRIPT_NAME) {
+      await existing.setName(TRANSCRIPT_NAME, 'Rename the recovered transcript channel for QueryFixr branding').catch((error) => {
+        console.warn('Could not rename the recovered QueryFixr transcript channel:', error);
+      });
+    }
 
     await updateGuildConfig(
       guild.id,
@@ -484,7 +502,7 @@ async function ensureTranscriptChannel(
 
     await ensureChannelPurposeMessage(
       existing,
-      'This private channel is the ResolvX transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
+      'This private channel is the QueryFixr transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
     );
 
     return existing;
@@ -538,7 +556,7 @@ async function ensureTranscriptChannel(
 
   await ensureChannelPurposeMessage(
     channel,
-    'This private channel is the ResolvX transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
+    'This private channel is the QueryFixr transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
   );
 
   return channel;
@@ -555,7 +573,7 @@ export async function ensurePanelChannel(
 
   if (!bot) {
     throw new Error(
-      'ResolvX bot member could not be resolved.',
+      'QueryFixr bot member could not be resolved.',
     );
   }
 
@@ -572,14 +590,19 @@ export async function ensurePanelChannel(
         parentId,
         `${PANEL_TOPIC} guild=${guild.id}`,
         panelChannelOverwrites(guild, bot.id),
-        'Repair ResolvX panel channel parent, topic and access',
+        'Repair QueryFixr panel channel parent, topic and access',
       );
+      if (saved.name !== PANEL_CHANNEL_NAME) {
+        await saved.setName(PANEL_CHANNEL_NAME, 'Rename the managed panel channel for QueryFixr branding').catch((error) => {
+          console.warn('Could not rename the QueryFixr panel channel:', error);
+        });
+      }
       return saved;
     }
   }
 
   /*
-   * A channel name is not ownership proof. Recover a previous ResolvX
+   * A channel name is not ownership proof. Recover a previous QueryFixr
    * panel only from its managed topic; otherwise create a new panel channel.
    */
   const existing = guild.channels.cache.find(
@@ -596,8 +619,14 @@ export async function ensurePanelChannel(
       parentId,
       `${PANEL_TOPIC} guild=${guild.id}`,
       panelChannelOverwrites(guild, bot.id),
-      'Repair recovered ResolvX panel channel parent, topic and access',
+      'Repair recovered QueryFixr panel channel parent, topic and access',
     );
+
+    if (existing.name !== PANEL_CHANNEL_NAME) {
+      await existing.setName(PANEL_CHANNEL_NAME, 'Rename the recovered panel channel for QueryFixr branding').catch((error) => {
+        console.warn('Could not rename the recovered QueryFixr panel channel:', error);
+      });
+    }
 
     await updateGuildConfig(
       guild.id,
@@ -763,9 +792,9 @@ export async function syncPanel(
 
 export const data =
   new SlashCommandBuilder()
-    .setName('supportforge')
+    .setName('qf')
     .setDescription(
-      'Manage ResolvX and support tickets',
+      'Manage QueryFixr support tickets',
     )
     .setDMPermission(false)
 
@@ -777,7 +806,7 @@ export const data =
       subcommand
         .setName('setup')
         .setDescription(
-          'Create or repair the ResolvX system',
+          'Create or repair the QueryFixr system',
         ),
     )
 
@@ -785,7 +814,7 @@ export const data =
       subcommand
         .setName('restore')
         .setDescription(
-          'Restore ResolvX after accidental deletion',
+          'Restore QueryFixr after accidental deletion',
         ),
     )
 
@@ -1252,14 +1281,14 @@ export const data =
           subcommand
             .setName('department')
             .setDescription('Move this ticket to a department directly')
-            .addStringOption((option) => option.setName('department-id').setDescription('Department ID from /supportforge form list').setRequired(true).setMaxLength(28))
+            .addStringOption((option) => option.setName('department-id').setDescription('Department ID from /qf form list').setRequired(true).setMaxLength(28))
             .addStringOption((option) => option.setName('tag-id').setDescription('Optional tag ID for the destination department').setRequired(false).setMaxLength(28)),
         )
         .addSubcommand((subcommand) =>
           subcommand
             .setName('tag')
             .setDescription('Set this ticket tag directly')
-            .addStringOption((option) => option.setName('tag-id').setDescription('Tag ID from /supportforge form list').setRequired(true).setMaxLength(28)),
+            .addStringOption((option) => option.setName('tag-id').setDescription('Tag ID from /qf form list').setRequired(true).setMaxLength(28)),
         )
         .addSubcommand((subcommand) =>
           subcommand
@@ -1288,14 +1317,14 @@ export const data =
     .addSubcommandGroup((group) =>
       group
         .setName('settings')
-        .setDescription('Manage ResolvX settings from slash commands')
+        .setDescription('Manage QueryFixr settings from slash commands')
         .addSubcommand((subcommand) =>
           subcommand.setName('overview').setDescription('Show a Settings overview and current configuration'),
         )
         .addSubcommand((subcommand) =>
           subcommand
             .setName('theme')
-            .setDescription('View or change this server’s ResolvX color theme')
+            .setDescription('View or change this server’s QueryFixr color theme')
             .addStringOption((option) => option.setName('action').setDescription('Show the current theme or set a new one').setRequired(true).addChoices(
               { name: 'Show current theme', value: 'show' },
               { name: 'Set server theme', value: 'set' },
@@ -1441,7 +1470,7 @@ export const data =
         .addSubcommand((subcommand) =>
           subcommand
             .setName('priority-role')
-            .setDescription('Create or delete a ResolvX-managed priority role')
+            .setDescription('Create or delete a QueryFixr-managed priority role')
             .addStringOption((option) => option.setName('action').setDescription('Role action').setRequired(true).addChoices(
               { name: 'Show current roles', value: 'status' },
               { name: 'Create role', value: 'create' },
@@ -1454,37 +1483,8 @@ export const data =
         )
         .addSubcommand((subcommand) =>
           subcommand
-            .setName('report-categories')
-            .setDescription('List report categories and inspect their subcategories')
-            .addStringOption((option) => option.setName('category-id').setDescription('Optional category ID to inspect').setRequired(false).setMaxLength(80))
-            .addIntegerOption((option) => option.setName('page').setDescription('Page number for the category list').setRequired(false).setMinValue(1).setMaxValue(999)),
-        )
-        .addSubcommand((subcommand) =>
-          subcommand
-            .setName('report-subcategory-add')
-            .setDescription('Add a report subcategory')
-            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
-            .addStringOption((option) => option.setName('name').setDescription('Subcategory name').setRequired(true).setMaxLength(80)),
-        )
-        .addSubcommand((subcommand) =>
-          subcommand
-            .setName('report-subcategory-edit')
-            .setDescription('Rename a report subcategory')
-            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
-            .addStringOption((option) => option.setName('subcategory-id').setDescription('Subcategory ID').setRequired(true).setMaxLength(80))
-            .addStringOption((option) => option.setName('name').setDescription('New subcategory name').setRequired(true).setMaxLength(80)),
-        )
-        .addSubcommand((subcommand) =>
-          subcommand
-            .setName('report-subcategory-remove')
-            .setDescription('Remove a report subcategory')
-            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
-            .addStringOption((option) => option.setName('subcategory-id').setDescription('Subcategory ID').setRequired(true).setMaxLength(80)),
-        )
-        .addSubcommand((subcommand) =>
-          subcommand
             .setName('repair')
-            .setDescription('Repair ResolvX infrastructure')
+            .setDescription('Repair QueryFixr infrastructure')
             .addStringOption((option) => option.setName('mode').setDescription('Repair mode').setRequired(true).addChoices(
               { name: 'Normal infrastructure repair', value: 'normal' },
               { name: 'Closed/Archive storage repair', value: 'storage' },
@@ -1563,11 +1563,58 @@ export const data =
         )
         .addSubcommand((subcommand) =>
           subcommand
+            .setName('language')
+            .setDescription('Show or change this server’s bot message language')
+            .addStringOption((option) => option
+              .setName('locale')
+              .setDescription('New language; omit this option to show the current setting')
+              .addChoices(...LOCALE_OPTIONS.map((locale) => ({
+                name: (locale.label + ' · ' + locale.nativeLabel).slice(0, 100),
+                value: locale.value,
+              })))),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
             .setName('reset')
-            .setDescription('Factory-reset ResolvX after typed confirmation')
+            .setDescription('Factory-reset QueryFixr after typed confirmation')
             .addStringOption((option) => option.setName('confirmation').setDescription('Type DELETE SUPPORT FORGE exactly').setRequired(true).setMinLength(20).setMaxLength(20))
             .addBooleanOption((option) => option.setName('accumulate-audit').setDescription('Keep individual audit events for future summaries').setRequired(true)),
         ),
+    )
+    .addSubcommandGroup((group) =>
+      group
+        .setName('settings-reports')
+        .setDescription('Manage report categories and subcategories')
+            .addSubcommand((subcommand) =>
+              subcommand
+                .setName('report-categories')
+                .setDescription('List report categories and inspect their subcategories')
+                .addStringOption((option) => option.setName('category-id').setDescription('Optional category ID to inspect').setRequired(false).setMaxLength(80))
+                .addIntegerOption((option) => option.setName('page').setDescription('Page number for the category list').setRequired(false).setMinValue(1).setMaxValue(999)),
+            )
+            .addSubcommand((subcommand) =>
+              subcommand
+                .setName('report-subcategory-add')
+                .setDescription('Add a report subcategory')
+                .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
+                .addStringOption((option) => option.setName('name').setDescription('Subcategory name').setRequired(true).setMaxLength(80)),
+            )
+            .addSubcommand((subcommand) =>
+              subcommand
+                .setName('report-subcategory-edit')
+                .setDescription('Rename a report subcategory')
+                .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
+                .addStringOption((option) => option.setName('subcategory-id').setDescription('Subcategory ID').setRequired(true).setMaxLength(80))
+                .addStringOption((option) => option.setName('name').setDescription('New subcategory name').setRequired(true).setMaxLength(80)),
+            )
+            .addSubcommand((subcommand) =>
+              subcommand
+                .setName('report-subcategory-remove')
+                .setDescription('Remove a report subcategory')
+                .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
+                .addStringOption((option) => option.setName('subcategory-id').setDescription('Subcategory ID').setRequired(true).setMaxLength(80)),
+            )
+,
     )
     .addSubcommandGroup((group) =>
       group
@@ -1654,7 +1701,7 @@ export async function runSupportForgeSetup(
     guild,
     supportCategory.id,
     restoreMode ? 'SUPPORTFORGE_RESTORED' : 'SETUP_COMPLETED',
-    (restoreMode ? 'ResolvX restore completed.' : 'ResolvX setup/repair completed.') +
+    (restoreMode ? 'QueryFixr restore completed.' : 'QueryFixr setup/repair completed.') +
       ' Support Forge=' + supportCategory.id +
       '; Open=' + (legacyOpenCategory?.id ?? 'not-created') +
       '; departments=' + Object.keys(config.departments).length + '.',
@@ -1735,7 +1782,7 @@ export async function execute(
   // Settings buttons require Manage Server or Administrator. Enforce the
   // same gate on slash commands; the Staff Manual is the sole exception and
   // remains available to configured department staff as in the button UI.
-  if (group === 'settings' && !isAdminLike(interaction)) {
+  if ((group === 'settings' || group === 'settings-reports') && !isAdminLike(interaction)) {
     let allowedDepartmentStaff = false;
     if (subcommand === 'manual') {
       const config = await getGuildConfig(guild.id);
@@ -1754,7 +1801,7 @@ export async function execute(
     }
     if (!allowedDepartmentStaff) {
       await interaction.reply({
-        content: '❌ You need **Manage Server** or **Administrator** to use ResolvX settings. The Staff Manual is also available to configured department staff.',
+        content: '❌ You need **Manage Server** or **Administrator** to use QueryFixr settings. The Staff Manual is also available to configured department staff.',
         flags: MessageFlags.Ephemeral,
       });
       return;
@@ -1826,7 +1873,7 @@ export async function execute(
         });
         writePanelAudit('CUSTOM_PANEL_CREATED', 'Created panel "' + panel.name + '" (' + panel.id + ') with ' + panel.buttons.length + ' ordered ticket button(s).');
         await interaction.editReply(
-          '**Panel draft created**\n\nName: **' + panel.name + '**\nPanel ID: `' + panel.id + '`\nButtons: **' + panel.buttons.length + '**\n\nUse `/supportforge panel preview` to inspect it privately, then `/supportforge panel publish` to put it in a channel. The draft is stored in Neon and is not public until published.',
+          '**Panel draft created**\n\nName: **' + panel.name + '**\nPanel ID: `' + panel.id + '`\nButtons: **' + panel.buttons.length + '**\n\nUse `/qf panel preview` to inspect it privately, then `/qf panel publish` to put it in a channel. The draft is stored in Neon and is not public until published.',
         );
         return;
       }
@@ -1839,8 +1886,8 @@ export async function execute(
               (panel.publishedMessageId ? 'Published in <#' + panel.publishedChannelId + '>' : 'Draft') +
               ' · ' + panel.buttons.length + ' button(s)',
             ).join('\n')
-          : 'No custom panels have been created. Use `/supportforge panel create` to build the first one.';
-        const embed = new EmbedBuilder().setColor(themeColor).setTitle('ResolvX • Custom Panels').setDescription(description.slice(0, 4096)).setFooter({ text: panels.length + ' saved panel(s) • ordered buttons persist in Neon' });
+          : 'No custom panels have been created. Use `/qf panel create` to build the first one.';
+        const embed = new EmbedBuilder().setColor(themeColor).setTitle('QueryFixr • Custom Panels').setDescription(description.slice(0, 4096)).setFooter({ text: panels.length + ' saved panel(s) • ordered buttons persist in Neon' });
         if (panels.length > 25) embed.addFields({ name: 'More panels', value: 'Showing the first 25 of ' + panels.length + ' panels. Use Show with a panel ID to inspect an individual panel.' });
         await interaction.editReply({ embeds: [embed] });
         return;
@@ -1848,7 +1895,7 @@ export async function execute(
 
       if (!panelId) throw new Error('A panel ID is required for this action.');
       let panel = await getCustomPanel(guild.id, panelId);
-      if (!panel) throw new Error('No custom panel was found with ID "' + panelId + '". Use /supportforge panel list to check the ID.');
+      if (!panel) throw new Error('No custom panel was found with ID "' + panelId + '". Use /qf panel list to check the ID.');
 
       if (action === 'show') {
         const buttonLines = panel.buttons.map((item, index) =>
@@ -1978,7 +2025,7 @@ export async function execute(
       throw new Error('Unknown custom panel action.');
     }
 
-    if (group === 'settings') {
+    if (group === 'settings' || group === 'settings-reports') {
       await handleSettingsSlashCommand(interaction, {
         syncPanel,
         repair: async (targetGuild, mode) => {
@@ -2023,7 +2070,7 @@ export async function execute(
           : '⚠️ **Discord restore completed; code deployment was not queued.** ' + deployment.reason);
       }
       await interaction.editReply(
-        (restoreMode ? '✅ **ResolvX restored successfully.**' : '✅ **ResolvX setup complete.**') +
+        (restoreMode ? '✅ **QueryFixr restored successfully.**' : '✅ **QueryFixr setup complete.**') +
         '\n\n📁 Container: <#' + result.supportCategoryId + '>\n' +
         '📂 Department categories: **' + result.departmentCount + '**\n' +
         (result.legacyOpenCategoryId ? '🟢 Legacy Open bucket: <#' + result.legacyOpenCategoryId + '>\n' : '') +
@@ -2200,12 +2247,12 @@ export async function execute(
       if (requestedPage > pages.length) {
         await interaction.editReply(
           '❌ Page ' + requestedPage + ' does not exist. This server has ' + pages.length +
-          ' department page(s). Use /supportforge category list page:1 to start.',
+          ' department page(s). Use /qf category list page:1 to start.',
         );
         return;
       }
       await interaction.editReply(
-        '**ResolvX Departments · Page ' + requestedPage + ' / ' + pages.length + '**\n\n' +
+        '**QueryFixr Departments · Page ' + requestedPage + ' / ' + pages.length + '**\n\n' +
         pages[requestedPage - 1],
       );
       return;
@@ -2468,7 +2515,7 @@ export async function execute(
 
         const requestedPage = interaction.options.getInteger('page') ?? 1;
         if (requestedPage > pages.length) {
-          await interaction.editReply('❌ Page ' + requestedPage + ' does not exist. This list has ' + pages.length + ' page(s). Use `/supportforge form list page:1` to start.');
+          await interaction.editReply('❌ Page ' + requestedPage + ' does not exist. This list has ' + pages.length + ' page(s). Use `/qf form list page:1` to start.');
           return;
         }
         await interaction.editReply('**Ticket Form List • Page ' + requestedPage + ' / ' + pages.length + '**\n\n' + pages[requestedPage - 1]);
@@ -2490,7 +2537,7 @@ export async function execute(
         const formId = interaction.options.getString('id', true).trim();
         const form = (await listTicketForms(guild.id)).find((item) => item.id === formId);
         if (!form) {
-          await interaction.editReply('Ticket form not found in this server. Use /supportforge form list to find its ID.');
+          await interaction.editReply('Ticket form not found in this server. Use /qf form list to find its ID.');
           return;
         }
         const fields = form.fields.slice(0, 12).map((field, index) =>
@@ -2503,7 +2550,7 @@ export async function execute(
           'ID: ' + form.id + '\nVersion: **' + form.version + '** · Status: **' + (form.active ? 'ACTIVE' : 'Inactive') + '**\n' +
           'Department ID: ' + form.departmentId + ' · Tag ID: ' + (form.tagId ?? '*') + '\n\n' +
           '**Current fields (' + form.fields.length + '):**\n' + (fields.length ? fields.join('\n') : 'No fields configured.') +
-          '\n\nUse /supportforge form schema to inspect the complete JSON schema.'
+          '\n\nUse /qf form schema to inspect the complete JSON schema.'
         );
         return;
       }
@@ -2512,7 +2559,7 @@ export async function execute(
         const formId = interaction.options.getString('id', true).trim();
         const form = (await listTicketForms(guild.id)).find((item) => item.id === formId);
         if (!form) {
-          await interaction.editReply('Ticket form not found in this server. Use /supportforge form list to find its ID.');
+          await interaction.editReply('Ticket form not found in this server. Use /qf form list to find its ID.');
           return;
         }
         const schema = JSON.stringify({ fields: form.fields }, null, 2);
@@ -2520,7 +2567,7 @@ export async function execute(
         const pageCount = Math.max(1, Math.ceil(schema.length / pageLength));
         const requestedPage = interaction.options.getInteger('page') ?? 1;
         if (requestedPage > pageCount) {
-          await interaction.editReply('Schema page ' + requestedPage + ' does not exist. This schema has ' + pageCount + ' page(s). Use /supportforge form schema id:' + formId + ' page:1 to start.');
+          await interaction.editReply('Schema page ' + requestedPage + ' does not exist. This schema has ' + pageCount + ' page(s). Use /qf form schema id:' + formId + ' page:1 to start.');
           return;
         }
         const chunk = schema.slice((requestedPage - 1) * pageLength, requestedPage * pageLength);
@@ -2536,7 +2583,7 @@ export async function execute(
         const templateId = interaction.options.getString('template-id', true).trim();
         const template = (await listTicketFormTemplates(guild.id)).find((item) => item.id === templateId);
         if (!template) {
-          await interaction.editReply('Template not found in this server. Use /supportforge form template-list to find its ID.');
+          await interaction.editReply('Template not found in this server. Use /qf form template-list to find its ID.');
           return;
         }
         const fields = template.fields.slice(0, 12).map((field, index) =>
@@ -2546,7 +2593,7 @@ export async function execute(
         await interaction.editReply(
           '**Template: ' + template.name + '**\nID: ' + template.id + '\nFields: **' + template.fields.length + '**\n\n' +
           (fields.length ? fields.join('\n') : 'No fields in this template.') +
-          '\n\nUse /supportforge form template-apply to create a form from this template. Deleting the template will not alter forms already created.'
+          '\n\nUse /qf form template-apply to create a form from this template. Deleting the template will not alter forms already created.'
         );
         return;
       }
@@ -2593,7 +2640,7 @@ export async function execute(
         });
         await interaction.editReply(
           '✅ Created inactive form **' + form.name + '**. ID: `' + form.id +
-          '`, version 1. Activate it with `/supportforge form activate id:' + form.id + '`. ' +
+          '`, version 1. Activate it with `/qf form activate id:' + form.id + '`. ' +
           'The form applies only to the selected existing department/tag mapping.',
         );
         writeFormAudit('TICKET_FORM_CREATED', 'Created form ' + form.id + ' version 1 for department ' + departmentId + ' and tag ' + (tagId ?? '*') + '.');
@@ -2609,7 +2656,7 @@ export async function execute(
         });
         await interaction.editReply(
           '✅ Saved template **' + template.name + '**. ID: `' + template.id +
-          '`, with ' + template.fields.length + ' custom field(s). Use `/supportforge form template-apply` to create a form from it.',
+          '`, with ' + template.fields.length + ' custom field(s). Use `/qf form template-apply` to create a form from it.',
         );
         writeFormAudit('TICKET_FORM_TEMPLATE_SAVED', 'Saved template ' + template.id + ' with ' + template.fields.length + ' field(s).');
         return;
@@ -2721,12 +2768,12 @@ export async function execute(
 
     await interaction.reply({
       content:
-        '❌ Unsupported ResolvX command.',
+        '❌ Unsupported QueryFixr command.',
       flags: MessageFlags.Ephemeral,
     });
   } catch (error) {
     console.error(
-      '❌ ResolvX command failed:',
+      '❌ QueryFixr command failed:',
       error,
     );
 

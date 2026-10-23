@@ -17,6 +17,8 @@ import { performFactoryReset } from '../services/factoryResetService';
 import { logSettingsEvent, refreshAuditPanelTheme } from '../services/auditLogService';
 import { approveRetentionDeletion, declineRetentionDeletion, getEligibleRetentionTickets } from '../services/ticketRetentionService';
 import { clearTicketInactivityWarningsForGuild } from '../services/ticketInactivityService';
+import { getLocaleLabel, isSupportedLocale } from '../i18n/localeRegistry';
+import { translate } from '../i18n/translationService';
 import { migrateDepartmentStaffRole } from '../services/departmentStaffRoleService';
 import { enforcePriorityRoleHierarchy } from '../services/priorityRoleService';
 import { getThemeColor, getThemeDefinition, isGuildTheme } from '../services/uiThemeService';
@@ -68,12 +70,34 @@ export async function handleSettingsSlashCommand(
   };
 
   try {
+    if (action === 'language') {
+      const selected = interaction.options.getString('locale');
+      const current = await getAdvancedSettings(guild.id);
+      if (!selected) {
+        await interaction.editReply(
+          translate(current.locale, 'settings.locale.current', { locale: getLocaleLabel(current.locale) }),
+        );
+        return;
+      }
+      if (!isSupportedLocale(selected)) {
+        await interaction.editReply(translate(current.locale, 'settings.locale.unknown'));
+        return;
+      }
+      await updateAdvancedSettings(guild.id, (settings) => { settings.locale = selected; });
+      await refreshSettingsChannel(guild);
+      audit('SERVER_LANGUAGE_CHANGED', 'Changed the server language to ' + selected + ' (' + getLocaleLabel(selected) + ').');
+      await interaction.editReply(
+        translate(selected, 'settings.locale.saved', { locale: getLocaleLabel(selected) }),
+      );
+      return;
+    }
+
     if (action === 'overview') {
       const settings = await getAdvancedSettings(guild.id);
       const departments = Object.values(config.departments);
       const tagCount = departments.reduce((sum, department) => sum + Object.keys(department.tags ?? {}).length, 0);
       await interaction.editReply(
-        '**ResolvX Settings Overview**\n\n' +
+        '**QueryFixr Settings Overview**\n\n' +
         'Departments: **' + departments.length + '** · Tags: **' + tagCount + '**\n' +
         'Default priority: **' + settings.ticketDefaults.priority + '**\n' +
         'Simultaneous moderators: **' + settings.ticketDefaults.maxClaimedModerators + '**\n' +
@@ -108,9 +132,9 @@ export async function handleSettingsSlashCommand(
           .setDescription('Each server stores its own theme. Changing this palette does not affect other servers. It accents the public support panel, Settings dashboard and Ticket Forms screens.')
           .addFields(
             { name: 'Current theme', value: '**' + activeTheme.label + '**\n' + activeTheme.description, inline: true },
-            { name: 'Change it', value: 'Use /supportforge settings theme with action:set and choose a palette.', inline: true },
+            { name: 'Change it', value: 'Use /qf settings theme with action:set and choose a palette.', inline: true },
           )
-          .setFooter({ text: 'ResolvX • Server-specific appearance' })],
+          .setFooter({ text: 'QueryFixr • Server-specific appearance' })],
       });
       return;
     }
@@ -397,8 +421,8 @@ export async function handleSettingsSlashCommand(
       const scopeId = scopeIdInput?.trim() || null;
       if (scopeType === 'guild' && scopeId) throw new Error('The server-default scope does not take a scope ID.');
       if (scopeType !== 'guild' && !scopeId) throw new Error('Supply the department ID or panel ID for this scope.');
-      if (scopeType === 'department' && !config.departments[scopeId!]) throw new Error('Department ID not found. Use /supportforge category list to see configured IDs.');
-      if (scopeType === 'panel' && !config.customPanels[scopeId!]) throw new Error('Ticket panel ID not found. Use /supportforge panel list to see published panel IDs.');
+      if (scopeType === 'department' && !config.departments[scopeId!]) throw new Error('Department ID not found. Use /qf category list to see configured IDs.');
+      if (scopeType === 'panel' && !config.customPanels[scopeId!]) throw new Error('Ticket panel ID not found. Use /qf panel list to see published panel IDs.');
 
       const currentPolicy = await getSupportHoursPolicy(guild.id, scopeType, scopeId);
       const context = scopeType === 'department'
@@ -536,7 +560,7 @@ export async function handleSettingsSlashCommand(
         ? settings.reports.categories[requestedCategoryId]
         : undefined;
       if (requestedCategoryId && !selected) {
-        throw new Error('Report category not found. Run /supportforge settings report-categories without a category ID to list valid IDs.');
+        throw new Error('Report category not found. Run /qf settings report-categories without a category ID to list valid IDs.');
       }
       const lines = (selected ? [selected] : categories).map((category) => {
         const subs = Object.values(category.subcategories);
@@ -614,7 +638,7 @@ export async function handleSettingsSlashCommand(
       if (role && (role.managed || role.id === guild.roles.everyone.id)) throw new Error('Choose a normal server role, not @everyone or a managed integration role.');
       const staffRoleId = clearRole ? null : role?.id ?? department.staffRoleId;
       const category = department.categoryId ? guild.channels.cache.get(department.categoryId) : null;
-      if (category?.type === ChannelType.GuildCategory) await category.edit({ name: ('ResolvX.' + newName).slice(0, 100), reason: 'ResolvX department update from slash command' });
+      if (category?.type === ChannelType.GuildCategory) await category.edit({ name: ('QueryFixr.' + newName).slice(0, 100), reason: 'QueryFixr department update from slash command' });
       await updateGuildConfig(guild.id, (current) => {
         const item = current.departments[department.id];
         if (item) { item.name = newName; item.staffRoleId = staffRoleId; }
@@ -716,7 +740,7 @@ export async function handleSettingsSlashCommand(
     if (action === 'priority-role') {
       const mode = interaction.options.getString('action', true);
       if (mode !== 'status' && !interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
-        throw new Error('Creating or deleting ResolvX priority roles requires the Administrator permission.');
+        throw new Error('Creating or deleting QueryFixr priority roles requires the Administrator permission.');
       }
       const settings = await getAdvancedSettings(guild.id);
       if (mode === 'status') {
@@ -727,7 +751,7 @@ export async function handleSettingsSlashCommand(
           const role = candidate && !candidate.managed ? candidate : undefined;
           return '**' + item.toUpperCase() + '** · ' + (role ? role.toString() : 'No managed role configured');
         });
-        await interaction.editReply('**Priority Rules & Roles**\n\n' + lines.join('\n') + '\n\nUse /supportforge settings priority-role to create or delete a managed role.');
+        await interaction.editReply('**Priority Rules & Roles**\n\n' + lines.join('\n') + '\n\nUse /qf settings priority-role to create or delete a managed role.');
         return;
       }
 
@@ -743,7 +767,7 @@ export async function handleSettingsSlashCommand(
           return;
         }
         const bot = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
-        if (!bot?.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('ResolvX needs Manage Roles to create priority roles.');
+        if (!bot?.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('QueryFixr needs Manage Roles to create priority roles.');
         const roleMeta: Record<TicketPriority, { label: string; color: number }> = {
           low: { label: 'Low', color: 0x2ecc71 },
           normal: { label: 'Normal', color: 0xf1c40f },
@@ -753,10 +777,10 @@ export async function handleSettingsSlashCommand(
         };
         const meta = roleMeta[priority];
         const role = await guild.roles.create({
-          name: 'ResolvX • ' + meta.label + ' Tickets',
+          name: 'QueryFixr • ' + meta.label + ' Tickets',
           colors: { primaryColor: meta.color },
           mentionable: false,
-          reason: 'ResolvX priority role created through slash command',
+          reason: 'QueryFixr priority role created through slash command',
         });
         await updateAdvancedSettings(guild.id, (current) => { current.priorityRoles[priority] = role.id; });
         await enforcePriorityRoleHierarchy(guild);
@@ -773,9 +797,9 @@ export async function handleSettingsSlashCommand(
         }
         const bot = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
         if (!existing.editable || existing.managed || !bot?.permissions.has(PermissionFlagsBits.ManageRoles)) {
-          throw new Error('Discord will not let ResolvX delete that role. Move the bot role above it and ensure Manage Roles is granted.');
+          throw new Error('Discord will not let QueryFixr delete that role. Move the bot role above it and ensure Manage Roles is granted.');
         }
-        await existing.delete('ResolvX priority role removed through slash command');
+        await existing.delete('QueryFixr priority role removed through slash command');
         await updateAdvancedSettings(guild.id, (current) => { delete current.priorityRoles[priority]; });
         await enforcePriorityRoleHierarchy(guild);
         await refreshSettingsChannel(guild);
@@ -845,7 +869,7 @@ export async function handleSettingsSlashCommand(
     if (action === 'manual') {
       const version = interaction.options.getString('version', true);
       await interaction.editReply(
-        '**ResolvX ' + (version === 'quick' ? 'Quick Manual' : 'Detailed Manual') + '**\n\n' +
+        '**QueryFixr ' + (version === 'quick' ? 'Quick Manual' : 'Detailed Manual') + '**\n\n' +
         'Use Claim to take ownership, Pending when waiting for a customer, Resume to return a pending ticket to open, and Close to generate the transcript and lock the ticket.\n\n' +
         'Administrators can configure departments, tags, retention, panel behavior, report safety, and forms using Settings buttons or slash commands.\n\n' +
         'For the full detailed guide, open Settings → Manual and choose the detailed version.'
@@ -857,7 +881,7 @@ export async function handleSettingsSlashCommand(
       const confirmation = interaction.options.getString('confirmation', true).trim().toUpperCase();
       if (confirmation !== 'DELETE SUPPORT FORGE') throw new Error('Confirmation must be exactly DELETE SUPPORT FORGE. Nothing was deleted.');
       const accumulate = interaction.options.getBoolean('accumulate-audit', true);
-      await interaction.editReply('ResolvX factory reset started. This is destructive and cannot be undone.');
+      await interaction.editReply('QueryFixr factory reset started. This is destructive and cannot be undone.');
       const result = await performFactoryReset(guild, accumulate);
       const failures = result.failed.slice(0, 8).map((failure) => '• ' + failure.name + ' (' + failure.id + '): ' + failure.error).join('\n');
       await interaction.followUp({

@@ -21,11 +21,12 @@ rollback() {
   status=$?
   trap - ERR
   if [[ "$status" -ne 0 && -n "$old_sha" ]]; then
-    echo "ResolvX update failed. Attempting source rollback to $old_sha." >&2
+    echo "QueryFixr update failed. Attempting source rollback to $old_sha." >&2
     git checkout -B main "$old_sha" || true
     git reset --hard "$old_sha" || true
     npm ci || true
     npm run build || true
+    npm run deploy-commands || true
     npm run db:migrate || true
     sudo systemctl restart "$SERVICE_NAME" || true
     sudo systemctl is-active --quiet "$SERVICE_NAME" || true
@@ -37,12 +38,12 @@ trap rollback ERR
 git fetch --prune origin main
 target_sha="$(git rev-parse origin/main)"
 if [[ "$target_sha" == "$old_sha" ]]; then
-  echo "ResolvX is already current at $target_sha."
+  echo "QueryFixr is already current at $target_sha."
   trap - ERR
   exit 0
 fi
 
-echo "Updating ResolvX from $old_sha to $target_sha."
+echo "Updating QueryFixr from $old_sha to $target_sha."
 git checkout -B main "$target_sha"
 git reset --hard "$target_sha"
 npm ci
@@ -50,9 +51,10 @@ npm run build
 npm test
 npm run db:migrate
 npm run db:verify
+npm run deploy-commands
 sudo systemctl restart "$SERVICE_NAME"
 sleep 3
 sudo systemctl is-active --quiet "$SERVICE_NAME"
 
 trap - ERR
-echo "ResolvX deployment succeeded at $target_sha."
+echo "QueryFixr deployment succeeded at $target_sha."

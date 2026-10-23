@@ -32,13 +32,13 @@ A code review cannot prove live Discord permissions, actual rate-limit timing, e
 
 ### Administrator commands
 
-All `/supportforge form` subcommands are behind the command's existing Manage Server/Administrator check.
+All `/qf form` subcommands are behind the command's existing Manage Server/Administrator check.
 
-- `/supportforge form list [page]`: shows form IDs, versions, status, mapping IDs and the existing department/tag IDs used when creating forms.
-- `/supportforge form create name department-id tag-id fields-json`: creates an inactive form version 1. Use `*` for `tag-id` to match any tag in that department.
-- `/supportforge form update id fields-json`: creates a new immutable schema version; it does not rewrite old versions or prior response snapshots.
-- `/supportforge form activate id`: assigns a form to new ticket requests for that routing mapping.
-- `/supportforge form deactivate id`: disables it for future requests while keeping historical versions and stored answers.
+- `/qf form list [page]`: shows form IDs, versions, status, mapping IDs and the existing department/tag IDs used when creating forms.
+- `/qf form create name department-id tag-id fields-json`: creates an inactive form version 1. Use `*` for `tag-id` to match any tag in that department.
+- `/qf form update id fields-json`: creates a new immutable schema version; it does not rewrite old versions or prior response snapshots.
+- `/qf form activate id`: assigns a form to new ticket requests for that routing mapping.
+- `/qf form deactivate id`: disables it for future requests while keeping historical versions and stored answers.
 
 The form can only map to an existing department and, when specified, a tag belonging to that department. An active exact-tag form takes precedence over an active wildcard form. The PostgreSQL partial unique index prevents two active forms from occupying the same exact mapping.
 

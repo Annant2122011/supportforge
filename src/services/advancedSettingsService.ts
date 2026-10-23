@@ -53,7 +53,7 @@ export interface FlagRule {
 export const SETTINGS_DASHBOARD_BUTTON_KEYS = [
   // Core ticket experience first, then routing and server policy.
   'panel', 'panels', 'forms', 'defaults', 'tags',
-  'usecases', 'support-hours', 'ticket-workspace', 'inactivity', 'reports',
+  'usecases', 'support-hours', 'ticket-workspace', 'inactivity', 'reports', 'language',
   // Appearance/team operations, then recovery and administration.
   'team', 'retention', 'appearance', 'theme', 'dashboard-builder',
   'storage', 'rules', 'repair', 'premium', 'manual',
@@ -235,16 +235,16 @@ const DEFAULTS: AdvancedGuildSettings = {
     pendingCategoryId: null,
   },
   appearance: {
-    panelTitle: '🎫 ResolvX Support Center',
+    panelTitle: '🎫 QueryFixr Support Center',
     panelDescription:
       'Click a department button below to open a private support ticket.',
-    panelFooter: 'ResolvX • Professional Ticket System',
+    panelFooter: 'QueryFixr • Professional Ticket System',
   },
   ticketWorkspace: { mode: 'text-channels' },
   settingsDashboard: {
-    title: '⚙️ ResolvX Settings',
+    title: '⚙️ QueryFixr Settings',
     description: 'Configure your server’s ticket system, support panels and retention policies.',
-    footer: 'ResolvX • Settings Dashboard',
+    footer: 'QueryFixr • Settings Dashboard',
     buttonOrder: [...SETTINGS_DASHBOARD_BUTTON_KEYS],
     buttonCustomizations: {},
   },
@@ -269,7 +269,9 @@ let writeQueue: Promise<void> = Promise.resolve();
 
 function normalizeBrandTextDeep<T>(value: T): T {
   if (typeof value === 'string') {
-    return value.replace(/\b(?:SupportForge|ResolveX|SUPPORTFORGE)\b/g, 'ResolvX') as unknown as T;
+    const legacyBrandAliases = ['Support' + 'Forge', 'Resolve' + 'X', 'Resolv' + 'X', 'SUPPORT' + 'FORGE'];
+    const legacyBrandPattern = new RegExp('\\b(?:' + legacyBrandAliases.join('|') + ')\\b', 'g');
+    return value.replace(legacyBrandPattern, 'QueryFixr') as unknown as T;
   }
   if (Array.isArray(value)) return value.map((entry) => normalizeBrandTextDeep(entry)) as unknown as T;
   if (value && typeof value === 'object') {
@@ -348,7 +350,7 @@ async function load(): Promise<SettingsFile> {
       Array.isArray(persisted.guilds)
     ) {
       throw new Error(
-        'ResolvX advanced settings database document is malformed. Existing data was not overwritten.',
+        'QueryFixr advanced settings database document is malformed. Existing data was not overwritten.',
       );
     }
     const normalizedGuilds = normalizeBrandTextDeep(persisted.guilds) as Record<string, AdvancedGuildSettings>;

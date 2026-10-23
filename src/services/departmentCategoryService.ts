@@ -14,9 +14,10 @@ import { logSystemEvent } from './auditLogService';
 import { getPersistedTicketRecords, getPersistedTicketStatus } from './ticketPersistenceService';
 import { getField, isTicketTopic } from './ticketStateService';
 import { setChannelParent } from './discordChannelService';
+import { isManagedDepartmentCategoryName } from '../core/domain/legacyBrandRecognition';
 
 const MAX_CHANNELS_PER_CATEGORY = 50;
-const PREFIX = 'ResolvX.';
+const PREFIX = 'QueryFixr.';
 
 function categoryName(departmentName: string, suffix = 1): string {
   const clean = departmentName.replace(/\s+/g, ' ').trim();
@@ -79,7 +80,7 @@ async function reconcileDepartmentTickets(
     await setChannelParent(
       channel.id,
       category.id,
-      'ResolvX: reconcile ticket with department category',
+      'QueryFixr: reconcile ticket with department category',
     ).then(() => {
       moved += 1;
     }).catch((error) => {
@@ -111,7 +112,7 @@ export async function ensureDepartmentCategory(
 ): Promise<CategoryChannel> {
   const bot = guild.members.me;
   if (!bot) {
-    throw new Error('ResolvX bot member could not be resolved.');
+    throw new Error('QueryFixr bot member could not be resolved.');
   }
 
   const baseName = categoryName(department.name);
@@ -124,6 +125,12 @@ export async function ensureDepartmentCategory(
     saved?.type === ChannelType.GuildCategory &&
     saved.children.cache.size < MAX_CHANNELS_PER_CATEGORY
   ) {
+    if (saved.name !== baseName && isManagedDepartmentCategoryName(saved.name)) {
+      await saved.setName(baseName, 'Normalize the managed department category to QueryFixr branding').catch((error) => {
+        console.warn('Could not rename the managed QueryFixr department category:', error);
+      });
+    }
+
     await saved.permissionOverwrites.edit(guild.roles.everyone.id, {
       ViewChannel: false,
       SendMessages: false,
@@ -155,7 +162,7 @@ export async function ensureDepartmentCategory(
   /*
    * A matching name is not ownership proof. An administrator may have created
    * an unrelated category with the same department name. Only the persisted
-   * categoryId identifies an existing ResolvX department category.
+   * categoryId identifies an existing QueryFixr department category.
    */
   const candidates: CategoryChannel[] = [];
 
@@ -197,7 +204,7 @@ export async function ensureDepartmentCategory(
           ]
         : []),
     ],
-    reason: 'ResolvX department category provisioning',
+    reason: 'QueryFixr department category provisioning',
   });
 
   await updateGuildConfig(guild.id, (current) => {
@@ -217,7 +224,7 @@ export async function ensureDepartmentCategory(
       guild,
       config.supportCategoryId,
       'CATEGORY_CREATED',
-      `Created ResolvX department category ${category.name} (${category.id}).`,
+      `Created QueryFixr department category ${category.name} (${category.id}).`,
     ).catch(() => undefined);
   }
 
@@ -280,7 +287,7 @@ export async function ensureAllDepartmentCategories(
         const isKnownManagedCategory =
           (config.managedCategoryIds ?? []).includes(department.categoryId);
 
-        // Remove only a provably ResolvX-managed, empty category. Never
+        // Remove only a provably QueryFixr-managed, empty category. Never
         // delete a non-empty category or one whose ownership is uncertain.
         if (
           saved?.type === ChannelType.GuildCategory &&
@@ -288,7 +295,7 @@ export async function ensureAllDepartmentCategories(
           isKnownManagedCategory
         ) {
           const removed = await saved.delete(
-            'ResolvX cleanup: no tickets exist for this department',
+            'QueryFixr cleanup: no tickets exist for this department',
           ).then(() => true).catch((error) => {
             console.warn(
               '⚠️ Could not remove unused empty department category ' +
@@ -313,7 +320,7 @@ export async function ensureAllDepartmentCategories(
       continue;
     }
 
-    // A ticket may have been preserved in the main ResolvX category
+    // A ticket may have been preserved in the main QueryFixr category
     // after an earlier category-provisioning failure. Setup should repair it
     // even when no department category ID was saved.
     const category = await ensureDepartmentCategory(guild, department);

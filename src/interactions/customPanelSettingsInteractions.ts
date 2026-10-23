@@ -98,7 +98,7 @@ async function render(
     : { label: 'Midnight Indigo', color: 0x5865f2 };
   const embed = new EmbedBuilder()
     .setColor(theme.color)
-    .setAuthor({ name: 'ResolvX • Custom Panel Builder' })
+    .setAuthor({ name: 'QueryFixr • Custom Panel Builder' })
     .setTitle(title.slice(0, 256))
     .setDescription((description || 'Choose an action below.').slice(0, 4096))
     .setFooter({ text: theme.label + ' theme • drafts persist in Neon PostgreSQL' });
@@ -709,7 +709,7 @@ async function showPublishChannelPicker(
     )
     .sort((a, b) => a.name.localeCompare(b.name));
   if (!channels.length) {
-    throw new Error('No accessible text channels were found where ResolvX can view, send messages and embeds.');
+    throw new Error('No accessible text channels were found where QueryFixr can view, send messages and embeds.');
   }
   const pageCount = Math.max(1, Math.ceil(channels.length / PAGE_SIZE));
   const safePage = Math.min(Math.max(page, 0), pageCount - 1);
@@ -734,7 +734,7 @@ async function showPublishChannelPicker(
   await render(
     interaction,
     'Publish Custom Panel',
-    'Choose a text channel where ResolvX can view messages, post embeds and create buttons. After the new public message is saved, ResolvX attempts to remove the previous message.\n\n**Panel:** ' + panel.name + '\n**Available channels:** ' + channels.length + '\n**Page:** ' + (safePage + 1) + ' / ' + pageCount,
+    'Choose a text channel where QueryFixr can view messages, post embeds and create buttons. After the new public message is saved, QueryFixr attempts to remove the previous message.\n\n**Panel:** ' + panel.name + '\n**Available channels:** ' + channels.length + '\n**Page:** ' + (safePage + 1) + ' / ' + pageCount,
     components,
   );
 }

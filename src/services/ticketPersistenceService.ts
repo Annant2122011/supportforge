@@ -159,7 +159,7 @@ export async function setPersistedTicketStatus(
 
   if (!current) {
     throw new Error(
-      `Cannot transition ResolvX ticket ${channelId}: durable ticket record does not exist.`,
+      `Cannot transition QueryFixr ticket ${channelId}: durable ticket record does not exist.`,
     );
   }
 
@@ -207,7 +207,7 @@ export async function closePersistedTicketIfActivityUnchanged(
   }
 
   // Legacy repository fallback is only retained for explicit migration/test
-  // use. Live ResolveX defaults to PostgreSQL and takes the atomic path above.
+  // use. Live QueryFixr defaults to PostgreSQL and takes the atomic path above.
   const current = await repository.getByChannelId(channelId);
   if (!current || current.deletedAt || !['open', 'claimed', 'pending', 'reopened'].includes(current.status)) return false;
   const canonical = (value: unknown): string | null => {

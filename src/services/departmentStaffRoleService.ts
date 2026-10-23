@@ -31,7 +31,7 @@ export async function migrateDepartmentStaffRole(
         [],
         [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
         0,
-        'ResolvX remove previous department staff role access',
+        'QueryFixr remove previous department staff role access',
       ).catch((error) => console.warn('⚠️ Could not remove previous department role from category:', error));
     }
     if (newRoleId) {
@@ -41,7 +41,7 @@ export async function migrateDepartmentStaffRole(
         [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
         [],
         0,
-        'ResolvX grant new department staff role access',
+        'QueryFixr grant new department staff role access',
       ).catch((error) => console.warn('⚠️ Could not grant new department role to category:', error));
     }
   }
@@ -66,7 +66,7 @@ export async function migrateDepartmentStaffRole(
         [],
         [],
         0,
-        'ResolvX clear previous department staff ticket override',
+        'QueryFixr clear previous department staff ticket override',
       ).catch((error) => console.warn('⚠️ Could not clear old department role on ticket ' + channel.id + ':', error));
     }
 
@@ -91,15 +91,15 @@ export async function migrateDepartmentStaffRole(
           : [],
         0,
         claimed
-          ? 'ResolvX hide claimed ticket from new department staff role'
-          : 'ResolvX grant new department staff ticket access',
+          ? 'QueryFixr hide claimed ticket from new department staff role'
+          : 'QueryFixr grant new department staff ticket access',
       ).catch((error) => console.warn('⚠️ Could not synchronize new department staff access on ticket ' + channel.id + ':', error));
     }
 
     await setChannelTopic(
       channel.id,
       nextTopic,
-      'ResolvX migrate department staff role metadata',
+      'QueryFixr migrate department staff role metadata',
     ).catch((error) => console.warn('⚠️ Could not update staff metadata on ticket ' + channel.id + ':', error));
 
     channel.topic = nextTopic;

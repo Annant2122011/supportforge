@@ -1,4 +1,4 @@
-# ResolvX Stage A–E Inspection and Completion Record
+# QueryFixr Stage A–E Inspection and Completion Record
 
 **Inspection date:** 18 October 2026  
 **Branch inspected:** `feature/forms-settings-panel`  
@@ -62,14 +62,14 @@ Stage E now includes separate visual builders for the public ticket panels and t
 ### Public ticket panels
 
 - Multiple panel definitions live in the existing Neon-backed guild configuration JSON document. There is no SQL migration for panel setup and no database reset.
-- **Settings → Ticket Panels** provides guided creation of empty drafts, button building, target changes, label/emoji/style/confirmation editing, role restrictions, reordering, private preview, channel selection, safe publishing and confirmed deletion. Slash commands are also available: `/supportforge panel create/list/show/update/preview/publish/delete`.
+- **Settings → Ticket Panels** provides guided creation of empty drafts, button building, target changes, label/emoji/style/confirmation editing, role restrictions, reordering, private preview, channel selection, safe publishing and confirmed deletion. Slash commands are also available: `/qf panel create/list/show/update/preview/publish/delete`.
 - When adding a department button, admins choose a fixed tag or customer-selected tag from a paginated visual picker. They do not need to copy tag IDs into a form.
 - Draft metadata includes title/instructions/footer, accent, author icon URL, thumbnail/banner URLs, and 1–25 ordered buttons.
 - Targets are existing departments (with optional fixed tag or customer tag choice) or a specific active ticket form pinned to a concrete tag/version.
 - Button access rules can be set at panel and individual button level. If both levels are restricted, a member must satisfy both. Admins with Manage Server/Administrator can use the panel.
 - Optional confirmation prompts are ephemeral, identify their initiating user, and bind to the source published message. The runtime validates the public message/channel and role access when clicked; confirmation clicks are also revalidated, and the Cancel button remains usable even if the source panel becomes unavailable during confirmation.
 - Published configuration is stored as a snapshot separately from the editable draft. Button IDs rotate on workflow retargeting; stale or copied component IDs are rejected. Panel definitions from older builder revisions that lack a published snapshot must be re-published once before their old buttons become active again; the detail view indicates that the draft needs publishing.
-- Publishing creates a replacement message, persists its channel/message pointer and immutable button snapshot, and only then tries to remove the old message. When persistence fails, ResolvX restores the previous published pointer/snapshot in configuration, then attempts to remove the unregistered replacement and retain the previous panel. When Discord fails to delete an old message, the panel interaction guard makes that stale message nonfunctional and the UI warns the administrator.
+- Publishing creates a replacement message, persists its channel/message pointer and immutable button snapshot, and only then tries to remove the old message. When persistence fails, QueryFixr restores the previous published pointer/snapshot in configuration, then attempts to remove the unregistered replacement and retain the previous panel. When Discord fails to delete an old message, the panel interaction guard makes that stale message nonfunctional and the UI warns the administrator.
 - Removing a panel removes only the definition and known public panel message; ticket channels opened through that panel remain independent.
 - Discord's five-row/25-component ceiling is respected. The private preview uses at most 20 buttons when it needs a navigation row; a published panel may use all 25.
 
@@ -90,8 +90,8 @@ Live acceptance is still required for actual role/permission behavior, public ch
 
 The current branch head was built and tested by GitHub Actions on commit `fdcc08526726330ffdca771c4a50ab1cc6ad6373`:
 
-- [Build run 39187857351](https://github.com/Annant2122011/supportforge/actions/runs/39187857351) passed the TypeScript build and automated tests.
-- [ResolvX CI run 39187857407](https://github.com/Annant2122011/supportforge/actions/runs/39187857407) passed build, tests and database verification.
+- [Build run 39187857351](https://github.com/Annant2122011/qf/actions/runs/39187857351) passed the TypeScript build and automated tests.
+- [QueryFixr CI run 39187857407](https://github.com/Annant2122011/qf/actions/runs/39187857407) passed build, tests and database verification.
 
 Those runs include the custom-panel interaction-ID parser tests, Settings-button customization tests, target editor, visual department-tag picker, and user/source-bound confirmation handling. CI used disposable test data, not production Neon. Live acceptance remains outstanding.
 

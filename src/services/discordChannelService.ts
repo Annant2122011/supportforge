@@ -40,7 +40,7 @@ const deferredMutations = new Map<string, DeferredDiscordMutation>();
 let deferredMutationSequence = 0;
 
 /**
- * All ResolvX channel mutations share discord.js's REST manager so its
+ * All QueryFixr channel mutations share discord.js's REST manager so its
  * global, route-bucket, major-parameter and resource sublimit accounting stays
  * consistent with the rest of the bot.
  */
@@ -73,7 +73,7 @@ function resolveDiscordRoute(method: DiscordMutationMethod, path: string): `/${s
     return Routes.channel(channelMatch[1]!);
   }
 
-  throw new Error('Unsupported ResolvX Discord REST route: ' + method + ' ' + path);
+  throw new Error('Unsupported QueryFixr Discord REST route: ' + method + ' ' + path);
 }
 
 function isGlobalRateLimit(error: unknown): boolean {
@@ -168,7 +168,7 @@ async function executeDiscordMutation<T>(
   deferLongRateLimit = true,
 ): Promise<T> {
   if (!sharedRest) {
-    throw new Error('ResolvX Discord REST manager has not been configured.');
+    throw new Error('QueryFixr Discord REST manager has not been configured.');
   }
 
   const route = resolveDiscordRoute(method, path);

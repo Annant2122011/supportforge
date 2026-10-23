@@ -33,7 +33,7 @@ const examplePanel: CustomSupportPanel = {
   name: 'Customer Care',
   title: 'How can we help?',
   description: 'Choose a department to start a ticket.',
-  footer: 'ResolvX Support',
+  footer: 'QueryFixr Support',
   color: '22D3EE',
   iconUrl: null,
   thumbnailUrl: null,

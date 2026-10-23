@@ -297,6 +297,8 @@ function roleRestrictedButtons(
   return rows;
 }
 
+const QUERYFIXR_ICON_URL = 'https://i.ibb.co/fdRDWXbH/3v-OKZCYL0-Rqkdu-OQ4t-PKA-Xt-Cc-OQu-N-Picsart-Ai-Image-Enhancer.png';
+
 export function buildCustomPanelEmbed(
   inputPanel: CustomSupportPanel,
   guildName: string,
@@ -312,10 +314,10 @@ export function buildCustomPanelEmbed(
     .setColor(color)
     .setTitle(view.title)
     .setDescription(view.description || 'Choose an option below to start a support request.')
-    .setFooter({ text: view.footer || 'ResolvX • Customer Support' })
+    .setFooter({ text: view.footer || 'QueryFixr • Customer Support' })
     .setAuthor({
-      name: guildName + ' • ResolvX Support',
-      ...(view.iconUrl ? { iconURL: view.iconUrl } : {}),
+      name: guildName + ' • QueryFixr Support',
+      iconURL: view.iconUrl || QUERYFIXR_ICON_URL,
     })
     .setTimestamp(new Date(panel.updatedAt));
   if (view.thumbnailUrl) embed.setThumbnail(view.thumbnailUrl);
@@ -397,7 +399,7 @@ export async function createCustomPanel(
     name,
     title: boundedText(input.title, 'Panel title', 256),
     description: boundedText(input.description, 'Panel description', 4000, true),
-    footer: input.footer === undefined ? 'ResolvX • Customer Support' : boundedText(input.footer, 'Panel footer', 2048, true),
+    footer: input.footer === undefined ? 'QueryFixr • Customer Support' : boundedText(input.footer, 'Panel footer', 2048, true),
     color: normalizePanelColor(input.color),
     iconUrl: normalizePanelUrl(input.iconUrl, 'Panel icon URL'),
     thumbnailUrl: normalizePanelUrl(input.thumbnailUrl, 'Thumbnail URL'),

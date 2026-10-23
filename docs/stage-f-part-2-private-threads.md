@@ -6,7 +6,7 @@ This increment adds private-thread workspaces to the existing ticket system with
 
 ## Configuration and resource layout
 
-- Configure the mode from **Settings → Ticket Workspace** or `/supportforge settings ticket-workspace`.
+- Configure the mode from **Settings → Ticket Workspace** or `/qf settings ticket-workspace`.
 - Modes are `text-channels` and `private-threads`; unknown persisted values normalize to the safer legacy `text-channels` mode.
 - Private-thread parents are created lazily beneath the configured support category and tagged with a stable topic marker for reconciliation.
 - A parent is maintained per department. The configured department staff role and the bot's role receive the permissions required for thread operations. The ticket owner's membership is explicitly added after thread creation.
