@@ -1993,6 +1993,10 @@ async function transition(
   );
 
   try {
+    // Load guild policy before changing durable ticket state so localization
+    // cannot make a committed transition appear to have failed.
+    const advancedSettings = await getAdvancedSettings(interaction.guild.id);
+
     /*
      * Always read the latest channel topic before changing state.
      * This prevents stale runtime data from becoming authoritative.
@@ -2119,7 +2123,7 @@ async function transition(
         .split(',')
         .map((id) => id.trim())
         .filter(Boolean);
-      const settings = await getAdvancedSettings(interaction.guild!.id);
+      const settings = advancedSettings;
 
       if (claimedIds.includes(interaction.user.id)) {
         await interaction.editReply('ℹ️ You are already assisting on this ticket.');
@@ -2544,7 +2548,7 @@ async function transition(
       );
     }
 
-    const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
+    const locale = advancedSettings.locale;
     const statusLabel = translate(locale, ('ticket.status.' + newStatus) as TranslationKey);
     await interaction.editReply(
       sideEffectFailures.length
@@ -2683,6 +2687,8 @@ async function closeTicket(
   let closeSyncRunningInBackground = false;
 
   try {
+    // Read the display locale before transcript and lifecycle mutations begin.
+    const locale = (await getAdvancedSettings(interaction.guild.id)).locale;
     /*
      * Always use the latest topic.
      */
@@ -2970,7 +2976,6 @@ async function closeTicket(
      * The outbox also retries failed channel reconciliation.
      */
     updateRuntimeTicketState(channel, closedTopic, 'closed');
-    const locale = (await getAdvancedSettings(interaction.guild.id)).locale;
     await editReplyOrFollowUp(
       interaction,
       '✅ ' + translate(locale, 'ticket.closed.saved', { ticketNumber }),
