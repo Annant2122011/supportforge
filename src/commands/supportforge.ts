@@ -34,6 +34,7 @@ import { buildSystemDiagnosticsEmbed, runSystemDiagnostics } from '../services/s
 import {
   createConfigurationSnapshot,
   listConfigurationSnapshots,
+  reviewConfigurationSnapshot,
   restoreConfigurationSnapshot,
 } from '../services/configurationHistoryService';
 import { handleSettingsSlashCommand } from '../interactions/settingsCommandTools';
@@ -1602,6 +1603,12 @@ export const data =
         )
         .addSubcommand((subcommand) =>
           subcommand
+            .setName('preview-snapshot')
+            .setDescription('Compare a saved checkpoint with the current settings before restore')
+            .addStringOption((option) => option.setName('snapshot-id').setDescription('Snapshot ID from diagnostics snapshots').setRequired(true).setMaxLength(40)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
             .setName('restore-snapshot')
             .setDescription('Restore a saved configuration checkpoint after typed confirmation')
             .addStringOption((option) => option.setName('snapshot-id').setDescription('Snapshot ID from diagnostics snapshots').setRequired(true).setMaxLength(40))
@@ -1873,6 +1880,41 @@ export async function execute(
             .setTitle('🗂️ Configuration History')
             .setDescription(description.slice(0, 4000))
             .setFooter({ text: snapshots.length + ' of up to 10 recent per-server checkpoints • restore requires typed confirmation' })],
+        });
+        return;
+      }
+
+      if (subcommand === 'preview-snapshot') {
+        const snapshotId = interaction.options.getString('snapshot-id', true).trim();
+        const review = await reviewConfigurationSnapshot(guild.id, snapshotId);
+        if (!review) {
+          await interaction.editReply('That configuration checkpoint was not found for this server. Use `/supportforge diagnostics snapshots` to list available checkpoints.');
+          return;
+        }
+        const saved = review.snapshot;
+        const current = review.currentCounts;
+        const changedSections = review.changedSections.length
+          ? review.changedSections.map((section) => '• ' + section).join('\\n')
+          : 'No differences were detected in the reviewed configuration sections.';
+        const config = await getGuildConfig(guild.id);
+        await interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setColor(getThemeColor(config.theme))
+            .setTitle('🔎 Configuration Restore Preview')
+            .setDescription(
+              '**Checkpoint:** `' + saved.id + '`\\n' +
+              '**Saved:** <t:' + Math.floor(Date.parse(saved.createdAt) / 1000) + ':F>\\n' +
+              '**Reason:** ' + saved.reason + '\\n\\n' +
+              '**Detected differences**\\n' + changedSections + '\\n\\n' +
+              '**Saved counts → current counts**\\n' +
+              'Departments: ' + saved.departmentCount + ' → ' + current.departmentCount + '\\n' +
+              'Panels: ' + saved.panelCount + ' → ' + current.panelCount + '\\n' +
+              'Tags: ' + saved.tagCount + ' → ' + current.tagCount + '\\n' +
+              'Forms: ' + (saved.formCount ?? 0) + ' → ' + current.formCount + '\\n' +
+              'Support-hours policies: ' + (saved.supportHoursPolicyCount ?? 0) + ' → ' + current.supportHoursPolicyCount + '\\n\\n' +
+              'This is a read-only preview. No configuration has changed. To proceed, run `/supportforge diagnostics restore-snapshot` with this ID and the exact confirmation `RESTORE ' + saved.id + '`. The restore creates a pre-restore checkpoint and keeps ticket/transcript history unchanged.',
+            )
+            .setFooter({ text: 'Re-run the preview immediately before restore if another administrator may be editing settings.' })],
         });
         return;
       }
