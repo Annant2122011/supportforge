@@ -64,24 +64,32 @@ Outbox heuristics currently warn for failed jobs, more than 50 pending jobs, a p
 - Corrected retention summary wording when the timer is disabled.
 - CI evidence and live Discord acceptance remain separate.
 
-## Required acceptance before Stage 2 can be called production-complete
+## Acceptance status
 
-- [x] The pre-telemetry Stage 2 + H2 head passed [ResolvX CI #2002](https://github.com/Annant2122011/supportforge/actions/runs/39962985648): build and PostgreSQL verification succeeded, and the test step passed on that earlier head.
-- [ ] Re-run Build, the full test suite (including `tests/operationalTaskTelemetry.test.ts`), and PostgreSQL verification on the final telemetry-enabled Stage 2 head.
-- [ ] Test guild: missing/deleted panel, transcript, audit and Settings destinations show correct statuses without destructive action.
-- [ ] Verify paginated health output shows every finding across all pages, including a server with many departments and custom panels.
-- [ ] Test guild: deliberately remove bot permissions and verify clear warnings for each destination.
-- [ ] Test guild: private-thread mode checks parent and thread permissions.
-- [ ] Inject database connection failure and outbox-query failure; confirm reports say Error/Unknown.
-- [ ] Create two configuration snapshots, confirm list order and per-guild isolation in the live test-guild.
-- [ ] Restore a snapshot with correct and incorrect confirmation phrases in the live test-guild.
-- [ ] Inject a test-only failure between configuration-document writes and verify checkpoint compensation in an isolated integration test.
-- [ ] Exercise rollback of form routing and support-hours policies, including a newer active-form conflict.
-- [ ] Confirm restore is audited and refreshes the public panel and Settings dashboard.
-- [ ] Verify the restore leaves ticket records, transcripts, history and other guild configuration intact.
-- [ ] Check Discord command registration and button routing in a non-production bot.
-- [ ] Exercise configuration history under large panel lists and concurrent admin changes.
-- [ ] Verify backup/restore of Neon independently; configuration checkpoints are not a substitute for database backups.
+### Automated acceptance: PASS
+
+- [x] Final combined Stage 2 + Stage H2 CI passed on the telemetry and restore-integration test head: [ResolvX CI #2063](https://github.com/Annant2122011/supportforge/actions/runs/39974255192). TypeScript build passed, **172 tests passed, 0 failed, 0 skipped**, and disposable PostgreSQL verification passed.
+- [x] The test run explicitly exercised restore compensation after an injected support-hours validation failure. It verifies the previously applied guild and advanced settings are restored and the selected checkpoint remains available.
+- [x] PostgreSQL integration coverage verifies configuration snapshots list newest-first and are isolated between guild IDs.
+- [x] The destructive restore integration test refuses to run unless both `DATABASE_URL` and `DATABASE_URL_UNPOOLED` use `localhost` or `127.0.0.1`. This protects production Neon from the test path.
+- [x] Synthetic pagination test verifies 23 findings are all visible across three pages without duplicate or dropped finding references.
+- [x] Unit coverage checks that failed outbox deliveries are errors, large/stale queues are warnings, empty diagnostic results remain UNKNOWN, and telemetry warns on unobserved scheduled tasks, flags stuck/repeated failures, resets failure streaks after success and omits raw error strings.
+- [x] The slash-command registration regression test recursively checks the 25-option cap and duplicate sibling names.
+- [x] Disposable PostgreSQL verification reports required tables, referential integrity and active outbox lease state as verified.
+
+### Live/environment acceptance: BLOCKED
+
+The following checks require an authorized non-production Discord guild/bot or a separate non-production Neon target. They are not represented as passed merely because CI is green.
+
+- [BLOCKED] Run `/supportforge diagnostics health` and `/supportforge diagnostics setup-doctor` through Discord as an administrator; confirm the Settings buttons, refresh, page controls and command registration work against the actual bot.
+- [BLOCKED] In a test guild, remove/restore bot permissions and delete/recreate panel, transcript, audit and Settings destinations; check the findings and confirm diagnostics never mutate Discord resources.
+- [BLOCKED] Exercise diagnostics against a large configured guild with many departments, forms and custom panels, and confirm the live pages show every finding.
+- [BLOCKED] Verify private-thread parent and thread permissions, including a deliberate missing-permission case.
+- [BLOCKED] Inject a live/staging PostgreSQL connection failure and an outbox-query failure; confirm the rendered report says Error/Unknown and never displays credentials or raw database errors.
+- [BLOCKED] Use Settings controls to save/list multiple snapshots, validate user-bound review, reject a wrong confirmation phrase, accept a correct phrase, and verify the public panel and Settings dashboard refresh after restore.
+- [BLOCKED] In the test guild, exercise form-routing and support-hours rollback, including a newer active-form conflict, and verify tickets, transcripts, audit events, Discord roles/channels and other guilds remain unchanged.
+- [BLOCKED] Stress large configuration histories/panel payloads and concurrent admin edits during restore.
+- [BLOCKED] Independently restore a Neon backup into a separate non-production Neon branch/database. A configuration snapshot is not a PostgreSQL backup.
 
 ## Known limits
 
