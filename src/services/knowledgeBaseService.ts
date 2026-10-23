@@ -492,7 +492,8 @@ export async function searchKnowledgeBase(
     [guildId,expandedQuery,access.isAdmin,access.isStaff,access.roleIds],
   );
   const metadataCandidates = await pool.query<KnowledgeArticleRow>(
-    'SELECT ' + ARTICLE_COLUMNS + ' FROM knowledge_base_articles WHERE ' + permissionPredicate + ' ORDER BY updated_at DESC LIMIT 500',
+    'SELECT ' + ARTICLE_COLUMNS + ' FROM knowledge_base_articles WHERE ' + permissionPredicate +
+      ' AND $2::text IS NOT NULL ORDER BY updated_at DESC LIMIT 500',
     [guildId,expandedQuery,access.isAdmin,access.isStaff,access.roleIds],
   );
   const articleMap = new Map<string,{ row: KnowledgeArticleRow; score: number }>();
