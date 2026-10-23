@@ -2770,20 +2770,24 @@ Errors should be grouped and traceable back to request/ticket context.
 
 ## F-094 — Health Checks
 
-**Status:** `PLANNED`  
+**Status:** `BUILT / PARTIAL`  
 **Priority:** `P2`
 
-A health endpoint or admin diagnostic system should report:
+The current implementation provides administrator-only `/supportforge diagnostics health` and `/supportforge diagnostics setup-doctor` commands, plus Run Diagnostics and Setup Doctor controls in Settings → Repair System.
 
-```text
-Bot: ONLINE
-Database: CONNECTED
-Storage: CONNECTED
-Queue: HEALTHY
-AI: AVAILABLE
-```
+Checks currently cover:
+- Discord client/guild availability.
+- Neon/PostgreSQL connectivity with a read-only `SELECT 1` probe.
+- Guild-scoped outbox pending, processing and failed counts, with backlog/lease-age warnings.
+- Configured support category, public panel, transcript, audit and Settings destinations, including expected channel types and required bot permissions.
+- Department staff-role/tag readiness and private-thread parent/permission readiness when private-thread mode is selected.
+- The saved default panel message pointer.
 
-Health checks should distinguish “process alive” from “system actually functioning”.
+Reports include severity, details and suggested next steps. Diagnostics do not execute repairs or delete resources. Existing configuration readers may initialize missing default documents during normal loading. Queue checks report UNKNOWN when the database probe or outbox query fails rather than falsely claiming health.
+
+Still required before marking this production-accepted: run health checks against a test guild with deliberately missing permissions/channels, verify rate-limit and inaccessible-destination handling, and confirm the configured Neon schema against a disposable test target. CI cannot prove production credentials or live Discord permissions. See [Stage 2 diagnostic architecture](docs/stage-2-admin-operational-diagnostics.md).
+
+AI availability is not reported because AI is not a required dependency for this product stage.
 
 ---
 
