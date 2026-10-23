@@ -1,6 +1,7 @@
 # Stage 2 — Administration and Operational Diagnostics
 
 **Branch:** `feature/stage-2-localized-operational-excellence`  
+**Review:** [PR #32](https://github.com/Annant2122011/supportforge/pull/32)  
 **Production store:** existing Neon PostgreSQL configuration and outbox tables. No new live database, SQL migration or AI dependency is introduced by this diagnostic slice.
 
 ## Delivered in this increment
@@ -29,7 +30,7 @@
 - Settings has Save Snapshot and View Snapshots controls; selecting a snapshot opens a two-step review/confirmation flow.
 - Each checkpoint stores this guild's existing guild-config and advanced-settings documents, support-hours policies, and the latest version/routing definition for existing forms in the current Neon/PostgreSQL-backed app-document system. The latest 10 checkpoints per guild are retained. History writes use a PostgreSQL transaction advisory lock so separate bot processes do not overwrite each other's checkpoint list.
 - Restore requires the exact confirmation phrase, saves a pre-restore checkpoint, attempts compensation if a configuration/service step fails, refreshes the public panel and Settings dashboard, and logs the actor/action. Guild and advanced-setting documents are replaced from the snapshot rather than merged with newer keys.
-- Form restoration appends a new immutable version for each form present in the checkpoint; it never rewrites prior form versions or submissions. Forms created after the checkpoint are not deleted; if one conflicts with the restored active route, rollback fails closed and asks the administrator to resolve the newer mapping first. A rollback does not restore Discord channel names, original messages or role state. Ticket records, transcripts and other guilds are not intentionally modified.
+- Form restoration appends a new immutable version for each form present in the checkpoint; it never rewrites prior form versions or submissions. Forms created after the checkpoint are not deleted; if one conflicts with the restored active route, rollback fails closed and asks the administrator to resolve the newer mapping first. The selected checkpoint is retained alongside the automatic pre-restore checkpoint even when restoring the oldest of ten saved entries. A fresh preflight comparison rejects changes detected while the restore is being prepared. A rollback does not restore Discord channel names, original messages or role state. Ticket records, transcripts and other guilds are not intentionally modified.
 - The history document is bounded by checkpoint count; extremely large panel/config payloads still need stress testing before large multi-tenant scale.
 
 ### Existing Stage A–H capabilities reused instead of duplicated
