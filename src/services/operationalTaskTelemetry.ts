@@ -236,7 +236,7 @@ export function getOperationalTaskFindings(
     if (!state || (state.lastOutcome === null && !state.running)) {
       findings.push({
         area: 'Operational tasks',
-        severity: 'info',
+        severity: definition.staleAfterMs === null ? 'info' : 'warning',
         title: definition.label + ' has no observed run',
         detail: 'Expected ' + definition.intervalHint + '. Task telemetry is process-local and resets after restart; absence is unknown, not proof that the task is broken or healthy.',
         remedy,
