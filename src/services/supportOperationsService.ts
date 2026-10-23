@@ -3,7 +3,7 @@ import type { QueryResultRow } from 'pg';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
 import { evaluateSlaTarget, isValidSlaScope, type SlaLifecycleEvent, type SlaTargetResult } from '../core/domain/supportSla';
-import { getPersistedTicketById } from './ticketPersistenceService';
+import { getPersistedTicket, getPersistedTicketById } from './ticketPersistenceService';
 
 export type SlaPriority = 'low' | 'normal' | 'high' | 'urgent' | 'critical' | '*';
 
@@ -176,7 +176,7 @@ export async function evaluateTicketSla(
   now = new Date().toISOString(),
 ): Promise<SupportSlaEvaluation> {
   let ticket = await getPersistedTicketById(ticketId);
-  if (!ticket) ticket = await (await import('./ticketPersistenceService')).getPersistedTicket(ticketId);
+  if (!ticket) ticket = await getPersistedTicket(ticketId);
   if (!ticket || ticket.guildId !== guildId || ticket.deletedAt) {
     throw new Error('An active durable ticket in this server is required for SLA evaluation.');
   }
