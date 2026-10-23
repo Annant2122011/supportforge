@@ -770,8 +770,13 @@ export async function executeTicketCommand(
         confidence: 'high',
       });
 
+      const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
       await context.channel.send(
-        `🎯 ${interaction.user} claimed ticket #${context.ticketNumber}.`,
+        '🎯 ' + translate(locale, 'ticket.status.announcement', {
+          ticketNumber: context.ticketNumber,
+          status: translate(locale, 'ticket.status.claimed'),
+          actor: interaction.user.toString(),
+        }),
       );
 
       await audit(
@@ -780,7 +785,6 @@ export async function executeTicketCommand(
         `Ticket claimed by ${interaction.user.tag}`,
       );
 
-      const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
       await interaction.editReply(
         '✅ ' + translate(locale, 'ticket.status.commandSuccess', {
           ticketNumber: context.ticketNumber,
@@ -1080,8 +1084,13 @@ export async function executeTicketCommand(
         confidence: 'high',
       });
 
+      const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
       await context.channel.send(
-        `⏳ Ticket #${context.ticketNumber} has been marked **pending** by ${interaction.user}.`,
+        '⏳ ' + translate(locale, 'ticket.status.announcement', {
+          ticketNumber: context.ticketNumber,
+          status: translate(locale, 'ticket.status.pending'),
+          actor: interaction.user.toString(),
+        }),
       );
 
       await audit(
@@ -1090,7 +1099,6 @@ export async function executeTicketCommand(
         `Ticket marked pending by ${interaction.user.tag}`,
       );
 
-      const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
       await interaction.editReply(
         '⏳ ' + translate(locale, 'ticket.status.commandSuccess', {
           ticketNumber: context.ticketNumber,
@@ -1130,8 +1138,13 @@ export async function executeTicketCommand(
         confidence: 'high',
       });
 
+      const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
       await context.channel.send(
-        `▶️ Ticket #${context.ticketNumber} has been resumed by ${interaction.user}.`,
+        '▶️ ' + translate(locale, 'ticket.status.announcement', {
+          ticketNumber: context.ticketNumber,
+          status: translate(locale, 'ticket.status.open'),
+          actor: interaction.user.toString(),
+        }),
       );
 
       await audit(
@@ -1140,7 +1153,6 @@ export async function executeTicketCommand(
         `Ticket resumed by ${interaction.user.tag}`,
       );
 
-      const locale = (await getAdvancedSettings(interaction.guild!.id)).locale;
       await interaction.editReply(
         '✅ ' + translate(locale, 'ticket.status.commandSuccess', {
           ticketNumber: context.ticketNumber,
