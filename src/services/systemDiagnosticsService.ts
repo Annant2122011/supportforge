@@ -12,6 +12,7 @@ import { getPostgresPool, pingPostgres } from '../core/persistence/postgresDatab
 import { CURRENT_POSTGRES_MIGRATION_ID } from '../core/persistence/postgresMigrations';
 import { listTicketForms, type TicketFormVersion } from './ticketFormService';
 import { getSupportHoursPolicies, type SupportHoursPolicy } from './supportHoursService';
+import { getDiscordRateLimitSummary } from './discordRateLimitTelemetry';
 
 export type DiagnosticSeverity = 'ok' | 'info' | 'warning' | 'error';
 
@@ -178,6 +179,37 @@ export async function runSystemDiagnostics(
     remedy: 'Check the process and gateway connection; a live interaction alone does not prove database or channel readiness.',
   });
 
+  const rateLimitSummary = getDiscordRateLimitSummary();
+  const rateLimitSeverity: DiagnosticSeverity =
+    rateLimitSummary.globalEventCount >= 3 || rateLimitSummary.eventCount >= 20
+      ? 'error'
+      : rateLimitSummary.eventCount >= 5
+        ? 'warning'
+        : 'info';
+  const routeSummary = rateLimitSummary.topRoutes
+    .map((item) => item.route + ' (' + item.count + ')')
+    .join('; ');
+  add({
+    area: 'Discord REST rate limits',
+    severity: rateLimitSeverity,
+    title: rateLimitSummary.eventCount === 0
+      ? 'No recent REST rate limits recorded'
+      : rateLimitSeverity === 'error'
+        ? 'Repeated Discord REST rate limits detected'
+        : rateLimitSeverity === 'warning'
+          ? 'Discord REST rate limits are recurring'
+          : 'Recent Discord REST rate limits recorded',
+    detail: rateLimitSummary.eventCount === 0
+      ? 'No HTTP 429 events were observed by this running process in the last ' + rateLimitSummary.windowMinutes + ' minutes. This is a process-local window, not a historical guarantee.'
+      : rateLimitSummary.eventCount + ' rate-limit event(s) in the last ' + rateLimitSummary.windowMinutes +
+        ' minutes; global events=' + rateLimitSummary.globalEventCount +
+        '; longest retry/sub-limit delay=' + Math.ceil(rateLimitSummary.longestRetryAfterMs / 1000) + 's.' +
+        (routeSummary ? ' Most frequent normalized routes: ' + routeSummary + '.' : ''),
+    remedy: rateLimitSummary.eventCount
+      ? 'Check repeated channel renames, edits and other REST operations. Keep the event-specific Retry-After and durable retry/outbox behavior; do not add fixed-delay retries.'
+      : undefined,
+  });
+
   let dbConnected = false;
   try {
     await pingPostgres();
@@ -318,6 +350,31 @@ export async function runSystemDiagnostics(
     });
     addDiagnosticReferences(report);
     return report;
+  }
+
+  // Role cache is not a reliable proof that a role was deleted. Refresh the
+  // guild role inventory first; if it fails, report that missing-role checks
+  // are incomplete instead of generating false positives.
+  const roleInventoryAvailable = await guild.roles.fetch().then(() => true).catch(() => false);
+  if (!roleInventoryAvailable) {
+    add({
+      area: 'Discord roles',
+      severity: 'warning',
+      title: 'Role inventory could not be refreshed',
+      detail: 'Missing-role checks are incomplete because Discord did not return the current guild role list.',
+      remedy: 'Verify the bot can access the guild and role list, then rerun diagnostics. Unverified role references are not labelled missing.',
+    });
+  }
+
+  const botMemberAvailable = await guild.members.fetchMe().then(() => true).catch(() => false);
+  if (!botMemberAvailable) {
+    add({
+      area: 'Discord permissions',
+      severity: 'warning',
+      title: 'Bot member permissions could not be fully resolved',
+      detail: 'Effective permission checks may be incomplete because the current guild bot member could not be fetched.',
+      remedy: 'Verify bot membership and gateway/API access, then rerun diagnostics before relying on permission results.',
+    });
   }
 
   await Promise.all([
@@ -503,7 +560,7 @@ export async function runSystemDiagnostics(
     inactivityProblems.push('grace threshold must be between 1 and 168 hours');
   }
   for (const roleId of advanced.inactivity.exemptRoleIds) {
-    if (!guild.roles.cache.has(roleId)) inactivityProblems.push('inactivity exemption references missing role ' + roleId);
+    if (roleInventoryAvailable && !guild.roles.cache.has(roleId)) inactivityProblems.push('inactivity exemption references missing role ' + roleId);
   }
   for (const departmentId of advanced.inactivity.exemptDepartmentIds) {
     if (!config.departments[departmentId]) inactivityProblems.push('inactivity exemption references missing department ' + departmentId);
@@ -585,7 +642,7 @@ export async function runSystemDiagnostics(
     if (buttons.length > 25) issues.errors.push(snapshotLabel + ' exceeds Discord’s 25-button limit');
     for (const button of buttons.slice(0, 25)) {
       for (const roleId of button.allowedRoleIds ?? []) {
-        if (!guild.roles.cache.has(roleId)) {
+        if (roleInventoryAvailable && !guild.roles.cache.has(roleId)) {
           issues.warnings.push('button “' + button.label + '” references missing role ' + roleId);
         }
       }
@@ -628,7 +685,7 @@ export async function runSystemDiagnostics(
     const issues = { errors: [] as string[], warnings: [] as string[] };
     if (panel.allowedRoleIds?.length) {
       for (const roleId of panel.allowedRoleIds) {
-        if (!guild.roles.cache.has(roleId)) {
+        if (roleInventoryAvailable && !guild.roles.cache.has(roleId)) {
           issues.warnings.push('panel access references missing role ' + roleId);
         }
       }
@@ -640,7 +697,7 @@ export async function runSystemDiagnostics(
       } else {
         inspectPanelButtons(panel.publishedConfig.buttons ?? [], panel.name, 'Published snapshot', issues);
         for (const roleId of panel.publishedConfig.allowedRoleIds ?? []) {
-          if (!guild.roles.cache.has(roleId)) issues.warnings.push('published access references missing role ' + roleId);
+          if (roleInventoryAvailable && !guild.roles.cache.has(roleId)) issues.warnings.push('published access references missing role ' + roleId);
         }
       }
       if (!panel.publishedChannelId) {
@@ -690,7 +747,7 @@ export async function runSystemDiagnostics(
           detail: 'The department can be difficult to staff or may have incomplete permission routing.',
           remedy: 'Assign a valid staff role in Settings → Departments.',
         });
-      } else if (!guild.roles.cache.has(department.staffRoleId)) {
+      } else if (roleInventoryAvailable && !guild.roles.cache.has(department.staffRoleId)) {
         add({
           area: 'Departments',
           severity: 'warning',
