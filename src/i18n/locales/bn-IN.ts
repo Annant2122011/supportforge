@@ -19,7 +19,7 @@ const bnIN: Partial<Record<TranslationKey, string>> = {
   'ticket.status.archived': 'সংরক্ষিত',
   'ticket.status.reopened': 'আবার খোলা হয়েছে',
   'ticket.status.changed': 'টিকিটের অবস্থা পরিবর্তন করে {status} করা হয়েছে।',
-  'ticket.status.announcement': '{actor} টিকিটের অবস্থা পরিবর্তন করে {status} করেছেন।',
+  'ticket.status.announcement': '{actor} টিকিট #{ticketNumber}-এর অবস্থা পরিবর্তন করে {status} করেছেন।',
   'ticket.status.syncWarning': 'ডেটাবেসে টিকিটের অবস্থা {status} করা হয়েছে, কিন্তু Discord এখনই তা প্রয়োগ করতে পারেনি: {details}। সংরক্ষিত টিকিটের অবস্থা অক্ষত রয়েছে।',
   'ticket.status.commandSuccess': 'টিকিট #{ticketNumber} এখন {status}।',
   'ticket.created.title': 'টিকিট #{ticketNumber} তৈরি হয়েছে',
