@@ -39,6 +39,7 @@ import { LOCALE_OPTIONS, getLocaleLabel, isSupportedLocale } from '../i18n/local
 import { translate } from '../i18n/translationService';
 import { buildSystemDiagnosticsEmbed, diagnosticsPageCount, runSystemDiagnostics } from '../services/systemDiagnosticsService';
 import {
+  assertCurrentConfigurationFingerprint,
   createConfigurationSnapshot,
   getConfigurationSnapshot,
   listConfigurationSnapshots,
@@ -2092,7 +2093,7 @@ export async function handleSettingsInteraction(
         )],
       components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
-          .setCustomId('sf:settings:diagnostics:restore-preview:' + snapshot.id)
+          .setCustomId('sf:settings:diagnostics:restore-preview:' + snapshot.id + ':' + review.currentFingerprint)
           .setLabel('Continue to Confirmation')
           .setEmoji('⚠️')
           .setStyle(ButtonStyle.Danger),
@@ -2344,11 +2345,20 @@ export async function handleSettingsInteraction(
     }
 
     if (id.startsWith('sf:settings:diagnostics:restore-preview:')) {
-      const snapshotId = id.slice('sf:settings:diagnostics:restore-preview:'.length);
+      const [snapshotId = '', expectedFingerprint = ''] = id.slice('sf:settings:diagnostics:restore-preview:'.length).split(':');
       const review = await reviewConfigurationSnapshot(guild.id, snapshotId);
       const snapshot = review?.snapshot ?? null;
       if (!review || !snapshot) {
         await interaction.reply({ content: 'That snapshot no longer exists. Reopen Configuration History and select a current checkpoint.', flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      try {
+        assertCurrentConfigurationFingerprint(expectedFingerprint, review.currentFingerprint);
+      } catch {
+        await interaction.reply({
+          content: 'Settings changed after you selected this checkpoint. Nothing was restored. Reopen Configuration History, select the checkpoint again and review the fresh preview.',
+          flags: MessageFlags.Ephemeral,
+        });
         return true;
       }
       await interaction.reply({
@@ -2366,10 +2376,11 @@ export async function handleSettingsInteraction(
             ', forms ' + (snapshot.formCount ?? 0) + ' → ' + review.currentCounts.formCount +
             ', support-hours ' + (snapshot.supportHoursPolicyCount ?? 0) + ' → ' + review.currentCounts.supportHoursPolicyCount + '.\n\n' +
             'ResolveX will first save a checkpoint of current settings, then restore the saved guild configuration and advanced settings. This does not restore old Discord channel names/messages or change ticket/transcript records.\n\n' +
-            'Review this preview, then confirm. The restore is restricted to this server and is reversible through the automatic checkpoint.'          )],
+            '**Preview fingerprint:** \`' + review.currentFingerprint + '\`\n' +
+            'The fingerprint is tied to the current configuration and is checked again at restore time. If settings change, restore is refused and you must review a fresh preview.'          )],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
           new ButtonBuilder()
-            .setCustomId('sf:settings:diagnostics:restore-confirm:' + snapshot.id + ':' + interaction.user.id)
+            .setCustomId('sf:settings:diagnostics:restore-confirm:' + snapshot.id + ':' + interaction.user.id + ':' + expectedFingerprint)
             .setLabel('Confirm Restore')
             .setEmoji('⚠️')
             .setStyle(ButtonStyle.Danger),
@@ -2387,6 +2398,7 @@ export async function handleSettingsInteraction(
       const tail = id.slice('sf:settings:diagnostics:restore-confirm:'.length).split(':');
       const snapshotId = tail[0] ?? '';
       const actorId = tail[1] ?? '';
+      const expectedFingerprint = tail[2] ?? '';
       if (actorId !== interaction.user.id) {
         await interaction.reply({ content: 'This confirmation belongs to another administrator. Return to Settings and initiate your own restore.', flags: MessageFlags.Ephemeral });
         return true;
@@ -2398,6 +2410,7 @@ export async function handleSettingsInteraction(
           snapshotId,
           'RESTORE ' + snapshotId,
           { id: interaction.user.id, name: interaction.user.tag },
+          expectedFingerprint,
         );
         const config = await getGuildConfig(guild.id).catch(() => null);
         if (config?.supportCategoryId) {
