@@ -2,7 +2,7 @@
 
 **Programme:** ResolveX four-stage product excellence  
 **Stage 1 branch:** `feature/four-stage-excellence-stage-1-clean`  
-**Pull request:** [#28, Stage 1 configuration integrity, source audit and acceptance](https://github.com/Annant2122011/supportforge/pull/28)  
+**Pull request:** [#31, Stage 1 configuration integrity, localization and acceptance](https://github.com/Annant2122011/supportforge/pull/31)  
 **Current status:** Source and automated checks pass. Live Discord acceptance and an isolated Neon restore drill remain blocked pending access to a non-production environment.
 
 ## Evidence summary
@@ -14,6 +14,7 @@
 | PostgreSQL verification | **PASS** | Same CI run verified required tables, referential integrity and the active outbox lease state against disposable CI PostgreSQL. This is not a connection to production Neon. |
 | Managed branding migration | **PASS in unit tests** | Exact application-owned defaults are migrated; custom department names, tags, descriptions, panel text, button labels, confirmation copy and custom footers are preserved. |
 | Panel role restrictions | **PASS in unit tests** | Role restrictions are normalized at the editable draft, button, published configuration and published-button layers. Valid Snowflake IDs remain strings, malformed IDs are rejected and duplicates are removed. |
+| Localization controls/lifecycle copy | **PASS in CI; partial acceptance** | Stage H2 locale selection and focused Hindi/Bengali/English lifecycle/form copy are included on this branch. Remaining Settings pages, panel previews and selected report surfaces are still open in the translation architecture checklist.
 | Production provider policy | **PASS in source/CI review** | Neon/PostgreSQL remains authoritative; no live provider switch or SQL migration was introduced in Stage 1. |
 | Live test-guild acceptance | **BLOCKED** | No authorized test-guild bot/session was available to verify actual Discord REST permissions, published interactions, role overwrites, command registration, rate limits and restart behavior. |
 | Non-production Neon backup/restore | **BLOCKED** | No authorized isolated Neon target/backup artifact was available. CI PostgreSQL verification is not a restore drill. |
@@ -26,13 +27,14 @@
 4. Added regression tests for managed-default migration, custom-text preservation and the role restrictions embedded in published panel snapshots.
 5. Reconciled the inactivity auto-close registry entry with the existing role/department exemption controls while keeping live acceptance clearly incomplete.
 6. Added the four-stage programme architecture, a detailed non-production acceptance checklist and this evidence report.
+7. Integrated the non-rebranding Stage H2 locale picker, sibling report command group (to stay within Discord command limits), and selected localized ticket lifecycle/form messages. This stays on the supported `/supportforge` command root and does not import QueryFixr branding.
 
 ## Branch / PR reconciliation
 
-- [PR #28 is the clean Stage 1 review branch](https://github.com/Annant2122011/supportforge/pull/28), based on the current `main` commit. It replaces the older diverged Stage 1 draft for review.
-- [PR #29 is the clean Stage 2 review branch](https://github.com/Annant2122011/supportforge/pull/29), stacked on Stage 1. It must not be merged before its Stage 1 parent.
+- [PR #31 is the clean Stage 1 + Stage H2 review branch](https://github.com/Annant2122011/supportforge/pull/31), based on the current `main` baseline. It replaces the older diverged Stage 1 draft for review.
+- [PR #30 is the current clean Stage 2 review branch](https://github.com/Annant2122011/supportforge/pull/30), stacked on the previous Stage 1 baseline; it will need the H2-aware Stage 2 overlay before merge.
 - Older draft PRs #24 and #25 are superseded by #28 and #29. They remain separate, unmerged histories; review the clean PRs instead.
-- [PR #23, Stage H Part 2 localization](https://github.com/Annant2122011/supportforge/pull/23) and [PR #22, the QueryFixr rebrand/localization branch](https://github.com/Annant2122011/supportforge/pull/22) remain separate review items. The QueryFixr branch changes visible branding and the root command name, so it was not copied into ResolveX.
+- [PR #23, Stage H Part 2 localization](https://github.com/Annant2122011/supportforge/pull/23) provided the H2 source increment ported into this branch. Its remaining Settings pages, panel previews, selected reports and live locale acceptance remain open in the translation checklist. [PR #22, the QueryFixr rebrand/localization branch](https://github.com/Annant2122011/supportforge/pull/22) remains separate because it changes visible branding and the root command name.
 - No production deployment or database change was performed. The accidental Stage 2 file on `main` was removed with a normal corrective commit; comparing the resulting `main` tree against its prior baseline shows no net source/document changes from this programme on `main`.
 
 ## Release gate
