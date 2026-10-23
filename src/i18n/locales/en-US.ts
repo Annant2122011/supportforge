@@ -26,6 +26,7 @@ const enUS = {
   'ticket.closed': 'Ticket #{ticketNumber} has been closed.',
   'ticket.reopened': 'Ticket #{ticketNumber} has been reopened.',
   'ticket.priority.changed': 'Ticket priority changed to {priority}.',
+  'ticket.priority.commandSuccess': 'Ticket #{ticketNumber} priority is now {priority}.',
   'ticket.intake.outsideHours': '⏰ Support is currently closed in {timezone}. New tickets are restricted by the configured support-hours policy. {nextOpening}',
   'ticket.intake.nextOpening': 'Next opening: {nextOpening}.',
   'ticket.intake.noNextOpening': 'No next opening is configured; contact a server administrator.',
