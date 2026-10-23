@@ -7,6 +7,7 @@ export interface SlaLifecycleEvent {
 }
 
 export interface SlaTargetInput {
+  clockKind?: 'first-response' | 'resolution';
   startedAt: string;
   observedAt: string;
   completedAt?: string | null;
@@ -116,11 +117,10 @@ export function evaluateSlaTarget(input: SlaTargetInput): SlaTargetResult {
     };
   }
 
-  const start = input.completedAt !== undefined && input.completedAt !== null
+  const shouldResetOnReopen = input.clockKind === 'resolution';
+  const start = shouldResetOnReopen
     ? (resolutionStart(input) ?? baseStart)
-    : input.currentStatus === 'closed' || input.currentStatus === 'archived'
-      ? (resolutionStart(input) ?? baseStart)
-      : baseStart;
+    : baseStart;
   const safeStart = Math.min(end, Math.max(baseStart, start));
   const pausedMs = pausedDurationMs(safeStart, end, input.events, input.pauseWhilePending);
   const elapsedMinutes = Math.max(0, Math.floor((end - safeStart - pausedMs) / 60_000));
