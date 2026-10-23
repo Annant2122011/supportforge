@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { normalizeConfigurationHistoryDocument } from '../src/services/configurationHistoryService';
+import { normalizeConfigurationHistoryDocument, restoreConfigurationSnapshot } from '../src/services/configurationHistoryService';
 
 function snapshot(id: string, guildId = '123456789012345678') {
   return {
@@ -77,5 +77,29 @@ test('a snapshot stored under the wrong guild key is rejected', () => {
       guilds: { [guildId]: [snapshot('foreign', otherGuildId)] },
     }),
     /malformed snapshot/,
+  );
+});
+
+
+test('configuration restore rejects an incorrect confirmation before reading or mutating persistence', async () => {
+  await assert.rejects(
+    restoreConfigurationSnapshot(
+      '123456789012345678',
+      'cfg_expected',
+      'RESTORE cfg_typo',
+      { id: '223456789012345678', name: 'Test administrator' },
+    ),
+    /Restore confirmation did not match/,
+  );
+});
+
+test('non-array snapshots and blank guild keys fail closed', () => {
+  assert.throws(
+    () => normalizeConfigurationHistoryDocument({ version: 1, guilds: { '123456789012345678': {} } }),
+    /malformed guild entry/,
+  );
+  assert.throws(
+    () => normalizeConfigurationHistoryDocument({ version: 1, guilds: { '   ': [] } }),
+    /malformed guild entry/,
   );
 });
