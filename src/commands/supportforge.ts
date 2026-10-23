@@ -31,6 +31,7 @@ import { executeTicketCommand } from '../interactions/ticketCommandTools';
 import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
 import { UI_THEMES, getThemeColor } from '../services/uiThemeService';
 import { buildSystemDiagnosticsEmbed, runSystemDiagnostics } from '../services/systemDiagnosticsService';
+import { getTicketRecoveryPreview } from '../services/ticketArchiveService';
 import {
   createConfigurationSnapshot,
   reviewConfigurationSnapshot,
@@ -1612,6 +1613,16 @@ export const data =
         )
         .addSubcommand((subcommand) =>
           subcommand
+            .setName('recovery-preview')
+            .setDescription('Preview archived ticket data and recovery limitations without changing anything')
+            .addStringOption((option) => option.setName('ticket-id').setDescription('Durable ticket ID from the recovery record').setRequired(true).setMaxLength(36))
+            .addStringOption((option) => option.setName('source').setDescription('Which deletion path should be inspected').setRequired(true).addChoices(
+              { name: 'Native Discord deletion', value: 'discord_native' },
+              { name: 'Ticket Delete button', value: 'ticket_button' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
             .setName('snapshot')
             .setDescription('Save a versioned checkpoint of this server configuration')
             .addStringOption((option) => option.setName('reason').setDescription('Why this checkpoint is being saved').setMaxLength(180)),
@@ -1852,6 +1863,40 @@ export async function execute(
   try {
     if (group === 'diagnostics') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+      if (subcommand === 'recovery-preview') {
+        const ticketId = interaction.options.getString('ticket-id', true).trim();
+        const sourceValue = interaction.options.getString('source', true);
+        if (sourceValue !== 'discord_native' && sourceValue !== 'ticket_button') {
+          await interaction.editReply('Invalid recovery source. Choose a supported deletion path.');
+          return;
+        }
+        const preview = await getTicketRecoveryPreview(guild.id, ticketId, sourceValue);
+        const config = await getGuildConfig(guild.id);
+        const lines = [
+          '**Read-only recovery preview**',
+          'Source: **' + (sourceValue === 'discord_native' ? 'native Discord deletion' : 'ticket Delete button') + '**',
+          'Eligibility: **' + (preview.eligibleToRestore ? 'eligible' : 'not eligible') + '**',
+          'Channel snapshot: **' + (preview.channelSnapshotAvailable ? 'available' : 'missing; safe defaults will be used') + '**',
+          'Historic message scan: **' + (preview.historicalBackfillComplete ? 'complete' : 'incomplete') + '**',
+          'Archived message records: **' + preview.archivedMessageCount + '** (source-deleted: ' + preview.deletedMessageCount + ')',
+          'Attachments: **' + preview.totalAttachmentCount + '** metadata; **' + preview.restorableAttachmentCount + '** with archived bytes; **' + preview.tooLargeAttachmentCount + '** oversized; **' + preview.metadataOnlyAttachmentCount + '** metadata-only; **' + preview.pendingAttachmentCount + '** pending; **' + preview.failedAttachmentCount + '** failed',
+          'Attachment archive rows: **' + preview.trackedAttachmentCount + ' / ' + preview.totalAttachmentCount + '**; missing rows: **' + preview.attachmentRecordsMissing + '**',
+          'Previously replayed message records: **' + preview.alreadyReplayedMessageCount + '**',
+          ...(preview.latestArchivedAt ? ['Latest archived message: <t:' + Math.floor(Date.parse(preview.latestArchivedAt) / 1000) + ':F>'] : []),
+          ...(preview.warnings.length ? ['', '**Limitations**', ...preview.warnings.map((warning) => '• ' + warning)] : []),
+          '',
+          'Restore creates a replacement channel with a new Discord ID. Replayed content is posted by the bot and labelled with original author/channel/message IDs and timestamp; original users are never impersonated.',
+        ];
+        await interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setColor(getThemeColor(config.theme))
+            .setTitle('🧰 Ticket Recovery Preview')
+            .setDescription(lines.join('\\n').slice(0, 4000))
+            .setFooter({ text: 'Read-only. This command does not restore, delete, or mutate ticket data.' })],
+        });
+        return;
+      }
 
       if (subcommand === 'snapshot') {
         const snapshot = await createConfigurationSnapshot(
