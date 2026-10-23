@@ -1,4 +1,4 @@
-import { EmbedBuilder, type ChatInputCommandInteraction, type TextChannel, type ThreadChannel } from 'discord.js';
+import { EmbedBuilder, MessageFlags, type ChatInputCommandInteraction, type TextChannel, type ThreadChannel } from 'discord.js';
 
 import { getGuildConfig } from '../services/configService';
 import { getPersistedTicket } from '../services/ticketPersistenceService';
@@ -6,7 +6,8 @@ import { logSettingsEvent, logTicketEvent } from '../services/auditLogService';
 import {
   createKnowledgeArticle,
   getKnowledgeArticle,
-  getKnowledgeArticleForShare,
+  getKnowledgeArticle,
+  recordKnowledgeArticleShare,
   getKnowledgeBaseMetrics,
   listKnowledgeArticles,
   listKnowledgeArticleRevisions,
@@ -98,7 +99,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
   if (!['knowledge', 'quick-reply', 'related', 'workflow'].includes(group ?? '')) return false;
   const subcommand = interaction.options.getSubcommand();
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   try {
     const { access, config } = await prepare(interaction);
     const guildId = interaction.guildId!;
@@ -238,7 +239,8 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
       if (subcommand === 'share') {
         if (!access.isStaff) throw accessDenied('a configured department staff role');
         const ticket = await requireTicketInCurrentChannel(interaction);
-        const article = await getKnowledgeArticleForShare(guildId, interaction.options.getString('article-id', true).trim(), access, actorId);
+        const article = await getKnowledgeArticle(guildId, interaction.options.getString('article-id', true).trim(), access);
+        if (!article || article.status !== 'published') throw new Error('Published article not found or you do not have permission to share it.');
         await requireTextChannel(interaction).send({
           embeds: [new EmbedBuilder().setTitle('📚 Suggested article: ' + article.title)
             .setDescription((article.summary ? article.summary + '\\n\\n' : '') +
@@ -248,6 +250,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
             .setFooter({ text: 'Knowledge Base article ' + article.id + ' • revision ' + article.revision })],
           allowedMentions: { parse: [] },
         });
+        await recordKnowledgeArticleShare(guildId, article.id, actorId);
         if (config.supportCategoryId) {
           await logTicketEvent(interaction.guild!, config.supportCategoryId, {
             ticketNumber: ticket.ticketNumber ?? ticket.id,
