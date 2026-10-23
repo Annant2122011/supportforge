@@ -32,6 +32,7 @@ import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
 import { UI_THEMES, getThemeColor } from '../services/uiThemeService';
 import { buildSystemDiagnosticsEmbed, runSystemDiagnostics } from '../services/systemDiagnosticsService';
 import { getTicketRecoveryPreview } from '../services/ticketArchiveService';
+import { handleStage4SlashCommand } from '../interactions/stage4SlashCommands';
 import {
   createKnowledgeArticle,
   getKnowledgeArticle,
@@ -1010,12 +1011,12 @@ export const data =
         .setName('related')
         .setDescription('Link related tickets in this server')
         .addSubcommand((subcommand) =>
-          subcommand.setName('link').setDescription('Link the current ticket to another ticket (admin only)')
+          subcommand.setName('link').setDescription('Link the current ticket to another ticket (configured staff only)')
             .addStringOption((option) => option.setName('other-ticket-id').setDescription('Durable ticket ID of the related ticket').setRequired(true).setMaxLength(36)),
         )
         .addSubcommand((subcommand) => subcommand.setName('list').setDescription('List related tickets for the current ticket'))
         .addSubcommand((subcommand) =>
-          subcommand.setName('unlink').setDescription('Remove the relationship to another ticket (admin only)')
+          subcommand.setName('unlink').setDescription('Remove the relationship to another ticket (configured staff only)')
             .addStringOption((option) => option.setName('other-ticket-id').setDescription('Durable ticket ID of the related ticket').setRequired(true).setMaxLength(36))
             .addBooleanOption((option) => option.setName('confirm').setDescription('Must be true to unlink').setRequired(true)),
         ),
@@ -2140,7 +2141,6 @@ export async function execute(
     group === 'panel' ||
     group === 'diagnostics' ||
     group === 'workflow' ||
-    group === 'related' ||
     (group === 'quick-reply' && ['save', 'delete'].includes(subcommand)) ||
     (group === 'knowledge' && ['create', 'update', 'publish', 'archive', 'revisions', 'restore-revision', 'synonyms-set', 'synonyms-delete', 'metrics'].includes(subcommand)) ||
     (group === 'feedback' && subcommand === 'summary')
@@ -2157,6 +2157,8 @@ export async function execute(
   }
 
   try {
+    if (await handleStage4SlashCommand(interaction)) return;
+
     if (group === 'feedback') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
