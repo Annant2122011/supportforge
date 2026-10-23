@@ -35,6 +35,7 @@ import { getTicketRecoveryPreview } from '../services/ticketArchiveService';
 import {
   createKnowledgeArticle,
   getKnowledgeArticle,
+  getKnowledgeArticleForShare,
   getKnowledgeBaseMetrics,
   listKnowledgeArticles,
   listKnowledgeArticleRevisions,
@@ -115,7 +116,7 @@ import {
   ensureAllDepartmentCategories,
 } from '../services/departmentCategoryService';
 
-import { ensureAuditDeveloperInfrastructure, getOrCreateAuditChannel, logSettingsEvent, logSystemEvent, handleAuditSlashCommand } from '../services/auditLogService';
+import { ensureAuditDeveloperInfrastructure, getOrCreateAuditChannel, logSettingsEvent, logSystemEvent, logTicketEvent, handleAuditSlashCommand } from '../services/auditLogService';
 import { performFactoryReset } from '../services/factoryResetService';
 import { recoverMissingTicketRecords } from '../services/ticketRecoveryService';
 import { addUseCasePreset } from '../services/useCasePresetService';
@@ -907,7 +908,7 @@ export const data =
             .addStringOption((option) => option.setName('visibility').setDescription('Who can see a published article').setRequired(false).addChoices({name:'Public',value:'public'},{name:'Staff only',value:'staff'}))
             .addStringOption((option) => option.setName('role-ids').setDescription('Optional comma-separated allowed Discord role IDs').setRequired(false).setMaxLength(420)),
         )
-        .addSubcommand((subcommand) => subcommand.setName('list').setDescription('List articles you are allowed to read')),
+        .addSubcommand((subcommand) => subcommand.setName('list').setDescription('List articles you are allowed to read'))
         .addSubcommand((subcommand) =>
           subcommand.setName('view').setDescription('View a published article or an admin-visible draft')
             .addStringOption((option) => option.setName('article-id').setDescription('Article ID from the list or search').setRequired(true).setMaxLength(36))
