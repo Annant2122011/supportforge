@@ -19,7 +19,7 @@ const hiIN: Partial<Record<TranslationKey, string>> = {
   'ticket.status.archived': 'संग्रहीत',
   'ticket.status.reopened': 'फिर से खोला गया',
   'ticket.status.changed': 'टिकट की स्थिति बदलकर {status} कर दी गई है।',
-  'ticket.status.announcement': '{actor} ने टिकट की स्थिति बदलकर {status} कर दी है।',
+  'ticket.status.announcement': '{actor} ने टिकट #{ticketNumber} की स्थिति बदलकर {status} कर दी है।',
   'ticket.status.syncWarning': 'टिकट की स्थिति डेटाबेस में {status} कर दी गई है, लेकिन Discord इसे तुरंत लागू नहीं कर पाया: {details}। सुरक्षित टिकट स्थिति बरकरार है।',
   'ticket.status.commandSuccess': 'टिकट #{ticketNumber} अब {status} है।',
   'ticket.created.title': 'टिकट #{ticketNumber} बनाया गया',
