@@ -1,6 +1,6 @@
 # Stage H: Translation and Localization Architecture
 
-**Status:** Part 1 implementation in progress  
+**Status:** H1 translation core implemented on `main`; H2 language controls and initial surface integration in progress  
 **Baseline:** Stages A–G integrated into main at e1988a1a0cc5efc698a870215ba7c902c7ddeeba  
 **Persistence:** Existing Neon/PostgreSQL-backed advanced-settings JSON document; no SQL migration  
 **Compatibility:** Existing /supportforge command root, IDs, event names, internal symbols and legacy persisted documents remain unchanged.
@@ -24,7 +24,7 @@ The canonical source language is English (United States). Part 1 provides the tr
 7. Add regression tests for key typing/catalog completeness, locale fallback, partial dictionary fallback, safe interpolation, date/number formatting, and settings normalization.
 8. Keep the rollout opt-in: existing handlers remain in English until individually wired or H2 migrates the user-facing surfaces.
 
-### H2 — Locale controls and end-to-end coverage (future increment)
+### H2 — Locale controls and end-to-end coverage (active increment)
 
 1. Add Settings-dashboard and slash-command locale controls with identical capability, authorization, validation, audit and fallback behavior.
 2. Localize high-traffic user surfaces incrementally: ticket intake/created, ticket lifecycle buttons and outcomes, common validation errors, forms, support-hours notices, settings dashboard, panel previews, and selected reports.
@@ -63,12 +63,12 @@ The guild setting is a simple supported-locale tag and defaults to en-US. Existi
 ## Acceptance checklist
 
 ### H1
-- [ ] Build, unit tests and PostgreSQL verification pass in CI.
-- [ ] Unknown/legacy locale values render English and do not stop startup.
-- [ ] Partial catalogs never return missing text when an English key exists.
-- [ ] Parameter values are substituted literally and only once.
-- [ ] Date/number output uses the requested supported locale.
-- [ ] New locale preference is defaulted and persisted through the existing JSON document without SQL changes.
+- [x] Build, unit tests and PostgreSQL verification pass in CI before the H1 merge.
+- [x] Unknown/legacy locale values render English and do not stop startup.
+- [x] Partial catalogs never return missing text when an English key exists.
+- [x] Parameter values are substituted literally and only once.
+- [x] Date/number output uses the requested supported locale.
+- [x] New locale preference is defaulted and persisted through the existing JSON document without SQL changes.
 
 ### H2
 - [ ] Every locale can be selected through both buttons and slash commands.
