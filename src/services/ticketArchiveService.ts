@@ -616,12 +616,20 @@ export async function getTicketRecoveryPreview(
 ): Promise<RecoveryPreviewSummary> {
   let ticket = await getPersistedTicketById(ticketIdOrChannelId);
   if (!ticket) ticket = await getPersistedTicket(ticketIdOrChannelId);
+  const pool = getPostgresPool();
+  if (!ticket) {
+    const archivedChannel = await pool.query<QueryResultRow & { ticket_id: string }>(
+      'SELECT ticket_id FROM ticket_channel_archive WHERE guild_id=$1 AND original_channel_id=$2 LIMIT 1',
+      [guildId, ticketIdOrChannelId],
+    );
+    if (archivedChannel.rows[0]) {
+      ticket = await getPersistedTicketById(archivedChannel.rows[0].ticket_id);
+    }
+  }
   if (!ticket || ticket.guildId !== guildId) {
     throw new Error('Ticket recovery record was not found in this server.');
   }
   const ticketId = ticket.id;
-
-  const pool = getPostgresPool();
   const eventResult = await pool.query<QueryResultRow & {
     status: string;
     accidental_answer: 'yes' | 'no' | null;
