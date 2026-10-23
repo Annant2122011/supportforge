@@ -1583,12 +1583,14 @@ export const data =
         .addSubcommand((subcommand) =>
           subcommand
             .setName('health')
-            .setDescription('Check gateway, Neon connectivity, outbox and required Discord resources'),
+            .setDescription('Check gateway, Neon connectivity, outbox and required Discord resources')
+            .addIntegerOption((option) => option.setName('page').setDescription('Diagnostic results page (10 checks per page)').setMinValue(1).setMaxValue(999)),
         )
         .addSubcommand((subcommand) =>
           subcommand
             .setName('setup-doctor')
-            .setDescription('Run detailed configuration and permission checks without applying changes'),
+            .setDescription('Run detailed configuration and permission checks without applying changes')
+            .addIntegerOption((option) => option.setName('page').setDescription('Diagnostic results page (10 checks per page)').setMinValue(1).setMaxValue(999)),
         )
         .addSubcommand((subcommand) =>
           subcommand
@@ -1956,10 +1958,11 @@ export async function execute(
       }
 
       const mode = subcommand === 'setup-doctor' ? 'setup-doctor' : 'health';
+      const requestedPage = interaction.options.getInteger('page') ?? 1;
       const report = await runSystemDiagnostics(guild, mode);
       const diagnosticConfig = await getGuildConfig(guild.id).catch(() => null);
       await interaction.editReply({
-        embeds: [buildSystemDiagnosticsEmbed(report, getThemeColor(diagnosticConfig?.theme ?? 'midnight'))],
+        embeds: [buildSystemDiagnosticsEmbed(report, getThemeColor(diagnosticConfig?.theme ?? 'midnight'), requestedPage)],
       });
       return;
     }
