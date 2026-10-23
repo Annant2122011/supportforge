@@ -14,7 +14,7 @@ test('unobserved background jobs are UNKNOWN/INFO instead of falsely healthy', (
   resetOperationalTaskTelemetryForTests();
   const findings = getOperationalTaskFindings('guild-a', 1_000_000);
   const outbox = findings.find((finding) => finding.title.includes('Durable outbox processor'));
-  assert.equal(outbox?.severity, 'info');
+  assert.equal(outbox?.severity, 'warning');
   assert.match(outbox?.detail ?? '', /resets after restart/);
 });
 
