@@ -281,7 +281,7 @@ export async function recordCsatResponse(
   const safeComment = comment.trim();
   if (safeComment.length > 500) throw new Error('Feedback comments must be 500 characters or fewer.');
   let ticket = await getPersistedTicketById(ticketId);
-  if (!ticket) ticket = await (await import('./ticketPersistenceService')).getPersistedTicket(ticketId);
+  if (!ticket) ticket = await getPersistedTicket(ticketId);
   if (!ticket || ticket.guildId !== guildId || ticket.deletedAt) {
     throw new Error('Ticket was not found in this server.');
   }
