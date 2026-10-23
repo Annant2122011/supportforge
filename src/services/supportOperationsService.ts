@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import type { Client } from 'discord.js';
 import type { QueryResultRow } from 'pg';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
+import { logTicketEvent } from './auditLogService';
+import { getGuildConfig } from './configService';
+import { runTrackedOperationalTask } from './operationalTaskTelemetry';
 import { evaluateSlaTarget, isValidSlaScope, type SlaLifecycleEvent, type SlaTargetResult } from '../core/domain/supportSla';
 import { getPersistedTicket, getPersistedTicketById } from './ticketPersistenceService';
 
@@ -35,6 +39,7 @@ export interface SupportSlaPolicyInput {
 export interface SupportSlaEvaluation {
   ticketId: string;
   channelId: string;
+  ticketNumber: string | null;
   status: string;
   policy: SupportSlaPolicy | null;
   firstResponseAt: string | null;
@@ -185,6 +190,7 @@ export async function evaluateTicketSla(
     return {
       ticketId: ticket.id,
       channelId: ticket.channelId,
+      ticketNumber: ticket.ticketNumber,
       status: ticket.status,
       policy: null,
       firstResponseAt: null,
@@ -331,6 +337,107 @@ export async function getCsatSummary(guildId: string, from: string, to: string):
     neutralCount: Number(row?.neutral_count ?? 0),
     negativeCount: Number(row?.negative_count ?? 0),
   };
+}
+
+
+let slaScheduler: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Persist one alert per policy version, lifecycle cycle, target and severity.
+ * This prevents alert spam after process restarts or when multiple workers race.
+ */
+async function persistSlaAlert(
+  guildId: string,
+  ticket: SupportSlaEvaluation,
+  targetType: 'first_response' | 'resolution',
+  result: SlaTargetResult,
+): Promise<boolean> {
+  if (!ticket.policy || (result.progress !== 'warning' && result.progress !== 'breached')) return false;
+  const policy = ticket.policy;
+  const cycleStartedAt = result.startedAt;
+  const detail =
+    (targetType === 'first_response' ? 'First-response' : 'Resolution') + ' SLA ' + result.progress +
+    ' for ticket ' + (ticket.ticketNumber ?? ticket.ticketId) + '; elapsed=' + result.elapsedMinutes +
+    'm; target=' + result.targetMinutes + 'm; paused=' + result.pausedMinutes + 'm; policy=' + policy.id +
+    '; policyVersion=' + policy.version + '.';
+  const inserted = await getPostgresPool().query<QueryResultRow & { id: string }>(
+    'INSERT INTO support_sla_alerts ' +
+      '(id,guild_id,ticket_id,policy_id,target_type,progress,policy_version,cycle_started_at,observed_at,detail) ' +
+      'VALUES ($1,$2,$3,$4,$5,$6,$7,$8::timestamptz,NOW(),$9) ' +
+      'ON CONFLICT (guild_id,ticket_id,policy_id,target_type,progress,policy_version,cycle_started_at) DO NOTHING ' +
+      'RETURNING id',
+    [randomUUID(), guildId, ticket.ticketId, policy.id, targetType, result.progress, policy.version, cycleStartedAt, detail],
+  );
+  return inserted.rows.length > 0;
+}
+
+/** Evaluate a bounded set of active tickets and publish newly crossed SLA thresholds to the audit stream. */
+export async function sweepSupportSlaAlerts(client: Client): Promise<number> {
+  let alerts = 0;
+  for (const guild of client.guilds.cache.values()) {
+    await runTrackedOperationalTask('ticket-sla-monitor', guild.id, async () => {
+      const active = await getPostgresPool().query<QueryResultRow & { id: string }>(
+        "SELECT id FROM tickets WHERE guild_id=$1 AND deleted_at IS NULL " +
+          "AND status IN ('open','claimed','pending','reopened') ORDER BY created_at ASC LIMIT 250",
+        [guild.id],
+      );
+      const config = await getGuildConfig(guild.id);
+      for (const row of active.rows) {
+        try {
+          const evaluation = await evaluateTicketSla(guild.id, row.id);
+          if (!evaluation.policy || !evaluation.firstResponse || !evaluation.resolution) continue;
+          const candidates: Array<{ type: 'first_response' | 'resolution'; result: SlaTargetResult }> = [
+            { type: 'first_response', result: evaluation.firstResponse },
+            { type: 'resolution', result: evaluation.resolution },
+          ];
+          for (const candidate of candidates) {
+            const inserted = await persistSlaAlert(guild.id, evaluation, candidate.type, candidate.result);
+            if (!inserted) continue;
+            alerts += 1;
+            if (config.supportCategoryId) {
+              await logTicketEvent(guild, config.supportCategoryId, {
+                ticketNumber: evaluation.ticketNumber ?? evaluation.ticketId.slice(0, 8),
+                ticketChannelId: evaluation.channelId,
+                event: 'SUPPORT_SLA_' + candidate.type.toUpperCase() + '_' + candidate.result.progress.toUpperCase(),
+                actorId: 'supportforge-system',
+                actor: 'ResolvX SLA monitor',
+                actorName: 'ResolvX SLA monitor',
+                detail: candidate.type + ' SLA ' + candidate.result.progress + '; elapsed ' +
+                  candidate.result.elapsedMinutes + ' of ' + candidate.result.targetMinutes + ' minutes; policy ' +
+                  evaluation.policy.id + ' v' + evaluation.policy.version + '.',
+                category: 'sla',
+              });
+            }
+          }
+        } catch (error) {
+          console.warn(
+            'ResolvX SLA monitor skipped ticket ' + row.id + ' after a check failure:',
+            error instanceof Error ? error.message : 'unknown error',
+          );
+        }
+      }
+    });
+  }
+  return alerts;
+}
+
+export function startSupportSlaMonitor(client: Client): void {
+  if (slaScheduler) return;
+  let running = false;
+  const tick = async (): Promise<void> => {
+    if (running) return;
+    running = true;
+    try {
+      await sweepSupportSlaAlerts(client);
+    } catch (error) {
+      console.warn('ResolvX SLA monitor will retry:', error instanceof Error ? error.message : 'unknown error');
+    } finally {
+      running = false;
+    }
+  };
+  void tick();
+  slaScheduler = setInterval(() => { void tick(); }, 5 * 60 * 1000);
+  slaScheduler.unref();
 }
 
 export async function getSupportMetrics(
