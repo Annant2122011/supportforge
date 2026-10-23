@@ -7,6 +7,7 @@ import { logTicketEvent } from './auditLogService';
 import { getGuildConfig } from './configService';
 import { runTrackedOperationalTask } from './operationalTaskTelemetry';
 import { evaluateSlaTarget, isValidSlaScope, type SlaLifecycleEvent, type SlaTargetResult } from '../core/domain/supportSla';
+import { normalizeCsatResponse } from '../core/domain/csatPolicy';
 import { getPersistedTicket, getPersistedTicketById } from './ticketPersistenceService';
 
 export type SlaPriority = 'low' | 'normal' | 'high' | 'urgent' | 'critical' | '*';
@@ -281,11 +282,9 @@ export async function recordCsatResponse(
   rating: number,
   comment = '',
 ): Promise<{ id: string; ticketId: string; rating: number; createdAt: string }> {
-  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
-    throw new Error('Rating must be a whole number from 1 to 5.');
-  }
-  const safeComment = comment.trim();
-  if (safeComment.length > 500) throw new Error('Feedback comments must be 500 characters or fewer.');
+  const normalized = normalizeCsatResponse(rating, comment);
+  const normalizedRating = normalized.rating;
+  const safeComment = normalized.comment;
   let ticket = await getPersistedTicketById(ticketId);
   if (!ticket) ticket = await getPersistedTicket(ticketId);
   if (!ticket || ticket.guildId !== guildId || ticket.deletedAt) {
@@ -302,7 +301,7 @@ export async function recordCsatResponse(
     }>(
       'INSERT INTO support_csat_responses (id,guild_id,ticket_id,user_id,rating,comment) VALUES ($1,$2,$3,$4,$5,$6) ' +
         'RETURNING id,ticket_id,rating,created_at',
-      [randomUUID(), guildId, ticket.id, userId, rating, safeComment],
+      [randomUUID(), guildId, ticket.id, userId, normalizedRating, safeComment],
     );
     const row = result.rows[0];
     return { id: row.id, ticketId: row.ticket_id, rating: Number(row.rating), createdAt: toIso(row.created_at) ?? new Date().toISOString() };
