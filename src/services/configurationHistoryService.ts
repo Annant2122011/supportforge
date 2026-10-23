@@ -57,26 +57,46 @@ function normalizeReason(reason: string): string {
   return reason.trim().replace(/\s+/g, ' ').slice(0, 180) || 'Manual configuration checkpoint';
 }
 
-function normalizeHistoryDocument(stored: unknown): ConfigurationHistoryDocument {
+export function normalizeConfigurationHistoryDocument(stored: unknown): ConfigurationHistoryDocument {
   if (stored === undefined || stored === null) return { version: HISTORY_VERSION, guilds: {} };
-  if (!stored || typeof stored !== 'object' || !('guilds' in stored)) {
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored) || !('guilds' in stored)) {
     throw new Error('Configuration history document is malformed. Existing history was not overwritten.');
   }
   const raw = stored as Partial<ConfigurationHistoryDocument>;
+  if (raw.version !== HISTORY_VERSION) {
+    throw new Error('Configuration history version is unsupported. Existing history was not overwritten.');
+  }
   if (!raw.guilds || typeof raw.guilds !== 'object' || Array.isArray(raw.guilds)) {
     throw new Error('Configuration history guild index is malformed. Existing history was not overwritten.');
   }
   const guilds: Record<string, ConfigurationSnapshot[]> = {};
   for (const [guildId, snapshots] of Object.entries(raw.guilds)) {
-    if (Array.isArray(snapshots)) {
-      guilds[guildId] = snapshots.filter((item): item is ConfigurationSnapshot =>
-        Boolean(item && typeof item === 'object' &&
-          typeof item.id === 'string' &&
-          item.guildId === guildId &&
-          item.payload && typeof item.payload === 'object' &&
-          item.payload.guildConfig && item.payload.advancedSettings),
-      ).slice(0, MAX_SNAPSHOTS_PER_GUILD);
+    if (!guildId.trim() || !Array.isArray(snapshots)) {
+      throw new Error('Configuration history contains a malformed guild entry. Existing history was not overwritten.');
     }
+    for (const item of snapshots) {
+      const validSnapshot = Boolean(
+        item && typeof item === 'object' &&
+        typeof item.id === 'string' && item.id.startsWith('cfg_') &&
+        item.guildId === guildId &&
+        typeof item.createdAt === 'string' && Number.isFinite(Date.parse(item.createdAt)) &&
+        typeof item.createdById === 'string' &&
+        typeof item.createdByName === 'string' &&
+        typeof item.reason === 'string' &&
+        Number.isInteger(item.departmentCount) && item.departmentCount >= 0 &&
+        Number.isInteger(item.panelCount) && item.panelCount >= 0 &&
+        Number.isInteger(item.tagCount) && item.tagCount >= 0 &&
+        item.payload && typeof item.payload === 'object' && !Array.isArray(item.payload) &&
+        item.payload.guildConfig && typeof item.payload.guildConfig === 'object' && !Array.isArray(item.payload.guildConfig) &&
+        item.payload.advancedSettings && typeof item.payload.advancedSettings === 'object' && !Array.isArray(item.payload.advancedSettings) &&
+        (item.payload.supportHours === undefined || Array.isArray(item.payload.supportHours)) &&
+        (item.payload.ticketForms === undefined || Array.isArray(item.payload.ticketForms))
+      );
+      if (!validSnapshot) {
+        throw new Error('Configuration history contains a malformed snapshot for guild ' + guildId + '. Existing history was not overwritten.');
+      }
+    }
+    guilds[guildId] = snapshots.slice(0, MAX_SNAPSHOTS_PER_GUILD) as ConfigurationSnapshot[];
   }
   return { version: HISTORY_VERSION, guilds };
 }
@@ -87,7 +107,7 @@ async function readDocument(): Promise<ConfigurationHistoryDocument> {
     'SELECT payload FROM app_documents WHERE document_key = $1',
     [DOCUMENT_KEY],
   );
-  return normalizeHistoryDocument(result.rows[0]?.payload);
+  return normalizeConfigurationHistoryDocument(result.rows[0]?.payload);
 }
 
 /**
@@ -110,7 +130,7 @@ async function mutateDocument<T>(
         'SELECT payload FROM app_documents WHERE document_key = $1 FOR UPDATE',
         [DOCUMENT_KEY],
       );
-      const document = normalizeHistoryDocument(stored.rows[0]?.payload);
+      const document = normalizeConfigurationHistoryDocument(stored.rows[0]?.payload);
       result = await mutate(document);
       await client.query(
         'INSERT INTO app_documents (document_key, payload, updated_at) VALUES ($1, $2::jsonb, NOW()) ' +
