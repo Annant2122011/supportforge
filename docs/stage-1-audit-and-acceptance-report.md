@@ -3,14 +3,14 @@
 **Programme:** ResolveX four-stage product excellence  
 **Stage 1 branch:** `feature/stage-1-localization-acceptance`  
 **Pull request:** [#31, Stage 1 configuration integrity, localization and acceptance](https://github.com/Annant2122011/supportforge/pull/31)  
-**Current status:** Source and automated checks pass. Live Discord acceptance and an isolated Neon restore drill remain blocked pending access to a non-production environment.
+**Current status:** Prior source-changing checks passed; the updated slash-command limit test is being rerun against the cleanup base. Live Discord acceptance and an isolated Neon restore drill remain blocked pending access to a non-production environment.
 
 ## Evidence summary
 
 | Area | Result | Evidence / limit |
 |---|---|---|
-| TypeScript build | **PASS** | [Build run #1192](https://github.com/Annant2122011/supportforge/actions/runs/39957752517) succeeded on the clean Stage 1 branch. |
-| Automated tests | **PASS** | [ResolvX CI run #1951](https://github.com/Annant2122011/supportforge/actions/runs/39957752790): 135 passed, 0 failed, 0 skipped. |
+| TypeScript build | **PASS** | [Build run #1198](https://github.com/Annant2122011/supportforge/actions/runs/39961674679) succeeded on the prior source-changing Stage 1 + H2 head. The current follow-up adds a slash-command option-limit regression test; CI on the updated head is tracked separately. |
+| Automated tests | **PASS** | [ResolvX CI run #1983](https://github.com/Annant2122011/supportforge/actions/runs/39961674673) succeeded on the prior source-changing Stage 1 + H2 head. The current follow-up adds command-registration regression coverage; re-run CI on the final head before closing the source/CI gate. |
 | PostgreSQL verification | **PASS** | Same CI run verified required tables, referential integrity and the active outbox lease state against disposable CI PostgreSQL. This is not a connection to production Neon. |
 | Managed branding migration | **PASS in unit tests** | Exact application-owned defaults are migrated; custom department names, tags, descriptions, panel text, button labels, confirmation copy and custom footers are preserved. |
 | Panel role restrictions | **PASS in unit tests** | Role restrictions are normalized at the editable draft, button, published configuration and published-button layers. Valid Snowflake IDs remain strings, malformed IDs are rejected and duplicates are removed. |
@@ -24,18 +24,18 @@
 1. Removed recursive branding substitutions from the two configuration normalizers. Only exact known managed defaults are migrated; user/server-authored content is left intact.
 2. Corrected persisted Discord role-ID normalization so draft and immutable published-panel access restrictions are treated consistently.
 3. Corrected the Settings retention summary: a disabled timer is shown as no timer within the configured maximum, not “unlimited.”
-4. Added regression tests for managed-default migration, custom-text preservation and the role restrictions embedded in published panel snapshots.
+4. Added regression tests for managed-default migration, custom-text preservation, role restrictions embedded in published panel snapshots, and recursive slash-command option limits / sibling-name uniqueness.
 5. Reconciled the inactivity auto-close registry entry with the existing role/department exemption controls while keeping live acceptance clearly incomplete.
 6. Added the four-stage programme architecture, a detailed non-production acceptance checklist and this evidence report.
 7. Integrated the non-rebranding Stage H2 locale picker, sibling report command group (to stay within Discord command limits), and selected localized ticket lifecycle/form messages. This stays on the supported `/supportforge` command root and does not import QueryFixr branding.
 
 ## Branch / PR reconciliation
 
-- [PR #31 is the clean Stage 1 + Stage H2 review branch](https://github.com/Annant2122011/supportforge/pull/31), based on the current `main` baseline. It replaces the older diverged Stage 1 draft for review.
-- [PR #32 is the H2-aware Stage 2 review branch](https://github.com/Annant2122011/supportforge/pull/32), stacked on this Stage 1 branch. It combines localization with Setup Doctor and configuration rollback.
+- [PR #33](https://github.com/Annant2122011/supportforge/pull/33) is a CI-baseline cleanup for the dangling Stage 2 history test currently present on `main` without its service. [PR #31](https://github.com/Annant2122011/supportforge/pull/31) temporarily targets that cleanup branch so the Stage 1 merge-test tree does not re-import the orphaned test. After #33 is reviewed/merged, retarget #31 to `main` before merging Stage 1. No direct change to `main` was made.
+- [PR #32 is the H2-aware Stage 2 review branch](https://github.com/Annant2122011/supportforge/pull/32), stacked on this Stage 1 branch. It combines localization with Setup Doctor, operational task telemetry and configuration rollback. It carries the full configuration-history service plus its test, so that suite returns with Stage 2 rather than remaining orphaned on the baseline.
 - Older drafts #24–#30 are superseded by the clean current PRs #31 and #32. Their histories remain intact; review the current PRs instead.
 - [PR #23, Stage H Part 2 localization](https://github.com/Annant2122011/supportforge/pull/23) provided the H2 source increment ported into this branch. Its remaining Settings pages, panel previews, selected reports and live locale acceptance remain open in the translation checklist. [PR #22, the QueryFixr rebrand/localization branch](https://github.com/Annant2122011/supportforge/pull/22) remains separate because it changes visible branding and the root command name.
-- No production deployment or database change was performed. The accidental Stage 2 file on `main` was removed with a normal corrective commit; comparing the resulting `main` tree against its prior baseline shows no net source/document changes from this programme on `main`.
+- No production deployment, live database change, direct `main` edit, force-push or history rewrite was performed. PR #33 isolates the baseline test cleanup as a reviewable dependency.
 
 ## Release gate
 
