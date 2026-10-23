@@ -54,7 +54,8 @@ function severityRank(severity: DiagnosticSeverity): number {
   }
 }
 
-export function diagnosticsOverallStatus(findings: readonly DiagnosticFinding[]): 'HEALTHY' | 'DEGRADED' | 'ACTION REQUIRED' {
+export function diagnosticsOverallStatus(findings: readonly DiagnosticFinding[]): 'HEALTHY' | 'DEGRADED' | 'ACTION REQUIRED' | 'UNKNOWN' {
+  if (findings.length === 0) return 'UNKNOWN';
   const maxSeverity = findings.reduce((rank, finding) => Math.max(rank, severityRank(finding.severity)), 0);
   return maxSeverity >= 3 ? 'ACTION REQUIRED' : maxSeverity >= 2 ? 'DEGRADED' : 'HEALTHY';
 }
@@ -781,7 +782,7 @@ export function buildSystemDiagnosticsEmbed(
   themeColor = 0x3b82f6,
 ): EmbedBuilder {
   const status = diagnosticsOverallStatus(report.findings);
-  const color = status === 'ACTION REQUIRED' ? 0xdc2626 : status === 'DEGRADED' ? 0xd97706 : themeColor;
+  const color = status === 'ACTION REQUIRED' ? 0xdc2626 : status === 'DEGRADED' ? 0xd97706 : status === 'UNKNOWN' ? 0x64748b : themeColor;
   const embed = new EmbedBuilder()
     .setColor(color)
     .setTitle(report.mode === 'setup-doctor' ? '🩺 ResolveX Setup Doctor' : '🛡️ ResolveX System Health')
@@ -790,6 +791,7 @@ export function buildSystemDiagnosticsEmbed(
       '\n**Report ID:** \`' + report.reportId + '\`' +
       '\n**Generated:** <t:' + Math.floor(Date.parse(report.generatedAt) / 1000) + ':F>' +
       '\n**Checks:** ' + report.findings.length +
+      (status === 'UNKNOWN' ? '\nNo checks produced results; do not treat this report as healthy.' : '') +
       '\n\nThis report does not execute repairs. A green result is not a substitute for the live acceptance checklist.',
     )
     .setFooter({ text: 'Guild ' + report.guildId + ' • report ' + report.reportId + ' • secrets and connection strings are never shown' });
