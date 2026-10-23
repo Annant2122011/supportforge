@@ -2256,7 +2256,9 @@ export async function handleSettingsInteraction(
                 '**Snapshot:** `' + snapshot.id + '`\n' +
                 '**Departments:** ' + snapshot.departmentCount + '\n' +
                 '**Panels:** ' + snapshot.panelCount + '\n' +
-                '**Tags:** ' + snapshot.tagCount + '\n\n' +
+                '**Tags:** ' + snapshot.tagCount + '\n' +
+                '**Forms:** ' + (snapshot.formCount ?? 0) + '\n' +
+                '**Support-hours policies:** ' + (snapshot.supportHoursPolicyCount ?? 0) + '\n\n' +
                 'A maximum of 10 recent checkpoints is kept per server.',
               )],
             components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -2275,7 +2277,7 @@ export async function handleSettingsInteraction(
           .setDescription(snapshots.length
             ? snapshots.map((snapshot) =>
                 '**`' + snapshot.id + '`** · <t:' + Math.floor(Date.parse(snapshot.createdAt) / 1000) + ':R>\n' +
-                snapshot.reason + '\nDepartments: ' + snapshot.departmentCount + ' · Panels: ' + snapshot.panelCount + ' · Tags: ' + snapshot.tagCount,
+                snapshot.reason + '\nDepartments: ' + snapshot.departmentCount + ' · Panels: ' + snapshot.panelCount + ' · Tags: ' + snapshot.tagCount + ' · Forms: ' + (snapshot.formCount ?? 0) + ' · Hours policies: ' + (snapshot.supportHoursPolicyCount ?? 0),
               ).join('\n\n').slice(0, 4000)
             : 'No snapshots saved yet. Save one before changing important configuration.');
         if (!snapshots.length) {
