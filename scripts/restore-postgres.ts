@@ -33,6 +33,35 @@ function postgresUrl(value: string, variable: string): URL {
   return url;
 }
 
+
+function postgresClientEnvironment(url: URL): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = { ...process.env };
+  const database = decodeURIComponent(url.pathname.replace(/^\\//, ''));
+  if (!database) throw new Error('PostgreSQL connection URL must include a database name.');
+  environment.PGHOST = url.hostname;
+  environment.PGPORT = url.port || '5432';
+  environment.PGDATABASE = database;
+  if (url.username) environment.PGUSER = decodeURIComponent(url.username);
+  if (url.password) environment.PGPASSWORD = decodeURIComponent(url.password);
+  const queryToEnvironment: Record<string, string> = {
+    sslmode: 'PGSSLMODE',
+    sslrootcert: 'PGSSLROOTCERT',
+    sslcert: 'PGSSLCERT',
+    sslkey: 'PGSSLKEY',
+    application_name: 'PGAPPNAME',
+    connect_timeout: 'PGCONNECT_TIMEOUT',
+    target_session_attrs: 'PGTARGETSESSIONATTRS',
+    channel_binding: 'PGCHANNELBINDING',
+  };
+  for (const [queryName, environmentName] of Object.entries(queryToEnvironment)) {
+    const value = url.searchParams.get(queryName);
+    if (value) environment[environmentName] = value;
+  }
+  if (!environment.PGSSLMODE) environment.PGSSLMODE = 'verify-full';
+  if (environment.PGSSLMODE === 'require') environment.PGSSLMODE = 'verify-full';
+  return environment;
+}
+
 async function sha256File(path: string): Promise<string> {
   const hash = createHash('sha256');
   await new Promise<void>((resolvePromise, reject) => {
@@ -114,8 +143,8 @@ async function main(): Promise<void> {
     process.env.DATABASE_URL_UNPOOLED = target.toString();
     await runTool(
       'pg_restore',
-      ['--no-owner', '--no-acl', '--exit-on-error', '--single-transaction', '--dbname', target.toString(), backupPath],
-      { ...process.env },
+      ['--no-owner', '--no-acl', '--exit-on-error', '--single-transaction', '--dbname', targetDatabaseName, backupPath],
+      postgresClientEnvironment(target),
     );
     await migrateAndVerifyPostgres();
 
