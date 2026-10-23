@@ -3,6 +3,7 @@ import { getGuildConfig } from './configService';
 import { refreshSettingsChannel } from './settingsChannelService';
 import { refreshTicketPanelControls } from './ticketPanelService';
 import { getOrCreateAuditChannel } from './auditLogService';
+import { runTrackedOperationalTask } from './operationalTaskTelemetry';
 
 const UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 const GITHUB_REPOSITORY = 'Annant2122011/supportforge';
@@ -110,7 +111,7 @@ export async function refreshAllSupportForgeUi(client: Client): Promise<void> {
 
 async function checkForUpdate(client: Client): Promise<void> {
   const latestSha = await fetchLatestSha();
-  if (!latestSha) return;
+  if (!latestSha) throw new Error('GitHub commit lookup was unavailable.');
 
   if (!baselineSha) {
     baselineSha = latestSha;
@@ -144,10 +145,12 @@ export function startSupportForgeUpdateMonitor(client: Client): void {
    * This monitor is responsible for detecting commits and refreshing UI after
    * an update event, while the separate server watchdog handles deployments.
    */
-  void checkForUpdate(client);
+  void runTrackedOperationalTask('github-update-monitor', null, () => checkForUpdate(client))
+    .catch((error) => console.warn('⚠️ ResolvX update monitor task failed:', error instanceof Error ? error.name : 'unknown error'));
 
   scheduler = setInterval(() => {
-    void checkForUpdate(client);
+    void runTrackedOperationalTask('github-update-monitor', null, () => checkForUpdate(client))
+      .catch((error) => console.warn('⚠️ ResolvX update monitor task failed:', error instanceof Error ? error.name : 'unknown error'));
   }, UPDATE_CHECK_INTERVAL_MS);
 
   scheduler.unref();
