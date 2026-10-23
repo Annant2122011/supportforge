@@ -21,6 +21,7 @@ The four-stage improvement programme covers Stage A–H stabilization, operation
 
 - [Four-stage programme architecture](docs/four-stage-excellence-programme.md)
 - [Stage 1 stabilization and acceptance checklist](docs/stage-1-acceptance-checklist.md)
+- [Stage 1 source audit and acceptance report](docs/stage-1-audit-and-acceptance-report.md)
 
 These docs describe planned delivery and acceptance criteria, not a claim that every listed feature is already implemented or production-accepted.
 
