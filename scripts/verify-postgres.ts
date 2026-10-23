@@ -53,6 +53,56 @@ async function main(): Promise<void> {
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM related_ticket_links'),
   ]);
 
+  // Exercise the database-maintained full-text index inside a transaction so
+  // CI verifies inserts and edits without leaving synthetic article data behind.
+  const verificationClient = await pool.connect();
+  try {
+    await verificationClient.query('BEGIN');
+    await verificationClient.query(
+      'INSERT INTO knowledge_base_articles ' +
+        '(id,guild_id,slug,title,summary,body,category,tags,status,visibility,allowed_role_ids,created_by,updated_by) ' +
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'published','public',$9,$10,$10)",
+      [
+        'resolvx-postgres-verification-article',
+        'resolvx-postgres-verification',
+        'knowledge-search-verification',
+        'Knowledge Search Verification',
+        'Verifying full-text search',
+        'This synthetic article verifies searchable PostgreSQL content.',
+        'Verification',
+        ['knowledge', 'verification'],
+        [],
+        'resolvx-verification',
+      ],
+    );
+    const insertedSearch = await verificationClient.query<{ matched: boolean }>(
+      "SELECT search_vector @@ plainto_tsquery('english','knowledge verification') AS matched " +
+        'FROM knowledge_base_articles WHERE id=$1',
+      ['resolvx-postgres-verification-article'],
+    );
+    if (!insertedSearch.rows[0]?.matched) {
+      throw new Error('Knowledge Base full-text trigger did not index a newly inserted article.');
+    }
+    await verificationClient.query(
+      "UPDATE knowledge_base_articles SET title=$2,body=$3 WHERE id=$1",
+      ['resolvx-postgres-verification-article', 'Updated Refund Verification', 'Updated searchable body'],
+    );
+    const updatedSearch = await verificationClient.query<{ matched: boolean }>(
+      "SELECT search_vector @@ plainto_tsquery('english','refund verification') AS matched " +
+        'FROM knowledge_base_articles WHERE id=$1',
+      ['resolvx-postgres-verification-article'],
+    );
+    if (!updatedSearch.rows[0]?.matched) {
+      throw new Error('Knowledge Base full-text trigger did not refresh the index after an article edit.');
+    }
+    await verificationClient.query('ROLLBACK');
+  } catch (error) {
+    await verificationClient.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    verificationClient.release();
+  }
+
   const orphanEvents = await pool.query<{ count: string }>(
     'SELECT COUNT(*)::text AS count FROM ticket_events e LEFT JOIN tickets t ON t.id = e.ticket_id WHERE t.id IS NULL',
   );
