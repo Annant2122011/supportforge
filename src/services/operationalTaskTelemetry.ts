@@ -233,7 +233,7 @@ export function getOperationalTaskFindings(
     if (definition.scope === 'guild' && !guildId) continue;
     const state = states.get(stateKey(task, guildId));
     const remedy = definition.remedy;
-    if (!state || state.lastOutcome === null) {
+    if (!state || (state.lastOutcome === null && !state.running)) {
       findings.push({
         area: 'Operational tasks',
         severity: 'info',
