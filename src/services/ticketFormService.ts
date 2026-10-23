@@ -7,6 +7,7 @@ import { initializePersistence } from '../core/persistence/provider';
 import { getGuildConfig } from './configService';
 import { getPersistedTicket, registerTicket } from './ticketPersistenceService';
 import type { TicketPriority } from './advancedSettingsService';
+import { runTrackedOperationalTask } from './operationalTaskTelemetry';
 
 export const MAX_TICKET_FORM_FIELDS = 25;
 export const MAX_TICKET_FORM_FIELDS_PER_STEP = 3;
@@ -873,7 +874,7 @@ export function startTicketFormCacheRefresh(intervalMs = 30_000): () => void {
   const tick = (): void => {
     if (cacheRefreshRunning) return;
     cacheRefreshRunning = true;
-    void refreshActiveTicketFormCache()
+    void runTrackedOperationalTask('ticket-form-cache-refresh', null, () => refreshActiveTicketFormCache())
       .catch((error) => console.warn('Active ticket form cache refresh failed; retaining the last known-good cache:', error instanceof Error ? error.message : 'database error'))
       .finally(() => { cacheRefreshRunning = false; });
   };
@@ -1760,7 +1761,7 @@ export function startTicketFormSubmissionRecovery(client: Client, intervalMs = 6
   const tick = (): void => {
     if (running) return;
     running = true;
-    void recoverPendingTicketFormSubmissions(client)
+    void runTrackedOperationalTask('ticket-form-submission-recovery', null, () => recoverPendingTicketFormSubmissions(client))
       .then((count) => {
         if (count > 0) console.info('Recovered ' + count + ' pending ResolvX form submission(s).');
       })
