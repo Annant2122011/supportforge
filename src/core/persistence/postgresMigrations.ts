@@ -480,6 +480,10 @@ const MIGRATIONS: readonly PostgresMigration[] = [
     },
   },
 ];
+
+/** Latest migration identifier required by this application version. */
+export const CURRENT_POSTGRES_MIGRATION_ID = MIGRATIONS[MIGRATIONS.length - 1]!.id;
+
 export async function runPostgresMigrations(
   db: TransactionExecutor,
 ): Promise<void> {
