@@ -3699,7 +3699,7 @@ async function validateTicketFormPrincipals(
 async function handleTicketFormWizardContinue(interaction: ButtonInteraction): Promise<void> {
   const route = parseTicketFormModalCustomId(interaction.customId);
   if (!interaction.guild || !route) {
-    await replyError(interaction, 'This form continuation is invalid. Reopen the support panel and start again.');
+    await replyError(interaction, translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'forms.continuation.invalid'));
     return;
   }
   if (route.expiresAt <= Date.now()) {
@@ -3770,7 +3770,7 @@ async function handleTicketFormWizardModal(interaction: ModalSubmitInteraction):
     return;
   }
   if (route.expiresAt <= Date.now()) {
-    await replyError(interaction, '⌛ This form expired. Reopen the support panel and submit the current form.');
+    await replyError(interaction, '⌛ ' + translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'forms.expired'));
     return;
   }
 
@@ -3876,7 +3876,7 @@ async function handleTicketFormWizardModal(interaction: ModalSubmitInteraction):
         panelId: route.panelId,
       });
       await interaction.editReply({
-        content: '✅ Your answers are saved. Continue to the next section when ready.',
+        content: '✅ ' + translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'forms.answers.saved'),
         components: [
           new ActionRowBuilder<ButtonBuilder>().addComponents(
             new ButtonBuilder()
