@@ -422,6 +422,148 @@ export async function runSystemDiagnostics(
     }
   }));
 
+
+  let ticketForms: TicketFormVersion[] = [];
+  let formsReadable = true;
+  try {
+    ticketForms = await listTicketForms(guild.id);
+  } catch {
+    formsReadable = false;
+    add({
+      area: 'Ticket forms',
+      severity: 'warning',
+      title: 'Form routing could not be inspected',
+      detail: 'The saved form catalog could not be read. Panel-to-form mappings are unknown, not healthy.',
+      remedy: 'Verify the PostgreSQL schema and form catalog before publishing or retargeting form-based panel buttons.',
+    });
+  }
+  const ticketFormsById = new Map(ticketForms.map((form) => [form.id, form]));
+  const customPanels = Object.values(config.customPanels ?? {});
+  if (customPanels.length > 25) {
+    add({
+      area: 'Custom panels',
+      severity: 'info',
+      title: 'Panel checks are bounded',
+      detail: 'The server has ' + customPanels.length + ' saved custom panels. This run checks the first 25 to avoid flooding the Discord API.',
+      remedy: 'Run diagnostics again after reviewing the first page, or inspect remaining panel targets individually in Settings → Ticket Panels.',
+    });
+  }
+  if (!customPanels.length) {
+    add({
+      area: 'Custom panels',
+      severity: 'info',
+      title: 'No custom panels are configured',
+      detail: 'The default support panel remains the configured ticket entry point.',
+    });
+  }
+
+  const inspectPanelButtons = (
+    buttons: readonly {
+      targetType: 'department' | 'form';
+      departmentId: string;
+      formId: string | null;
+      formVersion: number | null;
+      tagId: string | null;
+      allowedRoleIds: string[];
+      label: string;
+    }[],
+    panelName: string,
+    snapshotLabel: string,
+    issues: { errors: string[]; warnings: string[] },
+  ): void => {
+    if (buttons.length === 0) {
+      issues.warnings.push(snapshotLabel + ' has no ticket buttons');
+      return;
+    }
+    if (buttons.length > 25) issues.errors.push(snapshotLabel + ' exceeds Discord’s 25-button limit');
+    for (const button of buttons.slice(0, 25)) {
+      for (const roleId of button.allowedRoleIds ?? []) {
+        if (!guild.roles.cache.has(roleId)) {
+          issues.warnings.push('button “' + button.label + '” references missing role ' + roleId);
+        }
+      }
+      if (button.targetType === 'department') {
+        const department = config.departments[button.departmentId];
+        if (!department) {
+          issues.errors.push('button “' + button.label + '” targets missing department ' + button.departmentId);
+          continue;
+        }
+        if (button.tagId && !department.tags?.[button.tagId]) {
+          issues.errors.push('button “' + button.label + '” targets missing tag ' + button.tagId);
+        }
+      } else if (button.targetType === 'form') {
+        if (!formsReadable) {
+          issues.warnings.push('button “' + button.label + '” form mapping could not be verified');
+          continue;
+        }
+        const form = button.formId ? ticketFormsById.get(button.formId) : undefined;
+        if (!form) {
+          issues.errors.push('button “' + button.label + '” targets missing form ' + (button.formId ?? '(no ID)'));
+        } else {
+          if (!form.active) issues.warnings.push('button “' + button.label + '” targets an inactive form ' + form.id);
+          if (button.formVersion !== form.currentVersion) {
+            issues.warnings.push('button “' + button.label + '” pins form version ' + button.formVersion + ' but current version is ' + form.currentVersion + '; retarget and republish it');
+          }
+          if (form.departmentId !== button.departmentId) {
+            issues.errors.push('button “' + button.label + '” form department no longer matches its saved target');
+          }
+          if (button.tagId && form.tagId && button.tagId !== form.tagId) {
+            issues.errors.push('button “' + button.label + '” tag no longer matches the pinned form route');
+          }
+        }
+      } else {
+        issues.errors.push('button “' + button.label + '” has an unsupported target type');
+      }
+    }
+  };
+
+  for (const panel of customPanels.slice(0, 25)) {
+    const issues = { errors: [] as string[], warnings: [] as string[] };
+    if (panel.allowedRoleIds?.length) {
+      for (const roleId of panel.allowedRoleIds) {
+        if (!guild.roles.cache.has(roleId)) {
+          issues.warnings.push('panel access references missing role ' + roleId);
+        }
+      }
+    }
+    inspectPanelButtons(panel.buttons ?? [], panel.name, 'Draft', issues);
+    if (panel.publishedMessageId) {
+      if (!panel.publishedConfig) {
+        issues.warnings.push('published message has no immutable published snapshot; republish from Ticket Panels');
+      } else {
+        inspectPanelButtons(panel.publishedConfig.buttons ?? [], panel.name, 'Published snapshot', issues);
+        for (const roleId of panel.publishedConfig.allowedRoleIds ?? []) {
+          if (!guild.roles.cache.has(roleId)) issues.warnings.push('published access references missing role ' + roleId);
+        }
+      }
+      if (!panel.publishedChannelId) {
+        issues.errors.push('published message ID exists but no published channel ID is saved');
+      } else {
+        const publishedChannel = await fetchGuildChannel(guild, panel.publishedChannelId);
+        if (!publishedChannel || publishedChannel.type !== ChannelType.GuildText) {
+          issues.warnings.push('published channel is missing, inaccessible or is not a standard text channel');
+        } else {
+          const missingPerms = checkBotPermissions(guild, publishedChannel, CHANNEL_MESSAGE_PERMISSIONS);
+          if (missingPerms.length) issues.warnings.push('published channel is missing bot permission(s): ' + missingPerms.join(', '));
+          const message = await publishedChannel.messages.fetch(panel.publishedMessageId).catch(() => null);
+          if (!message) issues.warnings.push('published message cannot be fetched; verify it was not deleted');
+        }
+      }
+    } else if (panel.publishedChannelId) {
+      issues.warnings.push('published channel ID exists but no published message ID is saved');
+    }
+
+    const severity: DiagnosticSeverity = issues.errors.length ? 'error' : issues.warnings.length ? 'warning' : 'ok';
+    add({
+      area: 'Custom panels',
+      severity,
+      title: panel.name + (severity === 'ok' ? ' looks consistent' : ' needs review'),
+      detail: issues.errors.concat(issues.warnings).slice(0, 8).join('; ') ||
+        (panel.publishedMessageId ? 'Published message, role access, routing targets and current form version were checked.' : 'Draft targets and access roles were checked.'),
+      remedy: severity === 'ok' ? undefined : 'Open Settings → Ticket Panels, correct the listed targets or roles, preview the draft, then republish only after review.',
+    });
+  }
+
   const departments = Object.values(config.departments);
   if (!departments.length) {
     add({
