@@ -10,6 +10,8 @@ const hiIN: Partial<Record<TranslationKey, string>> = {
   'settings.locale.title': 'सर्वर की भाषा',
   'settings.locale.current': 'वर्तमान भाषा: {locale}',
   'settings.locale.saved': 'सर्वर की भाषा {locale} कर दी गई है।',
+  'settings.locale.prompt': 'इस सर्वर में समर्थित बॉट संदेशों की डिफ़ॉल्ट भाषा चुनें। उपयोगकर्ता की सामग्री और कमांड के स्थायी नामों का अनुवाद नहीं होगा।',
+  'settings.locale.unknown': 'यह भाषा समर्थित नहीं है। उपलब्ध विकल्पों में से भाषा चुनें।',
   'ticket.status.open': 'खुला',
   'ticket.status.claimed': 'स्टाफ़ को सौंपा गया',
   'ticket.status.pending': 'लंबित',
