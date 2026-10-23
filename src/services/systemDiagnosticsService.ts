@@ -681,6 +681,7 @@ export function buildSystemDiagnosticsEmbed(
     .setTitle(report.mode === 'setup-doctor' ? '🩺 ResolveX Setup Doctor' : '🛡️ ResolveX System Health')
     .setDescription(
       '**Overall status:** ' + status +
+      '\n**Report ID:** \`' + report.reportId + '\`' +
       '\n**Generated:** <t:' + Math.floor(Date.parse(report.generatedAt) / 1000) + ':F>' +
       '\n**Checks:** ' + report.findings.length +
       '\n\nThis report does not execute repairs. A green result is not a substitute for the live acceptance checklist.',
@@ -696,7 +697,7 @@ export function buildSystemDiagnosticsEmbed(
   for (const [area, group] of grouped) {
     const lines = group.map((finding) => {
       const icon = finding.severity === 'error' ? '🔴' : finding.severity === 'warning' ? '🟠' : finding.severity === 'info' ? 'ℹ️' : '🟢';
-      return icon + ' **' + finding.title + '**\n' + finding.detail +
+      return icon + ' **' + finding.title + '**' + (finding.referenceId ? ' \`' + finding.referenceId + '\`' : '') + '\n' + finding.detail +
         (finding.remedy ? '\n*Next step:* ' + finding.remedy : '');
     });
     embed.addFields({ name: area.slice(0, 256), value: (lines.join('\n\n').slice(0, 1024) || 'No details.'), inline: false });
