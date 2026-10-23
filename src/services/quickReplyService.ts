@@ -78,7 +78,7 @@ function fromRow(row: QuickReplyRow): QuickReply {
     createdAt:iso(row.created_at),updatedAt:iso(row.updated_at),
   };
 }
-function validateInput(input: QuickReplyInput): QuickReplyInput {
+export function validateQuickReplyInput(input: QuickReplyInput): QuickReplyInput {
   const name = input.name.trim().replace(/\s+/g,' ');
   const body = input.body.trim();
   const category = (input.category ?? 'General').trim().replace(/\s+/g,' ') || 'General';
@@ -121,7 +121,7 @@ export async function getQuickReply(guildId: string, idOrName: string, access: Q
 }
 
 export async function saveQuickReply(guildId: string, actorId: string, input: QuickReplyInput): Promise<QuickReply> {
-  const valid=validateInput(input);
+  const valid=validateQuickReplyInput(input);
   const normalizedName=normalizeName(valid.name!);
   const result=await getPostgresPool().query<QuickReplyRow>(
     'INSERT INTO quick_replies (id,guild_id,name,normalized_name,body,category,tags,allowed_role_ids,enabled,version,created_by,updated_by) '+
