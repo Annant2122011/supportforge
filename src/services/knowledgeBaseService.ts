@@ -529,9 +529,10 @@ export async function searchKnowledgeBase(
 export async function recordKnowledgeArticleShare(
   guildId: string,
   articleId: string,
+  access: KnowledgeAccess,
   actorId: string,
 ): Promise<void> {
-  const article = await getKnowledgeArticle(guildId, articleId, { isAdmin: true, isStaff: true, roleIds: [] });
+  const article = await getKnowledgeArticle(guildId, articleId, access);
   if (!article || article.status !== 'published') {
     throw new Error('Published article not found.');
   }
