@@ -130,6 +130,31 @@ const CANONICAL_CUSTOM_PANEL_FOOTER = 'ResolvX • Customer Support';
  * field (including names, descriptions, button labels and confirmation copy)
  * is administrator-authored data and must survive branding changes verbatim.
  */
+/**
+ * Sanitize persisted custom-panel role restrictions at every layer used for
+ * authorization: draft, each button, published snapshot, and published button.
+ * Invalid IDs must never cause valid restrictions to be silently discarded.
+ */
+export function normalizePersistedPanelRoleRestrictions(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const source = value as Record<string, unknown>;
+  const normalized: Record<string, unknown> = {
+    ...source,
+    allowedRoleIds: normalizeDiscordSnowflakeIds(source.allowedRoleIds),
+  };
+  if (Array.isArray(source.buttons)) {
+    normalized.buttons = source.buttons.map((button) => {
+      if (!button || typeof button !== 'object' || Array.isArray(button)) return button;
+      const record = button as Record<string, unknown>;
+      return { ...record, allowedRoleIds: normalizeDiscordSnowflakeIds(record.allowedRoleIds) };
+    });
+  }
+  if (source.publishedConfig && typeof source.publishedConfig === 'object' && !Array.isArray(source.publishedConfig)) {
+    normalized.publishedConfig = normalizePersistedPanelRoleRestrictions(source.publishedConfig);
+  }
+  return normalized;
+}
+
 export function normalizeLegacyManagedPanelFooters(
   guilds: Record<string, GuildConfig>,
 ): Record<string, GuildConfig> {
@@ -267,7 +292,7 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
       migrated = true;
       continue;
     }
-    const candidate = panel as CustomSupportPanel & Record<string, unknown>;
+    const candidate = normalizePersistedPanelRoleRestrictions(panel) as CustomSupportPanel & Record<string, unknown>;
     const rawButtons = Array.isArray(candidate.buttons) ? candidate.buttons : [];
     const normalizedButtons = rawButtons.filter((button) => button && typeof button === 'object' && !Array.isArray(button))
       .map((button, index) => {
