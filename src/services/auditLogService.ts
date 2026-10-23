@@ -22,6 +22,7 @@ import { getGuildConfig, updateGuildConfig } from './configService';
 import { getThemeColor } from './uiThemeService';
 import { getAdvancedSettings } from './advancedSettingsService';
 import { ensureChannelPurposeMessage } from './channelPurposeService';
+import { runTrackedOperationalTask } from './operationalTaskTelemetry';
 import {
   getPersistedTicketRecords,
   getPersistedTicketStatus,
@@ -2482,12 +2483,12 @@ async function runDailySummarySweep(client: Client): Promise<void> {
   const previousDate = previousCompletedUtcDateKey();
 
   for (const guild of client.guilds.cache.values()) {
-    try {
+    await runTrackedOperationalTask('audit-daily-summary', guild.id, async () => {
       await removeInvalidCurrentDaySummaries(guild, currentDate);
       await publishDailySummary(guild, previousDate);
-    } catch (error) {
+    }).catch((error) => {
       console.warn(`⚠️ Daily audit summary skipped for ${guild.id}:`, error);
-    }
+    });
   }
 }
 
