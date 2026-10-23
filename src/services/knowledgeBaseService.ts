@@ -526,18 +526,16 @@ export async function searchKnowledgeBase(
   return results;
 }
 
-export async function getKnowledgeArticleForShare(
+export async function recordKnowledgeArticleShare(
   guildId: string,
   articleId: string,
-  access: KnowledgeAccess,
   actorId: string,
-): Promise<KnowledgeBaseArticle> {
-  const article = await getKnowledgeArticle(guildId, articleId, access);
+): Promise<void> {
+  const article = await getKnowledgeArticle(guildId, articleId, { isAdmin: true, isStaff: true, roleIds: [] });
   if (!article || article.status !== 'published') {
-    throw new Error('Published article not found or you do not have permission to share it.');
+    throw new Error('Published article not found.');
   }
   await recordKnowledgeUsage(guildId, article.id, actorId, 'shared');
-  return article;
 }
 
 export async function recordKnowledgeArticleFeedback(
