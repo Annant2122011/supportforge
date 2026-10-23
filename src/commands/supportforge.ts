@@ -67,7 +67,6 @@ import {
   saveWorkflowTemplate,
   setWorkflowTemplateEnabled,
 } from '../services/workflowTemplateService';
-import { validateWorkflowTemplateDefinition } from '../core/domain/workflowSafety';
 import { getPersistedTicket } from '../services/ticketPersistenceService';
 import {
   deleteSupportSlaPolicy,
@@ -1010,12 +1009,12 @@ export const data =
         .setName('related')
         .setDescription('Link related tickets in this server')
         .addSubcommand((subcommand) =>
-          subcommand.setName('link').setDescription('Link the current ticket to another ticket (configured staff only)')
+          subcommand.setName('link').setDescription('Link the current ticket to another ticket (admin only)')
             .addStringOption((option) => option.setName('other-ticket-id').setDescription('Durable ticket ID of the related ticket').setRequired(true).setMaxLength(36)),
         )
         .addSubcommand((subcommand) => subcommand.setName('list').setDescription('List related tickets for the current ticket'))
         .addSubcommand((subcommand) =>
-          subcommand.setName('unlink').setDescription('Remove the relationship to another ticket (configured staff only)')
+          subcommand.setName('unlink').setDescription('Remove the relationship to another ticket (admin only)')
             .addStringOption((option) => option.setName('other-ticket-id').setDescription('Durable ticket ID of the related ticket').setRequired(true).setMaxLength(36))
             .addBooleanOption((option) => option.setName('confirm').setDescription('Must be true to unlink').setRequired(true)),
         ),
@@ -2140,6 +2139,7 @@ export async function execute(
     group === 'panel' ||
     group === 'diagnostics' ||
     group === 'workflow' ||
+    group === 'related' ||
     (group === 'quick-reply' && ['save', 'delete'].includes(subcommand)) ||
     (group === 'knowledge' && ['create', 'update', 'publish', 'archive', 'revisions', 'restore-revision', 'synonyms-set', 'synonyms-delete', 'metrics'].includes(subcommand)) ||
     (group === 'feedback' && subcommand === 'summary')
