@@ -16,6 +16,7 @@ import {
   markPersistedTicketDeleted,
 } from './ticketPersistenceService';
 import { getField, getTicketStatus, isTicketTopic } from './ticketStateService';
+import { runTrackedOperationalTask } from './operationalTaskTelemetry';
 
 export type RetentionScope = 'closed' | 'archive';
 
@@ -346,7 +347,9 @@ export function startTicketRetentionScheduler(client: Client): void {
 
   const run = async () => {
     for (const guild of client.guilds.cache.values()) {
-      await runRetentionSweepForGuild(guild, { requestApproval: true }).catch(
+      await runTrackedOperationalTask('ticket-retention', guild.id, () =>
+        runRetentionSweepForGuild(guild, { requestApproval: true }),
+      ).catch(
         (error) =>
           console.warn(
             '⚠️ Ticket retention sweep failed for ' + guild.id + ':',
