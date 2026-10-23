@@ -33,6 +33,7 @@ import { UI_THEMES, getThemeColor } from '../services/uiThemeService';
 import { buildSystemDiagnosticsEmbed, runSystemDiagnostics } from '../services/systemDiagnosticsService';
 import {
   createConfigurationSnapshot,
+  reviewConfigurationSnapshot,
   listConfigurationSnapshots,
   restoreConfigurationSnapshot,
 } from '../services/configurationHistoryService';
