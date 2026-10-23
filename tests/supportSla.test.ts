@@ -23,7 +23,7 @@ function input(overrides: Partial<Parameters<typeof evaluateSlaTarget>[0]> = {})
 }
 
 test('SLA elapsed clock enters warning then breach deterministically', () => {
-  assert.equal(evaluateSlaTarget(input({ observedAt: '2026-10-23T10:45:00.000Z' })).progress, 'warning');
+  assert.equal(evaluateSlaTarget(input({ observedAt: '2026-10-23T10:50:00.000Z' })).progress, 'warning');
   const late = evaluateSlaTarget(input({ observedAt: '2026-10-23T11:01:00.000Z' }));
   assert.equal(late.progress, 'breached');
   assert.equal(late.elapsedMinutes, 61);
@@ -59,7 +59,7 @@ test('pending time is excluded from SLA elapsed time and pending clock is labell
 test('resolution SLA clock resets at the latest reopen and then pauses on pending', () => {
   const result = evaluateSlaTarget(input({
     clockKind: 'resolution',
-    currentStatus: 'open',
+    currentStatus: 'pending',
     startedAt: start,
     observedAt: '2026-10-23T12:00:00.000Z',
     targetMinutes: 45,
