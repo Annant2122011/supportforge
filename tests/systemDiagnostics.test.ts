@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  addDiagnosticReferences,
+  buildSystemDiagnosticsEmbed,
   diagnosticsOverallStatus,
   evaluateOutboxCounts,
   type DiagnosticFinding,
@@ -61,4 +63,26 @@ test('outbox diagnostics handle invalid timestamps without crashing or inventing
 
   assert.ok(findings.every((finding) => typeof finding.detail === 'string'));
   assert.equal(findings.find((item) => item.title.includes('stuck in processing'))?.severity, undefined);
+});
+
+
+test('diagnostic findings receive stable references and embed output displays them', () => {
+  const report = {
+    guildId: 'guild-test',
+    reportId: 'DX-ABC12345',
+    generatedAt: '2026-10-23T12:00:00.000Z',
+    mode: 'health' as const,
+    findings: [
+      { area: 'Database', severity: 'error' as const, title: 'Connection failed', detail: 'No connection.' },
+      { area: 'Queue', severity: 'warning' as const, title: 'Backlog', detail: 'Queue is delayed.' },
+    ],
+  };
+  addDiagnosticReferences(report);
+
+  assert.equal(report.findings[0]?.referenceId, 'DX-ABC12345-001');
+  assert.equal(report.findings[1]?.referenceId, 'DX-ABC12345-002');
+  const embed = buildSystemDiagnosticsEmbed(report).toJSON();
+  assert.ok(embed.description?.includes('DX-ABC12345'));
+  assert.ok(embed.fields?.some((field) => field.value.includes('DX-ABC12345-001')));
+  assert.ok(embed.fields?.some((field) => field.value.includes('DX-ABC12345-002')));
 });
