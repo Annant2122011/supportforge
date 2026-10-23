@@ -1615,7 +1615,7 @@ export const data =
           subcommand
             .setName('recovery-preview')
             .setDescription('Preview archived ticket data and recovery limitations without changing anything')
-            .addStringOption((option) => option.setName('ticket-id').setDescription('Durable ticket ID from the recovery record').setRequired(true).setMaxLength(36))
+            .addStringOption((option) => option.setName('ticket-id').setDescription('Durable ticket ID or original channel ID from the recovery list').setRequired(true).setMaxLength(36))
             .addStringOption((option) => option.setName('source').setDescription('Which deletion path should be inspected').setRequired(true).addChoices(
               { name: 'Native Discord deletion', value: 'discord_native' },
               { name: 'Ticket Delete button', value: 'ticket_button' },
@@ -1892,7 +1892,7 @@ export async function execute(
           embeds: [new EmbedBuilder()
             .setColor(getThemeColor(config.theme))
             .setTitle('🧰 Ticket Recovery Preview')
-            .setDescription(lines.join('\\n').slice(0, 4000))
+            .setDescription(lines.join('\n').slice(0, 4000))
             .setFooter({ text: 'Read-only. This command does not restore, delete, or mutate ticket data.' })],
         });
         return;
