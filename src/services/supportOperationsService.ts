@@ -169,7 +169,7 @@ async function getMatchingSlaPolicy(
 ): Promise<SupportSlaPolicy | null> {
   const result = await getPostgresPool().query(
     SLA_SELECT + 'WHERE guild_id=$1 AND enabled=TRUE AND department_id IN ($2,$3) AND priority IN ($4,$5) ' +
-      'ORDER BY (department_id=$2) DESC,(priority=$4) DESC,updated_at DESC LIMIT 1',
+      'ORDER BY ((department_id=$2)::int + (priority=$4)::int) DESC,(department_id=$2) DESC,(priority=$4) DESC,updated_at DESC LIMIT 1',
     [guildId, departmentId ?? '*', '*', priority ?? '*', '*'],
   );
   return result.rows[0] ? fromSlaRow(result.rows[0] as Parameters<typeof fromSlaRow>[0]) : null;
@@ -405,7 +405,7 @@ export async function sweepSupportSlaAlerts(client: Client): Promise<number> {
                 detail: candidate.type + ' SLA ' + candidate.result.progress + '; elapsed ' +
                   candidate.result.elapsedMinutes + ' of ' + candidate.result.targetMinutes + ' minutes; policy ' +
                   evaluation.policy.id + ' v' + evaluation.policy.version + '.',
-                category: 'sla',
+                category: 'ticket',
               });
             }
           }
