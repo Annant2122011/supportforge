@@ -9,8 +9,8 @@
 
 | Area | Result | Evidence / limit |
 |---|---|---|
-| TypeScript build | **PASS** | [Build run #1192](https://github.com/Annant2122011/supportforge/actions/runs/39957752517) succeeded on the clean Stage 1 branch. |
-| Automated tests | **PASS** | [ResolvX CI run #1951](https://github.com/Annant2122011/supportforge/actions/runs/39957752790): 135 passed, 0 failed, 0 skipped. |
+| TypeScript build | **PASS** | [Build run #1198](https://github.com/Annant2122011/supportforge/actions/runs/39961674679) succeeded on the prior source-changing Stage 1 + H2 head. The current follow-up adds a slash-command option-limit regression test; CI on the updated head is tracked separately. |
+| Automated tests | **PASS** | [ResolvX CI run #1983](https://github.com/Annant2122011/supportforge/actions/runs/39961674673) succeeded on the prior source-changing Stage 1 + H2 head. The current follow-up adds command-registration regression coverage; re-run CI on the final head before closing the source/CI gate. |
 | PostgreSQL verification | **PASS** | Same CI run verified required tables, referential integrity and the active outbox lease state against disposable CI PostgreSQL. This is not a connection to production Neon. |
 | Managed branding migration | **PASS in unit tests** | Exact application-owned defaults are migrated; custom department names, tags, descriptions, panel text, button labels, confirmation copy and custom footers are preserved. |
 | Panel role restrictions | **PASS in unit tests** | Role restrictions are normalized at the editable draft, button, published configuration and published-button layers. Valid Snowflake IDs remain strings, malformed IDs are rejected and duplicates are removed. |
@@ -24,7 +24,7 @@
 1. Removed recursive branding substitutions from the two configuration normalizers. Only exact known managed defaults are migrated; user/server-authored content is left intact.
 2. Corrected persisted Discord role-ID normalization so draft and immutable published-panel access restrictions are treated consistently.
 3. Corrected the Settings retention summary: a disabled timer is shown as no timer within the configured maximum, not “unlimited.”
-4. Added regression tests for managed-default migration, custom-text preservation and the role restrictions embedded in published panel snapshots.
+4. Added regression tests for managed-default migration, custom-text preservation, role restrictions embedded in published panel snapshots, and recursive slash-command option limits / sibling-name uniqueness.
 5. Reconciled the inactivity auto-close registry entry with the existing role/department exemption controls while keeping live acceptance clearly incomplete.
 6. Added the four-stage programme architecture, a detailed non-production acceptance checklist and this evidence report.
 7. Integrated the non-rebranding Stage H2 locale picker, sibling report command group (to stay within Discord command limits), and selected localized ticket lifecycle/form messages. This stays on the supported `/supportforge` command root and does not import QueryFixr branding.
