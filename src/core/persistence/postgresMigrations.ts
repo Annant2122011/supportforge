@@ -479,6 +479,52 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+  {
+    id: 12,
+    name: 'add_sla_policy_and_ticket_csat_storage',
+    up: async (db) => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS support_sla_policies (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          department_id TEXT NOT NULL DEFAULT '*',
+          priority TEXT NOT NULL DEFAULT '*',
+          first_response_minutes INTEGER NOT NULL CHECK (first_response_minutes BETWEEN 1 AND 43200),
+          resolution_minutes INTEGER NOT NULL CHECK (resolution_minutes BETWEEN 1 AND 43200),
+          pause_while_pending BOOLEAN NOT NULL DEFAULT TRUE,
+          warning_ratio NUMERIC(4,3) NOT NULL DEFAULT 0.800 CHECK (warning_ratio BETWEEN 0.500 AND 0.990),
+          enabled BOOLEAN NOT NULL DEFAULT TRUE,
+          version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_by TEXT
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_support_sla_policy_scope
+          ON support_sla_policies (guild_id, department_id, priority);
+        CREATE INDEX IF NOT EXISTS idx_support_sla_policy_guild_enabled
+          ON support_sla_policies (guild_id, enabled);
+
+        CREATE TABLE IF NOT EXISTS support_csat_responses (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL,
+          rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+          comment TEXT NOT NULL DEFAULT '',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (guild_id, ticket_id, user_id),
+          CHECK (length(comment) <= 500)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_support_csat_guild_created
+          ON support_csat_responses (guild_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_support_csat_ticket
+          ON support_csat_responses (ticket_id, created_at DESC);
+      `);
+    },
+  },
 ];
 
 /** Latest migration identifier required by this application version. */
