@@ -24,6 +24,20 @@
 
 The Stage 3 implementation head `aef0b1501dccf52ac55aff041a033a23fd7ddcf0` passed [ResolvX CI #2090](https://github.com/Annant2122011/supportforge/actions/runs/39994584123): TypeScript build passed, **176/176 tests passed**, zero skipped, and disposable PostgreSQL verification passed. The initial CI attempt exposed one test assertion whose expected warning text did not match the implemented wording; that assertion was corrected and the subsequent run passed. This is not live Discord acceptance or a production Neon restore drill.
 
+## Increment 2: SLA, CSAT, metrics and backup safety
+
+- Added migration 12 for per-guild SLA policies, one-vote-per-ticket CSAT responses, and a deduplicated SLA alert ledger.
+- Added a deterministic SLA clock with configurable warning ratio, pending-time pause and resolution-clock reset after reopen; validated scope names and bounded target ranges.
+- Added a supervised five-minute SLA monitor, tracked through Stage 2 task telemetry. It processes a bounded active-ticket batch and creates one alert per ticket/policy/target/severity/policy-version/lifecycle-cycle before emitting an audit event.
+- Added `/supportforge diagnostics sla-list`, `sla-set`, `sla-delete`, `sla-check`, and `metrics`, plus `/supportforge feedback rate` and aggregate-only `feedback summary`.
+- Added `npm run db:backup` using custom-format `pg_dump`, `pg_restore --list`, SHA-256 and an atomic sidecar manifest.
+- Added `npm run db:restore` with an explicit non-production confirmation, checksum/size/manifest validation, source-target mismatch guard, empty-target check, single-transaction restore, migration verification and referential-integrity check.
+- Added backup/restore target guard unit tests and SLA pause/reopen/threshold tests. The live target is deliberately not touched by CI.
+
+### Latest Stage 3 CI
+
+[ResolvX CI #2155](https://github.com/Annant2122011/supportforge/actions/runs/40003972041) passed TypeScript build, **186/186 tests**, zero skipped, and disposable PostgreSQL schema/integrity verification on the Stage 3 head `be2c2caec6a10e4aac03f1fe43768d3d8b42bd25`. It verifies the new SLA/CSAT/alert tables on disposable PostgreSQL, not production Neon restore capability.
+
 ## Confirmed risks carried forward
 
 1. **Replay duplicate window:** Discord message sends and Neon ledger writes cannot be one transaction. If send succeeds but the replay ledger write fails, a retry can duplicate some output. Existing ledgering reduces repeats but cannot prove exactly-once delivery. A later increment must improve the operation ledger and add injected-failure recovery tests without claiming cross-system exactly-once semantics.
