@@ -26,6 +26,7 @@ import {
 import { getField, isTicketTopic, removeField, setField } from './ticketStateService';
 import { refreshTicketPanel } from './ticketPanelService';
 import { runTrackedOperationalTask } from './operationalTaskTelemetry';
+import { buildRecoveryPreviewSummary, type RecoveryPreviewSummary, type RecoverySource } from '../core/domain/recoveryPreview';
 
 const ARCHIVE_PAGE_SIZE = 100;
 const DEFAULT_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -605,6 +606,107 @@ export async function recordTicketChannelDeleted(channel: TextChannel | ThreadCh
       ? { id: 'ticket-button', attribution: 'actorInferred', confidence: 'low' }
       : { id: 'unknown', attribution: 'actorUnknown', confidence: 'none' },
   );
+}
+
+/** Return a read-only, privacy-safe preview of what a recovery can reconstruct. */
+export async function getTicketRecoveryPreview(
+  guildId: string,
+  ticketId: string,
+  source: RecoverySource,
+): Promise<RecoveryPreviewSummary> {
+  const ticket = await getPersistedTicketById(ticketId);
+  if (!ticket || ticket.guildId !== guildId) {
+    throw new Error('Ticket recovery record was not found in this server.');
+  }
+
+  const pool = getPostgresPool();
+  const eventResult = await pool.query<QueryResultRow & {
+    status: string;
+    accidental_answer: 'yes' | 'no' | null;
+    id: string;
+  }>(
+    'SELECT id,status,accidental_answer FROM ticket_recovery_events ' +
+      'WHERE ticket_id=$1 AND guild_id=$2 AND source=$3 ORDER BY created_at DESC LIMIT 1',
+    [ticketId, guildId, source],
+  );
+  const recoveryEvent = eventResult.rows[0];
+  if (!recoveryEvent) {
+    throw new Error('No recovery record exists for this ticket and deletion path.');
+  }
+
+  const [snapshotResult, messageResult, attachmentResult, replayResult] = await Promise.all([
+    pool.query<QueryResultRow & { backfill_complete: boolean }>(
+      'SELECT backfill_complete FROM ticket_channel_archive WHERE ticket_id=$1 AND guild_id=$2 LIMIT 1',
+      [ticketId, guildId],
+    ),
+    pool.query<QueryResultRow & {
+      message_count: number | string;
+      deleted_message_count: number | string;
+      attachment_count: number | string;
+      latest_archived_at: Date | string | null;
+    }>(
+      'SELECT COUNT(*)::int AS message_count, ' +
+        'COUNT(*) FILTER (WHERE deleted_at IS NOT NULL)::int AS deleted_message_count, ' +
+        "COALESCE(SUM(CASE WHEN jsonb_typeof(attachments)='array' THEN jsonb_array_length(attachments) ELSE 0 END),0)::int AS attachment_count, " +
+        'MAX(created_at) AS latest_archived_at ' +
+        'FROM ticket_message_archive WHERE ticket_id=$1 AND guild_id=$2',
+      [ticketId, guildId],
+    ),
+    pool.query<QueryResultRow & {
+      tracked_attachment_count: number | string;
+      restorable_attachment_count: number | string;
+      too_large_attachment_count: number | string;
+      metadata_only_attachment_count: number | string;
+      pending_attachment_count: number | string;
+      failed_attachment_count: number | string;
+    }>(
+      'SELECT COUNT(*)::int AS tracked_attachment_count, ' +
+        "COUNT(*) FILTER (WHERE archive_status='archived' AND archived_bytes IS NOT NULL)::int AS restorable_attachment_count, " +
+        "COUNT(*) FILTER (WHERE archive_status='too_large')::int AS too_large_attachment_count, " +
+        "COUNT(*) FILTER (WHERE archive_status='metadata_only')::int AS metadata_only_attachment_count, " +
+        "COUNT(*) FILTER (WHERE archive_status='pending')::int AS pending_attachment_count, " +
+        "COUNT(*) FILTER (WHERE archive_status='failed' OR archive_error IS NOT NULL)::int AS failed_attachment_count " +
+        'FROM ticket_message_archive_attachments WHERE guild_id=$1 AND message_id IN ' +
+        '(SELECT message_id FROM ticket_message_archive WHERE ticket_id=$2 AND guild_id=$1)',
+      [guildId, ticketId],
+    ),
+    pool.query<QueryResultRow & { already_replayed_message_count: number | string }>(
+      "SELECT COUNT(DISTINCT replay.original_message_id)::int AS already_replayed_message_count " +
+        'FROM ticket_recovery_replay_items replay ' +
+        'JOIN ticket_message_archive archived ON archived.message_id=replay.original_message_id ' +
+        "WHERE replay.recovery_event_id=$1 AND replay.status='completed' AND archived.ticket_id=$2 AND archived.guild_id=$3",
+      [recoveryEvent.id, ticketId, guildId],
+    ),
+  ]);
+
+  const snapshot = snapshotResult.rows[0];
+  const messages = messageResult.rows[0];
+  const attachments = attachmentResult.rows[0];
+  const replay = replayResult.rows[0];
+  const isoDate = (value: Date | string | null | undefined): string | null => {
+    if (value == null) return null;
+    const timestamp = value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+    return Number.isFinite(Date.parse(timestamp)) ? timestamp : null;
+  };
+
+  return buildRecoveryPreviewSummary({
+    source,
+    status: recoveryEvent.status,
+    accidentalAnswer: recoveryEvent.accidental_answer,
+    channelSnapshotAvailable: Boolean(snapshot),
+    historicalBackfillComplete: snapshot?.backfill_complete === true,
+    archivedMessageCount: Number(messages?.message_count ?? 0),
+    deletedMessageCount: Number(messages?.deleted_message_count ?? 0),
+    latestArchivedAt: isoDate(messages?.latest_archived_at),
+    totalAttachmentCount: Number(messages?.attachment_count ?? 0),
+    trackedAttachmentCount: Number(attachments?.tracked_attachment_count ?? 0),
+    restorableAttachmentCount: Number(attachments?.restorable_attachment_count ?? 0),
+    tooLargeAttachmentCount: Number(attachments?.too_large_attachment_count ?? 0),
+    metadataOnlyAttachmentCount: Number(attachments?.metadata_only_attachment_count ?? 0),
+    pendingAttachmentCount: Number(attachments?.pending_attachment_count ?? 0),
+    failedAttachmentCount: Number(attachments?.failed_attachment_count ?? 0),
+    alreadyReplayedMessageCount: Number(replay?.already_replayed_message_count ?? 0),
+  });
 }
 
 export async function listTicketRecoveryCandidates(
