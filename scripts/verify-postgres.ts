@@ -14,6 +14,9 @@ async function main(): Promise<void> {
     'ticket_events',
     'outbox_events',
     'app_documents',
+    'support_sla_policies',
+    'support_csat_responses',
+    'support_sla_alerts',
   ];
 
   for (const table of requiredTables) {
@@ -32,6 +35,9 @@ async function main(): Promise<void> {
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM ticket_events'),
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM outbox_events'),
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM app_documents'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_sla_policies'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_csat_responses'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_sla_alerts'),
   ]);
 
   const orphanEvents = await pool.query<{ count: string }>(
@@ -61,6 +67,9 @@ async function main(): Promise<void> {
   console.log(`Ticket events: ${counts[1].rows[0]?.count ?? '0'}`);
   console.log(`Outbox events: ${counts[2].rows[0]?.count ?? '0'}`);
   console.log(`Application documents: ${counts[3].rows[0]?.count ?? '0'}`);
+  console.log(`SLA policies: ${counts[4].rows[0]?.count ?? '0'}`);
+  console.log(`CSAT responses: ${counts[5].rows[0]?.count ?? '0'}`);
+  console.log(`SLA alert records: ${counts[6].rows[0]?.count ?? '0'}`);
   console.log(`Orphan events: ${orphanEvents.rows[0]?.count ?? '0'}`);
   console.log(`Orphan outbox records: ${orphanOutbox.rows[0]?.count ?? '0'}`);
   console.log(`Stale processing records: ${invalidProcessing.rows[0]?.count ?? '0'}`);
