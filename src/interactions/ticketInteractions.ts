@@ -4848,6 +4848,9 @@ async function applyTicketPriority(
     return;
   }
 
+  // Load locale before committing priority, so a settings read cannot turn a
+  // successful durable mutation into a misleading failure response.
+  const locale = (await getAdvancedSettings(channel.guild.id)).locale;
   const transitionAt = new Date().toISOString();
   const newTopic = setField(
     setField(topic, 'priority', priority),
@@ -4884,7 +4887,6 @@ async function applyTicketPriority(
    * are the source of truth for priority.
    */
 
-  const locale = (await getAdvancedSettings(channel.guild.id)).locale;
   const priorityLabel = ({
     low: '🟢 ' + translate(locale, 'priority.low'),
     normal: '🟡 ' + translate(locale, 'priority.normal'),
