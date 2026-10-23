@@ -1894,7 +1894,7 @@ export async function execute(
         const saved = review.snapshot;
         const current = review.currentCounts;
         const changedSections = review.changedSections.length
-          ? review.changedSections.map((section) => '• ' + section).join('\\n')
+          ? review.changedSections.map((section) => '• ' + section).join('\n')
           : 'No differences were detected in the reviewed configuration sections.';
         const config = await getGuildConfig(guild.id);
         await interaction.editReply({
@@ -1902,16 +1902,16 @@ export async function execute(
             .setColor(getThemeColor(config.theme))
             .setTitle('🔎 Configuration Restore Preview')
             .setDescription(
-              '**Checkpoint:** `' + saved.id + '`\\n' +
-              '**Saved:** <t:' + Math.floor(Date.parse(saved.createdAt) / 1000) + ':F>\\n' +
-              '**Reason:** ' + saved.reason + '\\n\\n' +
-              '**Detected differences**\\n' + changedSections + '\\n\\n' +
-              '**Saved counts → current counts**\\n' +
-              'Departments: ' + saved.departmentCount + ' → ' + current.departmentCount + '\\n' +
-              'Panels: ' + saved.panelCount + ' → ' + current.panelCount + '\\n' +
-              'Tags: ' + saved.tagCount + ' → ' + current.tagCount + '\\n' +
-              'Forms: ' + (saved.formCount ?? 0) + ' → ' + current.formCount + '\\n' +
-              'Support-hours policies: ' + (saved.supportHoursPolicyCount ?? 0) + ' → ' + current.supportHoursPolicyCount + '\\n\\n' +
+              '**Checkpoint:** `' + saved.id + '`\n' +
+              '**Saved:** <t:' + Math.floor(Date.parse(saved.createdAt) / 1000) + ':F>\n' +
+              '**Reason:** ' + saved.reason + '\n\n' +
+              '**Detected differences**\n' + changedSections + '\n\n' +
+              '**Saved counts → current counts**\n' +
+              'Departments: ' + saved.departmentCount + ' → ' + current.departmentCount + '\n' +
+              'Panels: ' + saved.panelCount + ' → ' + current.panelCount + '\n' +
+              'Tags: ' + saved.tagCount + ' → ' + current.tagCount + '\n' +
+              'Forms: ' + (saved.formCount ?? 0) + ' → ' + current.formCount + '\n' +
+              'Support-hours policies: ' + (saved.supportHoursPolicyCount ?? 0) + ' → ' + current.supportHoursPolicyCount + '\n\n' +
               'This is a read-only preview. No configuration has changed. To proceed, run `/supportforge diagnostics restore-snapshot` with this ID and the exact confirmation `RESTORE ' + saved.id + '`. The restore creates a pre-restore checkpoint and keeps ticket/transcript history unchanged.',
             )
             .setFooter({ text: 'Re-run the preview immediately before restore if another administrator may be editing settings.' })],
