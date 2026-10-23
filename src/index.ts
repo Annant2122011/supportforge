@@ -61,6 +61,7 @@ import { initializePersistence } from './core/persistence/provider';
 import { initializeSupportHoursService } from './services/supportHoursService';
 import { startOutboxProcessor } from './core/events/outboxProcessor';
 import { TicketOutboxPublisher } from './services/ticketOutboxPublisher';
+import { recordDiscordRateLimit } from './services/discordRateLimitTelemetry';
 import { configureDiscordChannelRest } from './services/discordChannelService';
 import { refreshActiveTicketFormCache, startTicketFormCacheRefresh, startTicketFormSubmissionRecovery } from './services/ticketFormService';
 import {
@@ -130,6 +131,14 @@ configureDiscordChannelRest(client.rest, (data) => {
   manager._add?.(data, guild);
 });
 client.rest.on(RESTEvents.RateLimited, (rateLimit) => {
+  recordDiscordRateLimit({
+    method: rateLimit.method,
+    route: rateLimit.route,
+    scope: rateLimit.scope,
+    retryAfterMs: rateLimit.retryAfter,
+    global: rateLimit.global,
+    sublimitTimeoutMs: rateLimit.sublimitTimeout ?? null,
+  });
   console.warn(
     '⚠️ Discord REST rate limit: ' +
     'method=' + rateLimit.method +

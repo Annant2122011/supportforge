@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { getJsonDocument, setJsonDocument } from './jsonDocumentPersistenceService';
+import { normalizeManagedBrandDefault } from '../core/domain/managedBrandDefaults';
+import { normalizeDiscordSnowflakeIds } from '../core/domain/discordSnowflake';
 
 export type SupportForgeTier = 'free' | 'premium-demo' | 'pro-demo';
 
@@ -121,19 +123,94 @@ const DEFAULT_CONFIG: GuildConfig = {
 let state: ConfigFile | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 
-function normalizeBrandTextDeep<T>(value: T): T {
-  if (typeof value === 'string') {
-    return value.replace(/\b(?:SupportForge|ResolveX|SUPPORTFORGE)\b/g, 'ResolvX') as unknown as T;
+const CANONICAL_CUSTOM_PANEL_FOOTER = 'ResolvX • Customer Support';
+
+/**
+ * Upgrade only a known application-owned default footer. Every other panel
+ * field (including names, descriptions, button labels and confirmation copy)
+ * is administrator-authored data and must survive branding changes verbatim.
+ */
+/**
+ * Sanitize persisted custom-panel role restrictions at every layer used for
+ * authorization: draft, each button, published snapshot, and published button.
+ * Invalid IDs must never cause valid restrictions to be silently discarded.
+ */
+export function normalizePersistedPanelRoleRestrictions(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const source = value as Record<string, unknown>;
+  const normalized: Record<string, unknown> = {
+    ...source,
+    allowedRoleIds: normalizeDiscordSnowflakeIds(source.allowedRoleIds),
+  };
+  if (Array.isArray(source.buttons)) {
+    normalized.buttons = source.buttons.map((button) => {
+      if (!button || typeof button !== 'object' || Array.isArray(button)) return button;
+      const record = button as Record<string, unknown>;
+      return { ...record, allowedRoleIds: normalizeDiscordSnowflakeIds(record.allowedRoleIds) };
+    });
   }
-  if (Array.isArray(value)) return value.map((entry) => normalizeBrandTextDeep(entry)) as unknown as T;
-  if (value && typeof value === 'object') {
-    const normalized: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-      normalized[key] = normalizeBrandTextDeep(entry);
-    }
-    return normalized as unknown as T;
+  if (source.publishedConfig && typeof source.publishedConfig === 'object' && !Array.isArray(source.publishedConfig)) {
+    normalized.publishedConfig = normalizePersistedPanelRoleRestrictions(source.publishedConfig);
   }
-  return value;
+  return normalized;
+}
+
+export function normalizeLegacyManagedPanelFooters(
+  guilds: Record<string, GuildConfig>,
+): Record<string, GuildConfig> {
+  let changedAnyGuild = false;
+  const normalizedGuilds = Object.fromEntries(
+    Object.entries(guilds).map(([guildId, guild]) => {
+      if (!guild || typeof guild !== 'object' || Array.isArray(guild)) {
+        return [guildId, guild];
+      }
+      const panels = guild.customPanels;
+      if (!panels || typeof panels !== 'object' || Array.isArray(panels)) {
+        return [guildId, guild];
+      }
+
+      let changedGuild = false;
+      const normalizedPanels = Object.fromEntries(
+        Object.entries(panels).map(([panelId, panel]) => {
+          if (!panel || typeof panel !== 'object' || Array.isArray(panel)) {
+            return [panelId, panel];
+          }
+
+          let normalizedPanel = panel;
+          const footer = normalizeManagedBrandDefault(
+            panel.footer,
+            CANONICAL_CUSTOM_PANEL_FOOTER,
+          );
+          if (typeof panel.footer === 'string' && footer !== panel.footer) {
+            normalizedPanel = { ...normalizedPanel, footer: footer as string };
+          }
+
+          const published = panel.publishedConfig;
+          if (published && typeof published === 'object' && !Array.isArray(published)) {
+            const publishedFooter = normalizeManagedBrandDefault(
+              published.footer,
+              CANONICAL_CUSTOM_PANEL_FOOTER,
+            );
+            if (typeof published.footer === 'string' && publishedFooter !== published.footer) {
+              normalizedPanel = {
+                ...normalizedPanel,
+                publishedConfig: { ...published, footer: publishedFooter as string },
+              };
+            }
+          }
+
+          if (normalizedPanel !== panel) changedGuild = true;
+          return [panelId, normalizedPanel];
+        }),
+      );
+
+      if (!changedGuild) return [guildId, guild];
+      changedAnyGuild = true;
+      return [guildId, { ...guild, customPanels: normalizedPanels }];
+    }),
+  );
+
+  return changedAnyGuild ? normalizedGuilds as Record<string, GuildConfig> : guilds;
 }
 
 function cloneDefaultConfig(): GuildConfig {
@@ -162,12 +239,12 @@ async function loadState(): Promise<ConfigFile> {
         'ResolvX database configuration document is malformed. Existing data was not overwritten.',
       );
     }
-    const normalizedGuilds = normalizeBrandTextDeep(persisted.guilds) as Record<string, GuildConfig>;
+    const normalizedGuilds = normalizeLegacyManagedPanelFooters(persisted.guilds as Record<string, GuildConfig>);
     state = {
       version: 1,
       guilds: normalizedGuilds,
     };
-    // Migrate legacy visible brand text in saved panels/configuration without renaming IDs or keys.
+    // Migrate exact built-in footer defaults only; preserve custom server copy and stable IDs.
     if (JSON.stringify(persisted.guilds) !== JSON.stringify(normalizedGuilds)) await persistState();
     return state;
   }
@@ -215,7 +292,7 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
       migrated = true;
       continue;
     }
-    const candidate = panel as CustomSupportPanel & Record<string, unknown>;
+    const candidate = normalizePersistedPanelRoleRestrictions(panel) as CustomSupportPanel & Record<string, unknown>;
     const rawButtons = Array.isArray(candidate.buttons) ? candidate.buttons : [];
     const normalizedButtons = rawButtons.filter((button) => button && typeof button === 'object' && !Array.isArray(button))
       .map((button, index) => {
@@ -224,9 +301,7 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
           ? item.id
           : 'legacy_' + panelId.slice(0, 6) + '_' + (index + 1);
         const targetType = item.targetType === 'form' && typeof item.formId === 'string' ? 'form' : 'department';
-        const roleIds = Array.isArray(item.allowedRoleIds)
-          ? item.allowedRoleIds.filter((id): id is string => typeof id === 'string' && /^\\d{17,20}$/.test(id)).slice(0, 25)
-          : [];
+        const roleIds = normalizeDiscordSnowflakeIds(item.allowedRoleIds);
         return {
           id: stableId,
           targetType,
@@ -243,9 +318,7 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
           allowedRoleIds: [...new Set(roleIds)],
         } satisfies CustomSupportPanelButton;
       });
-    const panelRoleIds = Array.isArray(candidate.allowedRoleIds)
-      ? candidate.allowedRoleIds.filter((id): id is string => typeof id === 'string' && /^\\d{17,20}$/.test(id)).slice(0, 25)
-      : [];
+    const panelRoleIds = normalizeDiscordSnowflakeIds(candidate.allowedRoleIds);
     const iconUrl = typeof candidate.iconUrl === 'string' ? candidate.iconUrl : null;
     const publishedConfig = candidate.publishedConfig && typeof candidate.publishedConfig === 'object'
       ? candidate.publishedConfig as CustomSupportPanel['publishedConfig']
