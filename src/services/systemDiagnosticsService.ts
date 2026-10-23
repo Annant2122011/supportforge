@@ -777,39 +777,68 @@ export async function runSystemDiagnostics(
   return report;
 }
 
+export const DIAGNOSTIC_PAGE_SIZE = 10;
+
+export function diagnosticsPageCount(report: Pick<SystemDiagnosticsReport, 'findings'>): number {
+  return Math.max(1, Math.ceil(report.findings.length / DIAGNOSTIC_PAGE_SIZE));
+}
+
 export function buildSystemDiagnosticsEmbed(
   report: SystemDiagnosticsReport,
   themeColor = 0x3b82f6,
+  requestedPage = 1,
 ): EmbedBuilder {
   const status = diagnosticsOverallStatus(report.findings);
   const color = status === 'ACTION REQUIRED' ? 0xdc2626 : status === 'DEGRADED' ? 0xd97706 : status === 'UNKNOWN' ? 0x64748b : themeColor;
+  const pageCount = diagnosticsPageCount(report);
+  const page = Math.min(pageCount, Math.max(1, Number.isFinite(requestedPage) ? Math.floor(requestedPage) : 1));
+  const start = (page - 1) * DIAGNOSTIC_PAGE_SIZE;
+  const pageFindings = report.findings.slice(start, start + DIAGNOSTIC_PAGE_SIZE);
   const embed = new EmbedBuilder()
     .setColor(color)
-    .setTitle(report.mode === 'setup-doctor' ? '🩺 ResolveX Setup Doctor' : '🛡️ ResolveX System Health')
+    .setTitle(
+      (report.mode === 'setup-doctor' ? '🩺 ResolveX Setup Doctor' : '🛡️ ResolveX System Health') +
+      (pageCount > 1 ? ' • Page ' + page + '/' + pageCount : ''),
+    )
     .setDescription(
       '**Overall status:** ' + status +
       '\n**Report ID:** \`' + report.reportId + '\`' +
       '\n**Generated:** <t:' + Math.floor(Date.parse(report.generatedAt) / 1000) + ':F>' +
       '\n**Checks:** ' + report.findings.length +
+      (pageCount > 1 ? '\n**Page:** ' + page + ' of ' + pageCount + ' (' + DIAGNOSTIC_PAGE_SIZE + ' findings per page)' : '') +
       (status === 'UNKNOWN' ? '\nNo checks produced results; do not treat this report as healthy.' : '') +
       '\n\nThis report does not execute repairs. A green result is not a substitute for the live acceptance checklist.',
     )
-    .setFooter({ text: 'Guild ' + report.guildId + ' • report ' + report.reportId + ' • secrets and connection strings are never shown' });
-
-  const grouped = new Map<string, DiagnosticFinding[]>();
-  for (const finding of report.findings) {
-    const current = grouped.get(finding.area) ?? [];
-    current.push(finding);
-    grouped.set(finding.area, current);
-  }
-  for (const [area, group] of grouped) {
-    const lines = group.map((finding) => {
-      const icon = finding.severity === 'error' ? '🔴' : finding.severity === 'warning' ? '🟠' : finding.severity === 'info' ? 'ℹ️' : '🟢';
-      return icon + ' **' + finding.title + '**' + (finding.referenceId ? ' \`' + finding.referenceId + '\`' : '') + '\n' + finding.detail +
-        (finding.remedy ? '\n*Next step:* ' + finding.remedy : '');
+    .setFooter({
+      text: 'Guild ' + report.guildId + ' • report ' + report.reportId +
+        (pageCount > 1 ? ' • page ' + page + '/' + pageCount : '') +
+        ' • secrets and connection strings are never shown',
     });
-    embed.addFields({ name: area.slice(0, 256), value: (lines.join('\n\n').slice(0, 1024) || 'No details.'), inline: false });
-    if (embed.data.fields?.length === 25) break;
+
+  if (!pageFindings.length) {
+    embed.addFields({
+      name: 'No diagnostic checks produced results',
+      value: 'Status is UNKNOWN. Re-run the checks and inspect sanitized process logs.',
+    });
+    return embed;
   }
+
+  for (const finding of pageFindings) {
+    const icon = finding.severity === 'error'
+      ? '🔴'
+      : finding.severity === 'warning'
+        ? '🟠'
+        : finding.severity === 'info'
+          ? 'ℹ️'
+          : '🟢';
+    const reference = finding.referenceId ? ' • ' + finding.referenceId : '';
+    const fieldName = (icon + ' ' + finding.area + ' • ' + finding.title + reference).slice(0, 256);
+    let value = finding.detail + (finding.remedy ? '\n**Next step:** ' + finding.remedy : '');
+    if (value.length > 1024) {
+      value = value.slice(0, 970) + '\n… Details shortened. Use reference ' + (finding.referenceId ?? report.reportId) + ' when inspecting logs.';
+    }
+    embed.addFields({ name: fieldName, value: value || 'No additional details.' });
+  }
+
   return embed;
 }
