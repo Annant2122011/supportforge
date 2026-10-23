@@ -36,7 +36,6 @@ import { handleStage4SlashCommand } from '../interactions/stage4SlashCommands';
 import {
   createKnowledgeArticle,
   getKnowledgeArticle,
-  getKnowledgeArticleForShare,
   getKnowledgeBaseMetrics,
   listKnowledgeArticles,
   listKnowledgeArticleRevisions,
