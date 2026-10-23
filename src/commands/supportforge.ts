@@ -2110,10 +2110,10 @@ export async function execute(
             action: 'SUPPORT_SLA_POLICY_DELETED',
             actorId: interaction.user.id,
             actorName: interaction.user.tag,
-            detail: 'Deleted SLA policy ' + policyId + '.',
+            detail: 'Deactivated SLA policy ' + policyId + '; policy/alert history is retained.',
           });
         }
-        await interaction.editReply('Deleted SLA policy ' + policyId + '. Past event history is unchanged.');
+        await interaction.editReply('Deactivated SLA policy ' + policyId + '. Historical SLA alert records are retained.');
         return;
       }
 
