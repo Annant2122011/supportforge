@@ -8,6 +8,8 @@ const enUS = {
   'settings.locale.title': 'Server Language',
   'settings.locale.current': 'Current language: {locale}',
   'settings.locale.saved': 'Server language saved as {locale}.',
+  'settings.locale.prompt': 'Choose the default language for supported bot messages in this server. User-provided content and stable command names are not translated.',
+  'settings.locale.unknown': 'That language is not supported. Choose one of the available options.',
   'ticket.status.open': 'Open',
   'ticket.status.claimed': 'Claimed',
   'ticket.status.pending': 'Pending',
