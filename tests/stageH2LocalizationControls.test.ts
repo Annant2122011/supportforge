@@ -47,6 +47,18 @@ test('locale labels and language-control copy are safe for all supported locales
     'टिकट #42 अब लंबित है।',
   );
   assert.equal(
+    translate('hi-IN', 'ticket.status.announcement', {
+      ticketNumber: 42,
+      status: translate('hi-IN', 'ticket.status.reopened'),
+      actor: '@staff',
+    }),
+    '@staff ने टिकट #42 की स्थिति बदलकर फिर से खोला गया कर दी है।',
+  );
+  assert.match(
+    translate('bn-IN', 'ticket.closed.saved', { ticketNumber: 19 }),
+    /ট্রান্সক্রিপ্ট সংরক্ষণ করা হয়েছে/,
+  );
+  assert.equal(
     translate('bn-IN', 'ticket.priority.commandSuccess', { ticketNumber: 17, priority: translate('bn-IN', 'priority.urgent') }),
     'টিকিট #17-এর অগ্রাধিকার এখন জরুরি।',
   );
