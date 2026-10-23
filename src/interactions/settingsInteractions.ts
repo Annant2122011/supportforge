@@ -69,6 +69,7 @@ import {
   createConfigurationSnapshot,
   getConfigurationSnapshot,
   listConfigurationSnapshots,
+  reviewConfigurationSnapshot,
   restoreConfigurationSnapshot,
 } from '../services/configurationHistoryService';
 import {
@@ -2031,8 +2032,9 @@ export async function handleSettingsInteraction(
 
   if (interaction.isStringSelectMenu() && interaction.customId === 'sf:settings:diagnostics:snapshot-select') {
     const snapshotId = interaction.values[0];
-    const snapshot = await getConfigurationSnapshot(guild.id, snapshotId);
-    if (!snapshot) {
+    const review = await reviewConfigurationSnapshot(guild.id, snapshotId);
+    const snapshot = review?.snapshot ?? null;
+    if (!review || !snapshot) {
       await interaction.followUp({ content: 'That configuration snapshot is no longer available. Refresh the snapshot list.', flags: MessageFlags.Ephemeral });
       return true;
     }
@@ -2046,8 +2048,17 @@ export async function handleSettingsInteraction(
           '**Snapshot:** `' + snapshot.id + '`\n' +
           '**Saved:** <t:' + Math.floor(Date.parse(snapshot.createdAt) / 1000) + ':F>\n' +
           '**Reason:** ' + snapshot.reason + '\n' +
-          '**Departments:** ' + snapshot.departmentCount + ' · **Panels:** ' + snapshot.panelCount + ' · **Tags:** ' + snapshot.tagCount + ' · **Forms:** ' + (snapshot.formCount ?? 0) + ' · **Support-hours policies:** ' + (snapshot.supportHoursPolicyCount ?? 0) +
-          '\n\nRestoring replaces this server’s guild configuration and advanced settings. It does not intentionally delete ticket records, messages, transcripts or audit history. A checkpoint of the current configuration is saved first. Review the values, then confirm in the next step.'
+          '**Departments / panels / tags / forms / schedules:** ' +
+          snapshot.departmentCount + ' / ' + snapshot.panelCount + ' / ' + snapshot.tagCount + ' / ' + (snapshot.formCount ?? 0) + ' / ' + (snapshot.supportHoursPolicyCount ?? 0) +
+          '\n\n**Detected differences**\n' +
+          (review.changedSections.length ? review.changedSections.map((section) => '• ' + section).join('\n') : 'No differences were detected in the reviewed sections.') +
+          '\n\n**Saved → current counts**\n' +
+          'Departments: ' + snapshot.departmentCount + ' → ' + review.currentCounts.departmentCount + '\n' +
+          'Panels: ' + snapshot.panelCount + ' → ' + review.currentCounts.panelCount + '\n' +
+          'Tags: ' + snapshot.tagCount + ' → ' + review.currentCounts.tagCount + '\n' +
+          'Forms: ' + (snapshot.formCount ?? 0) + ' → ' + review.currentCounts.formCount + '\n' +
+          'Support-hours policies: ' + (snapshot.supportHoursPolicyCount ?? 0) + ' → ' + review.currentCounts.supportHoursPolicyCount +
+          '\n\nThis preview is read-only. Restoring replaces this server’s guild configuration and advanced settings, but does not intentionally delete ticket records, messages, transcripts or audit history. A checkpoint of current configuration is saved before restore.
         )],
       components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
@@ -2274,8 +2285,9 @@ export async function handleSettingsInteraction(
 
     if (id.startsWith('sf:settings:diagnostics:restore-preview:')) {
       const snapshotId = id.slice('sf:settings:diagnostics:restore-preview:'.length);
-      const snapshot = await getConfigurationSnapshot(guild.id, snapshotId);
-      if (!snapshot) {
+      const review = await reviewConfigurationSnapshot(guild.id, snapshotId);
+      const snapshot = review?.snapshot ?? null;
+      if (!review || !snapshot) {
         await interaction.reply({ content: 'That snapshot no longer exists. Reopen Configuration History and select a current checkpoint.', flags: MessageFlags.Ephemeral });
         return true;
       }
@@ -2286,9 +2298,15 @@ export async function handleSettingsInteraction(
           .setTitle('⚠️ Confirm Configuration Restore')
           .setDescription(
             'You selected `' + snapshot.id + '` (' + snapshot.reason + ').\n\n' +
-            'ResolveX will first save a checkpoint of the current settings, then restore the saved guild configuration and advanced settings. This does not restore old Discord channel names/messages and does not change ticket/transcript records.\n\n' +
-            'This action is reversible through the automatic checkpoint, but verify the snapshot is from the intended server before proceeding.',
-          )],
+            '**Configuration areas that differ now:**\n' +
+            (review.changedSections.length ? review.changedSections.map((section) => '• ' + section).join('\n') : 'No differences were detected in the reviewed sections.') + '\n\n' +
+            '**Saved → current counts:** departments ' + snapshot.departmentCount + ' → ' + review.currentCounts.departmentCount +
+            ', panels ' + snapshot.panelCount + ' → ' + review.currentCounts.panelCount +
+            ', tags ' + snapshot.tagCount + ' → ' + review.currentCounts.tagCount +
+            ', forms ' + (snapshot.formCount ?? 0) + ' → ' + review.currentCounts.formCount +
+            ', support-hours ' + (snapshot.supportHoursPolicyCount ?? 0) + ' → ' + review.currentCounts.supportHoursPolicyCount + '.\n\n' +
+            'ResolveX will first save a checkpoint of current settings, then restore the saved guild configuration and advanced settings. This does not restore old Discord channel names/messages or change ticket/transcript records.\n\n' +
+            'Review this preview, then confirm. The restore is restricted to this server and is reversible through the automatic checkpoint.'          )],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
           new ButtonBuilder()
             .setCustomId('sf:settings:diagnostics:restore-confirm:' + snapshot.id + ':' + interaction.user.id)
