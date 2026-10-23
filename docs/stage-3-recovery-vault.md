@@ -20,6 +20,10 @@
 - `tests/recoveryPreview.test.ts` covers source eligibility, explicit accidental-deletion review, incomplete channel/history records, missing attachment bytes and invalid count normalization.
 - These are unit tests for preview classification, not yet full PostgreSQL integration tests for every recovery failure window.
 
+## Automated CI evidence
+
+The Stage 3 implementation head `aef0b1501dccf52ac55aff041a033a23fd7ddcf0` passed [ResolvX CI #2090](https://github.com/Annant2122011/supportforge/actions/runs/39994584123): TypeScript build passed, **176/176 tests passed**, zero skipped, and disposable PostgreSQL verification passed. The initial CI attempt exposed one test assertion whose expected warning text did not match the implemented wording; that assertion was corrected and the subsequent run passed. This is not live Discord acceptance or a production Neon restore drill.
+
 ## Confirmed risks carried forward
 
 1. **Replay duplicate window:** Discord message sends and Neon ledger writes cannot be one transaction. If send succeeds but the replay ledger write fails, a retry can duplicate some output. Existing ledgering reduces repeats but cannot prove exactly-once delivery. A later increment must improve the operation ledger and add injected-failure recovery tests without claiming cross-system exactly-once semantics.
