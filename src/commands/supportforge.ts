@@ -1470,35 +1470,6 @@ export const data =
         )
         .addSubcommand((subcommand) =>
           subcommand
-            .setName('report-categories')
-            .setDescription('List report categories and inspect their subcategories')
-            .addStringOption((option) => option.setName('category-id').setDescription('Optional category ID to inspect').setRequired(false).setMaxLength(80))
-            .addIntegerOption((option) => option.setName('page').setDescription('Page number for the category list').setRequired(false).setMinValue(1).setMaxValue(999)),
-        )
-        .addSubcommand((subcommand) =>
-          subcommand
-            .setName('report-subcategory-add')
-            .setDescription('Add a report subcategory')
-            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
-            .addStringOption((option) => option.setName('name').setDescription('Subcategory name').setRequired(true).setMaxLength(80)),
-        )
-        .addSubcommand((subcommand) =>
-          subcommand
-            .setName('report-subcategory-edit')
-            .setDescription('Rename a report subcategory')
-            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
-            .addStringOption((option) => option.setName('subcategory-id').setDescription('Subcategory ID').setRequired(true).setMaxLength(80))
-            .addStringOption((option) => option.setName('name').setDescription('New subcategory name').setRequired(true).setMaxLength(80)),
-        )
-        .addSubcommand((subcommand) =>
-          subcommand
-            .setName('report-subcategory-remove')
-            .setDescription('Remove a report subcategory')
-            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
-            .addStringOption((option) => option.setName('subcategory-id').setDescription('Subcategory ID').setRequired(true).setMaxLength(80)),
-        )
-        .addSubcommand((subcommand) =>
-          subcommand
             .setName('repair')
             .setDescription('Repair ResolvX infrastructure')
             .addStringOption((option) => option.setName('mode').setDescription('Repair mode').setRequired(true).addChoices(
@@ -1583,6 +1554,40 @@ export const data =
             .setDescription('Factory-reset ResolvX after typed confirmation')
             .addStringOption((option) => option.setName('confirmation').setDescription('Type DELETE SUPPORT FORGE exactly').setRequired(true).setMinLength(20).setMaxLength(20))
             .addBooleanOption((option) => option.setName('accumulate-audit').setDescription('Keep individual audit events for future summaries').setRequired(true)),
+        ),
+    )
+    .addSubcommandGroup((group) =>
+      group
+        .setName('settings-reports')
+        .setDescription('Manage report categories and subcategories')
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('report-categories')
+            .setDescription('List report categories and inspect their subcategories')
+            .addStringOption((option) => option.setName('category-id').setDescription('Optional category ID to inspect').setRequired(false).setMaxLength(80))
+            .addIntegerOption((option) => option.setName('page').setDescription('Page number for the category list').setRequired(false).setMinValue(1).setMaxValue(999)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('report-subcategory-add')
+            .setDescription('Add a report subcategory')
+            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('name').setDescription('Subcategory name').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('report-subcategory-edit')
+            .setDescription('Rename a report subcategory')
+            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('subcategory-id').setDescription('Subcategory ID').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('name').setDescription('New subcategory name').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('report-subcategory-remove')
+            .setDescription('Remove a report subcategory')
+            .addStringOption((option) => option.setName('category-id').setDescription('Report category ID').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('subcategory-id').setDescription('Subcategory ID').setRequired(true).setMaxLength(80)),
         ),
     )
     .addSubcommandGroup((group) =>
