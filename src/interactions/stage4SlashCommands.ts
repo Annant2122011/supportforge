@@ -71,6 +71,17 @@ function activeTicketStatus(status: string): boolean {
   return ['open', 'claimed', 'pending', 'reopened'].includes(status);
 }
 
+function canHandleTicketForStaff(
+  access: Access,
+  ticket: NonNullable<Awaited<ReturnType<typeof getPersistedTicket>>>,
+  config: Awaited<ReturnType<typeof getGuildConfig>>,
+): boolean {
+  if (access.isAdmin) return true;
+  if (!ticket.departmentId) return false;
+  const department = config.departments[ticket.departmentId];
+  return Boolean(department?.staffRoleId && access.roleIds.includes(department.staffRoleId));
+}
+
 async function prepare(interaction: ChatInputCommandInteraction): Promise<{ access: Access; config: Awaited<ReturnType<typeof getGuildConfig>> }> {
   if (!interaction.guildId) throw new Error('This command must be used inside a server.');
   const config = await getGuildConfig(interaction.guildId);
@@ -242,6 +253,9 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
       if (subcommand === 'share') {
         if (!access.isStaff) throw accessDenied('a configured department staff role');
         const ticket = await requireTicketInCurrentChannel(interaction);
+        if (!canHandleTicketForStaff(access, ticket, config)) {
+          throw accessDenied('the staff role configured for this ticket department');
+        }
         const article = await getKnowledgeArticle(guildId, interaction.options.getString('article-id', true).trim(), access);
         if (!article || article.status !== 'published') throw new Error('Published article not found or you do not have permission to share it.');
         await requireTextChannel(interaction).send({
@@ -407,6 +421,9 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
       }
       if (subcommand === 'send') {
         const ticket = await requireTicketInCurrentChannel(interaction);
+        if (!canHandleTicketForStaff(access, ticket, config)) {
+          throw accessDenied('the staff role configured for this ticket department');
+        }
         const reply = await getQuickReply(guildId, interaction.options.getString('name-or-id', true), { isAdmin: access.isAdmin, roleIds: access.roleIds });
         if (!reply) throw new Error('Quick reply not found or unavailable to your roles.');
         const department = ticket.departmentId ? config.departments[ticket.departmentId] : undefined;
