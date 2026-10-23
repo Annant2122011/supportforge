@@ -1,7 +1,7 @@
 # Stage 1 Source Audit and Acceptance Report
 
 **Programme:** ResolveX four-stage product excellence  
-**Stage 1 branch:** `feature/four-stage-excellence-stage-1-clean`  
+**Stage 1 branch:** `feature/stage-1-localization-acceptance`  
 **Pull request:** [#31, Stage 1 configuration integrity, localization and acceptance](https://github.com/Annant2122011/supportforge/pull/31)  
 **Current status:** Source and automated checks pass. Live Discord acceptance and an isolated Neon restore drill remain blocked pending access to a non-production environment.
 
@@ -32,8 +32,8 @@
 ## Branch / PR reconciliation
 
 - [PR #31 is the clean Stage 1 + Stage H2 review branch](https://github.com/Annant2122011/supportforge/pull/31), based on the current `main` baseline. It replaces the older diverged Stage 1 draft for review.
-- [PR #30 is the current clean Stage 2 review branch](https://github.com/Annant2122011/supportforge/pull/30), stacked on the previous Stage 1 baseline; it will need the H2-aware Stage 2 overlay before merge.
-- Older draft PRs #24 and #25 are superseded by #28 and #29. They remain separate, unmerged histories; review the clean PRs instead.
+- [PR #32 is the H2-aware Stage 2 review branch](https://github.com/Annant2122011/supportforge/pull/32), stacked on this Stage 1 branch. It combines localization with Setup Doctor and configuration rollback.
+- Older drafts #24–#30 are superseded by the clean current PRs #31 and #32. Their histories remain intact; review the current PRs instead.
 - [PR #23, Stage H Part 2 localization](https://github.com/Annant2122011/supportforge/pull/23) provided the H2 source increment ported into this branch. Its remaining Settings pages, panel previews, selected reports and live locale acceptance remain open in the translation checklist. [PR #22, the QueryFixr rebrand/localization branch](https://github.com/Annant2122011/supportforge/pull/22) remains separate because it changes visible branding and the root command name.
 - No production deployment or database change was performed. The accidental Stage 2 file on `main` was removed with a normal corrective commit; comparing the resulting `main` tree against its prior baseline shows no net source/document changes from this programme on `main`.
 
