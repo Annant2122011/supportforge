@@ -12,6 +12,7 @@ import {
   type AdvancedGuildSettings,
 } from './advancedSettingsService';
 import { getSupportHoursPolicies, replaceSupportHoursPolicies, type SupportHoursPolicy } from './supportHoursService';
+import { listTicketForms, restoreTicketFormCatalogSnapshot, type TicketFormVersion } from './ticketFormService';
 
 const DOCUMENT_KEY = 'configuration-history';
 const HISTORY_VERSION = 1;
@@ -27,13 +28,16 @@ export interface ConfigurationSnapshotMetadata {
   departmentCount: number;
   panelCount: number;
   tagCount: number;
+  formCount: number;
+  supportHoursPolicyCount: number;
 }
 
 interface ConfigurationSnapshot extends ConfigurationSnapshotMetadata {
   payload: {
     guildConfig: GuildConfig;
     advancedSettings: AdvancedGuildSettings;
-    supportHours: SupportHoursPolicy[];
+    supportHours?: SupportHoursPolicy[];
+    ticketForms?: TicketFormVersion[];
   };
 }
 
@@ -67,7 +71,7 @@ async function readDocument(): Promise<ConfigurationHistoryDocument> {
           typeof item.id === 'string' &&
           item.guildId === guildId &&
           item.payload && typeof item.payload === 'object' &&
-          item.payload.guildConfig && item.payload.advancedSettings && Array.isArray(item.payload.supportHours)),
+          item.payload.guildConfig && item.payload.advancedSettings),
       ).slice(0, MAX_SNAPSHOTS_PER_GUILD);
     }
   }
@@ -101,12 +105,13 @@ function countTags(config: GuildConfig): number {
 }
 
 async function capturePayload(guildId: string): Promise<ConfigurationSnapshot['payload']> {
-  const [guildConfig, advancedSettings, supportHours] = await Promise.all([
+  const [guildConfig, advancedSettings, supportHours, ticketForms] = await Promise.all([
     getGuildConfig(guildId),
     getAdvancedSettings(guildId),
     getSupportHoursPolicies(guildId),
+    listTicketForms(guildId),
   ]);
-  return cloneJson({ guildConfig, advancedSettings, supportHours });
+  return cloneJson({ guildConfig, advancedSettings, supportHours, ticketForms });
 }
 
 async function savePayloadSnapshot(
@@ -125,6 +130,8 @@ async function savePayloadSnapshot(
     departmentCount: Object.keys(payload.guildConfig.departments ?? {}).length,
     panelCount: Object.keys(payload.guildConfig.customPanels ?? {}).length,
     tagCount: countTags(payload.guildConfig),
+    formCount: payload.ticketForms?.length ?? 0,
+    supportHoursPolicyCount: payload.supportHours?.length ?? 0,
     payload: cloneJson(payload),
   };
 
@@ -136,7 +143,7 @@ async function savePayloadSnapshot(
   });
 }
 
-/** Save a bounded, per-server checkpoint of the two existing configuration documents. */
+/** Save a bounded, per-server checkpoint of guild, advanced, support-hours and form configuration. */
 export async function createConfigurationSnapshot(
   guildId: string,
   actor: { id: string; name: string },
@@ -166,7 +173,7 @@ export async function getConfigurationSnapshot(
 }
 
 /**
- * Restore only the requesting guild's configuration documents and support-hours policies. Tickets,
+ * Restore only the requesting guild's configuration documents, support-hours policies and existing form schemas. Tickets,
  * transcripts, audit events, message archives and other guilds are not changed.
  * A pre-restore checkpoint is saved first; partial failures attempt compensation.
  */
@@ -203,7 +210,12 @@ export async function restoreConfigurationSnapshot(
     await updateAdvancedSettings(guildId, (current) => {
       Object.assign(current, cloneJson(payload.advancedSettings));
     });
-    await replaceSupportHoursPolicies(guildId, cloneJson(payload.supportHours ?? []), actor.id);
+    if (payload.supportHours !== undefined) {
+      await replaceSupportHoursPolicies(guildId, cloneJson(payload.supportHours), actor.id);
+    }
+    if (payload.ticketForms !== undefined) {
+      await restoreTicketFormCatalogSnapshot(guildId, cloneJson(payload.ticketForms), actor.id);
+    }
   };
 
   try {
