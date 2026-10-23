@@ -22,7 +22,14 @@ const hasPostgres =
 const isLocalPostgres = [
   process.env.DATABASE_URL,
   process.env.DATABASE_URL_UNPOOLED,
-].every((url) => /@(localhost|127\\.0\\.0\\.1)(:\\d+)?\\//i.test(url ?? ''));
+].every((value) => {
+  try {
+    const hostname = new URL(value ?? '').hostname;
+    return hostname === 'localhost' || hostname === '127.0.0.1';
+  } catch {
+    return false;
+  }
+});
 const postgresIntegrationEnabled = hasPostgres && isLocalPostgres;
 
 if (hasPostgres && !isLocalPostgres) {
