@@ -32,6 +32,7 @@ import { getField, isTicketTopic, setField } from './ticketStateService';
 import { projectDurableTicketTopic } from './ticketTopicProjectionService';
 import { refreshPrivateThreadPanel } from './privateThreadTicketService';
 import { logTicketEvent } from './auditLogService';
+import { runTrackedOperationalTask } from './operationalTaskTelemetry';
 
 const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 const WARNING_MARKER_PREFIX = 'ResolveX inactivity warning';
@@ -776,7 +777,9 @@ export function startTicketInactivityScheduler(client: Client): void {
     try {
       for (const guild of client.guilds.cache.values()) {
         try {
-          await sweepTicketInactivityForGuild(client, guild);
+          await runTrackedOperationalTask('ticket-inactivity', guild.id, () =>
+            sweepTicketInactivityForGuild(client, guild),
+          );
         } catch (error) {
           console.warn('Ticket inactivity scheduler failed for guild ' + guild.id + ':', error);
         }
