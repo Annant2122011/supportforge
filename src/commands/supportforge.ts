@@ -30,6 +30,7 @@ import {
 import { executeTicketCommand } from '../interactions/ticketCommandTools';
 import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
 import { UI_THEMES, getThemeColor } from '../services/uiThemeService';
+import { buildSystemDiagnosticsEmbed, runSystemDiagnostics } from '../services/systemDiagnosticsService';
 import { handleSettingsSlashCommand } from '../interactions/settingsCommandTools';
 import {
   applyTicketFormTemplate,
@@ -1571,6 +1572,21 @@ export const data =
     )
     .addSubcommandGroup((group) =>
       group
+        .setName('diagnostics')
+        .setDescription('Run read-only system health and setup checks')
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('health')
+            .setDescription('Check gateway, Neon connectivity, outbox and required Discord resources'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('setup-doctor')
+            .setDescription('Run detailed configuration and permission checks without applying changes'),
+        ),
+    )
+    .addSubcommandGroup((group) =>
+      group
         .setName('audit')
         .setDescription('Review audit summaries and manage audit controls')
         .addSubcommand((subcommand) =>
@@ -1768,7 +1784,8 @@ export async function execute(
     group === 'category' ||
     group === 'premium' ||
     group === 'form' ||
-    group === 'panel'
+    group === 'panel' ||
+    group === 'diagnostics'
   ) {
     if (!isAdminLike(interaction)) {
       await interaction.reply({
@@ -1782,6 +1799,17 @@ export async function execute(
   }
 
   try {
+    if (group === 'diagnostics') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const mode = subcommand === 'setup-doctor' ? 'setup-doctor' : 'health';
+      const report = await runSystemDiagnostics(guild, mode);
+      const diagnosticConfig = await getGuildConfig(guild.id).catch(() => null);
+      await interaction.editReply({
+        embeds: [buildSystemDiagnosticsEmbed(report, getThemeColor(diagnosticConfig?.theme ?? 'midnight'))],
+      });
+      return;
+    }
+
     if (group === 'audit') {
       await handleAuditSlashCommand(interaction);
       return;
