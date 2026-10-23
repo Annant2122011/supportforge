@@ -34,8 +34,13 @@ async function assertWorkflowReferencesExist(guildId: string, definition: Workfl
   const config = await getGuildConfig(guildId);
   const departmentIds = new Set(Object.entries(config.departments).flatMap(([key, department]) => [key, department.id]));
   const tagIds = new Set(Object.values(config.departments).flatMap((department) => Object.values(department.tags).map((tag) => tag.id)));
+  for (const condition of definition.conditions) {
+    if (condition.field === 'departmentId' && !departmentIds.has(condition.equals)) {
+      throw new Error('Workflow condition references a department that does not exist in this server: ' + condition.equals);
+    }
+  }
   const replies = await listQuickReplies(guildId, { isAdmin: true, roleIds: [] });
-  const replyIds = new Set(replies.map((reply) => reply.id));
+  const replyById = new Map(replies.map((reply) => [reply.id, reply]));
   for (const action of definition.actions) {
     if (action.type === 'assign_department' && !departmentIds.has(action.value)) {
       throw new Error('Workflow references a department that does not exist in this server: ' + action.value);
@@ -43,8 +48,8 @@ async function assertWorkflowReferencesExist(guildId: string, definition: Workfl
     if (action.type === 'add_tag' && !tagIds.has(action.value)) {
       throw new Error('Workflow references a tag that does not exist in this server: ' + action.value);
     }
-    if (action.type === 'send_quick_reply' && !replyIds.has(action.value)) {
-      throw new Error('Workflow references a quick reply that does not exist in this server: ' + action.value);
+    if (action.type === 'send_quick_reply' && !replyById.get(action.value)?.enabled) {
+      throw new Error('Workflow must reference an enabled quick reply in this server: ' + action.value);
     }
   }
 }
