@@ -26,6 +26,8 @@ const bnIN: Partial<Record<TranslationKey, string>> = {
   'ticket.created.description': 'আপনার সহায়তার টিকিট প্রস্তুত। দলের একজন সদস্য এখানে উত্তর দেবেন।',
   'ticket.claimed': '{staffName} এই টিকিটের দায়িত্ব নিয়েছেন।',
   'ticket.closed': 'টিকিট #{ticketNumber} বন্ধ করা হয়েছে।',
+  'ticket.closed.saved': 'টিকিট #{ticketNumber} বন্ধ হয়েছে এবং এর ট্রান্সক্রিপ্ট সংরক্ষণ করা হয়েছে। Discord চ্যানেলের বিন্যাস পটভূমিতে সমন্বয় করা হচ্ছে।',
+  'ticket.closed.announcement': '{actor} টিকিট #{ticketNumber} বন্ধ করেছেন।',
   'ticket.reopened': 'টিকিট #{ticketNumber} আবার খোলা হয়েছে।',
   'ticket.priority.changed': 'টিকিটের অগ্রাধিকার {priority} করা হয়েছে।',
   'ticket.priority.commandSuccess': 'টিকিট #{ticketNumber}-এর অগ্রাধিকার এখন {priority}।',
