@@ -58,7 +58,7 @@ test('preview identifies incomplete channel history and missing attachment bytes
   assert.equal(preview.attachmentBytesUnavailable, 5);
   assert.ok(preview.warnings.some((warning) => warning.includes('snapshot is missing')));
   assert.ok(preview.warnings.some((warning) => warning.includes('scan is incomplete')));
-  assert.ok(preview.warnings.some((warning) => warning.includes('do not have a corresponding attachment archive row')));
+  assert.ok(preview.warnings.some((warning) => warning.includes('do not yet have a corresponding attachment archive row')));
   assert.ok(preview.warnings.some((warning) => warning.includes('do not have archived bytes')));
 });
 
