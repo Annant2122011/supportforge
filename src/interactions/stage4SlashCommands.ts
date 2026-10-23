@@ -191,6 +191,10 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           guildId, interaction.options.getString('article-id', true).trim(),
           interaction.options.getInteger('revision', true), actorId, changes,
         );
+        if (config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
+          action: 'KNOWLEDGE_ARTICLE_UPDATED', actorId, actorName: interaction.user.tag,
+          detail: 'Updated Knowledge Base article ' + article.id + ' to revision ' + article.revision + '; changed fields=' + Object.keys(changes).join(',') + '.',
+        });
         await interaction.editReply('Updated article "' + article.title + '" to revision ' + article.revision + '. The previous revision remains in history.');
         return true;
       }
@@ -282,6 +286,10 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           interaction.options.getInteger('current-revision', true),
           actorId,
         );
+        if (config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
+          action: 'KNOWLEDGE_ARTICLE_REVISION_RESTORED', actorId, actorName: interaction.user.tag,
+          detail: 'Restored historical article content for ' + article.id + ' into new revision ' + article.revision + '.',
+        });
         await interaction.editReply('Restored historical content into a new revision. Article "' + article.title + '" is now revision ' + article.revision + '; previous history was not overwritten.');
         return true;
       }
@@ -323,6 +331,10 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
 
       if (subcommand === 'synonyms-delete') {
         const deleted = await deleteKnowledgeSynonyms(guildId, interaction.options.getString('term', true));
+        if (deleted && config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
+          action: 'KNOWLEDGE_SYNONYMS_DELETED', actorId, actorName: interaction.user.tag,
+          detail: 'Deleted deterministic Knowledge Base synonym mapping.',
+        });
         await interaction.editReply(deleted ? 'Removed that synonym mapping.' : 'No matching synonym mapping was found.');
         return true;
       }
@@ -384,7 +396,12 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
       if (subcommand === 'delete') {
         if (!access.isAdmin) throw accessDenied('Manage Server or Administrator permission');
         if (!interaction.options.getBoolean('confirm', true)) throw new Error('Delete was not confirmed. No quick reply was removed.');
-        const deleted = await deleteQuickReply(guildId, interaction.options.getString('name-or-id', true));
+        const quickReplyId = interaction.options.getString('name-or-id', true);
+        const deleted = await deleteQuickReply(guildId, quickReplyId);
+        if (deleted && config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
+          action: 'QUICK_REPLY_DELETED', actorId, actorName: interaction.user.tag,
+          detail: 'Deleted quick reply identified by ' + quickReplyId.slice(0, 80) + '.',
+        });
         await interaction.editReply(deleted ? 'Quick reply deleted.' : 'No matching quick reply was found.');
         return true;
       }
@@ -440,7 +457,13 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
       }
       if (subcommand === 'unlink') {
         if (!interaction.options.getBoolean('confirm', true)) throw new Error('Unlink was not confirmed. No relationship was removed.');
-        const removed = await unlinkRelatedTickets(guildId, ticket.id, interaction.options.getString('other-ticket-id', true).trim());
+        const otherTicketId = interaction.options.getString('other-ticket-id', true).trim();
+        const removed = await unlinkRelatedTickets(guildId, ticket.id, otherTicketId);
+        if (removed && config.supportCategoryId) await logTicketEvent(interaction.guild!, config.supportCategoryId, {
+          ticketNumber: ticket.ticketNumber ?? ticket.id, ticketChannelId: ticket.channelId,
+          event: 'RELATED_TICKET_UNLINKED', actorId, actor: interaction.user.tag, actorName: interaction.user.tag,
+          detail: 'Removed one same-server related-ticket link from ' + ticket.id + '.',
+        });
         await interaction.editReply(removed ? 'Related-ticket link removed. Both tickets and their history remain unchanged.' : 'No matching related-ticket link was found.');
         return true;
       }
@@ -493,11 +516,16 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
       }
       if (subcommand === 'delete') {
         if (!interaction.options.getBoolean('confirm', true)) throw new Error('Delete was not confirmed. No workflow template was removed.');
+        const templateId = interaction.options.getString('template-id', true).trim();
         const removed = await deleteWorkflowTemplate(
           guildId,
-          interaction.options.getString('template-id', true).trim(),
+          templateId,
           interaction.options.getInteger('version', true),
         );
+        if (removed && config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
+          action: 'WORKFLOW_TEMPLATE_DELETED', actorId, actorName: interaction.user.tag,
+          detail: 'Deleted safe workflow template catalogue entry ' + templateId + '.',
+        });
         await interaction.editReply(removed ? 'Workflow template deleted.' : 'No template matched that ID and version. Refresh before retrying.');
         return true;
       }
