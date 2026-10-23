@@ -24,6 +24,8 @@ const enUS = {
   'ticket.created.description': 'Your support ticket is ready. A team member will respond here.',
   'ticket.claimed': 'This ticket has been claimed by {staffName}.',
   'ticket.closed': 'Ticket #{ticketNumber} has been closed.',
+  'ticket.closed.saved': 'Ticket #{ticketNumber} is closed and its transcript has been saved. Discord channel organization is syncing in the background.',
+  'ticket.closed.announcement': 'Ticket #{ticketNumber} has been closed by {actor}.',
   'ticket.reopened': 'Ticket #{ticketNumber} has been reopened.',
   'ticket.priority.changed': 'Ticket priority changed to {priority}.',
   'ticket.priority.commandSuccess': 'Ticket #{ticketNumber} priority is now {priority}.',
