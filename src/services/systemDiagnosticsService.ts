@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   ChannelType,
   EmbedBuilder,
@@ -9,6 +10,7 @@ import { getGuildConfig } from './configService';
 import { getAdvancedSettings } from './advancedSettingsService';
 import { getPostgresPool, pingPostgres } from '../core/persistence/postgresDatabase';
 import { CURRENT_POSTGRES_MIGRATION_ID } from '../core/persistence/postgresMigrations';
+import { listTicketForms, type TicketFormVersion } from './ticketFormService';
 
 export type DiagnosticSeverity = 'ok' | 'info' | 'warning' | 'error';
 
@@ -18,10 +20,12 @@ export interface DiagnosticFinding {
   title: string;
   detail: string;
   remedy?: string;
+  referenceId?: string;
 }
 
 export interface SystemDiagnosticsReport {
   guildId: string;
+  reportId: string;
   generatedAt: string;
   mode: 'health' | 'setup-doctor';
   findings: DiagnosticFinding[];
@@ -144,6 +148,12 @@ function checkBotPermissions(
     .map(([name]) => name);
 }
 
+function addDiagnosticReferences(report: SystemDiagnosticsReport): void {
+  report.findings.forEach((finding, index) => {
+    finding.referenceId ??= report.reportId + '-' + String(index + 1).padStart(3, '0');
+  });
+}
+
 export async function runSystemDiagnostics(
   guild: Guild,
   mode: 'health' | 'setup-doctor' = 'health',
@@ -151,6 +161,7 @@ export async function runSystemDiagnostics(
   const findings: DiagnosticFinding[] = [];
   const report: SystemDiagnosticsReport = {
     guildId: guild.id,
+    reportId: 'DX-' + randomUUID().slice(0, 8).toUpperCase(),
     generatedAt: new Date().toISOString(),
     mode,
     findings,
@@ -303,6 +314,7 @@ export async function runSystemDiagnostics(
       detail: 'One or more configuration documents could not be read or normalized.',
       remedy: 'Inspect database-document health and existing config validation errors before running repairs. Do not reset the configuration.',
     });
+    addDiagnosticReferences(report);
     return report;
   }
 
@@ -512,6 +524,7 @@ export async function runSystemDiagnostics(
     detail: 'This report does not execute repairs, delete/rename/publish Discord resources or modify ticket records. Existing configuration readers may initialize missing default documents.',
   });
 
+  addDiagnosticReferences(report);
   return report;
 }
 
@@ -530,7 +543,7 @@ export function buildSystemDiagnosticsEmbed(
       '\n**Checks:** ' + report.findings.length +
       '\n\nThis report does not execute repairs. A green result is not a substitute for the live acceptance checklist.',
     )
-    .setFooter({ text: 'Guild ' + report.guildId + ' • secrets and connection strings are never shown' });
+    .setFooter({ text: 'Guild ' + report.guildId + ' • report ' + report.reportId + ' • secrets and connection strings are never shown' });
 
   const grouped = new Map<string, DiagnosticFinding[]>();
   for (const finding of report.findings) {
