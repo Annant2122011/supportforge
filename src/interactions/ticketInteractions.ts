@@ -5236,7 +5236,7 @@ async function handlePanelButton(
       id.slice('ticket:priority:set:'.length),
     );
     if (!priority) {
-      await replyError(interaction, '❌ Invalid ticket priority.');
+      await replyError(interaction, '❌ ' + translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'errors.invalidInput'));
       return;
     }
     await applyTicketPriority(interaction, priority);
