@@ -341,6 +341,70 @@ export async function getSupportHoursPolicies(guildId: string): Promise<SupportH
   return JSON.parse(JSON.stringify(policies)) as SupportHoursPolicy[];
 }
 
+/**
+ * Replace one guild's schedule policy set from a reviewed configuration snapshot.
+ * Inputs are fully validated before the existing set is changed. Policy versions
+ * remain monotonic so stale cached/intake decisions cannot be mistaken for current.
+ */
+export async function replaceSupportHoursPolicies(
+  guildId: string,
+  inputs: readonly SupportHoursPolicy[],
+  actorId: string,
+): Promise<SupportHoursPolicy[]> {
+  if (!Array.isArray(inputs)) throw new Error('Support-hours snapshot must contain a policy list.');
+  const prepared = new Map<string, SupportHoursPolicy>();
+  for (const raw of inputs) {
+    const normalized = validateSupportHoursPolicy({
+      scopeType: raw.scopeType,
+      scopeId: raw.scopeId,
+      enabled: raw.enabled,
+      timezone: raw.timezone,
+      outsideHoursBehavior: raw.outsideHoursBehavior,
+      weeklySchedule: raw.weeklySchedule,
+      updatedBy: actorId,
+    });
+    const key = policyKey(normalized.scopeType, normalized.scopeId);
+    if (prepared.has(key)) throw new Error('Support-hours snapshot contains a duplicate policy scope: ' + key);
+    prepared.set(key, {
+      id: key,
+      ...normalized,
+      scopeId: normalized.scopeId ?? null,
+      version: Math.max(0, Number.isInteger(raw.version) ? raw.version : 0),
+      updatedAt: typeof raw.updatedAt === 'string' && Number.isFinite(Date.parse(raw.updatedAt))
+        ? raw.updatedAt
+        : new Date().toISOString(),
+      updatedBy: actorId || null,
+    });
+  }
+
+  const current = await loadState();
+  const previousGuildPolicies = current.guilds[guildId] ?? {};
+  const nextGuildPolicies: Record<string, SupportHoursPolicy> = {};
+  for (const [key, incoming] of prepared) {
+    const previous = previousGuildPolicies[key];
+    nextGuildPolicies[key] = {
+      ...incoming,
+      version: Math.max(previous?.version ?? 0, incoming.version) + 1,
+      updatedAt: new Date().toISOString(),
+      updatedBy: actorId || null,
+    };
+  }
+
+  const previousSnapshot = JSON.parse(JSON.stringify(previousGuildPolicies)) as Record<string, SupportHoursPolicy>;
+  if (Object.keys(nextGuildPolicies).length) current.guilds[guildId] = nextGuildPolicies;
+  else delete current.guilds[guildId];
+
+  try {
+    await persistState();
+  } catch (error) {
+    if (Object.keys(previousSnapshot).length) current.guilds[guildId] = previousSnapshot;
+    else delete current.guilds[guildId];
+    throw error;
+  }
+
+  return JSON.parse(JSON.stringify(Object.values(nextGuildPolicies))) as SupportHoursPolicy[];
+}
+
 export async function getSupportHoursPolicy(
   guildId: string,
   scopeType: SupportHoursScopeType,
