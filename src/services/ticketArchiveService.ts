@@ -850,7 +850,7 @@ async function permissionOverwritePayload(
   return Array.from(map.values());
 }
 
-const RECOVERY_SEGMENT_PATTERN = /\\u2063[\\u200B\\u200C]{64}\\u2063/g;
+const RECOVERY_SEGMENT_PATTERN = /\u2063[\u200B\u200C]{64}\u2063/g;
 
 function recoverySegmentMarker(recoveryEventId: string, originalMessageId: string, segmentKey: string): string {
   const hex = createHash('sha256')
@@ -859,7 +859,7 @@ function recoverySegmentMarker(recoveryEventId: string, originalMessageId: strin
     .slice(0, 16);
   const bits = hex.split('').map((character) => Number.parseInt(character, 16).toString(2).padStart(4, '0')).join('');
   // Deterministic zero-width marker: restored text remains readable, but retries can find sends.
-  return '\\u2063' + bits.split('').map((bit) => bit === '0' ? '\\u200B' : '\\u200C').join('') + '\\u2063';
+  return '\u2063' + bits.split('').map((bit) => bit === '0' ? '\u200B' : '\u200C').join('') + '\u2063';
 }
 
 function recoveryMarkersInMessage(message: Message): string[] {
