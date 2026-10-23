@@ -250,7 +250,7 @@ export async function runSystemDiagnostics(
     return report;
   }
 
-  const channelResults = await Promise.all([
+  await Promise.all([
     {
       id: config.supportCategoryId,
       name: 'Support category',
