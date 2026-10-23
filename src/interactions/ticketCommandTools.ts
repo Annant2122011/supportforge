@@ -1257,7 +1257,7 @@ export async function executeTicketCommand(
 
       if (!PRIORITIES.has(level)) {
         await interaction.editReply(
-          '❌ Invalid priority.',
+          '❌ ' + translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'errors.invalidInput'),
         );
         return;
       }
