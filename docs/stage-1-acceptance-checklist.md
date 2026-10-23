@@ -4,7 +4,7 @@ This checklist is for a non-production bot and test guild. Do not use production
 
 ## Current evidence snapshot (2026-10-23)
 
-- **Source/CI baseline:** PASS for the clean Stage 1 + Stage H2 branch at [PR #31](https://github.com/Annant2122011/supportforge/pull/31). [Build #1194](https://github.com/Annant2122011/supportforge/actions/runs/39959732876) passed; [ResolvX CI #1970](https://github.com/Annant2122011/supportforge/actions/runs/39959732860) passed with 137 tests, zero failures/skips, and disposable PostgreSQL verification.
+- **Source/CI baseline:** PASS for the clean Stage 1 + Stage H2 branch at [PR #31](https://github.com/Annant2122011/supportforge/pull/31). [Build #1198](https://github.com/Annant2122011/supportforge/actions/runs/39961674679) and [ResolvX CI #1983](https://github.com/Annant2122011/supportforge/actions/runs/39961674673) passed on the previous source-changing head, including build, tests and disposable PostgreSQL verification. This checklist-only follow-up adds an automated slash-command option-limit regression test; CI on the updated head is tracked separately.
 - **Production store:** source checks preserve Neon/PostgreSQL; the CI database is disposable and does not establish production Neon connectivity or backup recoverability.
 - **Discord acceptance:** BLOCKED / NOT RUN. No authorized non-production guild session was available for interaction, permission, published command, rate-limit and restart tests.
 - **Neon restore drill:** BLOCKED / NOT RUN. No authorized isolated non-production Neon target or backup artifact was available.
@@ -32,7 +32,8 @@ The checkboxes below separate source/CI evidence from live-environment acceptanc
 - [x] Support hours: scope inheritance, overnight intervals, invalid/overlapping intervals and DST-boundary tests pass.
 - [x] Inactivity: activity reset, exemptions, stale anchors, policy changes, transcript failure and compare-and-close regressions pass.
 - [x] Translation: supported locales, per-key English fallback, safe interpolation, formatting and preserved custom content tests pass. H2 page/command live acceptance remains open.
-- [ ] Command registration stays within Discord's application command/component limits.
+- [x] Slash-command option lists are recursively checked against Discord's 25-option cap and duplicate sibling names by `tests/commandRegistrationLimits.test.ts`. The updated test still requires CI on this exact head.
+- [ ] Live component-row limits and actual published command registration remain part of non-production Discord acceptance.
 
 ## 3. Test-guild acceptance
 
