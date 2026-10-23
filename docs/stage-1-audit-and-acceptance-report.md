@@ -1,39 +1,42 @@
 # Stage 1 Source Audit and Acceptance Report
 
-**Scope:** Stage 1 of the four-stage ResolveX programme, with the existing Stage A–H code treated as the audited baseline.  
-**Current branch head:** `671e69da454e8d383d1dbcf0103ae790000ab982`  
-**Status:** Source/CI gates passed; live-guild and isolated Neon recovery acceptance are blocked pending an authorized test environment.
+**Programme:** ResolveX four-stage product excellence  
+**Stage 1 branch:** `feature/four-stage-excellence-stage-1-clean`  
+**Pull request:** [#28, Stage 1 configuration integrity, source audit and acceptance](https://github.com/Annant2122011/supportforge/pull/28)  
+**Current status:** Source and automated checks pass. Live Discord acceptance and an isolated Neon restore drill remain blocked pending access to a non-production environment.
 
 ## Evidence summary
 
-| Area | Result | Evidence / limits |
+| Area | Result | Evidence / limit |
 |---|---|---|
-| TypeScript build | **PASS** | [Build run #1184](https://github.com/Annant2122011/supportforge/actions/runs/39951597149) succeeded on the current Stage 1 head. |
-| Automated test suite | **PASS** | [ResolvX CI run #1865](https://github.com/Annant2122011/supportforge/actions/runs/39951597012): 140 passed, 0 failed, 0 skipped. |
-| PostgreSQL verification | **PASS** | Same ResolvX CI run verified required tables, referential integrity and active outbox lease state against disposable CI PostgreSQL. |
-| Custom branding/config preservation | **PASS in unit tests** | Exact built-in defaults are migrated; administrator-authored labels, descriptions, tags, buttons, confirmation text and custom footers are preserved. See `tests/managedBrandDefaults.test.ts`. |
-| Persisted panel role restrictions | **PASS in unit tests** | Shared string-only Snowflake validation is exercised through the same sanitizer used by the config loader for draft panel/button restrictions and immutable published-panel snapshots. |
-| Neon remains production provider | **PASS in source/CI review** | No provider change or live database migration was introduced. CI uses disposable PostgreSQL; it does not authenticate to or change production Neon. |
-| Non-production Discord acceptance | **BLOCKED** | No test guild session/credentials were available for live permissions, interactions, role overwrites, rate limits, or command deployment validation. |
-| Isolated Neon backup/restore drill | **BLOCKED** | No authorized disposable Neon target or backup artifact was available. CI database verification is not a production recovery drill. |
+| TypeScript build | **PASS** | [Build run #1192](https://github.com/Annant2122011/supportforge/actions/runs/39957752517) succeeded on the clean Stage 1 branch. |
+| Automated tests | **PASS** | [ResolvX CI run #1951](https://github.com/Annant2122011/supportforge/actions/runs/39957752790): 135 passed, 0 failed, 0 skipped. |
+| PostgreSQL verification | **PASS** | Same CI run verified required tables, referential integrity and the active outbox lease state against disposable CI PostgreSQL. This is not a connection to production Neon. |
+| Managed branding migration | **PASS in unit tests** | Exact application-owned defaults are migrated; custom department names, tags, descriptions, panel text, button labels, confirmation copy and custom footers are preserved. |
+| Panel role restrictions | **PASS in unit tests** | Role restrictions are normalized at the editable draft, button, published configuration and published-button layers. Valid Snowflake IDs remain strings, malformed IDs are rejected and duplicates are removed. |
+| Production provider policy | **PASS in source/CI review** | Neon/PostgreSQL remains authoritative; no live provider switch or SQL migration was introduced in Stage 1. |
+| Live test-guild acceptance | **BLOCKED** | No authorized test-guild bot/session was available to verify actual Discord REST permissions, published interactions, role overwrites, command registration, rate limits and restart behavior. |
+| Non-production Neon backup/restore | **BLOCKED** | No authorized isolated Neon target/backup artifact was available. CI PostgreSQL verification is not a restore drill. |
 
-## Findings fixed in this pass
+## Confirmed findings and fixes
 
-1. Replaced recursive branding replacement with exact-match migrations of application-owned defaults. The migration avoids rewriting custom server-created labels and copy.
-2. Fixed persisted Discord role-ID validation. A malformed escaped digit pattern could fail to recognize valid Snowflake IDs. The shared validator treats IDs as strings, rejects malformed values, removes duplicates, and now sanitizes both draft and published role restrictions, including the published button list.
-3. Corrected the retention summary so disabled retention is described as no timer with the configured maximum, not as unlimited retention.
-4. Added regression coverage for custom text preservation, role restrictions and published snapshot data.
-5. Preserved the live Neon/PostgreSQL architecture, existing JSON configuration/migration data and Stage A–H roadmap boundary.
+1. Removed recursive branding substitutions from the two configuration normalizers. Only exact known managed defaults are migrated; user/server-authored content is left intact.
+2. Corrected persisted Discord role-ID normalization so draft and immutable published-panel access restrictions are treated consistently.
+3. Corrected the Settings retention summary: a disabled timer is shown as no timer within the configured maximum, not “unlimited.”
+4. Added regression tests for managed-default migration, custom-text preservation and the role restrictions embedded in published panel snapshots.
+5. Reconciled the inactivity auto-close registry entry with the existing role/department exemption controls while keeping live acceptance clearly incomplete.
+6. Added the four-stage programme architecture, a detailed non-production acceptance checklist and this evidence report.
 
-## Repository / pull-request audit
+## Branch / PR reconciliation
 
-- [PR #24, Stage 1](https://github.com/Annant2122011/supportforge/pull/24) contains the source-audit fixes and remains a draft pending live acceptance.
-- [PR #25, Stage 2](https://github.com/Annant2122011/supportforge/pull/25) is stacked on this Stage 1 branch. It must be reviewed and merged after its own final CI and acceptance gates, not directly into `main` independently.
-- [PR #23, Stage H Part 2 localization](https://github.com/Annant2122011/supportforge/pull/23) and [PR #22, QueryFixr rebrand/localization](https://github.com/Annant2122011/supportforge/pull/22) are separate drafts. They remain out of this branch: the QueryFixr PR changes visible branding and the root command name, so it is not safe to combine casually with ResolveX.
-- No feature from either conflicting branch was silently copied into Stage 1. No force-push, history rewrite, production migration or deployment was performed.
+- [PR #28 is the clean Stage 1 review branch](https://github.com/Annant2122011/supportforge/pull/28), based on the current `main` commit. It replaces the older diverged Stage 1 draft for review.
+- [PR #29 is the clean Stage 2 review branch](https://github.com/Annant2122011/supportforge/pull/29), stacked on Stage 1. It must not be merged before its Stage 1 parent.
+- Older draft PRs #24 and #25 are superseded by #28 and #29. They remain separate, unmerged histories; review the clean PRs instead.
+- [PR #23, Stage H Part 2 localization](https://github.com/Annant2122011/supportforge/pull/23) and [PR #22, the QueryFixr rebrand/localization branch](https://github.com/Annant2122011/supportforge/pull/22) remain separate review items. The QueryFixr branch changes visible branding and the root command name, so it was not copied into ResolveX.
+- No production deployment or database change was performed. The accidental Stage 2 file on `main` was removed with a normal corrective commit; comparing the resulting `main` tree against its prior baseline shows no net source/document changes from this programme on `main`.
 
-## Remaining release gate
+## Release gate
 
-The code/CI portion of Stage 1 is green. Stage 1 is **not production-accepted** until a person with the test environment runs the live scenarios in [the acceptance checklist](stage-1-acceptance-checklist.md), saves the actual results, and completes a restore from a backup into a separate non-production Neon target.
+Stage 1 is **not production-accepted** until the checklist in [stage-1-acceptance-checklist.md](stage-1-acceptance-checklist.md) is executed in an authorized non-production Discord guild, its results are recorded, and a backup is restored into a separate non-production Neon target.
 
-Do not mark blocked checks as passed merely because unit tests passed. Test data should stay isolated from production tickets, channels and Neon records.
+Record every scenario as `PASS`, `FAIL`, `BLOCKED` or `NOT RUN` with an actual run/incident reference. Do not mark environment-dependent checks passed based only on unit tests.
