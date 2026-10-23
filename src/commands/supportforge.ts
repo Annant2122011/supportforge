@@ -30,6 +30,12 @@ import {
 import { executeTicketCommand } from '../interactions/ticketCommandTools';
 import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
 import { UI_THEMES, getThemeColor } from '../services/uiThemeService';
+import { buildSystemDiagnosticsEmbed, runSystemDiagnostics } from '../services/systemDiagnosticsService';
+import {
+  createConfigurationSnapshot,
+  listConfigurationSnapshots,
+  restoreConfigurationSnapshot,
+} from '../services/configurationHistoryService';
 import { handleSettingsSlashCommand } from '../interactions/settingsCommandTools';
 import {
   applyTicketFormTemplate,
@@ -1571,6 +1577,39 @@ export const data =
     )
     .addSubcommandGroup((group) =>
       group
+        .setName('diagnostics')
+        .setDescription('Run read-only system health and setup checks')
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('health')
+            .setDescription('Check gateway, Neon connectivity, outbox and required Discord resources'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('setup-doctor')
+            .setDescription('Run detailed configuration and permission checks without applying changes'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('snapshot')
+            .setDescription('Save a versioned checkpoint of this server configuration')
+            .addStringOption((option) => option.setName('reason').setDescription('Why this checkpoint is being saved').setMaxLength(180)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('snapshots')
+            .setDescription('List recent configuration checkpoints for this server'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('restore-snapshot')
+            .setDescription('Restore a saved configuration checkpoint after typed confirmation')
+            .addStringOption((option) => option.setName('snapshot-id').setDescription('Snapshot ID from diagnostics snapshots').setRequired(true).setMaxLength(40))
+            .addStringOption((option) => option.setName('confirmation').setDescription('Type RESTORE followed by the exact snapshot ID').setRequired(true).setMaxLength(60)),
+        ),
+    )
+    .addSubcommandGroup((group) =>
+      group
         .setName('audit')
         .setDescription('Review audit summaries and manage audit controls')
         .addSubcommand((subcommand) =>
@@ -1768,7 +1807,8 @@ export async function execute(
     group === 'category' ||
     group === 'premium' ||
     group === 'form' ||
-    group === 'panel'
+    group === 'panel' ||
+    group === 'diagnostics'
   ) {
     if (!isAdminLike(interaction)) {
       await interaction.reply({
@@ -1782,6 +1822,106 @@ export async function execute(
   }
 
   try {
+    if (group === 'diagnostics') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+      if (subcommand === 'snapshot') {
+        const snapshot = await createConfigurationSnapshot(
+          guild.id,
+          { id: interaction.user.id, name: interaction.user.tag },
+          interaction.options.getString('reason') ?? 'Manual configuration checkpoint',
+        );
+        const config = await getGuildConfig(guild.id);
+        if (config.supportCategoryId) {
+          await logSettingsEvent(guild, config.supportCategoryId, {
+            action: 'CONFIGURATION_SNAPSHOT_CREATED',
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Saved configuration snapshot ' + snapshot.id + ': ' + snapshot.reason,
+          }).catch(() => undefined);
+        }
+        await interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setColor(getThemeColor(config.theme))
+            .setTitle('✅ Configuration checkpoint saved')
+            .setDescription(
+              '**Snapshot:** `' + snapshot.id + '`\n' +
+              '**Reason:** ' + snapshot.reason + '\n' +
+              '**Departments:** ' + snapshot.departmentCount + '\n' +
+              '**Custom panels:** ' + snapshot.panelCount + '\n' +
+              '**Tags:** ' + snapshot.tagCount + '\n\n' +
+              'Use `/supportforge diagnostics snapshots` to review saved checkpoints.',
+            )
+            .setFooter({ text: 'Ticket records and transcripts are not modified by configuration snapshots.' })],
+        });
+        return;
+      }
+
+      if (subcommand === 'snapshots') {
+        const snapshots = await listConfigurationSnapshots(guild.id);
+        const config = await getGuildConfig(guild.id);
+        const description = snapshots.length
+          ? snapshots.map((snapshot) =>
+              '**`' + snapshot.id + '`** · <t:' + Math.floor(Date.parse(snapshot.createdAt) / 1000) + ':R>\n' +
+              snapshot.reason + '\nDepartments: ' + snapshot.departmentCount +
+              ' · Panels: ' + snapshot.panelCount + ' · Tags: ' + snapshot.tagCount,
+            ).join('\n\n')
+          : 'No configuration checkpoints have been saved for this server yet. Run `/supportforge diagnostics snapshot` before a risky change.';
+        await interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setColor(getThemeColor(config.theme))
+            .setTitle('🗂️ Configuration History')
+            .setDescription(description.slice(0, 4000))
+            .setFooter({ text: snapshots.length + ' of up to 10 recent per-server checkpoints • restore requires typed confirmation' })],
+        });
+        return;
+      }
+
+      if (subcommand === 'restore-snapshot') {
+        const snapshotId = interaction.options.getString('snapshot-id', true).trim();
+        const confirmation = interaction.options.getString('confirmation', true).trim();
+        const result = await restoreConfigurationSnapshot(
+          guild.id,
+          snapshotId,
+          confirmation,
+          { id: interaction.user.id, name: interaction.user.tag },
+        );
+        const config = await getGuildConfig(guild.id);
+        if (config.supportCategoryId) {
+          await logSettingsEvent(guild, config.supportCategoryId, {
+            action: 'CONFIGURATION_SNAPSHOT_RESTORED',
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Restored snapshot ' + result.restored.id + ' with automatic checkpoint ' + result.checkpoint.id + '.',
+          }).catch(() => undefined);
+        }
+        const refreshFailures: string[] = [];
+        await syncPanel(guild).catch(() => refreshFailures.push('public panel'));
+        await refreshSettingsChannel(guild).catch(() => refreshFailures.push('Settings dashboard'));
+        await interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setColor(getThemeColor(config.theme))
+            .setTitle('✅ Configuration checkpoint restored')
+            .setDescription(
+              'Restored snapshot `' + result.restored.id + '`.\n' +
+              'A pre-restore checkpoint was also saved: `' + result.checkpoint.id + '`.\n\n' +
+              'Restored settings, support-hours policies and current form definitions using new immutable form versions. Existing submissions and their historical versions remain intact; forms created after the checkpoint were not deleted.' +
+              (refreshFailures.length ? '\n\n⚠️ Could not refresh: ' + refreshFailures.join(', ') + '. Use the Settings Refresh control after inspecting permissions.' : ''),
+            )
+            .setFooter({ text: 'Restore operations are audited; earlier snapshots remain available.' })],
+        });
+        return;
+      }
+
+      const mode = subcommand === 'setup-doctor' ? 'setup-doctor' : 'health';
+      const report = await runSystemDiagnostics(guild, mode);
+      const diagnosticConfig = await getGuildConfig(guild.id).catch(() => null);
+      await interaction.editReply({
+        embeds: [buildSystemDiagnosticsEmbed(report, getThemeColor(diagnosticConfig?.theme ?? 'midnight'))],
+      });
+      return;
+    }
+
     if (group === 'audit') {
       await handleAuditSlashCommand(interaction);
       return;
