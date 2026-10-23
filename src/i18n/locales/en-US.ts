@@ -17,7 +17,7 @@ const enUS = {
   'ticket.status.archived': 'Archived',
   'ticket.status.reopened': 'Reopened',
   'ticket.status.changed': 'Ticket status changed to {status}.',
-  'ticket.status.announcement': 'Ticket status changed to {status} by {actor}.',
+  'ticket.status.announcement': 'Ticket #{ticketNumber} status changed to {status} by {actor}.',
   'ticket.status.syncWarning': 'Ticket status changed to {status} in durable storage. Discord could not immediately apply: {details}. The durable ticket state was preserved.',
   'ticket.status.commandSuccess': 'Ticket #{ticketNumber} is now {status}.',
   'ticket.created.title': 'Ticket #{ticketNumber} created',
