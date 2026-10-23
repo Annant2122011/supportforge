@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
 import { initializePersistence } from '../core/persistence/provider';
@@ -274,6 +274,8 @@ export async function getConfigurationSnapshot(
 }
 export interface ConfigurationSnapshotReview {
   snapshot: ConfigurationSnapshotMetadata;
+  /** Fingerprint of the current settings at the time the preview was generated. */
+  currentFingerprint: string;
   currentCounts: {
     departmentCount: number;
     panelCount: number;
@@ -297,6 +299,20 @@ function stableSerialize(value: unknown): string {
 function withoutKeys(value: Record<string, unknown>, excluded: readonly string[]): Record<string, unknown> {
   return Object.fromEntries(Object.entries(value).filter(([key]) => !excluded.includes(key)));
 }
+
+/** Stable, content-only fingerprint used to reject stale rollback previews. */
+export function configurationFingerprint(payload: unknown): string {
+  return createHash('sha256').update(stableSerialize(payload)).digest('hex').slice(0, 16);
+}
+
+export function assertCurrentConfigurationFingerprint(expected: string, actual: string): void {
+  if (!/^[a-f0-9]{16}$/i.test(expected) || expected.toLowerCase() !== actual.toLowerCase()) {
+    throw new Error(
+      'Configuration changed after the preview was generated. Nothing was restored. Run preview-snapshot again, review the changes, then retry with its current fingerprint.',
+    );
+  }
+}
+
 
 /**
  * Read-only preview for rollback. It reports changed areas and counts without
@@ -359,6 +375,7 @@ export async function reviewConfigurationSnapshot(
 
   return {
     snapshot: metadata(target),
+    currentFingerprint: configurationFingerprint(current),
     currentCounts: {
       departmentCount: Object.keys(current.guildConfig.departments ?? {}).length,
       panelCount: Object.keys(current.guildConfig.customPanels ?? {}).length,
@@ -383,6 +400,7 @@ export async function restoreConfigurationSnapshot(
   snapshotId: string,
   confirmation: string,
   actor: { id: string; name: string },
+  expectedCurrentFingerprint: string,
 ): Promise<{
   restored: ConfigurationSnapshotMetadata;
   checkpoint: ConfigurationSnapshotMetadata;
@@ -397,6 +415,9 @@ export async function restoreConfigurationSnapshot(
   if (!target) throw new Error('That configuration snapshot does not exist for this server.');
 
   const before = await capturePayload(guildId);
+  // Reject stale previews before creating an automatic checkpoint or touching settings.
+  assertCurrentConfigurationFingerprint(expectedCurrentFingerprint, configurationFingerprint(before));
+
   const checkpoint = await savePayloadSnapshot(
     guildId,
     actor,
