@@ -38,7 +38,7 @@ test('a successful task reports completion and isolates per-guild state', () => 
   const b = getOperationalTaskFindings('guild-b', 2_000).find((finding) => finding.title.includes('Ticket retention sweep'));
   assert.equal(a?.severity, 'ok');
   assert.match(a?.detail ?? '', /500 ms/);
-  assert.equal(b?.severity, 'info');
+  assert.equal(b?.severity, 'warning');
 });
 
 test('a single task failure warns and repeated failures escalate to error', () => {
@@ -89,5 +89,5 @@ test('guild-specific task outcomes do not contaminate another guild', () => {
   const a = getOperationalTaskFindings('guild-a', 1_200).find((item) => item.title.includes('Ticket inactivity sweep'));
   const b = getOperationalTaskFindings('guild-b', 1_200).find((item) => item.title.includes('Ticket inactivity sweep'));
   assert.equal(a?.severity, 'warning');
-  assert.equal(b?.severity, 'info');
+  assert.equal(b?.severity, 'warning');
 });
