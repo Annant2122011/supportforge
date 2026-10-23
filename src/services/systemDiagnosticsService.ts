@@ -835,7 +835,8 @@ export function buildSystemDiagnosticsEmbed(
     const fieldName = (icon + ' ' + finding.area + ' • ' + finding.title + reference).slice(0, 256);
     let value = finding.detail + (finding.remedy ? '\n**Next step:** ' + finding.remedy : '');
     if (value.length > 1024) {
-      value = value.slice(0, 970) + '\n… Details shortened. Use reference ' + (finding.referenceId ?? report.reportId) + ' when inspecting logs.';
+      const suffix = '\n… Details shortened. Ref: ' + (finding.referenceId ?? report.reportId);
+      value = value.slice(0, Math.max(0, 1024 - suffix.length)) + suffix;
     }
     embed.addFields({ name: fieldName, value: value || 'No additional details.' });
   }
