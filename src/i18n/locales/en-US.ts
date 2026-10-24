@@ -1022,6 +1022,8 @@ const enUS = {
   'forms.settings.error.unknown': "Unknown error.",
   'forms.settings.embed.author': "ResolvX • Forms & Templates",
   'forms.settings.embed.continue': "Use the controls below to continue.",
+  'forms.settings.detail.statusActive': "Active",
+  'forms.settings.detail.statusInactive': "Inactive",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
