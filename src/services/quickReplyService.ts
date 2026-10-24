@@ -127,7 +127,7 @@ async function insertQuickReplyRevision(
 }
 /** Parse the page token stored in a quick-reply select menu custom ID. */
 export function parseQuickReplyPage(rawPage: string): number | null {
-  if (!/^\\d{1,5}$/.test(rawPage)) return null;
+  if (!/^\d{1,5}$/.test(rawPage)) return null;
   const page = Number(rawPage);
   return Number.isInteger(page) && page >= 0 && page <= 99_999 ? page : null;
 }
