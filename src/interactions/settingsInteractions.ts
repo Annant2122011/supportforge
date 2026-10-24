@@ -2751,7 +2751,7 @@ export async function handleSettingsInteraction(
     if (id.startsWith(SETTINGS_LAYOUT_PREFIX + ':customize:')) {
       const rawKey = id.slice((SETTINGS_LAYOUT_PREFIX + ':customize:').length);
       if (!(SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(rawKey)) {
-        await reject(interaction, 'That Settings control is not supported.');
+        await reject(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.controlUnsupported'));
         return true;
       }
       const key = rawKey as SettingsDashboardButtonKey;
@@ -2813,7 +2813,7 @@ export async function handleSettingsInteraction(
       const movingUp = id.startsWith(SETTINGS_LAYOUT_PREFIX + ':up:');
       const key = id.slice((SETTINGS_LAYOUT_PREFIX + (movingUp ? ':up:' : ':down:')).length);
       if (!(SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(key)) {
-        await reject(interaction, 'That Settings control is not supported.');
+        await reject(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.controlUnsupported'));
         return true;
       }
       await interaction.deferUpdate();
@@ -4361,14 +4361,14 @@ export async function handleSettingsInteraction(
     if (interaction.customId.startsWith('sf:settings:modal:dashboard-button:')) {
       const rawKey = interaction.customId.slice('sf:settings:modal:dashboard-button:'.length);
       if (!(SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(rawKey)) {
-        await reject(interaction, 'That Settings control is not supported.');
+        await reject(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.controlUnsupported'));
         return true;
       }
       const key = rawKey as SettingsDashboardButtonKey;
       const submittedLabel = interaction.fields.getTextInputValue('label').trim();
       const submittedEmoji = interaction.fields.getTextInputValue('emoji').trim();
       if (!submittedLabel || submittedLabel.length > 80) {
-        await reject(interaction, 'Button label must contain 1–80 characters.');
+        await reject(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.buttonLabelRequired'));
         return true;
       }
       const label = submittedLabel.toLowerCase() === 'default'
@@ -4383,7 +4383,7 @@ export async function handleSettingsInteraction(
         try {
           emoji = normalizeDiscordEmoji(submittedEmoji, 'Settings button emoji') ?? null;
         } catch (error) {
-          await reject(interaction, error instanceof Error ? error.message : 'Enter a valid Unicode or Discord custom emoji.');
+          await reject(interaction, error instanceof Error ? error.message : translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.emojiInvalid'));
           return true;
         }
       }
@@ -4398,9 +4398,9 @@ export async function handleSettingsInteraction(
       await refreshSettingsChannel(guild);
       await auditSettingsAction(guild, interaction, 'SETTINGS_DASHBOARD_BUTTON_CUSTOMIZED', 'Customized the label or emoji for Settings control "' + SETTINGS_LAYOUT_LABELS[key] + '".');
       await interaction.editReply({
-        content: '✅ Settings control updated. The persistent dashboard has been refreshed.',
+        content: '✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.buttonUpdated'),
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel('Return to Settings Layout').setEmoji('🧰').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.returnLayout')).setEmoji('🧰').setStyle(ButtonStyle.Primary),
           backButton(),
         )],
       });
@@ -4412,11 +4412,11 @@ export async function handleSettingsInteraction(
       const description = interaction.fields.getTextInputValue('description').trim();
       const footer = interaction.fields.getTextInputValue('footer').trim();
       if (!title) {
-        await reject(interaction, 'Dashboard title cannot be empty.');
+        await reject(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.titleRequired'));
         return true;
       }
       if (title.length > 256 || description.length > 4000 || footer.length > 1800) {
-        await reject(interaction, 'Dashboard title, description or footer exceeds the supported Discord limit.');
+        await reject(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.contentTooLong'));
         return true;
       }
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -4424,14 +4424,14 @@ export async function handleSettingsInteraction(
         settings.settingsDashboard.title = title;
         // Empty description intentionally falls back to the built-in helper text.
         settings.settingsDashboard.description = description;
-        settings.settingsDashboard.footer = footer || 'ResolvX • Settings Dashboard';
+        settings.settingsDashboard.footer = footer || 'QueryFixr • Settings Dashboard';
       });
       await refreshSettingsChannel(guild);
       await auditSettingsAction(guild, interaction, 'SETTINGS_DASHBOARD_BRANDING_CHANGED', 'Updated the per-server Settings dashboard title, description or footer.');
       await interaction.editReply({
-        content: '✅ Settings dashboard branding saved and refreshed for this server.',
+        content: '✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.brandingSaved'),
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel('Open Layout Builder').setEmoji('🧰').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.openLayout')).setEmoji('🧰').setStyle(ButtonStyle.Primary),
           backButton(),
         )],
       });
@@ -4444,7 +4444,7 @@ export async function handleSettingsInteraction(
       const footer = interaction.fields.getTextInputValue('footer').trim();
 
       if (!title || !description || !footer) {
-        await reject(interaction, '❌ Panel appearance fields cannot be empty.');
+        await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.appearance.emptyFields'));
         return true;
       }
 
@@ -4457,7 +4457,7 @@ export async function handleSettingsInteraction(
       await syncPanel(guild);
       await refreshSettingsChannel(guild);
       await interaction.editReply({
-        embeds: [new EmbedBuilder().setTitle('✅ Appearance Updated').setDescription('Panel title, description, and footer were saved and the support panel was refreshed.')],
+        embeds: [new EmbedBuilder().setTitle('✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.appearance.savedTitle')).setDescription(translate((await getAdvancedSettings(guild.id)).locale, 'settings.appearance.savedDescription'))],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
       await auditSettingsAction(guild, interaction, 'APPEARANCE_CHANGED', 'Updated the ResolvX panel appearance.');
