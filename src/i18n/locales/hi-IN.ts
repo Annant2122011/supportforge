@@ -6,6 +6,8 @@ const hiIN: Record<TranslationKey, string> = {
   'common.back': 'वापस',
   'common.enabled': 'चालू',
   'common.disabled': 'बंद',
+  'common.none': "कोई नहीं",
+  'settings.team.value.people': "{count} लोग",
   'settings.title': 'ResolveX सेटिंग्स',
   'settings.locale.title': 'सर्वर की भाषा',
   'settings.locale.current': 'वर्तमान भाषा: {locale}',
