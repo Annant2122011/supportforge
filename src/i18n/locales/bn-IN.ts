@@ -630,6 +630,8 @@ const bnIN: Record<TranslationKey, string> = {
   'quickReply.command.operationDeleted': "মুছে ফেলা",
   'quickReply.command.operationBaseline': "মূল রেকর্ড",
   'quickReply.command.operationRestored': "পুনরুদ্ধার",
+  'knowledge.command.suggestionLine': "**{index}. {title}** • নির্ভরযোগ্যতা: {confidence} • স্কোর {score}\n{summary}\n{category}",
+  'knowledge.command.searchResultLine': "**{index}. {title}** • নির্ভরযোগ্যতা: {confidence} • স্কোর {score}\nID: {id}\n{summary}\n{category}",
 };
 
 export default bnIN;
