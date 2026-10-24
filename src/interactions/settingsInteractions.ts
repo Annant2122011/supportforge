@@ -2332,12 +2332,14 @@ export async function handleSettingsInteraction(
     const subcategoryId = interaction.values[0];
     const settings = await getAdvancedSettings(guild.id);
     const sub = settings.reports.categories[categoryId]?.subcategories[subcategoryId];
-    if (!sub) { await reject(interaction, '❌ Report subcategory not found.'); return true; }
+    if (!sub) { await reject(interaction, '❌ ' + translate(settings.locale, 'settings.reports.error.subcategoryMissing')); return true; }
     await interaction.editReply({
-      content: 'Edit or remove **' + sub.name + '**.',
+      content: translate(settings.locale, 'settings.reports.selector.editOrRemovePrompt', { name: sub.name }),
       components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:edit:' + categoryId + ':' + subcategoryId).setLabel('Edit').setEmoji('✏️').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:remove:' + categoryId + ':' + subcategoryId).setLabel('Remove').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:edit:' + categoryId + ':' + subcategoryId)
+          .setLabel(translate(settings.locale, 'settings.reports.action.edit')).setEmoji('✏️').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:remove:' + categoryId + ':' + subcategoryId)
+          .setLabel(translate(settings.locale, 'settings.reports.action.remove')).setEmoji('🗑️').setStyle(ButtonStyle.Danger),
       )],
     });
     return true;
@@ -3064,9 +3066,10 @@ export async function handleSettingsInteraction(
 
     if (id.startsWith('sf:settings:reports:subcategory:edit:')) {
       const parts = id.split(':'); const categoryId = parts[5] ?? ''; const subcategoryId = parts[6] ?? '';
-      const sub = (await getAdvancedSettings(guild.id)).reports.categories[categoryId]?.subcategories[subcategoryId];
-      if (!sub) { await reject(interaction, '❌ Report subcategory not found.'); return true; }
-      const locale = (await getAdvancedSettings(guild.id)).locale;
+      const settings = await getAdvancedSettings(guild.id);
+      const sub = settings.reports.categories[categoryId]?.subcategories[subcategoryId];
+      if (!sub) { await reject(interaction, '❌ ' + translate(settings.locale, 'settings.reports.error.subcategoryMissing')); return true; }
+      const locale = settings.locale;
       await openModal(interaction, 'sf:settings:modal:report-subcategory:edit:' + categoryId + ':' + subcategoryId, translate(locale, 'settings.reports.modal.editSubcategoryTitle'), [
         new TextInputBuilder().setCustomId('name').setLabel(translate(locale, 'settings.reports.modal.subcategoryName')).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(sub.name),
       ]);
@@ -3077,8 +3080,14 @@ export async function handleSettingsInteraction(
       const parts = id.split(':'); const categoryId = parts[5] ?? ''; const subcategoryId = parts[6] ?? '';
       const settings = await getAdvancedSettings(guild.id);
       const category = settings.reports.categories[categoryId];
-      if (!category || !category.subcategories[subcategoryId]) { await reject(interaction, '❌ Report subcategory not found.'); return true; }
-      if (Object.keys(category.subcategories).length <= 1) { await reject(interaction, '❌ Each report category must keep at least one subcategory.'); return true; }
+      if (!category || !category.subcategories[subcategoryId]) {
+        await reject(interaction, '❌ ' + translate(settings.locale, 'settings.reports.error.subcategoryMissing'));
+        return true;
+      }
+      if (Object.keys(category.subcategories).length <= 1) {
+        await reject(interaction, '❌ ' + translate(settings.locale, 'settings.reports.error.keepOneSubcategory'));
+        return true;
+      }
       await interaction.deferUpdate();
       await updateAdvancedSettings(guild.id, (current) => { const item = current.reports.categories[categoryId]; if (item) delete item.subcategories[subcategoryId]; });
       await refreshSettingsChannel(guild);
@@ -3848,7 +3857,7 @@ export async function handleSettingsInteraction(
       const channelId = channelMention?.[1] ?? (/^\d{15,25}$/.test(rawChannel) ? rawChannel : null);
 
       if (![ticketThreshold, serverThreshold, channelThreshold].every((value) => Number.isInteger(value) && value >= 0 && value <= 100000) || (channelThreshold > 0 && !channelId)) {
-        await reject(interaction, '❌ Thresholds must be whole numbers from 0 to 100000. A channel must be supplied when channel restriction is enabled.');
+        await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.reports.error.thresholdsInvalid'));
         return true;
       }
 
