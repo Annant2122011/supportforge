@@ -993,6 +993,7 @@ export const data =
             .addStringOption((option) => option.setName('category').setDescription('Category').setRequired(false).setMaxLength(80))
             .addStringOption((option) => option.setName('tags').setDescription('Comma-separated tags').setRequired(false).setMaxLength(400))
             .addStringOption((option) => option.setName('role-ids').setDescription('Optional comma-separated roles allowed to use it').setRequired(false).setMaxLength(420))
+            .addBooleanOption((option) => option.setName('enabled').setDescription('Explicitly enable or disable the reply; omit to preserve its current state').setRequired(false))
             .addIntegerOption((option) => option.setName('expected-version').setDescription('Required to update an existing quick reply; current v# from quick-reply list').setRequired(false).setMinValue(1)),
         )
         .addSubcommand((subcommand) =>
