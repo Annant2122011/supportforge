@@ -785,21 +785,21 @@ async function showSettingsDashboardPreview(interaction: SettingsViewInteraction
 }
 
 async function showPremiumSettings(interaction: SettingsViewInteraction, notice = ''): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   const tier = await getTier(interaction.guild!.id);
   const next = tier === 'free' ? 'premium-demo' : tier === 'premium-demo' ? 'pro-demo' : 'free';
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('💎 Premium & Feature Demo')
+      .setTitle('💎 ' + translate(settings.locale, 'settings.premium.title'))
       .setDescription(
         (notice ? notice + '\\n\\n' : '') +
-        'Current tier: **' + tierLabel(tier) + '**. Premium and Pro are demo entitlements for preview only, not real billing. ' +
-        'This control cycles Free → Premium Demo → Pro Demo → Free.',
+        translate(settings.locale, 'settings.premium.description', { tier: tierLabel(tier) }),
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId('sf:settings:premium:toggle')
-        .setLabel('Switch to ' + tierLabel(next))
+        .setLabel(translate(settings.locale, 'settings.premium.switchTo', { tier: tierLabel(next) }))
         .setEmoji('🔁')
         .setStyle(ButtonStyle.Primary),
       backButton(),
@@ -1807,61 +1807,77 @@ async function showStorage(interaction: ButtonInteraction): Promise<void> {
 }
 
 async function showResetStepOne(interaction: ButtonInteraction): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🚨 Delete Everything • Confirmation 1 of 3')
-      .setDescription(
-        '**This permanently removes ResolvX data from this server.**\n\n' +
-        'Before continuing, choose whether ResolvX should retain individual audit events for future summaries. Daily and overall summaries are retained either way.\n\n' +
-        'ResolvX-managed ticket channels and their messages, ResolvX categories, the public ticket panel, transcript/audit/settings channels, and stored ResolvX data will be deleted.\n\n' +
-        'Unrelated Discord channels are not targeted.',
-      ),
+      .setTitle('🚨 ' + translate(settings.locale, 'settings.reset.stepOneTitle'))
+      .setDescription(translate(settings.locale, 'settings.reset.stepOneDescription')),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:reset:audit:no').setLabel('Do Not Accumulate').setEmoji('📊').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('sf:settings:reset:audit:yes').setLabel('Accumulate Audit Data').setEmoji('💾').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:reset:audit:no').setLabel(translate(settings.locale, 'settings.reset.noAuditEvents')).setEmoji('📊').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sf:settings:reset:audit:yes').setLabel(translate(settings.locale, 'settings.reset.keepAuditEvents')).setEmoji('💾').setStyle(ButtonStyle.Primary),
       backButton(),
     ),
   ]);
 }
 
 async function showResetStepTwo(interaction: ButtonInteraction): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   const accumulate = pendingResetAuditChoice.get(interaction.guild!.id) ?? false;
+  const auditChoice = translate(settings.locale, accumulate ? 'settings.reset.auditAccumulate' : 'settings.reset.auditSummaries');
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🚨 Delete Everything • Confirmation 2 of 3')
-      .setDescription(
-        '**You are about to erase every ResolvX-managed channel and stored record in this server.**\n\n' +
-        'Audit retention choice: **' + (accumulate ? 'Accumulate individual audit data' : 'Keep summaries only') + '**.\n\n' +
-        'Daily and overall summaries will remain available after ResolvX is set up again. This choice can be changed later from the Audit Log controls.\n\n' +
-        'This includes every message inside ResolvX-managed channels. ResolvX cannot undo this operation.',
-      ),
+      .setTitle('🚨 ' + translate(settings.locale, 'settings.reset.stepTwoTitle'))
+      .setDescription(translate(settings.locale, 'settings.reset.stepTwoDescription', { auditChoice })),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:reset:confirm3').setLabel('Continue to Final Confirmation').setEmoji('☢️').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('sf:settings:home').setLabel('Cancel').setEmoji('✖️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sf:settings:reset:confirm3').setLabel(translate(settings.locale, 'settings.reset.continueFinal')).setEmoji('☢️').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('sf:settings:home').setLabel(translate(settings.locale, 'settings.reset.cancel')).setEmoji('✖️').setStyle(ButtonStyle.Secondary),
     ),
   ]);
 }
 
 async function showResetFinal(interaction: ButtonInteraction): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   await interaction.showModal(
     new ModalBuilder()
       .setCustomId('sf:settings:modal:reset')
-      .setTitle('Final Confirmation • 3 of 3')
+      .setTitle(translate(settings.locale, 'settings.reset.finalTitle'))
       .addComponents(
         new ActionRowBuilder<TextInputBuilder>().addComponents(
           new TextInputBuilder()
             .setCustomId('confirmation')
-            .setLabel('Type DELETE SUPPORT FORGE to continue')
+            .setLabel(translate(settings.locale, 'settings.reset.finalLabel'))
             .setStyle(TextInputStyle.Short)
             .setRequired(true)
-            .setPlaceholder('DELETE SUPPORT FORGE')
+            .setPlaceholder(translate(settings.locale, 'settings.reset.finalPlaceholder'))
             .setMaxLength(20),
         ),
       ),
   );
 }
+
+async function openModal(
+  interaction: ButtonInteraction,
+  customId: string,
+  title: string,
+  inputs: TextInputBuilder[],
+): Promise<void> {
+  try {
+    const modal = new ModalBuilder().setCustomId(customId).setTitle(title);
+    for (const input of inputs) {
+      modal.addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(input),
+      );
+    }
+    await interaction.showModal(modal);
+  } catch (error) {
+    console.error('❌ Failed to open settings form:', error);
+    const locale = await getAdvancedSettings(interaction.guild!.id).then((settings) => settings.locale).catch(() => 'en-US');
+    await reject(interaction, '❌ ' + translate(locale, 'settings.recovery.modalOpenFailed'));
+  }
+}
+
 
 async function openModal(
   interaction: ButtonInteraction,
