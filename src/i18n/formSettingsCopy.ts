@@ -139,7 +139,7 @@ export function localizeFormSettingsText(locale: string, value: string): string 
   if (templateFields) return translate(locale, 'forms.settings.template.fieldCount', { count: templateFields[1] });
 
   const genericPage = value.match(/^Page (\d+) \/ (\d+)$/);
-  if (genericPage) return translate(locale, 'forms.settings.list.title', { page: genericPage[1], pages: genericPage[2] });
+  if (genericPage) return translate(locale, 'forms.settings.pageIndicator', { page: genericPage[1], pages: genericPage[2] });
 
   return value;
 }
