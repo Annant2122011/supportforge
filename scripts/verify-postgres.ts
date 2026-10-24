@@ -25,6 +25,7 @@ async function main(): Promise<void> {
     'quick_reply_templates',
     'quick_reply_usage',
     'quick_reply_template_revisions',
+    'related_ticket_links',
   ];
 
   for (const table of requiredTables) {
@@ -90,6 +91,8 @@ async function main(): Promise<void> {
   console.log(`Knowledge feedback: ${counts[10].rows[0]?.count ?? '0'}`);
   console.log(`Quick replies: ${counts[11].rows[0]?.count ?? '0'}`);
   console.log(`Quick reply revisions: ${counts[12].rows[0]?.count ?? '0'}`);
+  const relatedLinks = await pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM related_ticket_links');
+  console.log(`Related-ticket links: ${relatedLinks.rows[0]?.count ?? '0'}`);
   console.log(`Orphan events: ${orphanEvents.rows[0]?.count ?? '0'}`);
   console.log(`Orphan outbox records: ${orphanOutbox.rows[0]?.count ?? '0'}`);
   console.log(`Stale processing records: ${invalidProcessing.rows[0]?.count ?? '0'}`);
