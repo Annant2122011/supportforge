@@ -1317,16 +1317,30 @@ async function showDefaults(interaction: ButtonInteraction): Promise<void> {
 
 async function showTagActions(interaction: SettingsViewInteraction, departmentId: string, tagId: string): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const locale = settings.locale;
   const department = config.departments[departmentId];
   const tag = department?.tags?.[tagId];
-  if (!department || !tag) { await reject(interaction, '❌ Tag not found.'); return; }
+  if (!department || !tag) {
+    await reject(interaction, '❌ ' + translate(locale, 'settings.tags.notFound'));
+    return;
+  }
   await renderSettingsView(interaction, [
-    new EmbedBuilder().setTitle('🏷️ ' + tag.name).setDescription('Tag **' + tag.name + '** belongs to **' + department.name + '**. Tags are subcategories only and never create Discord categories.'),
+    new EmbedBuilder()
+      .setTitle('🏷️ ' + tag.name)
+      .setDescription(translate(locale, 'settings.tags.detail', {
+        tag: tag.name,
+        department: department.name,
+      })),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:tag:edit:' + departmentId + ':' + tagId).setLabel('Edit Tag').setEmoji('✏️').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('sf:settings:tag:remove:' + departmentId + ':' + tagId).setLabel('Remove Tag').setEmoji('🗑️').setStyle(ButtonStyle.Danger).setDisabled(Object.keys(department.tags).length <= 1),
-      new ButtonBuilder().setCustomId('sf:settings:tag:manage:' + departmentId).setLabel('Back').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sf:settings:tag:edit:' + departmentId + ':' + tagId)
+        .setLabel(translate(locale, 'settings.tags.actions.edit')).setEmoji('✏️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:tag:remove:' + departmentId + ':' + tagId)
+        .setLabel(translate(locale, 'settings.tags.actions.remove')).setEmoji('🗑️')
+        .setStyle(ButtonStyle.Danger).setDisabled(Object.keys(department.tags).length <= 1),
+      new ButtonBuilder().setCustomId('sf:settings:tag:manage:' + departmentId)
+        .setLabel(translate(locale, 'settings.tags.actions.backToDepartment')).setStyle(ButtonStyle.Secondary),
     ),
   ]);
 }
