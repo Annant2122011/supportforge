@@ -706,6 +706,14 @@ const enUS = {
   'settings.diagnostics.refreshFailures': "\n\n⚠️ Refresh failed for: {failures}. Use the Settings Refresh action after checking permissions.",
   'settings.diagnostics.restoreFailed': "Configuration restore was not completed. Check the diagnostic logs and use the saved pre-restore checkpoint if an operation partially failed.",
   'settings.recovery.modalOpenFailed': "The settings form could not be opened. Please try again.",
+  'settings.recovery.nativeIntro': "Native Discord deletions only. These records never enter the ticket-button accidental-deletion review.",
+  'settings.recovery.noNative': "No native Discord channel deletions are currently available for restoration.",
+  'settings.recovery.ticketIntro': "Ticket-button deletions only. Choose a record to answer the question or restore a ticket already marked as accidental.",
+  'settings.recovery.noTicket': "No ticket-button deletions are awaiting review or accidental-deletion recovery.",
+  'settings.recovery.nothingThisPage': "Nothing to display on this page.",
+  'settings.recovery.page': "Page {page} / {pages}",
+  'settings.recovery.ticketLine': "• **Ticket #{number}** • {messages} archived message(s) • original channel ID: {channelId}",
+  'settings.recovery.accidentalReady': " • **marked accidental, ready to restore**",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
