@@ -26,6 +26,8 @@ async function main(): Promise<void> {
     'quick_reply_revisions',
     'workflow_templates',
     'workflow_template_revisions',
+    'workflow_execution_runs',
+    'workflow_execution_steps',
     'related_ticket_links',
   ];
 
@@ -57,6 +59,8 @@ async function main(): Promise<void> {
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM quick_reply_revisions'),
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM workflow_templates'),
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM workflow_template_revisions'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM workflow_execution_runs'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM workflow_execution_steps'),
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM related_ticket_links'),
   ]);
 
@@ -125,6 +129,10 @@ async function main(): Promise<void> {
       '(SELECT COUNT(*) FROM workflow_template_revisions r LEFT JOIN workflow_templates w ON w.id=r.template_id WHERE w.id IS NULL) AS count',
   );
 
+  const orphanWorkflowExecutionSteps = await pool.query<{ count: string }>(
+    'SELECT COUNT(*)::text AS count FROM workflow_execution_steps s LEFT JOIN workflow_execution_runs r ON r.id=s.run_id WHERE r.id IS NULL',
+  );
+
   const invalidProcessing = await pool.query<{ count: string }>(
     "SELECT COUNT(*)::text AS count FROM outbox_events WHERE status = 'processing' AND (processing_started_at IS NULL OR processing_started_at < NOW() - INTERVAL '10 minutes')",
   );
@@ -133,6 +141,7 @@ async function main(): Promise<void> {
     Number(orphanEvents.rows[0]?.count ?? 0) !== 0 ||
     Number(orphanOutbox.rows[0]?.count ?? 0) !== 0 ||
     Number(orphanProductivityRevisions.rows[0]?.count ?? 0) !== 0 ||
+    Number(orphanWorkflowExecutionSteps.rows[0]?.count ?? 0) !== 0 ||
     Number(invalidProcessing.rows[0]?.count ?? 0) !== 0
   ) {
     throw new Error('PostgreSQL verification found orphaned ticket events/outbox/history records or stale processing leases.');
@@ -153,10 +162,12 @@ async function main(): Promise<void> {
   console.log(`Knowledge synonyms/usage/feedback: ${counts[9].rows[0]?.count ?? '0'}/${counts[10].rows[0]?.count ?? '0'}/${counts[11].rows[0]?.count ?? '0'}`);
   console.log(`Quick replies/revisions: ${counts[12].rows[0]?.count ?? '0'}/${counts[13].rows[0]?.count ?? '0'}`);
   console.log(`Workflow templates/revisions: ${counts[14].rows[0]?.count ?? '0'}/${counts[15].rows[0]?.count ?? '0'}`);
-  console.log(`Related ticket links: ${counts[16].rows[0]?.count ?? '0'}`);
+  console.log(`Workflow execution runs/steps: ${counts[16].rows[0]?.count ?? '0'}/${counts[17].rows[0]?.count ?? '0'}`);
+  console.log(`Related ticket links: ${counts[18].rows[0]?.count ?? '0'}`);
   console.log(`Orphan events: ${orphanEvents.rows[0]?.count ?? '0'}`);
   console.log(`Orphan outbox records: ${orphanOutbox.rows[0]?.count ?? '0'}`);
   console.log(`Orphan productivity revision records: ${orphanProductivityRevisions.rows[0]?.count ?? '0'}`);
+  console.log(`Orphan workflow execution steps: ${orphanWorkflowExecutionSteps.rows[0]?.count ?? '0'}`);
   console.log(`Stale processing records: ${invalidProcessing.rows[0]?.count ?? '0'}`);
   console.log('✅ Required tables, referential integrity, and active outbox lease state verified.');
 }
