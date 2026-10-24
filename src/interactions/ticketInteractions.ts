@@ -5081,7 +5081,90 @@ async function handleTicketVoiceJoin(interaction: ButtonInteraction | ChatInputC
   );
 }
 
-type QuickReplyInteraction = ButtonInteraction | StringSelectMenuInteraction;
+type QuickReplyInteraction = ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction;
+type QuickReplyPickerUiInteraction = ButtonInteraction | ModalSubmitInteraction;
+
+interface QuickReplyPickerFilters {
+  query?: string;
+  category?: string;
+  tag?: string;
+}
+
+interface QuickReplyPickerSession {
+  guildId: string;
+  channelId: string;
+  userId: string;
+  locale: string;
+  filters: QuickReplyPickerFilters;
+  lastAccessedAt: number;
+}
+
+const QUICK_REPLY_PICKER_SESSION_TTL_MS = 15 * 60 * 1000;
+const QUICK_REPLY_PICKER_SESSION_MAX = 2000;
+const quickReplyPickerSessions = new Map<string, QuickReplyPickerSession>();
+
+function cleanQuickReplyPickerSessions(now = Date.now()): void {
+  for (const [id, session] of quickReplyPickerSessions) {
+    if (now - session.lastAccessedAt > QUICK_REPLY_PICKER_SESSION_TTL_MS) {
+      quickReplyPickerSessions.delete(id);
+    }
+  }
+  if (quickReplyPickerSessions.size > QUICK_REPLY_PICKER_SESSION_MAX) {
+    const oldest = [...quickReplyPickerSessions.entries()]
+      .sort((left, right) => left[1].lastAccessedAt - right[1].lastAccessedAt)
+      .slice(0, quickReplyPickerSessions.size - QUICK_REPLY_PICKER_SESSION_MAX);
+    for (const [id] of oldest) quickReplyPickerSessions.delete(id);
+  }
+}
+
+function createQuickReplyPickerSession(
+  interaction: ButtonInteraction,
+  locale: string,
+): string {
+  const now = Date.now();
+  cleanQuickReplyPickerSessions(now);
+  let id = '';
+  do {
+    id = randomBytes(9).toString('base64url');
+  } while (quickReplyPickerSessions.has(id));
+  quickReplyPickerSessions.set(id, {
+    guildId: interaction.guildId!,
+    channelId: interaction.channelId,
+    userId: interaction.user.id,
+    locale,
+    filters: {},
+    lastAccessedAt: now,
+  });
+  return id;
+}
+
+function getQuickReplyPickerSession(
+  sessionId: string,
+  interaction: QuickReplyInteraction,
+): QuickReplyPickerSession | null {
+  const session = quickReplyPickerSessions.get(sessionId);
+  const now = Date.now();
+  if (!session || now - session.lastAccessedAt > QUICK_REPLY_PICKER_SESSION_TTL_MS ||
+      session.guildId !== interaction.guildId ||
+      session.channelId !== interaction.channelId ||
+      session.userId !== interaction.user.id) {
+    quickReplyPickerSessions.delete(sessionId);
+    return null;
+  }
+  session.lastAccessedAt = now;
+  return session;
+}
+
+function quickReplyPickerFilterSummary(
+  locale: string,
+  filters: QuickReplyPickerFilters,
+): string {
+  const fields: string[] = [];
+  if (filters.query) fields.push(translate(locale, 'settings.panel.value.minimumMessages', { count: filters.query }));
+  if (filters.category) fields.push(translate(locale, 'quickReply.picker.filterCategoryLabel') + ': ' + filters.category);
+  if (filters.tag) fields.push(translate(locale, 'quickReply.picker.filterTagLabel') + ': ' + filters.tag);
+  return fields.join(' • ');
+}
 
 async function getQuickReplyTicketContext(interaction: QuickReplyInteraction) {
   if (!interaction.guild || !interaction.guildId || !interaction.channel || !('send' in interaction.channel)) {
@@ -5118,65 +5201,201 @@ async function getQuickReplyTicketContext(interaction: QuickReplyInteraction) {
   };
 }
 
+function quickReplyPickerFilterButton(sessionId: string, locale: string): ButtonBuilder {
+  return new ButtonBuilder()
+    .setCustomId('ticket:quick-reply:filter:' + sessionId)
+    .setLabel(translate(locale, 'quickReply.picker.filter').slice(0, 80))
+    .setEmoji('🔎')
+    .setStyle(ButtonStyle.Primary);
+}
+
+function quickReplyPickerClearButton(sessionId: string, locale: string): ButtonBuilder {
+  return new ButtonBuilder()
+    .setCustomId('ticket:quick-reply:clear:' + sessionId)
+    .setLabel(translate(locale, 'quickReply.picker.clearFilters').slice(0, 80))
+    .setEmoji('✖️')
+    .setStyle(ButtonStyle.Secondary);
+}
+
+async function renderQuickReplySelector(
+  interaction: QuickReplyPickerUiInteraction,
+  context: Awaited<ReturnType<typeof getQuickReplyTicketContext>>,
+  sessionId: string,
+  requestedPage: number,
+): Promise<void> {
+  const session = getQuickReplyPickerSession(sessionId, interaction);
+  if (!session) {
+    const settings = await getAdvancedSettings(interaction.guildId!);
+    await interaction.editReply(translate(settings.locale, 'quickReply.picker.invalidSession'));
+    return;
+  }
+  const locale = session.locale;
+  const resultPage = await searchQuickRepliesPage(
+    interaction.guildId!,
+    context.access,
+    { ...session.filters, page: requestedPage, pageSize: 25, enabledOnly: true },
+  );
+  const hasFilters = Boolean(session.filters.query || session.filters.category || session.filters.tag);
+  const filterSummary = quickReplyPickerFilterSummary(locale, session.filters);
+  const controls: ButtonBuilder[] = [quickReplyPickerFilterButton(sessionId, locale)];
+  if (hasFilters) controls.push(quickReplyPickerClearButton(sessionId, locale));
+
+  if (!resultPage.total) {
+    await interaction.editReply({
+      content: hasFilters
+        ? translate(locale, 'quickReply.list.noResults')
+        : translate(locale, 'quickReply.picker.empty'),
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(controls)],
+      allowedMentions: { parse: [] },
+    });
+    return;
+  }
+
+  const options = resultPage.replies.map((reply) => ({
+    label: reply.name.slice(0, 100),
+    value: reply.id,
+    description: (reply.category + ' • ' + (reply.tags.join(', ') || 'no tags')).slice(0, 100),
+  }));
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId('ticket:quick-reply:select')
+    .setPlaceholder(translate(locale, 'quickReply.picker.placeholder').slice(0, 150))
+    .setMinValues(1)
+    .setMaxValues(1)
+    .addOptions(options);
+  const components: Array<ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<ButtonBuilder>> = [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
+  ];
+  if (resultPage.pageCount > 1) {
+    controls.unshift(
+      new ButtonBuilder()
+        .setCustomId('ticket:quick-reply:page:' + sessionId + ':' + (resultPage.page - 1))
+        .setLabel(translate(locale, 'quickReply.picker.previous'))
+        .setEmoji('⬅️')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(resultPage.page === 0),
+      new ButtonBuilder()
+        .setCustomId('ticket:quick-reply:page:' + sessionId + ':' + (resultPage.page + 1))
+        .setLabel(translate(locale, 'quickReply.picker.next'))
+        .setEmoji('➡️')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(resultPage.page >= resultPage.pageCount - 1),
+    );
+  }
+  components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(controls));
+  await interaction.editReply({
+    content: translate(locale, 'quickReply.picker.prompt', {
+      page: resultPage.page + 1,
+      pages: resultPage.pageCount,
+    }) + (filterSummary ? '\n' + translate(locale, 'quickReply.picker.activeFilters', { filters: filterSummary }) : ''),
+    components,
+    allowedMentions: { parse: [] },
+  });
+}
+
 async function showQuickReplySelector(
   interaction: ButtonInteraction,
   requestedPage = 0,
+  existingSessionId?: string,
 ): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
   try {
-    const context = await getQuickReplyTicketContext(interaction);
-    const settings = await getAdvancedSettings(interaction.guildId!);
-    const locale = settings.locale;
-    const resultPage = await searchQuickRepliesPage(
-      interaction.guildId!,
-      context.access,
-      { page: requestedPage, pageSize: 25, enabledOnly: true },
-    );
-    if (!resultPage.total) {
-      await interaction.editReply(translate(locale, 'quickReply.picker.empty'));
+    let sessionId = existingSessionId;
+    let session = existingSessionId
+      ? getQuickReplyPickerSession(existingSessionId, interaction)
+      : null;
+    if (existingSessionId && !session) {
+      const settings = await getAdvancedSettings(interaction.guildId!);
+      await interaction.editReply(translate(settings.locale, 'quickReply.picker.invalidSession'));
       return;
     }
 
-    const options = resultPage.replies.map((reply) => ({
-      label: reply.name.slice(0, 100),
-      value: reply.id,
-      description: (reply.category + ' • ' + (reply.tags.join(', ') || 'no tags')).slice(0, 100),
-    }));
-    const menu = new StringSelectMenuBuilder()
-      .setCustomId('ticket:quick-reply:select')
-      .setPlaceholder(translate(locale, 'quickReply.picker.placeholder').slice(0, 150))
-      .setMinValues(1)
-      .setMaxValues(1)
-      .addOptions(options);
-    const components: Array<ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<ButtonBuilder>> = [
-      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
-    ];
-    if (resultPage.pageCount > 1) {
-      components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId('ticket:quick-reply:page:' + (resultPage.page - 1))
-          .setLabel(translate(locale, 'quickReply.picker.previous'))
-          .setEmoji('⬅️')
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(resultPage.page === 0),
-        new ButtonBuilder()
-          .setCustomId('ticket:quick-reply:page:' + (resultPage.page + 1))
-          .setLabel(translate(locale, 'quickReply.picker.next'))
-          .setEmoji('➡️')
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(resultPage.page >= resultPage.pageCount - 1),
-      ));
+    const context = await getQuickReplyTicketContext(interaction);
+    if (!sessionId) {
+      const settings = await getAdvancedSettings(interaction.guildId!);
+      sessionId = createQuickReplyPickerSession(interaction, settings.locale);
+      session = quickReplyPickerSessions.get(sessionId)!;
     }
-    await interaction.editReply({
-      content: translate(locale, 'quickReply.picker.prompt', {
-        page: resultPage.page + 1,
-        pages: resultPage.pageCount,
-      }),
-      components,
-    });
+    if (!sessionId || !session) {
+      await interaction.editReply('Quick Reply picker could not be initialized. Reopen it from the ticket panel.');
+      return;
+    }
+    await renderQuickReplySelector(interaction, context, sessionId, requestedPage);
   } catch (error) {
     await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : 'Quick replies are temporarily unavailable.');
   }
+}
+
+async function showQuickReplyFilterModal(
+  interaction: ButtonInteraction,
+  sessionId: string,
+): Promise<void> {
+  const session = getQuickReplyPickerSession(sessionId, interaction);
+  if (!session) {
+    if (await safeDeferReply(interaction)) {
+      const settings = await getAdvancedSettings(interaction.guildId!);
+      await interaction.editReply(translate(settings.locale, 'quickReply.picker.invalidSession'));
+    }
+    return;
+  }
+  const settings = session.locale;
+  const field = (id: string, label: string, maxLength: number, value?: string) => {
+    const input = new TextInputBuilder()
+      .setCustomId(id)
+      .setLabel(translate(settings, label).slice(0, 45))
+      .setStyle(TextInputStyle.Short)
+      .setRequired(false)
+      .setMaxLength(maxLength);
+    if (value) input.setValue(value);
+    return new ActionRowBuilder<TextInputBuilder>().addComponents(input);
+  };
+  const modal = new ModalBuilder()
+    .setCustomId('ticket:quick-reply:filter-modal:' + sessionId)
+    .setTitle(translate(settings, 'quickReply.picker.filterTitle').slice(0, 45))
+    .addComponents(
+      field('query', 'quickReply.picker.filterQueryLabel', 80, session.filters.query),
+      field('category', 'quickReply.picker.filterCategoryLabel', 80, session.filters.category),
+      field('tag', 'quickReply.picker.filterTagLabel', 32, session.filters.tag),
+    );
+  await interaction.showModal(modal);
+}
+
+async function handleQuickReplyFilterModal(interaction: ModalSubmitInteraction): Promise<void> {
+  if (!(await safeDeferReply(interaction))) return;
+  const sessionId = interaction.customId.slice('ticket:quick-reply:filter-modal:'.length);
+  const session = getQuickReplyPickerSession(sessionId, interaction);
+  if (!session) {
+    const settings = await getAdvancedSettings(interaction.guildId!);
+    await interaction.editReply(translate(settings.locale, 'quickReply.picker.invalidSession'));
+    return;
+  }
+  try {
+    const context = await getQuickReplyTicketContext(interaction);
+    const normalize = (value: string, maxLength: number) => value.trim().replace(/\s+/g, ' ').slice(0, maxLength) || undefined;
+    session.filters = {
+      query: normalize(interaction.fields.getTextInputValue('query'), 80),
+      category: normalize(interaction.fields.getTextInputValue('category'), 80),
+      tag: normalize(interaction.fields.getTextInputValue('tag'), 32),
+    };
+    await renderQuickReplySelector(interaction, context, sessionId, 0);
+  } catch (error) {
+    await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : 'Quick reply filtering is temporarily unavailable.');
+  }
+}
+
+async function handleQuickReplyClear(
+  interaction: ButtonInteraction,
+  sessionId: string,
+): Promise<void> {
+  const session = getQuickReplyPickerSession(sessionId, interaction);
+  if (!session) {
+    if (await safeDeferReply(interaction)) {
+      const settings = await getAdvancedSettings(interaction.guildId!);
+      await interaction.editReply(translate(settings.locale, 'quickReply.picker.invalidSession'));
+    }
+    return;
+  }
+  session.filters = {};
+  await showQuickReplySelector(interaction, 0, sessionId);
 }
 
 async function handleQuickReplySelection(interaction: StringSelectMenuInteraction): Promise<void> {
