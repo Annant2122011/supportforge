@@ -116,19 +116,23 @@ export function evaluateWorkflowConditions(
 }
 
 export function previewWorkflowTemplate(definition: WorkflowTemplateDefinition): {
-  executable: false;
+  executable: boolean;
   conditionCount: number;
   actionCount: number;
   warnings: string[];
 } {
+  const departmentReassignmentBlocked = definition.actions.some(
+    (action) => action.type === 'assign_department',
+  );
   return {
-    executable: false,
+    executable: !departmentReassignmentBlocked,
     conditionCount: definition.conditions.length,
     actionCount: definition.actions.length,
     warnings: [
-      'This template is stored and validated only; it cannot run until a separate authorized execution plan exists.',
-      'Execution must use existing domain services, lifecycle transition guards, role checks and durable audit/outbox.',
-      'Send actions must suppress unsolicited mentions and must not evaluate raw code or SQL.',
+      'Workflows run manually only after an administrator explicitly confirms execution in an active ticket. They never run automatically.',
+      'Department reassignment is blocked in the manual executor until Discord category and role-permission reconciliation can be guaranteed.',
+      'Actions are allowlisted, validated against current guild configuration, and recorded in the durable PostgreSQL execution ledger.',
+      'Send actions suppress unsolicited mentions and never evaluate raw code or SQL.',
     ],
   };
 }
