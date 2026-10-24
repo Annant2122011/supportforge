@@ -78,7 +78,7 @@ These changes require CI on the latest exact PR head. The older passing CI run b
 ## Release readiness checklist
 
 - [ ] The ordered PR chain is reviewed and merged without bypassing CI.
-- [ ] The exact combined Stage 4 head passes TypeScript build, all tests with zero skips, PostgreSQL migration/integrity verification and command registration limit tests.
+- [x] Combined PR #36 head `e8127ed1efdd780df65ff03f3f1572d1a01313a2` passed [ResolvX CI #2512](https://github.com/Annant2122011/supportforge/actions/runs/40084712275): build passed, 222/222 tests, zero skipped, PostgreSQL migration/integrity verification passed. This covers the Support Tools button routing, current Stage 3 recovery ledger, migration compatibility test and Stage 4 tables.
 - [ ] An authorized test guild validates commands and role access independently from buttons, private ticket threads, stale revisions, staff-only articles, quick replies, related ticket privacy, and unauthorized actions.
 - [ ] A backup is generated from a non-production Neon source; manifest checksum is verified; restore into a freshly created empty non-production target completes; schema migration level, table counts, ticket/event/outbox integrity and an application-level smoke test are recorded.
 - [ ] A failed restore drill is repeated only after inspecting the isolated target; never switch the restore script to drop/clean populated targets.
@@ -120,3 +120,9 @@ The integration audit found a migration-number collision: Stage 3 requires migra
 - Article sharing rechecks the active ticket and article visibility, shares explicitly to the ticket, records article usage and writes a ticket audit event.
 - The tool handler is additive: claim/close/reopen/delete and other existing lifecycle controls continue through their original handlers.
 - Test-guild interaction and permission acceptance is still required; component routing passing CI does not prove behavior against real Discord permissions.
+
+## Latest combined Stage 4 CI — 2026-10-24
+
+PR #36 head `e8127ed1efdd780df65ff03f3f1572d1a01313a2` passed [ResolvX CI #2512](https://github.com/Annant2122011/supportforge/actions/runs/40084712275): TypeScript build passed, **222/222 tests passed**, zero skipped, and disposable PostgreSQL schema/integrity verification passed. The checked-in suite includes the migration-number compatibility regression, durable recovery-segment persistence tests, and access policy tests for the ticket Support Tools menu.
+
+The current ticket panel Support Tools button is now routed to Knowledge Base search, role-scoped quick replies, and administrator-only related-ticket/workflow history. This run verifies compilation/tests and disposable PostgreSQL only; real Discord interaction acceptance and a successful isolated non-production Neon restore remain **BLOCKED / NOT RUN**.
