@@ -800,11 +800,14 @@ async function showSettingsDashboardPreview(interaction: SettingsViewInteraction
     0,
   );
   const preview = buildSettingsDashboardEmbed(settings, departmentCount, tagCount, config.theme)
-    .addFields({ name: 'Preview only', value: 'These controls are disabled. Saving the builder changes the persistent Settings dashboard for this server.' });
+    .addFields({
+      name: translate(settings.locale, 'settings.preview.only'),
+      value: translate(settings.locale, 'settings.preview.disabledDescription'),
+    });
   await renderSettingsView(interaction, [preview], [
     ...buildSettingsDashboardComponents(settings, true),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel('Return to Layout Builder').setEmoji('↩️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel(translate(settings.locale, 'settings.preview.returnToBuilder')).setEmoji('↩️').setStyle(ButtonStyle.Primary),
     ),
   ]);
 }
@@ -1016,23 +1019,30 @@ async function showTicketWorkspaceSettings(
 
 async function showPanelSettings(interaction: ButtonInteraction): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
+  const status = translate(settings.locale, settings.panelActivity.enabled ? 'common.enabled' : 'common.disabled');
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🎛️ Panel Settings')
-      .setDescription('Automatic panel positioning uses message count and estimated visual occupancy because Discord does not expose a bot-readable viewport.')
+      .setTitle('🎛️ ' + translate(settings.locale, 'settings.panel.title'))
+      .setDescription(translate(settings.locale, 'settings.panel.description'))
       .addFields({
-        name: 'Current configuration',
-        value:
-          `Automatic movement: **${settings.panelActivity.enabled ? 'Enabled' : 'Disabled'}**\n` +
-          `Visual budget: **${settings.panelActivity.visualLineBudget} lines**\n` +
-          `Message safety cap: **${settings.panelActivity.messageBudget}**\n` +
-          `Minimum messages: **${settings.panelActivity.minimumMessagesBeforeMove}**`,
+        name: translate(settings.locale, 'settings.panel.field.currentConfiguration'),
+        value: [
+          translate(settings.locale, 'settings.panel.value.automaticMovement', { status }),
+          translate(settings.locale, 'settings.panel.value.visualBudget', { lines: settings.panelActivity.visualLineBudget }),
+          translate(settings.locale, 'settings.panel.value.messageCap', { cap: settings.panelActivity.messageBudget }),
+          translate(settings.locale, 'settings.panel.value.minimumMessages', { count: settings.panelActivity.minimumMessagesBeforeMove }),
+        ].join('\\n'),
       }),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:panel:toggle').setLabel(settings.panelActivity.enabled ? 'Disable Auto Move' : 'Enable Auto Move').setEmoji(settings.panelActivity.enabled ? '⏸️' : '▶️').setStyle(settings.panelActivity.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('sf:settings:panel:thresholds').setLabel('Edit Thresholds').setEmoji('📏').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:panel:toggle')
+        .setLabel(translate(settings.locale, settings.panelActivity.enabled ? 'settings.panel.action.disableAutoMove' : 'settings.panel.action.enableAutoMove'))
+        .setEmoji(settings.panelActivity.enabled ? '⏸️' : '▶️')
+        .setStyle(settings.panelActivity.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sf:settings:panel:thresholds')
+        .setLabel(translate(settings.locale, 'settings.panel.action.editThresholds'))
+        .setEmoji('📏').setStyle(ButtonStyle.Primary),
       backButton(),
     ),
   ]);
@@ -1062,34 +1072,40 @@ async function showReportSettings(interaction: ButtonInteraction): Promise<void>
   const categories = Object.values(settings.reports.categories);
   const rules = Object.values(settings.reports.flagRules).filter((rule) => rule.enabled).sort((a, b) => a.threshold - b.threshold);
   const categoryText = categories.map((category) =>
-    category.emoji + ' **' + category.name + '**\n' +
+    category.emoji + ' **' + category.name + '**\\n' +
     Object.values(category.subcategories).map((sub) => '• ' + sub.name).join(' • ')
-  ).join('\n\n').slice(0, 3800) || 'No report categories configured.';
+  ).join('\\n\\n').slice(0, 3800) || translate(settings.locale, 'settings.reports.value.noCategories');
 
   const ruleText = rules.length
-    ? rules.map((rule) => '• **' + rule.threshold + ' flags** → **' + rule.action + '**' + (rule.channelId ? ' in <#' + rule.channelId + '>' : '')).join('\n')
-    : 'No automatic actions configured.';
+    ? rules.map((rule) => '• **' + rule.threshold + ' flags** → **' + rule.action + '**' + (rule.channelId ? ' in <#' + rule.channelId + '>' : '')).join('\\n')
+    : translate(settings.locale, 'settings.reports.value.noAutomaticActions');
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🚩 Safety & Reports')
-      .setDescription('Reports are independent of ticket use cases. Moderators choose a category and subcategory during a report; they never need to configure a use-case preset first.')
+      .setTitle('🚩 ' + translate(settings.locale, 'settings.reports.title'))
+      .setDescription(translate(settings.locale, 'settings.reports.description'))
       .addFields(
-        { name: 'Reporting', value: settings.reports.enabled ? '🟢 Enabled' : '🔴 Disabled', inline: true },
-        { name: 'Configured categories', value: String(categories.length), inline: true },
-        { name: 'Automatic flag rules', value: String(rules.length), inline: true },
-        { name: 'Categories & subcategories', value: categoryText.slice(0, 1024) },
-        { name: 'Automatic actions', value: ruleText.slice(0, 1024) },
+        { name: translate(settings.locale, 'settings.reports.field.reporting'), value: settings.reports.enabled ? '🟢 ' + translate(settings.locale, 'common.enabled') : '🔴 ' + translate(settings.locale, 'common.disabled'), inline: true },
+        { name: translate(settings.locale, 'settings.reports.field.configuredCategories'), value: String(categories.length), inline: true },
+        { name: translate(settings.locale, 'settings.reports.field.automaticFlagRules'), value: String(rules.length), inline: true },
+        { name: translate(settings.locale, 'settings.reports.field.categoriesSubcategories'), value: categoryText.slice(0, 1024) },
+        { name: translate(settings.locale, 'settings.reports.field.automaticActions'), value: ruleText.slice(0, 1024) },
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:reports:toggle').setLabel(settings.reports.enabled ? 'Disable Reports' : 'Enable Reports').setEmoji(settings.reports.enabled ? '⏸️' : '▶️').setStyle(settings.reports.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('sf:settings:reports:rules').setLabel('Flag Rules').setEmoji('🚩').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:reports:toggle')
+        .setLabel(translate(settings.locale, settings.reports.enabled ? 'settings.reports.action.disable' : 'settings.reports.action.enable'))
+        .setEmoji(settings.reports.enabled ? '⏸️' : '▶️')
+        .setStyle(settings.reports.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sf:settings:reports:rules')
+        .setLabel(translate(settings.locale, 'settings.reports.action.flagRules'))
+        .setEmoji('🚩').setStyle(ButtonStyle.Primary),
       backButton(),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       ...categories.slice(0, 5).map((category) =>
-        new ButtonBuilder().setCustomId('sf:settings:reports:category:' + category.id).setLabel(category.name.slice(0, 80)).setEmoji(category.emoji).setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('sf:settings:reports:category:' + category.id)
+          .setLabel(category.name.slice(0, 80)).setEmoji(category.emoji).setStyle(ButtonStyle.Secondary),
       ),
     ),
   ]);
@@ -1567,16 +1583,18 @@ async function showAppearance(interaction: ButtonInteraction): Promise<void> {
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🎨 Appearance')
-      .setDescription('Customize the main support panel without editing source code.')
+      .setTitle('🎨 ' + translate(settings.locale, 'settings.appearance.title'))
+      .setDescription(translate(settings.locale, 'settings.appearance.description'))
       .addFields(
-        { name: 'Title', value: settings.appearance.panelTitle.slice(0, 1024) || 'Not set' },
-        { name: 'Description', value: settings.appearance.panelDescription.slice(0, 1024) || 'Not set' },
-        { name: 'Footer', value: settings.appearance.panelFooter.slice(0, 1024) || 'Not set' },
+        { name: translate(settings.locale, 'settings.appearance.field.title'), value: settings.appearance.panelTitle.slice(0, 1024) || translate(settings.locale, 'settings.appearance.value.notSet') },
+        { name: translate(settings.locale, 'settings.appearance.field.description'), value: settings.appearance.panelDescription.slice(0, 1024) || translate(settings.locale, 'settings.appearance.value.notSet') },
+        { name: translate(settings.locale, 'settings.appearance.field.footer'), value: settings.appearance.panelFooter.slice(0, 1024) || translate(settings.locale, 'settings.appearance.value.notSet') },
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:appearance:edit').setLabel('Edit Appearance').setEmoji('✏️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:appearance:edit')
+        .setLabel(translate(settings.locale, 'settings.appearance.action.edit'))
+        .setEmoji('✏️').setStyle(ButtonStyle.Primary),
       backButton(),
     ),
   ]);
@@ -1586,7 +1604,7 @@ async function showThemeSettings(
   interaction: SettingsViewInteraction,
   notice = '',
 ): Promise<void> {
-  const config = await getGuildConfig(interaction.guild!.id);
+  const config = await getGuildConfig(interaction.guild!.id);\n  const settings = await getAdvancedSettings(interaction.guild!.id);
   const active = getThemeDefinition(config.theme);
   const chooser = new StringSelectMenuBuilder()
     .setCustomId('sf:settings:theme:select')
@@ -1600,14 +1618,14 @@ async function showThemeSettings(
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🌈 Server Theme')
+      .setTitle('🌈 ' + translate(settings.locale, 'settings.theme.title'))
       .setDescription(
         (notice ? notice + '\n\n' : '') +
-        'Give this server its own visual identity. The selected palette is saved in this server’s configuration and does not affect other servers. It accents the public support panel, Settings dashboard, and Ticket Forms screens. Discord’s native controls retain their built-in style.'
+        translate(settings.locale, 'settings.theme.description')
       )
       .addFields(
-        { name: 'Active palette', value: '**' + active.label + '**\n' + active.description, inline: true },
-        { name: 'Preview', value: active.preview, inline: true },
+        { name: translate(settings.locale, 'settings.theme.field.activePalette'), value: '**' + active.label + '**\n' + active.description, inline: true },
+        { name: translate(settings.locale, 'settings.theme.field.preview'), value: active.preview, inline: true },
       ),
   ], [
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(chooser),
