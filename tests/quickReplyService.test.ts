@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { renderQuickReply, validateQuickReplyInput, type QuickReply } from '../src/services/quickReplyService';
+import { quickReplyHasTag, renderQuickReply, validateQuickReplyInput, type QuickReply } from '../src/services/quickReplyService';
 
 const validReply = (): QuickReply => ({
   id:'reply-1',guildId:'guild-1',name:'Refund update',body:'Hello {username}, ticket {ticket_number} is {priority}.',
@@ -36,4 +36,14 @@ test('quick reply rendering replaces only allowlisted placeholders and ignores m
   assert.equal(output,'Hello Agent, ticket 42 is urgent.');
   assert.ok(!output.includes('{ticket_number}'));
   assert.ok(!output.includes('undefined'));
+});
+
+
+test('quick reply tag filtering is normalized but matches complete tags only', () => {
+  const tags = ['Billing Refund', 'return', 'account  access'];
+  assert.equal(quickReplyHasTag(tags, ' BILLING   refund '), true);
+  assert.equal(quickReplyHasTag(tags, 'RETURN'), true);
+  assert.equal(quickReplyHasTag(tags, 'bill'), false);
+  assert.equal(quickReplyHasTag(tags, 'access'), false);
+  assert.equal(quickReplyHasTag(tags), true);
 });
