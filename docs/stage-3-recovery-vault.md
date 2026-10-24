@@ -14,10 +14,11 @@
 - Replayed messages are clearly attributed to the bot with original author/channel/message IDs and timestamps. ResolvX never impersonates historical authors. Reactions and original Discord message/channel IDs cannot be recreated.
 
 ### 2. Restart-tolerant replay and restore concurrency
-- Each replay segment has a deterministic recovery marker; retries inspect recent destination history and the durable replay ledger before sending it again.
-- A failure while replaying one archived message stops the current replay attempt before later messages push its segment markers out of recent history.
+- Each replay segment has a deterministic recovery marker and its own durable PostgreSQL intent row (`ticket_recovery_replay_segments`) with pending/completed status, attempt count/start time, destination Discord message ID and a safe error class.
+- On retry, completed segments are skipped; pending segments search destination history from their persisted attempt timestamp for the deterministic marker, then reconcile to completed if the send was accepted before the database write failed. The history scan continues backwards until older than that timestamp, rather than examining only the newest 100 messages.
+- A failure while replaying one archived message stops the current replay attempt before later messages obscure the uncertain segment. Database ledger errors are distinguished from Discord attachment-send errors and cannot be silently reported as an unavailable file.
 - Concurrent restoration attempts for the same guild/ticket/deletion source are serialized using a PostgreSQL session advisory lock. The lock is released on success or failure and PostgreSQL drops it when the session closes.
-- These mechanisms reduce duplicate replay and duplicate-channel races, but they do **not** guarantee cross-system exactly-once delivery: Discord and PostgreSQL do not share a transaction. A segment can still be duplicated if a send succeeds, the marker cannot be recovered from destination history, and the ledger write fails.
+- These mechanisms substantially narrow the duplicate window and recover the common send-succeeded/ledger-write-failed case, but they do **not** guarantee cross-system exactly-once delivery: Discord and PostgreSQL do not share a transaction. Duplicates remain possible if destination history is inaccessible/truncated by platform limits, the marker is removed/altered, or the post-send result is otherwise unknowable.
 
 ### 3. Neon/PostgreSQL backup and isolated restore utilities
 - `npm run db:backup` uses the authoritative unpooled PostgreSQL connection, custom-format `pg_dump`, `pg_restore --list`, SHA-256, and an atomic manifest.
@@ -31,6 +32,13 @@
 - The supervised SLA worker reports through Stage 2's operational task telemetry.
 - `/supportforge diagnostics sla-list`, `sla-set`, `sla-delete`, `sla-check`, and `metrics` expose administration and ticket/aggregate reporting. The optional `/supportforge feedback rate` flow and aggregate `feedback summary` use per-ticket/user duplicate-vote protection.
 - Automated calculations and schema tests are present. Live timing, load, permissions and alert delivery in a real Discord test guild remain unverified.
+
+### Recovery segment ledger — current increment
+
+- Added PostgreSQL migration 13 for durable per-segment send intent and reconciliation.
+- Expanded `db:verify` to require the new ledger table.
+- Added a PostgreSQL integration test for pending/completed segment state and stored Discord message identity, plus pure marker tests covering determinism and extraction.
+- CI must pass on this exact branch head before the increment is considered automated-verified.
 
 ## Automated evidence and Stage 1/2 re-audit
 
