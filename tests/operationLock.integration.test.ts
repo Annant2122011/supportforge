@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
+import { closePostgresDatabase } from '../src/core/persistence/postgresDatabase';
 import { withPostgresAdvisoryLock } from '../src/core/persistence/operationLock';
 
 const hasPostgres =
@@ -22,31 +23,35 @@ test('PostgreSQL advisory operation locks reject overlap, release after success,
   const acquired = new Promise<void>((resolve) => { markAcquired = resolve; });
   const hold = new Promise<void>((resolve) => { releaseFirst = resolve; });
 
-  const first = withPostgresAdvisoryLock(key, 'already running', async () => {
-    markAcquired();
-    await hold;
-    return 'first';
-  });
-  await acquired;
+  try {
+    const first = withPostgresAdvisoryLock(key, 'already running', async () => {
+      markAcquired();
+      await hold;
+      return 'first';
+    });
+    await acquired;
 
-  await assert.rejects(
-    withPostgresAdvisoryLock(key, 'already running', async () => 'should not run'),
-    /already running/,
-  );
-  releaseFirst();
-  assert.equal(await first, 'first');
+    await assert.rejects(
+      withPostgresAdvisoryLock(key, 'already running', async () => 'should not run'),
+      /already running/,
+    );
+    releaseFirst();
+    assert.equal(await first, 'first');
 
-  assert.equal(
-    await withPostgresAdvisoryLock(key, 'already running', async () => 'after success'),
-    'after success',
-  );
+    assert.equal(
+      await withPostgresAdvisoryLock(key, 'already running', async () => 'after success'),
+      'after success',
+    );
 
-  await assert.rejects(
-    withPostgresAdvisoryLock(key, 'already running', async () => { throw new Error('simulated operation failure'); }),
-    /simulated operation failure/,
-  );
-  assert.equal(
-    await withPostgresAdvisoryLock(key, 'already running', async () => 'after failure'),
-    'after failure',
-  );
+    await assert.rejects(
+      withPostgresAdvisoryLock(key, 'already running', async () => { throw new Error('simulated operation failure'); }),
+      /simulated operation failure/,
+    );
+    assert.equal(
+      await withPostgresAdvisoryLock(key, 'already running', async () => 'after failure'),
+      'after failure',
+    );
+  } finally {
+    await closePostgresDatabase();
+  }
 });
