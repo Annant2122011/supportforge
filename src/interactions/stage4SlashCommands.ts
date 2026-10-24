@@ -31,6 +31,14 @@ import {
 } from '../services/quickReplyService';
 import { linkRelatedTickets, listRelatedTickets, unlinkRelatedTickets } from '../services/relatedTicketService';
 import {
+  executeWorkflowTemplateForTicket,
+  listWorkflowExecutionRunsForTicket,
+  resolveWorkflowExecutionStep,
+  resumeWorkflowExecutionForTicket,
+  type WorkflowExecutionSummary,
+} from '../services/workflowExecutionService';
+
+import {
   deleteWorkflowTemplate,
   listWorkflowTemplates,
   listWorkflowTemplateRevisions,
@@ -106,6 +114,58 @@ async function requireTicketInCurrentChannel(interaction: ChatInputCommandIntera
 
 function accessDenied(action: string): Error {
   return new Error('You need ' + action + ' to use this command.');
+}
+
+function workflowRunDescription(run: WorkflowExecutionSummary): string {
+  const lines = [
+    '**Run ID:** `' + run.id + '`',
+    '**Template:** ' + run.templateName + ' • `' + run.templateId + '` v' + run.templateVersion,
+    '**Status:** ' + run.status,
+    '**Requested by:** <@' + run.requestedBy + '>',
+  ];
+  if (run.status === 'not_matched') {
+    lines.push('Conditions did not match the current ticket snapshot. No actions were executed.');
+  }
+  if (run.steps.length) {
+    lines.push('', '**Steps**');
+    for (const step of run.steps) {
+      lines.push(
+        (step.index + 1) + '. `' + step.actionType + '` • **' + step.status + '**' +
+        (step.attempts ? ' • attempts ' + step.attempts : '') +
+        (step.errorCode ? ' • error code: `' + step.errorCode + '`' : '') +
+        (step.destinationMessageId ? ' • message ID: ' + step.destinationMessageId : ''),
+      );
+    }
+  }
+  if (run.status === 'needs_review') {
+    lines.push('', 'A send may have succeeded without its ledger update. Check the ticket history manually before using `workflow resolve-step`. The retry option explicitly acknowledges possible duplicate delivery.');
+  }
+  if (run.status === 'failed') {
+    lines.push('', 'No later steps were run. Resume only after reviewing the recorded failed step.');
+  }
+  return lines.join('\\n').slice(0, 3900);
+}
+
+async function auditWorkflowRun(
+  interaction: ChatInputCommandInteraction,
+  config: Awaited<ReturnType<typeof getGuildConfig>>,
+  ticket: NonNullable<Awaited<ReturnType<typeof getPersistedTicket>>>,
+  run: WorkflowExecutionSummary,
+  event: string,
+): Promise<void> {
+  if (!interaction.guild || !config.supportCategoryId) return;
+  await logTicketEvent(interaction.guild, config.supportCategoryId, {
+    ticketNumber: ticket.ticketNumber ?? ticket.id.slice(0, 8),
+    ticketChannelId: ticket.channelId,
+    event,
+    actorId: interaction.user.id,
+    actor: interaction.user.tag,
+    actorName: interaction.user.tag,
+    category: 'ticket',
+    detail: 'Workflow run ' + run.id + '; template=' + run.templateId + ' v' + run.templateVersion +
+      '; status=' + run.status + '; completed steps=' + run.steps.filter((step) => step.status === 'completed').length +
+      '/' + run.steps.length + '. No customer message body was copied into this audit entry.',
+  }).catch(() => undefined);
 }
 
 export async function handleStage4SlashCommand(interaction: ChatInputCommandInteraction): Promise<boolean> {
@@ -541,10 +601,74 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
 
     if (group === 'workflow') {
       if (!access.isAdmin) throw accessDenied('Manage Server or Administrator permission');
+      if (subcommand === 'runs') {
+        const ticket = await requireTicketInCurrentChannel(interaction, false);
+        const runs = await listWorkflowExecutionRunsForTicket(guildId, ticket.id, 10);
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setTitle('Workflow Runs • Ticket #' + (ticket.ticketNumber ?? ticket.id.slice(0, 8)))
+            .setDescription(runs.length ? runs.map((run) => workflowRunDescription(run)).join('\\n\\n').slice(0, 3900) : 'No workflow runs are recorded for this ticket.')
+            .setFooter({ text: 'Manual admin-triggered runs only. No background workflow triggers are enabled.' })],
+        });
+        return true;
+      }
+      if (subcommand === 'execute') {
+        const ticket = await requireTicketInCurrentChannel(interaction, true);
+        const run = await executeWorkflowTemplateForTicket({
+          guildId,
+          channel: requireTextChannel(interaction),
+          actorId,
+          actorName: interaction.user.tag,
+          interactionId: interaction.id,
+          templateId: interaction.options.getString('template-id', true).trim(),
+          expectedVersion: interaction.options.getInteger('version', true),
+          confirmation: interaction.options.getString('confirmation', true).trim(),
+        });
+        await auditWorkflowRun(interaction, config, ticket, run, 'WORKFLOW_RUN_STARTED');
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setTitle('Manual Workflow Run').setDescription(workflowRunDescription(run))
+            .setFooter({ text: 'Every action is recorded. Automatic triggers and arbitrary code execution are disabled.' })],
+        });
+        return true;
+      }
+      if (subcommand === 'resume') {
+        const ticket = await requireTicketInCurrentChannel(interaction, true);
+        const run = await resumeWorkflowExecutionForTicket({
+          guildId,
+          channel: requireTextChannel(interaction),
+          actorId,
+          actorName: interaction.user.tag,
+          runId: interaction.options.getString('run-id', true).trim(),
+          confirmation: interaction.options.getString('confirmation', true).trim(),
+        });
+        await auditWorkflowRun(interaction, config, ticket, run, 'WORKFLOW_RUN_RESUMED');
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setTitle('Workflow Run Recovery').setDescription(workflowRunDescription(run))
+            .setFooter({ text: 'Completed steps are skipped; ambiguous sends require safe reconciliation or explicit review.' })],
+        });
+        return true;
+      }
+      if (subcommand === 'resolve-step') {
+        const ticket = await requireTicketInCurrentChannel(interaction, true);
+        const run = await resolveWorkflowExecutionStep({
+          guildId,
+          channel: requireTextChannel(interaction),
+          actorId,
+          runId: interaction.options.getString('run-id', true).trim(),
+          stepIndex: interaction.options.getInteger('step', true),
+          decision: interaction.options.getString('decision', true) as 'complete' | 'retry',
+          confirmation: interaction.options.getString('confirmation', true).trim(),
+        });
+        await auditWorkflowRun(interaction, config, ticket, run, 'WORKFLOW_STEP_MANUALLY_RESOLVED');
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setTitle('Workflow Step Review').setDescription(workflowRunDescription(run))
+            .setFooter({ text: 'Retry may duplicate delivery if the original send was not visible in channel history.' })],
+        });
+        return true;
+      }
       if (subcommand === 'list') {
         const templates = await listWorkflowTemplates(guildId);
         await interaction.editReply(templates.length
-          ? templates.map((item) => '**' + item.name + '** • ' + item.id + ' • v' + item.version + ' • ' + (item.enabled ? 'catalogue enabled' : 'disabled') +
+          ? templates.map((item) => '**' + item.name + '** • ' + item.id + ' • v' + item.version + ' • ' + (item.enabled ? 'manual execution enabled' : 'disabled') +
               '\nConditions: ' + item.definition.conditions.length + ' • actions: ' + item.definition.actions.length).join('\n\n').slice(0, 4000)
           : 'No workflow templates exist.');
         return true;
@@ -561,7 +685,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           : 'No revision history is recorded for this workflow template.';
         await interaction.editReply({
           embeds: [new EmbedBuilder().setTitle('Workflow Template Revision History').setDescription(description)
-            .setFooter({ text: 'Catalogue history only. Workflow execution is not enabled.' })],
+            .setFooter({ text: 'Templates execute only on explicit admin command; no automatic triggers run.' })],
         });
         return true;
       }
@@ -578,9 +702,9 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         );
         if (config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
           action: 'WORKFLOW_TEMPLATE_SAVED', actorId, actorName: interaction.user.tag,
-          detail: 'Saved validated workflow template ' + item.id + ' version ' + item.version + '; execution remains disabled.',
+          detail: 'Saved validated workflow template ' + item.id + ' version ' + item.version + '; manual execution requires enablement and explicit confirmation.',
         });
-        await interaction.editReply('Saved validated workflow template "' + item.name + '" v' + item.version + '. It remains non-executable; no ticket action was run.');
+        await interaction.editReply('Saved validated workflow template "' + item.name + '" v' + item.version + '. It remains disabled; no ticket action was run. Enable it for explicit admin-only manual execution.');
         return true;
       }
       if (subcommand === 'restore-revision') {
@@ -619,9 +743,9 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         );
         if (config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
           action: 'WORKFLOW_TEMPLATE_CATALOGUE_TOGGLE', actorId, actorName: interaction.user.tag,
-          detail: 'Set workflow template ' + item.id + ' enabled=' + item.enabled + ' at version ' + item.version + '. Execution is still not implemented.',
+          detail: 'Set workflow template ' + item.id + ' manualExecutionEnabled=' + item.enabled + ' at version ' + item.version + '. Automatic triggers remain disabled.',
         });
-        await interaction.editReply('Workflow template catalogue entry is now ' + (item.enabled ? 'enabled' : 'disabled') + ' at version ' + item.version + '. Automatic execution remains disabled.');
+        await interaction.editReply('Manual workflow execution is now ' + (item.enabled ? 'enabled' : 'disabled') + ' for template version ' + item.version + '. Execute still requires an explicit confirmation phrase; no automatic triggers are enabled.');
         return true;
       }
       if (subcommand === 'delete') {
