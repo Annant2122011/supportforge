@@ -6608,6 +6608,17 @@ export async function handleTicketInteraction(
     }
 
     if (interaction.customId.startsWith('ticket:thread:')) {
+      if (interaction.isButton() && interaction.customId.startsWith('ticket:thread:quick-reply:')) {
+        const targetThreadId = interaction.customId.split(':')[3] ?? '';
+        if (!targetThreadId || targetThreadId !== interaction.channelId) {
+          if (await safeDeferReply(interaction)) {
+            await interaction.editReply('This quick-reply control no longer matches the current ticket thread.');
+          }
+          return;
+        }
+        await showQuickReplySelector(interaction);
+        return;
+      }
       if (interaction.isButton()) {
         const handled = await handlePrivateThreadAuxButton(interaction);
         if (!handled) await handlePrivateThreadTicketButton(interaction);
