@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +13,19 @@ import { migratePostgres } from '../src/core/persistence/migrationRunner';
 import { PostgresEventRepository } from '../src/repositories/postgresEventRepository';
 import { PostgresJsonDocumentRepository, importLegacyJsonDocuments } from '../src/repositories/jsonDocumentRepository';
 import { PostgresTicketRepository } from '../src/repositories/postgresTicketRepository';
+import {
+  deleteQuickReply,
+  listQuickReplies,
+  listQuickReplyRevisions,
+  saveQuickReply,
+} from '../src/services/quickReplyService';
+import {
+  deleteWorkflowTemplate,
+  listWorkflowTemplates,
+  listWorkflowTemplateRevisions,
+  saveWorkflowTemplate,
+  setWorkflowTemplateEnabled,
+} from '../src/services/workflowTemplateService';
 import type { TicketRepositoryRecord } from '../src/repositories/ticketRepository';
 
 const hasPostgres =
@@ -528,3 +542,102 @@ test.after(async () => {
     await closePostgresDatabase();
   }
 });
+
+
+test(
+  'quick replies preserve revisions, reject stale edits, and soft-delete with expected-version protection',
+  { skip: !postgresIntegrationEnabled },
+  async () => {
+    await migratePostgres();
+    const pool = getPostgresPool();
+    const guildId = 'postgres-quick-reply-' + randomUUID();
+    const actorId = 'postgres-test-admin';
+    try {
+      const created = await saveQuickReply(guildId, actorId, {
+        name: 'Billing update',
+        body: 'Your request is being reviewed.',
+        category: 'Billing',
+      });
+      assert.equal(created.version, 1);
+
+      const updated = await saveQuickReply(guildId, actorId, {
+        name: 'Billing update',
+        body: 'Your refund request is being reviewed.',
+        category: 'Billing',
+      }, 1);
+      assert.equal(updated.version, 2);
+      await assert.rejects(
+        () => saveQuickReply(guildId, actorId, {
+          name: 'Billing update',
+          body: 'Stale content must not overwrite the latest version.',
+        }, 1),
+        /changed since you opened it/,
+      );
+
+      const removed = await deleteQuickReply(guildId, 'Billing update', 2, actorId);
+      assert.equal(removed, true);
+      assert.deepEqual(await listQuickReplies(guildId, { isAdmin: true, roleIds: [] }), []);
+      const revisions = await listQuickReplyRevisions(guildId, created.id);
+      assert.deepEqual(revisions.map((item) => item.version), [3, 2, 1]);
+      assert.deepEqual(revisions.map((item) => item.operation), ['deleted', 'updated', 'created']);
+
+      const recreated = await saveQuickReply(guildId, actorId, {
+        name: 'Billing update',
+        body: 'This is a new active definition.',
+        category: 'Billing',
+      });
+      assert.notEqual(recreated.id, created.id);
+      assert.deepEqual(await listQuickReplies(guildId, { isAdmin: true, roleIds: [] }).then((items) => items.map((item) => item.id)), [recreated.id]);
+    } finally {
+      await pool.query('DELETE FROM quick_reply_revisions WHERE guild_id=$1', [guildId]);
+      await pool.query('DELETE FROM quick_replies WHERE guild_id=$1', [guildId]);
+    }
+  },
+);
+
+test(
+  'workflow templates preserve revisions through edits, enablement, stale writes, and soft deletion',
+  { skip: !postgresIntegrationEnabled },
+  async () => {
+    await migratePostgres();
+    const pool = getPostgresPool();
+    const guildId = 'postgres-workflow-' + randomUUID();
+    const actorId = 'postgres-test-admin';
+    const firstDefinition = {
+      conditions: [{ field: 'priority', equals: 'urgent' }],
+      actions: [{ type: 'set_priority', value: 'high' }],
+    };
+    const secondDefinition = {
+      conditions: [{ field: 'status', equals: 'open' }],
+      actions: [{ type: 'set_priority', value: 'critical' }],
+    };
+    try {
+      const created = await saveWorkflowTemplate(guildId, actorId, 'Urgent triage', firstDefinition);
+      assert.equal(created.version, 1);
+
+      const updated = await saveWorkflowTemplate(guildId, actorId, 'Urgent triage', secondDefinition, 1);
+      assert.equal(updated.version, 2);
+      await assert.rejects(
+        () => saveWorkflowTemplate(guildId, actorId, 'Urgent triage', firstDefinition, 1),
+        /changed since you opened it/,
+      );
+
+      const enabled = await setWorkflowTemplateEnabled(guildId, created.id, 2, true, actorId);
+      assert.equal(enabled.version, 3);
+      assert.equal(enabled.enabled, true);
+      const disabled = await setWorkflowTemplateEnabled(guildId, created.id, 3, false, actorId);
+      assert.equal(disabled.version, 4);
+      assert.equal(disabled.enabled, false);
+
+      assert.equal(await deleteWorkflowTemplate(guildId, created.id, 4, actorId), true);
+      assert.deepEqual(await listWorkflowTemplates(guildId), []);
+      const revisions = await listWorkflowTemplateRevisions(guildId, created.id);
+      assert.deepEqual(revisions.map((item) => item.version), [5, 4, 3, 2, 1]);
+      assert.deepEqual(revisions.map((item) => item.operation), ['deleted', 'disabled', 'enabled', 'updated', 'created']);
+      assert.equal(revisions[0]?.deleted, true);
+    } finally {
+      await pool.query('DELETE FROM workflow_template_revisions WHERE guild_id=$1', [guildId]);
+      await pool.query('DELETE FROM workflow_templates WHERE guild_id=$1', [guildId]);
+    }
+  },
+);
