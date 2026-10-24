@@ -1033,6 +1033,11 @@ const bnIN: Record<TranslationKey, string> = {
   'quickReply.picker.sendFailed': "Quick Reply নিরাপদভাবে পাঠানো যায়নি।",
   'quickReply.picker.invalidThreadControl': "এই Quick Reply নিয়ন্ত্রণটি আর বর্তমান টিকিট থ্রেডের সঙ্গে মেলে না।",
   'knowledge.command.invalidShareControl': "এই টিকিটে নিবন্ধ শেয়ার করার নিয়ন্ত্রণটি আর বৈধ নয়। আবার /supportforge knowledge suggest চালান।",
+  'ticket.report.error.disabled': "সার্ভার প্রশাসকেরা বর্তমানে ব্যবহারকারী রিপোর্টিং বন্ধ রেখেছেন।",
+  'ticket.report.error.noOtherParticipants': "এই টিকিটে রিপোর্ট করার মতো অন্য কোনো অংশগ্রহণকারী নেই।",
+  'ticket.report.error.reviewExpired': "এই রিপোর্টের পর্যালোচনার সময় শেষ হয়েছে অথবা এটি আপনাকে বরাদ্দ করা হয়নি।",
+  'ticket.report.error.targetNotParticipant': "লক্ষ্য ব্যবহারকারীকে এই টিকিটের অংশগ্রহণকারী হতে হবে।",
+  'ticket.report.error.selfReport': "আপনি নিজের বিরুদ্ধে রিপোর্ট করতে পারবেন না।",
 };
 
 export default bnIN;
