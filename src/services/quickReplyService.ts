@@ -94,7 +94,7 @@ export function validateQuickReplyInput(input: QuickReplyInput): QuickReplyInput
       throw new Error('Unsupported placeholder {' + match[1] + '}. Supported placeholders: ' + [...PLACEHOLDERS].map((token)=>'{'+token+'}').join(', ') + '.');
     }
   }
-  return {name,body,category,tags,allowedRoleIds:roleIds,enabled:input.enabled??true};
+  return {name,body,category,tags,allowedRoleIds:roleIds,...(input.enabled === undefined ? {} : {enabled:input.enabled})};
 }
 function canUse(reply: QuickReply, access: QuickReplyAccess): boolean {
   return access.isAdmin || (reply.enabled && (reply.allowedRoleIds.length===0 || reply.allowedRoleIds.some((role)=>access.roleIds.includes(role))));
@@ -120,18 +120,79 @@ export async function getQuickReply(guildId: string, idOrName: string, access: Q
   return canUse(reply,access)?reply:null;
 }
 
-export async function saveQuickReply(guildId: string, actorId: string, input: QuickReplyInput): Promise<QuickReply> {
-  const valid=validateQuickReplyInput(input);
-  const normalizedName=normalizeName(valid.name!);
-  const result=await getPostgresPool().query<QuickReplyRow>(
-    'INSERT INTO quick_replies (id,guild_id,name,normalized_name,body,category,tags,allowed_role_ids,enabled,version,created_by,updated_by) '+
-    'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,1,$10,$10) '+
-    'ON CONFLICT (guild_id,normalized_name) DO UPDATE SET name=EXCLUDED.name,body=EXCLUDED.body,category=EXCLUDED.category,tags=EXCLUDED.tags,'+
-    'allowed_role_ids=EXCLUDED.allowed_role_ids,enabled=EXCLUDED.enabled,version=quick_replies.version+1,updated_by=EXCLUDED.updated_by,updated_at=NOW() '+
-    'RETURNING '+COLUMNS,
-    [randomUUID(),guildId,valid.name,normalizedName,valid.body,valid.category,valid.tags,valid.allowedRoleIds,valid.enabled,actorId],
-  );
-  return fromRow(result.rows[0]);
+export async function saveQuickReply(
+  guildId: string,
+  actorId: string,
+  input: QuickReplyInput,
+  expectedVersion?: number,
+): Promise<QuickReply> {
+  const valid = validateQuickReplyInput(input);
+  if (expectedVersion !== undefined && (!Number.isInteger(expectedVersion) || expectedVersion < 1)) {
+    throw new Error('Expected version must be a positive integer when updating a quick reply.');
+  }
+  const normalizedName = normalizeName(valid.name!);
+  const pool = getPostgresPool();
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+    const currentResult = await client.query<QuickReplyRow>(
+      'SELECT ' + COLUMNS + ' FROM quick_replies WHERE guild_id=$1 AND normalized_name=$2 FOR UPDATE',
+      [guildId, normalizedName],
+    );
+    const current = currentResult.rows[0];
+
+    if (current) {
+      if (expectedVersion === undefined) {
+        throw new Error(
+          'A quick reply with this name already exists at version ' + current.version +
+          '. Pass the current expected-version from /supportforge quick-reply list to update it.',
+        );
+      }
+      if (Number(current.version) !== expectedVersion) {
+        throw new Error('This quick reply changed since you opened it. Refresh the list and retry with the current version.');
+      }
+
+      const updated = await client.query<QuickReplyRow>(
+        'UPDATE quick_replies SET name=$4,body=$5,category=$6,tags=$7,allowed_role_ids=$8,' +
+          'enabled=CASE WHEN $9::boolean IS NULL THEN enabled ELSE $9 END,' +
+          'version=version+1,updated_by=$10,updated_at=NOW() ' +
+          'WHERE guild_id=$1 AND id=$2 AND version=$3 RETURNING ' + COLUMNS,
+        [
+          guildId, current.id, expectedVersion, valid.name, valid.body, valid.category,
+          valid.tags, valid.allowedRoleIds, valid.enabled ?? null, actorId,
+        ],
+      );
+      if (!updated.rows[0]) {
+        throw new Error('This quick reply changed during the save. Refresh the list and retry.');
+      }
+      await client.query('COMMIT');
+      return fromRow(updated.rows[0]);
+    }
+
+    if (expectedVersion !== undefined) {
+      throw new Error('No quick reply with this name exists at that version. Omit expected-version to create a new reply.');
+    }
+
+    const inserted = await client.query<QuickReplyRow>(
+      'INSERT INTO quick_replies (id,guild_id,name,normalized_name,body,category,tags,allowed_role_ids,enabled,version,created_by,updated_by) ' +
+        'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,1,$10,$10) RETURNING ' + COLUMNS,
+      [
+        randomUUID(), guildId, valid.name, normalizedName, valid.body, valid.category,
+        valid.tags, valid.allowedRoleIds, valid.enabled ?? true, actorId,
+      ],
+    );
+    await client.query('COMMIT');
+    return fromRow(inserted.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === '23505') {
+      throw new Error('Another administrator created a quick reply with this name concurrently. Refresh the list before retrying.');
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function deleteQuickReply(guildId: string, idOrName: string): Promise<boolean> {
