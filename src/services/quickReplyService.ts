@@ -2,6 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { PoolClient, QueryResultRow } from 'pg';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
+import type { Guild, TextChannel, ThreadChannel } from 'discord.js';
+import { getGuildConfig } from './configService';
+import { getPersistedTicket } from './ticketPersistenceService';
+import { logTicketEvent } from './auditLogService';
 
 export interface QuickReply {
   id: string;
@@ -387,4 +391,69 @@ export function renderQuickReply(reply: QuickReply, context: QuickReplyContext):
     staff:context.staff??'',
   };
   return reply.body.replace(TOKEN_PATTERN,(_match,token:string)=>values[token.toLocaleLowerCase('en-US')]??'').slice(0,1800);
+} 
+
+export async function sendQuickReplyInTicket(args: {
+  guild: Guild;
+  channel: TextChannel | ThreadChannel;
+  quickReplyId: string;
+  actorId: string;
+  actorName: string;
+  actorUsername: string;
+  isAdmin: boolean;
+  roleIds: string[];
+}): Promise<QuickReply> {
+  if (!args.guild || args.channel.guild.id !== args.guild.id) {
+    throw new Error('Quick replies can only be sent inside a ticket in the same server.');
+  }
+  const ticket = await getPersistedTicket(args.channel.id);
+  if (!ticket || ticket.guildId !== args.guild.id || ticket.channelId !== args.channel.id ||
+      ticket.deletedAt || !['open', 'claimed', 'pending', 'reopened'].includes(ticket.status)) {
+    throw new Error('Quick replies are available only in an active managed ticket.');
+  }
+
+  const config = await getGuildConfig(args.guild.id);
+  const department = ticket.departmentId ? config.departments[ticket.departmentId] : undefined;
+  const isTicketStaff = Boolean(department?.staffRoleId && args.roleIds.includes(department.staffRoleId));
+  if (!args.isAdmin && !isTicketStaff) {
+    throw new Error('Only the staff role configured for this ticket department or a server administrator can send quick replies.');
+  }
+
+  const access: QuickReplyAccess = { isAdmin: args.isAdmin, roleIds: args.roleIds };
+  const reply = await getQuickReply(args.guild.id, args.quickReplyId, access);
+  if (!reply || !reply.enabled) {
+    throw new Error('That quick reply is no longer enabled or available to your role. Refresh the list and retry.');
+  }
+
+  const owner = ticket.ownerId
+    ? await args.guild.members.fetch(ticket.ownerId).catch(() => null)
+    : null;
+  const staff = await args.guild.members.fetch(args.actorId).catch(() => null);
+  const rendered = renderQuickReply(reply, {
+    user: owner?.displayName ?? 'customer',
+    username: owner?.user.username ?? 'customer',
+    ticketId: ticket.id,
+    ticketNumber: ticket.ticketNumber ?? ticket.id.slice(0, 8),
+    department: department?.name ?? ticket.departmentId ?? 'Support',
+    priority: ticket.priority ?? 'normal',
+    staff: staff?.displayName ?? args.actorUsername,
+  });
+
+  await args.channel.send({ content: rendered, allowedMentions: { parse: [] } });
+  if (config.supportCategoryId) {
+    try {
+      await logTicketEvent(args.guild, config.supportCategoryId, {
+        ticketNumber: ticket.ticketNumber ?? ticket.id,
+        ticketChannelId: ticket.channelId,
+        event: 'QUICK_REPLY_SENT',
+        actorId: args.actorId,
+        actor: args.actorName,
+        actorName: args.actorName,
+        detail: 'Sent quick reply ' + reply.id + ' version ' + reply.version + '.',
+      });
+    } catch {
+      console.warn('Quick reply was sent, but its ticket audit notification failed.');
+    }
+  }
+  return reply;
 }
