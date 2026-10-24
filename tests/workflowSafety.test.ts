@@ -11,6 +11,16 @@ test('workflow template only accepts allowlisted conditions and typed actions', 
   assert.equal(definition.conditions.length, 2);
   assert.equal(definition.actions.length, 2);
   assert.equal(previewWorkflowTemplate(definition).executable, false);
+  assert.match(previewWorkflowTemplate(definition).warnings.join(' '), /reassignment is blocked/i);
+});
+
+test('manual workflow preview marks supported non-routing actions executable after review', () => {
+  const definition = validateWorkflowTemplateDefinition({
+    conditions: [{ field: 'status', equals: 'open' }],
+    actions: [{ type: 'set_priority', value: 'high' }, { type: 'send_quick_reply', value: 'refund-ready' }],
+  });
+  assert.equal(previewWorkflowTemplate(definition).executable, true);
+  assert.match(previewWorkflowTemplate(definition).warnings.join(' '), /never run automatically/i);
 });
 
 test('workflow validator rejects arbitrary JavaScript, SQL, unknown keys and lifecycle bypass actions', () => {
