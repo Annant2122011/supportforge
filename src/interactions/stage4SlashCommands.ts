@@ -659,7 +659,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         );
         if (config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
           action: 'WORKFLOW_TEMPLATE_SAVED', actorId, actorName: interaction.user.tag,
-          detail: 'Saved validated workflow template ' + item.id + ' version ' + item.version + '; execution remains disabled.',
+          detail: 'Saved validated workflow template ' + item.id + ' version ' + item.version + '; manual execution requires explicit admin confirmation after enablement, and automatic triggers remain disabled.',
         });
         await interaction.editReply('Saved validated workflow template "' + item.name + '" v' + item.version + '. Preview it, enable the reviewed version, then use /supportforge workflow execute inside an active ticket. Department reassignment remains blocked until channel-visibility reconciliation is supported.');
         return true;
