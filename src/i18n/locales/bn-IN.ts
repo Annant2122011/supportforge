@@ -1038,6 +1038,7 @@ const bnIN: Record<TranslationKey, string> = {
   'ticket.report.error.reviewExpired': "এই রিপোর্টের পর্যালোচনার সময় শেষ হয়েছে অথবা এটি আপনাকে বরাদ্দ করা হয়নি।",
   'ticket.report.error.targetNotParticipant': "লক্ষ্য ব্যবহারকারীকে এই টিকিটের অংশগ্রহণকারী হতে হবে।",
   'ticket.report.error.selfReport': "আপনি নিজের বিরুদ্ধে রিপোর্ট করতে পারবেন না।",
+  'panelBuilder.authorSuffix': "ResolvX সহায়তা",
 };
 
 export default bnIN;
