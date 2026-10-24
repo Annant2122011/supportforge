@@ -33,7 +33,9 @@
 
 - Versioned catalog of JSON templates with strict allowlisted condition fields/actions, bounded array counts and configured-ID validation. Updating an existing template requires its current version; stale writes are rejected, and changed templates are returned to disabled catalogue state for review.
 - Unknown keys, arbitrary JavaScript/SQL and lifecycle bypass actions are rejected.
-- Template preview states that templates are **not executable**. Catalogue enablement is only metadata; no automatic ticket execution is implemented until a separate execution plan reuses domain services, authorization, lifecycle guards, durable audit and outbox.
+- Admin-only `/supportforge workflow execute`, `runs` and `resume` expose explicit, manually confirmed execution inside the same active managed ticket. The execution ledger persists a template snapshot, conditions, per-step status/attempts, error classes and outbound message IDs in PostgreSQL. Resume is guarded by guild/ticket/channel identity and a PostgreSQL advisory lock. No automatic ticket-event triggers are enabled.
+- The current manual executor supports validated priority updates, tag updates and quick-reply sends. Quick-reply sends suppress unsolicited mentions, use stable recovery markers and persist the destination message ID for reconciliation.
+- `assign_department` remains accepted for template validation/preview but is deliberately blocked by the executor until the existing routing flow's Discord category and role-permission reconciliation is safely reusable. The preview marks such templates as not executable; the runner refuses them before any workflow step is created or executed. This prevents a metadata-only department change from accidentally leaving stale staff access in Discord.
 
 ## 2026-10-24 refinement increment
 
@@ -76,7 +78,7 @@ These changes require CI on the latest exact PR head. The older passing CI run b
 
 ## Known limits retained intentionally
 
-1. Workflow templates are validated and stored but do not execute actions.
+1. Workflow execution is manual and admin-confirmed only; no automatic triggers exist. Templates containing department reassignment are rejected by the executor until Discord permission/category reconciliation is implemented through the established routing path.
 2. SLA scan has a bounded batch per guild; large-guild throughput/restart rotation needs verified load tests before promising an alert deadline.
 3. Recovery message segment markers reduce duplicate replay after partial failure, but cross-system exactly-once delivery cannot be guaranteed when Discord accepts a send and the bot cannot read recent history again.
 4. The backup/restore scripts are guarded utilities, not automatic production rollback. Actual Neon backup/restore acceptance must be run against a disposable non-production target.
