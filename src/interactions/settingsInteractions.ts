@@ -3912,13 +3912,19 @@ export async function handleSettingsInteraction(
       }
       const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);
       const subId = slug || 'subcategory-' + randomBytes(6).toString('hex');
+      const normalizedName = name.normalize('NFKC').toLowerCase();
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       await updateAdvancedSettings(guild.id, (settings) => {
         const category = settings.reports.categories[categoryId];
-        if (!category) return;
-        if (category.subcategories[subId]) throw new Error(translate(locale, 'settings.reports.error.subcategoryExists'));
+        if (!category) throw new Error(translate(locale, 'settings.reports.error.categoryMissing'));
+        const duplicateName = Object.values(category.subcategories).some((item) =>
+          item.name.normalize('NFKC').toLowerCase() === normalizedName,
+        );
+        if (duplicateName || category.subcategories[subId]) {
+          throw new Error(translate(locale, 'settings.reports.error.subcategoryExists'));
+        }
         category.subcategories[subId] = { id: subId, name, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-      }).catch(async (error) => { throw error; });
+      });
       await refreshSettingsChannel(guild);
       await interaction.editReply({
         embeds: [new EmbedBuilder()
@@ -3937,8 +3943,20 @@ export async function handleSettingsInteraction(
       if (!sub) { await reject(interaction, '❌ ' + translate(settings.locale, 'settings.reports.error.subcategoryMissing')); return true; }
       const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
       if (!name) { await reject(interaction, '❌ ' + translate(settings.locale, 'settings.reports.error.subcategoryEmpty')); return true; }
+      const normalizedName = name.normalize('NFKC').toLowerCase();
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      await updateAdvancedSettings(guild.id, (settings) => { const item = settings.reports.categories[categoryId]?.subcategories[subcategoryId]; if (item) { item.name = name; item.updatedAt = new Date().toISOString(); } });
+      await updateAdvancedSettings(guild.id, (current) => {
+        const category = current.reports.categories[categoryId];
+        if (!category) throw new Error(translate(settings.locale, 'settings.reports.error.categoryMissing'));
+        const item = category.subcategories[subcategoryId];
+        if (!item) throw new Error(translate(settings.locale, 'settings.reports.error.subcategoryMissing'));
+        const duplicateName = Object.values(category.subcategories).some((other) =>
+          other.id !== subcategoryId && other.name.normalize('NFKC').toLowerCase() === normalizedName,
+        );
+        if (duplicateName) throw new Error(translate(settings.locale, 'settings.reports.error.subcategoryExists'));
+        item.name = name;
+        item.updatedAt = new Date().toISOString();
+      });
       await refreshSettingsChannel(guild);
       await interaction.editReply({
         embeds: [new EmbedBuilder()
