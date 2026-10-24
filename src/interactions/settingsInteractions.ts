@@ -1601,10 +1601,8 @@ async function showInactivitySettings(interaction: SettingsViewInteraction, noti
         (settings.inactivity.enabled
           ? '🟢 ' + translate(settings.locale, 'common.enabled')
           : '⚪ ' + translate(settings.locale, 'common.disabled')) + '\n' +
-        '**' + translate(settings.locale, 'settings.inactivity.label.warnAfter') + ':** ' +
-        settings.inactivity.idleHours + ' ' + translate(settings.locale, 'settings.value.days', { count: settings.inactivity.idleHours }) + '\n' +
-        '**' + translate(settings.locale, 'settings.inactivity.label.graceAfter') + ':** ' +
-        settings.inactivity.graceHours + ' ' + translate(settings.locale, 'settings.value.days', { count: settings.inactivity.graceHours }) + '\n' +
+        translate(settings.locale, 'settings.inactivity.warnAfter', { hours: settings.inactivity.idleHours }) + '\n' +
+        translate(settings.locale, 'settings.inactivity.graceAfter', { hours: settings.inactivity.graceHours }) + '\n' +
         '**' + translate(settings.locale, 'settings.inactivity.label.exemptRoles') + ':** ' + roleNames + '\n' +
         '**' + translate(settings.locale, 'settings.inactivity.label.exemptDepartments') + ':** ' + departmentNames + '\n\n' +
         translate(settings.locale, 'settings.inactivity.exemptionHelp')
