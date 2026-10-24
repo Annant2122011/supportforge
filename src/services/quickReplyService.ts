@@ -521,18 +521,111 @@ export function renderQuickReply(reply: QuickReply, context: QuickReplyContext):
   return reply.body.replace(TOKEN_PATTERN,(_match,token:string)=>values[token.toLocaleLowerCase('en-US')]??'').slice(0,1800);
 } 
 
+interface QuickReplySendIntentRow extends QueryResultRow {
+  interaction_id: string;
+  guild_id: string;
+  quick_reply_id: string;
+  ticket_id: string;
+  channel_id: string;
+  actor_id: string;
+  marker: string;
+  status: 'pending' | 'completed' | 'uncertain';
+  discord_message_id: string | null;
+  created_at: Date | string;
+}
+
+async function findQuickReplySendMarker(
+  channel: TextChannel | ThreadChannel,
+  marker: string,
+  notBefore: Date,
+): Promise<string | null> {
+  // Discord message timestamps can differ by a small amount from the DB
+  // clock; the marker is cryptographically tied to one interaction, so a
+  // small look-back does not create a false positive.
+  const minimumTimestamp = notBefore.getTime() - 60_000;
+  let before: string | undefined;
+  while (true) {
+    const options: { limit: number; before?: string } = { limit: 100 };
+    if (before) options.before = before;
+    const page = await channel.messages.fetch(options);
+    if (page.size === 0) return null;
+    for (const message of page.values()) {
+      if (message.createdTimestamp < minimumTimestamp) continue;
+      if (extractQuickReplySendMarkers([message.content]).includes(marker)) return message.id;
+    }
+    const oldest = Array.from(page.values()).reduce((current, candidate) =>
+      BigInt(candidate.id) < BigInt(current.id) ? candidate : current,
+    );
+    if (oldest.createdTimestamp < minimumTimestamp || page.size < 100) return null;
+    before = oldest.id;
+  }
+}
+
+async function markQuickReplySendUncertain(
+  interactionId: string,
+  errorClass: string,
+): Promise<void> {
+  await getPostgresPool().query(
+    "UPDATE quick_reply_send_intents SET status='uncertain',error_class=$2,updated_at=NOW() " +
+      "WHERE interaction_id=$1 AND status <> 'completed'",
+    [interactionId, errorClass.slice(0, 100)],
+  );
+}
+
+async function completeQuickReplySendIntent(args: {
+  interactionId: string;
+  guildId: string;
+  quickReplyId: string;
+  discordMessageId: string;
+}): Promise<void> {
+  const pool = getPostgresPool();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const updated = await client.query(
+      "UPDATE quick_reply_send_intents SET status='completed',discord_message_id=$2,completed_at=COALESCE(completed_at,NOW()),error_class=NULL,updated_at=NOW() " +
+        "WHERE interaction_id=$1 AND status IN ('pending','uncertain')",
+      [args.interactionId, args.discordMessageId],
+    );
+    if ((updated.rowCount ?? 0) === 0) {
+      const saved = await client.query<{ status: string; discord_message_id: string | null }>(
+        'SELECT status,discord_message_id FROM quick_reply_send_intents WHERE interaction_id=$1',
+        [args.interactionId],
+      );
+      if (saved.rows[0]?.status !== 'completed' || saved.rows[0].discord_message_id !== args.discordMessageId) {
+        throw new Error('Quick-reply send intent could not be reconciled to the delivered Discord message.');
+      }
+    }
+    await client.query(
+      "INSERT INTO quick_reply_usage_events (id,guild_id,quick_reply_id,send_intent_id,event_type) " +
+        "VALUES ($1,$2,$3,$4,'sent') ON CONFLICT (send_intent_id) DO NOTHING",
+      [randomUUID(), args.guildId, args.quickReplyId, args.interactionId],
+    );
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function sendQuickReplyInTicket(args: {
   guild: Guild;
   channel: TextChannel | ThreadChannel;
   quickReplyId: string;
+  sendIntentId: string;
   actorId: string;
   actorName: string;
   actorUsername: string;
   isAdmin: boolean;
   roleIds: string[];
-}): Promise<QuickReply> {
+}): Promise<QuickReplySendResult> {
   if (!args.guild || args.channel.guild.id !== args.guild.id) {
     throw new Error('Quick replies can only be sent inside a ticket in the same server.');
+  }
+  if (!/^\d{17,20}$/.test(args.sendIntentId)) {
+    throw new Error('The quick-reply interaction identifier is invalid.');
   }
   const ticket = await getPersistedTicket(args.channel.id);
   if (!ticket || ticket.guildId !== args.guild.id || ticket.channelId !== args.channel.id ||
@@ -566,8 +659,93 @@ export async function sendQuickReplyInTicket(args: {
     priority: ticket.priority ?? 'normal',
     staff: staff?.displayName ?? args.actorUsername,
   });
+  const marker = quickReplySendMarker(args.sendIntentId, args.guild.id, ticket.id, reply.id);
+  const pool = getPostgresPool();
+  const inserted = await pool.query<{ interaction_id: string }>(
+    'INSERT INTO quick_reply_send_intents ' +
+      '(interaction_id,guild_id,quick_reply_id,ticket_id,channel_id,actor_id,marker,status) ' +
+      "VALUES ($1,$2,$3,$4,$5,$6,$7,'pending') ON CONFLICT (interaction_id) DO NOTHING RETURNING interaction_id",
+    [args.sendIntentId, args.guild.id, reply.id, ticket.id, ticket.channelId, args.actorId, marker],
+  );
+  const isNewIntent = inserted.rows.length === 1;
+  const intentResult = await pool.query<QuickReplySendIntentRow>(
+    'SELECT interaction_id,guild_id,quick_reply_id,ticket_id,channel_id,actor_id,marker,status,discord_message_id,created_at ' +
+      'FROM quick_reply_send_intents WHERE interaction_id=$1 LIMIT 1',
+    [args.sendIntentId],
+  );
+  const intent = intentResult.rows[0];
+  if (!intent ||
+      intent.guild_id !== args.guild.id ||
+      intent.quick_reply_id !== reply.id ||
+      intent.ticket_id !== ticket.id ||
+      intent.channel_id !== ticket.channelId ||
+      intent.actor_id !== args.actorId ||
+      intent.marker !== marker) {
+    throw new Error('This quick-reply send intent belongs to a different ticket or response.');
+  }
 
-  await args.channel.send({ content: rendered, allowedMentions: { parse: [] } });
+  if (intent.status === 'completed' && intent.discord_message_id) {
+    return { reply, status: 'already-sent' };
+  }
+
+  if (!isNewIntent) {
+    try {
+      const recoveredMessageId = await findQuickReplySendMarker(
+        args.channel,
+        marker,
+        intent.created_at instanceof Date ? intent.created_at : new Date(intent.created_at),
+      );
+      if (recoveredMessageId) {
+        await completeQuickReplySendIntent({
+          interactionId: args.sendIntentId,
+          guildId: args.guild.id,
+          quickReplyId: reply.id,
+          discordMessageId: recoveredMessageId,
+        });
+        return { reply, status: 'already-sent' };
+      }
+      await markQuickReplySendUncertain(args.sendIntentId, 'MarkerNotFound');
+    } catch (error) {
+      await markQuickReplySendUncertain(
+        args.sendIntentId,
+        error instanceof Error ? error.name : 'HistoryLookupFailed',
+      ).catch(() => undefined);
+    }
+    // An existing pending/uncertain intent is never re-sent blindly. Missing
+    // history markers are not sufficient evidence that Discord rejected it.
+    return { reply, status: 'uncertain' };
+  }
+
+  let sentMessageId: string;
+  try {
+    const sent = await args.channel.send({
+      content: rendered + marker,
+      allowedMentions: { parse: [] },
+    });
+    sentMessageId = sent.id;
+  } catch (error) {
+    await markQuickReplySendUncertain(
+      args.sendIntentId,
+      error instanceof Error ? error.name : 'UnknownDeliveryError',
+    ).catch(() => undefined);
+    return { reply, status: 'uncertain' };
+  }
+
+  try {
+    await completeQuickReplySendIntent({
+      interactionId: args.sendIntentId,
+      guildId: args.guild.id,
+      quickReplyId: reply.id,
+      discordMessageId: sentMessageId,
+    });
+  } catch (error) {
+    console.warn(
+      'Quick reply was delivered, but its durable completion/usage record needs reconciliation:',
+      error instanceof Error ? error.name : 'Unknown persistence error',
+    );
+    return { reply, status: 'uncertain' };
+  }
+
   if (config.supportCategoryId) {
     try {
       await logTicketEvent(args.guild, config.supportCategoryId, {
@@ -583,5 +761,5 @@ export async function sendQuickReplyInTicket(args: {
       console.warn('Quick reply was sent, but its ticket audit notification failed.');
     }
   }
-  return reply;
+  return { reply, status: 'sent' };
 }
