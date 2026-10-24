@@ -562,17 +562,33 @@ const MIGRATIONS: readonly PostgresMigration[] = [
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           published_at TIMESTAMPTZ,
-          search_vector TSVECTOR GENERATED ALWAYS AS (
-            setweight(to_tsvector('simple'::regconfig, coalesce(title, '')), 'A') ||
-            setweight(to_tsvector('simple'::regconfig, coalesce(category, '')), 'B') ||
-            setweight(to_tsvector('simple'::regconfig, coalesce(array_to_string(tags, ' '), '')), 'B') ||
-            setweight(to_tsvector('simple'::regconfig, coalesce(body, '')), 'C')
-          ) STORED
+          search_vector TSVECTOR NOT NULL DEFAULT ''::tsvector
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_articles_guild_slug
           ON knowledge_base_articles (guild_id, slug);
         CREATE INDEX IF NOT EXISTS idx_kb_articles_guild_status_updated
           ON knowledge_base_articles (guild_id, status, updated_at DESC);
+        CREATE OR REPLACE FUNCTION supportforge_kb_article_search_vector_update()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $function$
+        BEGIN
+          NEW.search_vector :=
+            setweight(to_tsvector('simple'::regconfig, coalesce(NEW.title, '')), 'A') ||
+            setweight(to_tsvector('simple'::regconfig, coalesce(NEW.category, '')), 'B') ||
+            setweight(to_tsvector('simple'::regconfig, coalesce(array_to_string(NEW.tags, ' '), '')), 'B') ||
+            setweight(to_tsvector('simple'::regconfig, coalesce(NEW.body, '')), 'C');
+          RETURN NEW;
+        END;
+        $function$;
+
+        DROP TRIGGER IF EXISTS trg_supportforge_kb_article_search_vector ON knowledge_base_articles;
+        CREATE TRIGGER trg_supportforge_kb_article_search_vector
+          BEFORE INSERT OR UPDATE OF title, category, tags, body
+          ON knowledge_base_articles
+          FOR EACH ROW
+          EXECUTE FUNCTION supportforge_kb_article_search_vector_update();
+
         CREATE INDEX IF NOT EXISTS idx_kb_articles_search_vector
           ON knowledge_base_articles USING GIN (search_vector);
 
