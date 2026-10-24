@@ -116,11 +116,12 @@ export function validateQuickReplyTemplate(template: string): void {
   if (!template.trim()) throw new Error('Quick reply content cannot be empty.');
   if (template.length > 1900) throw new Error('Quick reply content must be 1,900 characters or fewer.');
   const allowed = new Set<string>(QUICK_REPLY_PLACEHOLDERS);
-  const pattern = /\{([a-z][a-z0-9_]*)\}/gi;
+  const pattern = /\{([^{}]+)\}/g;
   for (const match of template.matchAll(pattern)) {
-    const name = match[1].toLowerCase();
+    const rawName = match[1].trim();
+    const name = rawName.toLowerCase();
     if (!allowed.has(name)) {
-      throw new Error('Unsupported placeholder {' + match[1] + '}. Supported placeholders: ' + QUICK_REPLY_PLACEHOLDERS.map((item) => '{' + item + '}').join(', ') + '.');
+      throw new Error('Unsupported placeholder {' + rawName + '}. Supported placeholders: ' + QUICK_REPLY_PLACEHOLDERS.map((item) => '{' + item + '}').join(', ') + '.');
     }
   }
 }
