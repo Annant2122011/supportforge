@@ -84,3 +84,20 @@ test('date formatting is locale-aware and refuses invalid dates', () => {
   assert.notEqual(hindi, english);
   assert.throws(() => formatLocaleDate('en-US', 'not-a-date'), RangeError);
 });
+
+
+test('all translated catalog entries preserve the canonical placeholder contract', () => {
+  const placeholders = (value: string): string[] =>
+    [...value.matchAll(/\{([A-Za-z][A-Za-z0-9_]*)\}/g)].map((match) => match[1]).sort();
+
+  for (const key of getTranslationKeys()) {
+    const canonical = placeholders(translate('en-US', key));
+    for (const locale of SUPPORTED_LOCALES) {
+      assert.deepEqual(
+        placeholders(translate(locale, key)),
+        canonical,
+        'Placeholder mismatch for ' + locale + '/' + key,
+      );
+    }
+  }
+});
