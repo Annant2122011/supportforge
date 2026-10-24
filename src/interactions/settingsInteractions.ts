@@ -277,7 +277,7 @@ async function showPriorityRules(interaction: ButtonInteraction): Promise<void> 
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🎨 Priority Rules & Roles')
+      .setTitle('🎨 ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.priorityRules.title'))
       .setDescription(
         'Priority roles are optional server rules. **Nothing is created automatically.** Choose a priority to create its role, or delete an existing ResolvX priority role. ResolvX will not fail the whole rule operation just because Discord refuses a role-hierarchy reorder.',
       )
@@ -293,7 +293,7 @@ async function showPriorityRules(interaction: ButtonInteraction): Promise<void> 
 
 async function createPriorityRole(interaction: ButtonInteraction, priority: TicketPriority): Promise<void> {
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
-    await reject(interaction, '❌ Creating priority roles requires the **Administrator** permission.');
+    await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.priorityRules.adminRequired'));
     return;
   }
 
@@ -355,7 +355,7 @@ async function createPriorityRole(interaction: ButtonInteraction, priority: Tick
     await interaction.editReply({
       embeds: [
         new EmbedBuilder()
-          .setTitle('✅ Priority Role Created')
+          .setTitle('✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.priorityRules.createdTitle'))
           .setDescription(
             definition.emoji +
               ' **' +
@@ -1925,7 +1925,7 @@ async function showRecoveryCandidates(
   await ensureRecoveryReply(interaction);
   const guild = interaction.guild;
   if (!guild) {
-    await interaction.editReply('Ticket recovery must be opened inside a server.');
+    await interaction.editReply(translate('en-US', 'settings.recovery.mustBeInServer'));
     return;
   }
 
@@ -3281,29 +3281,29 @@ export async function handleSettingsInteraction(
       const deptText = settings.inactivity.exemptDepartmentIds.join(', ');
       const input = new TextInputBuilder()
         .setCustomId('departments')
-        .setLabel('Comma-separated department IDs (max 25)')
+        .setLabel(translate(settings.locale, 'settings.inactivity.modal.departments'))
         .setStyle(TextInputStyle.Paragraph)
         .setRequired(false)
         .setMaxLength(1000);
       if (deptText) input.setValue(deptText);
-      await openModal(interaction, 'sf:settings:modal:inactivity-departments', 'Department Exemptions', [input]);
+      await openModal(interaction, 'sf:settings:modal:inactivity-departments', translate(settings.locale, 'settings.inactivity.departmentsTitle'), [input]);
       return true;
     }
 
     if (id === 'sf:settings:inactivity:edit') {
       const settings = await getAdvancedSettings(guild.id);
-      await openModal(interaction, 'sf:settings:modal:inactivity', 'Ticket Inactivity', [
-        new TextInputBuilder().setCustomId('idle').setLabel('Idle hours before warning (1–720)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.inactivity.idleHours)),
-        new TextInputBuilder().setCustomId('grace').setLabel('Grace hours after warning (1–168)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.inactivity.graceHours)),
+      await openModal(interaction, 'sf:settings:modal:inactivity', translate(settings.locale, 'settings.inactivity.title'), [
+        new TextInputBuilder().setCustomId('idle').setLabel(translate(settings.locale, 'settings.inactivity.modal.idle')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.inactivity.idleHours)),
+        new TextInputBuilder().setCustomId('grace').setLabel(translate(settings.locale, 'settings.inactivity.modal.grace')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.inactivity.graceHours)),
       ]);
       return true;
     }
 
     if (id === 'sf:settings:retention:edit') {
       const settings = await getAdvancedSettings(guild.id);
-      await openModal(interaction, 'sf:settings:modal:retention', 'Ticket Retention', [
-        new TextInputBuilder().setCustomId('closed').setLabel('Closed ticket days (0–365; 0 = no timer)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.retention.closedDays)),
-        new TextInputBuilder().setCustomId('archive').setLabel('Archived ticket days (0–365; 0 = no timer)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.retention.archiveDays)),
+      await openModal(interaction, 'sf:settings:modal:retention', translate(settings.locale, 'settings.retention.modalTitle'), [
+        new TextInputBuilder().setCustomId('closed').setLabel(translate(settings.locale, 'settings.retention.closedLabel')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.retention.closedDays)),
+        new TextInputBuilder().setCustomId('archive').setLabel(translate(settings.locale, 'settings.retention.archiveLabel')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.retention.archiveDays)),
       ]);
       return true;
     }
@@ -3320,10 +3320,10 @@ export async function handleSettingsInteraction(
 
     if (id === 'sf:settings:appearance:edit') {
       const settings = await getAdvancedSettings(guild.id);
-      await openModal(interaction, 'sf:settings:modal:appearance', 'Panel Appearance', [
-        new TextInputBuilder().setCustomId('title').setLabel('Panel title').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(256).setValue(settings.appearance.panelTitle),
-        new TextInputBuilder().setCustomId('description').setLabel('Panel description').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1500).setValue(settings.appearance.panelDescription),
-        new TextInputBuilder().setCustomId('footer').setLabel('Panel footer').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(2048).setValue(settings.appearance.panelFooter),
+      await openModal(interaction, 'sf:settings:modal:appearance', translate(settings.locale, 'settings.appearance.modalTitle'), [
+        new TextInputBuilder().setCustomId('title').setLabel(translate(settings.locale, 'settings.appearance.titleLabel')).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(256).setValue(settings.appearance.panelTitle),
+        new TextInputBuilder().setCustomId('description').setLabel(translate(settings.locale, 'settings.appearance.descriptionLabel')).setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1500).setValue(settings.appearance.panelDescription),
+        new TextInputBuilder().setCustomId('footer').setLabel(translate(settings.locale, 'settings.appearance.footerLabel')).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(2048).setValue(settings.appearance.panelFooter),
       ]);
       return true;
     }
@@ -3440,16 +3440,16 @@ export async function handleSettingsInteraction(
 
     if (id.startsWith('sf:settings:retention:change-after-decline:')) {
       const settings = await getAdvancedSettings(guild.id);
-      await openModal(interaction, 'sf:settings:modal:retention', 'Ticket Retention', [
+      await openModal(interaction, 'sf:settings:modal:retention', translate(settings.locale, 'settings.retention.modalTitle'), [
         new TextInputBuilder()
           .setCustomId('closed')
-          .setLabel('Closed ticket days (0–365; 0 = no timer)')
+          .setLabel(translate(settings.locale, 'settings.retention.closedLabel'))
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
           .setValue(String(settings.retention.closedDays)),
         new TextInputBuilder()
           .setCustomId('archive')
-          .setLabel('Archived ticket days (0–365; 0 = no timer)')
+          .setLabel(translate(settings.locale, 'settings.retention.archiveLabel'))
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
           .setValue(String(settings.retention.archiveDays)),
