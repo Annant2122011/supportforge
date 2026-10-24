@@ -49,6 +49,10 @@
 | Real SLA alert timing and large-guild throughput | **Blocked / not run** |
 | Production acceptance | **Not accepted** |
 
+## Combined-stack integration evidence
+
+The Stage 3 replay ledger and archive service are included in the Stage 4 integration branch. PR #36 head `e8127ed1efdd780df65ff03f3f1572d1a01313a2` passed [CI #2512](https://github.com/Annant2122011/supportforge/actions/runs/40084712275): build passed, 222/222 tests passed, zero skipped, and disposable PostgreSQL verification passed. The run verifies the recovery table and checks that completed segments have destination IDs; it still does not prove live Discord replay behavior or an actual Neon restore drill.
+
 ## Remaining risk-based work
 1. Run the non-production Discord acceptance checklist for native deletion, accidental/intentional ticket-button deletion, concurrent restore clicks, restore restart windows, long histories, missing members/channels and unavailable attachments.
 2. Create a backup from a disposable source, restore it into a newly created empty Neon branch/database, then record checksum, schema migration level, core row counts, orphan checks and application smoke-test evidence.
