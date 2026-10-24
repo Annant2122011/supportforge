@@ -2397,6 +2397,7 @@ export async function handleSettingsInteraction(
       id.startsWith('sf:settings:diagnostics:page:')
     ) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const locale = (await getAdvancedSettings(guild.id)).locale;
       try {
         const pageMatch = id.match(/^sf:settings:diagnostics:page:(health|setup-doctor):([1-9][0-9]{0,2})$/);
         const mode: 'health' | 'setup-doctor' = pageMatch
@@ -2414,19 +2415,19 @@ export async function handleSettingsInteraction(
           components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
             new ButtonBuilder()
               .setCustomId('sf:settings:diagnostics:page:' + mode + ':' + Math.max(1, page - 1))
-              .setLabel('Previous Checks')
+              .setLabel(translate(locale, 'settings.diagnostics.previous'))
               .setEmoji('◀️')
               .setStyle(ButtonStyle.Secondary)
               .setDisabled(page <= 1),
             new ButtonBuilder()
               .setCustomId('sf:settings:diagnostics:page:' + mode + ':' + Math.min(pageCount, page + 1))
-              .setLabel('Next Checks')
+              .setLabel(translate(locale, 'settings.diagnostics.next'))
               .setEmoji('▶️')
               .setStyle(ButtonStyle.Secondary)
               .setDisabled(page >= pageCount),
             new ButtonBuilder()
               .setCustomId('sf:settings:diagnostics:refresh')
-              .setLabel('Refresh All Checks')
+              .setLabel(translate(locale, 'settings.diagnostics.refresh'))
               .setEmoji('🔄')
               .setStyle(ButtonStyle.Primary),
           ));
@@ -2435,22 +2436,22 @@ export async function handleSettingsInteraction(
         components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
           new ButtonBuilder()
             .setCustomId('sf:settings:diagnostics:setup-doctor')
-            .setLabel('Setup Doctor')
+            .setLabel(translate(locale, 'settings.diagnostics.setupDoctor'))
             .setEmoji('🩺')
             .setStyle(ButtonStyle.Secondary),
           new ButtonBuilder()
             .setCustomId('sf:settings:diagnostics:snapshot')
-            .setLabel('Save Snapshot')
+            .setLabel(translate(locale, 'settings.diagnostics.saveSnapshot'))
             .setEmoji('📸')
             .setStyle(ButtonStyle.Success),
           new ButtonBuilder()
             .setCustomId('sf:settings:diagnostics:snapshots')
-            .setLabel('View Snapshots')
+            .setLabel(translate(locale, 'settings.diagnostics.viewSnapshots'))
             .setEmoji('🗂️')
             .setStyle(ButtonStyle.Secondary),
           new ButtonBuilder()
             .setCustomId('sf:settings:repair:back')
-            .setLabel('Repair System')
+            .setLabel(translate(locale, 'settings.diagnostics.repair'))
             .setEmoji('↩️')
             .setStyle(ButtonStyle.Secondary),
         ));
@@ -2461,13 +2462,14 @@ export async function handleSettingsInteraction(
         });
       } catch (error) {
         console.error('System diagnostics failed:', error);
-        await interaction.editReply('Diagnostics could not complete. The bot did not attempt any repair. Check the bot logs for a sanitized diagnostic error.');
+        await interaction.editReply(translate(locale, 'settings.diagnostics.failed'));
       }
       return true;
     }
 
     if (id === 'sf:settings:diagnostics:snapshot' || id === 'sf:settings:diagnostics:snapshots') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const locale = (await getAdvancedSettings(guild.id)).locale;
       try {
         if (id === 'sf:settings:diagnostics:snapshot') {
           const snapshot = await createConfigurationSnapshot(
@@ -2487,19 +2489,13 @@ export async function handleSettingsInteraction(
           await interaction.editReply({
             embeds: [new EmbedBuilder()
               .setColor(getThemeColor(config?.theme ?? 'midnight'))
-              .setTitle('✅ Configuration checkpoint saved')
+              .setTitle('✅ ' + translate(locale, 'settings.diagnostics.snapshotSavedTitle'))
               .setDescription(
-                '**Snapshot:** `' + snapshot.id + '`\n' +
-                '**Departments:** ' + snapshot.departmentCount + '\n' +
-                '**Panels:** ' + snapshot.panelCount + '\n' +
-                '**Tags:** ' + snapshot.tagCount + '\n' +
-                '**Forms:** ' + (snapshot.formCount ?? 0) + '\n' +
-                '**Support-hours policies:** ' + (snapshot.supportHoursPolicyCount ?? 0) + '\n\n' +
-                'A maximum of 10 recent checkpoints is kept per server.',
+                translate(locale, 'settings.diagnostics.snapshotSavedDescription', { id: snapshot.id, departments: snapshot.departmentCount, panels: snapshot.panelCount, tags: snapshot.tagCount, forms: snapshot.formCount ?? 0, hours: snapshot.supportHoursPolicyCount ?? 0 }),
               )],
             components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-              new ButtonBuilder().setCustomId('sf:settings:diagnostics:snapshots').setLabel('View Snapshots').setEmoji('🗂️').setStyle(ButtonStyle.Secondary),
-              new ButtonBuilder().setCustomId('sf:settings:repair:back').setLabel('Repair System').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+              new ButtonBuilder().setCustomId('sf:settings:diagnostics:snapshots').setLabel(translate(locale, 'settings.diagnostics.viewSnapshots')).setEmoji('🗂️').setStyle(ButtonStyle.Secondary),
+              new ButtonBuilder().setCustomId('sf:settings:repair:back').setLabel(translate(locale, 'settings.diagnostics.repair')).setEmoji('↩️').setStyle(ButtonStyle.Secondary),
             )],
           });
           return true;
@@ -2509,23 +2505,23 @@ export async function handleSettingsInteraction(
         const config = await getGuildConfig(guild.id).catch(() => null);
         const embed = new EmbedBuilder()
           .setColor(getThemeColor(config?.theme ?? 'midnight'))
-          .setTitle('🗂️ Configuration History')
+          .setTitle('🗂️ ' + translate(locale, 'settings.diagnostics.historyTitle'))
           .setDescription(snapshots.length
             ? snapshots.map((snapshot) =>
                 '**`' + snapshot.id + '`** · <t:' + Math.floor(Date.parse(snapshot.createdAt) / 1000) + ':R>\n' +
                 snapshot.reason + '\nDepartments: ' + snapshot.departmentCount + ' · Panels: ' + snapshot.panelCount + ' · Tags: ' + snapshot.tagCount + ' · Forms: ' + (snapshot.formCount ?? 0) + ' · Hours policies: ' + (snapshot.supportHoursPolicyCount ?? 0),
               ).join('\n\n').slice(0, 4000)
-            : 'No snapshots saved yet. Save one before changing important configuration.');
+            : translate(locale, 'settings.diagnostics.noSnapshots'));
         if (!snapshots.length) {
           await interaction.editReply({ embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-            new ButtonBuilder().setCustomId('sf:settings:diagnostics:snapshot').setLabel('Save Snapshot').setEmoji('📸').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId('sf:settings:repair:back').setLabel('Repair System').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('sf:settings:diagnostics:snapshot').setLabel(translate(locale, 'settings.diagnostics.saveSnapshot')).setEmoji('📸').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('sf:settings:repair:back').setLabel(translate(locale, 'settings.diagnostics.repair')).setEmoji('↩️').setStyle(ButtonStyle.Secondary),
           )] });
           return true;
         }
         const select = new StringSelectMenuBuilder()
           .setCustomId('sf:settings:diagnostics:snapshot-select')
-          .setPlaceholder('Choose a checkpoint to review')
+          .setPlaceholder(translate(locale, 'settings.diagnostics.chooseSnapshot'))
           .addOptions(snapshots.slice(0, 10).map((snapshot) => ({
             label: (snapshot.reason || 'Configuration checkpoint').slice(0, 100),
             description: (snapshot.id + ' · ' + snapshot.departmentCount + ' departments · ' + snapshot.panelCount + ' panels · ' + (snapshot.formCount ?? 0) + ' forms').slice(0, 100),
@@ -2536,31 +2532,32 @@ export async function handleSettingsInteraction(
           components: [
             new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select),
             new ActionRowBuilder<ButtonBuilder>().addComponents(
-              new ButtonBuilder().setCustomId('sf:settings:diagnostics:snapshot').setLabel('Save New Snapshot').setEmoji('📸').setStyle(ButtonStyle.Success),
-              new ButtonBuilder().setCustomId('sf:settings:repair:back').setLabel('Repair System').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+              new ButtonBuilder().setCustomId('sf:settings:diagnostics:snapshot').setLabel(translate(locale, 'settings.diagnostics.saveNewSnapshot')).setEmoji('📸').setStyle(ButtonStyle.Success),
+              new ButtonBuilder().setCustomId('sf:settings:repair:back').setLabel(translate(locale, 'settings.diagnostics.repair')).setEmoji('↩️').setStyle(ButtonStyle.Secondary),
             ),
           ],
         });
       } catch (error) {
         console.error('Configuration history action failed:', error);
-        await interaction.editReply('Configuration history could not be read or saved. No destructive repair was attempted; inspect the database document status before retrying.');
+        await interaction.editReply(translate(locale, 'settings.diagnostics.historyFailed'));
       }
       return true;
     }
 
     if (id.startsWith('sf:settings:diagnostics:restore-preview:')) {
+      const locale = (await getAdvancedSettings(guild.id)).locale;
       const [snapshotId = '', expectedFingerprint = ''] = id.slice('sf:settings:diagnostics:restore-preview:'.length).split(':');
       const review = await reviewConfigurationSnapshot(guild.id, snapshotId);
       const snapshot = review?.snapshot ?? null;
       if (!review || !snapshot) {
-        await interaction.reply({ content: 'That snapshot no longer exists. Reopen Configuration History and select a current checkpoint.', flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: translate(locale, 'settings.diagnostics.snapshotMissing'), flags: MessageFlags.Ephemeral });
         return true;
       }
       try {
         assertCurrentConfigurationFingerprint(expectedFingerprint, review.currentFingerprint);
       } catch {
         await interaction.reply({
-          content: 'Settings changed after you selected this checkpoint. Nothing was restored. Reopen Configuration History, select the checkpoint again and review the fresh preview.',
+          content: translate(locale, 'settings.diagnostics.staleSnapshot'),
           flags: MessageFlags.Ephemeral,
         });
         return true;
@@ -2569,28 +2566,24 @@ export async function handleSettingsInteraction(
         flags: MessageFlags.Ephemeral,
         embeds: [new EmbedBuilder()
           .setColor(0xdc2626)
-          .setTitle('⚠️ Confirm Configuration Restore')
+          .setTitle('⚠️ ' + translate(locale, 'settings.diagnostics.restoreTitle'))
           .setDescription(
-            'You selected `' + snapshot.id + '` (' + snapshot.reason + ').\n\n' +
-            '**Configuration areas that differ now:**\n' +
-            (review.changedSections.length ? review.changedSections.map((section) => '• ' + section).join('\n') : 'No differences were detected in the reviewed sections.') + '\n\n' +
-            '**Saved → current counts:** departments ' + snapshot.departmentCount + ' → ' + review.currentCounts.departmentCount +
-            ', panels ' + snapshot.panelCount + ' → ' + review.currentCounts.panelCount +
-            ', tags ' + snapshot.tagCount + ' → ' + review.currentCounts.tagCount +
-            ', forms ' + (snapshot.formCount ?? 0) + ' → ' + review.currentCounts.formCount +
-            ', support-hours ' + (snapshot.supportHoursPolicyCount ?? 0) + ' → ' + review.currentCounts.supportHoursPolicyCount + '.\n\n' +
-            'ResolveX will first save a checkpoint of current settings, then restore the saved guild configuration and advanced settings. This does not restore old Discord channel names/messages or change ticket/transcript records.\n\n' +
-            '**Preview fingerprint:** \`' + review.currentFingerprint + '\`\n' +
-            'The fingerprint is tied to the current configuration and is checked again at restore time. If settings change, restore is refused and you must review a fresh preview.'          )],
+            translate(locale, 'settings.diagnostics.snapshotSelected', { id: snapshot.id, reason: snapshot.reason }) + '\n\n' +
+            '**' + translate(locale, 'settings.diagnostics.differences') + ':**\n' +
+            (review.changedSections.length ? review.changedSections.map((section) => '• ' + section).join('\n') : translate(locale, 'settings.diagnostics.noDifferences')) + '\n\n' +
+            translate(locale, 'settings.diagnostics.counts', { savedDepartments: snapshot.departmentCount, currentDepartments: review.currentCounts.departmentCount, savedPanels: snapshot.panelCount, currentPanels: review.currentCounts.panelCount, savedTags: snapshot.tagCount, currentTags: review.currentCounts.tagCount, savedForms: snapshot.formCount ?? 0, currentForms: review.currentCounts.formCount, savedHours: snapshot.supportHoursPolicyCount ?? 0, currentHours: review.currentCounts.supportHoursPolicyCount }) + '\n\n' +
+            translate(locale, 'settings.diagnostics.restoreSafety') + '\n\n' +
+            '**' + translate(locale, 'settings.diagnostics.previewFingerprint', { fingerprint: review.currentFingerprint }) + '**\n' +
+            translate(locale, 'settings.diagnostics.fingerprintSafety')          )],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
           new ButtonBuilder()
             .setCustomId('sf:settings:diagnostics:restore-confirm:' + snapshot.id + ':' + interaction.user.id + ':' + expectedFingerprint)
-            .setLabel('Confirm Restore')
+            .setLabel(translate(locale, 'settings.diagnostics.confirmRestore'))
             .setEmoji('⚠️')
             .setStyle(ButtonStyle.Danger),
           new ButtonBuilder()
             .setCustomId('sf:settings:repair:back')
-            .setLabel('Cancel')
+            .setLabel(translate(locale, 'settings.reset.cancel'))
             .setEmoji('↩️')
             .setStyle(ButtonStyle.Secondary),
         )],
@@ -2599,12 +2592,13 @@ export async function handleSettingsInteraction(
     }
 
     if (id.startsWith('sf:settings:diagnostics:restore-confirm:')) {
+      const locale = (await getAdvancedSettings(guild.id)).locale;
       const tail = id.slice('sf:settings:diagnostics:restore-confirm:'.length).split(':');
       const snapshotId = tail[0] ?? '';
       const actorId = tail[1] ?? '';
       const expectedFingerprint = tail[2] ?? '';
       if (actorId !== interaction.user.id) {
-        await interaction.reply({ content: 'This confirmation belongs to another administrator. Return to Settings and initiate your own restore.', flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: translate(locale, 'settings.diagnostics.restoreOtherAdmin'), flags: MessageFlags.Ephemeral });
         return true;
       }
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -2631,17 +2625,14 @@ export async function handleSettingsInteraction(
         await interaction.editReply({
           embeds: [new EmbedBuilder()
             .setColor(getThemeColor(config?.theme ?? 'midnight'))
-            .setTitle('✅ Configuration checkpoint restored')
+            .setTitle('✅ ' + translate(locale, 'settings.diagnostics.restoredTitle'))
             .setDescription(
-              '**Restored:** `' + result.restored.id + '`\n' +
-              '**Pre-restore checkpoint:** `' + result.checkpoint.id + '`\n\n' +
-              'Restored guild/advanced settings, support-hours policies and current schemas for forms present in the checkpoint using new immutable versions. Existing submissions, historical form versions and forms created after the checkpoint were not deleted.' +
-              (failures.length ? '\n\n⚠️ Refresh failed for: ' + failures.join(', ') + '. Use the Settings Refresh action after checking permissions.' : ''),
+              translate(locale, 'settings.diagnostics.restoredDescription', { restored: result.restored.id, checkpoint: result.checkpoint.id, refreshFailures: failures.length ? translate(locale, 'settings.diagnostics.refreshFailures', { failures: failures.join(', ') }) : '' }),
             )],
         });
       } catch (error) {
         console.error('Configuration restore failed:', error);
-        await interaction.editReply('Configuration restore was not completed. Check the diagnostic logs and use the saved pre-restore checkpoint if an operation partially failed.');
+        await interaction.editReply(translate(locale, 'settings.diagnostics.restoreFailed'));
       }
       return true;
     }
