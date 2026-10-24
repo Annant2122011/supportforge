@@ -1333,25 +1333,40 @@ async function showTagActions(interaction: SettingsViewInteraction, departmentId
 
 async function showTags(interaction: SettingsViewInteraction): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const locale = settings.locale;
   const departments = Object.values(config.departments).sort((a, b) => a.name.localeCompare(b.name));
   const lines = departments.length
-    ? departments.map((d) => {
-        const tags = Object.values(d.tags ?? {}).map((t) => t.name).sort().join(', ') || 'No tags';
-        return '📂 **' + d.name + '** • ' + (d.categoryId ? '<#' + d.categoryId + '>' : 'Category pending') + '\n   🏷️ ' + tags;
+    ? departments.map((department) => {
+        const tags = Object.values(department.tags ?? {}).map((tag) => tag.name).sort().join(', ') ||
+          translate(locale, 'settings.departments.noTags');
+        return '📂 **' + department.name + '** • ' +
+          (department.categoryId ? '<#' + department.categoryId + '>' : translate(locale, 'settings.departments.categoryPending')) +
+          '\n   🏷️ ' + tags;
       }).join('\n')
-    : 'No departments configured.';
+    : translate(locale, 'settings.departments.noDepartments');
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('📂 Departments & Tags')
-      .setDescription(lines.slice(0, 3900))
+      .setTitle('📂 ' + translate(locale, 'settings.departments.title'))
+      .setDescription(lines.slice(0, 3200))
       .addFields(
-        { name: 'Hierarchy', value: 'A **Department** owns one Discord category and optional staff role. **Tags are subcategories inside that department** and never create Discord categories. Tickets select one department and one tag.' },
-        { name: 'AI-ready design', value: 'Premium AI can classify a ticket into a department, then choose only from that department’s tags. The model never needs to invent categories or tags.' },
+        {
+          name: translate(locale, 'settings.departments.hierarchy.title'),
+          value: translate(locale, 'settings.departments.hierarchy.description'),
+        },
+        {
+          name: translate(locale, 'settings.departments.aiReady.title'),
+          value: translate(locale, 'settings.departments.aiReady.description'),
+        },
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:departments:add').setLabel('Add Department').setEmoji('📂').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('sf:settings:departments:manage').setLabel('Manage Departments').setEmoji('⚙️').setStyle(ButtonStyle.Primary).setDisabled(!departments.length),
+      new ButtonBuilder().setCustomId('sf:settings:departments:add')
+        .setLabel(translate(locale, 'settings.departments.actions.add'))
+        .setEmoji('📂').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sf:settings:departments:manage')
+        .setLabel(translate(locale, 'settings.departments.actions.manage'))
+        .setEmoji('⚙️').setStyle(ButtonStyle.Primary).setDisabled(!departments.length),
       backButton(),
     ),
   ]);
@@ -1362,109 +1377,104 @@ async function showDepartmentPicker(
   page = 0,
 ): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
-  const departments = Object.values(config.departments).sort((a, b) =>
-    a.name.localeCompare(b.name),
-  );
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const locale = settings.locale;
+  const departments = Object.values(config.departments).sort((a, b) => a.name.localeCompare(b.name));
   if (!departments.length) {
-    await renderSettingsView(
-      interaction,
-      [new EmbedBuilder().setTitle('📂 Departments').setDescription('No departments configured.')],
-      [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
-    );
+    await renderSettingsView(interaction, [
+      new EmbedBuilder()
+        .setTitle('📂 ' + translate(locale, 'settings.departments.title'))
+        .setDescription(translate(locale, 'settings.departments.noDepartments')),
+    ], [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())]);
     return;
   }
 
   const pageSize = 25;
   const pageCount = Math.max(1, Math.ceil(departments.length / pageSize));
   const safePage = Math.min(Math.max(page, 0), pageCount - 1);
-  const visible = departments.slice(
-    safePage * pageSize,
-    (safePage + 1) * pageSize,
-  );
-
-  const components: Array<
-    ActionRowBuilder<StringSelectMenuBuilder> |
-    ActionRowBuilder<ButtonBuilder>
-  > = [
+  const visible = departments.slice(safePage * pageSize, (safePage + 1) * pageSize);
+  const components: Array<ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<ButtonBuilder>> = [
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId('sf:settings:department:select')
-        .setPlaceholder('Choose a department')
-        .addOptions(
-          visible.map((d) => ({
-            label: d.name.slice(0, 100),
-            value: d.id,
-            description: Object.keys(d.tags ?? {}).length + ' tag(s)',
-          })),
-        ),
+        .setPlaceholder(translate(locale, 'settings.departments.actions.select').slice(0, 150))
+        .addOptions(visible.map((department) => ({
+          label: department.name.slice(0, 100),
+          value: department.id,
+          description: translate(locale, 'settings.departments.actions.tags', {
+            count: Object.keys(department.tags ?? {}).length,
+          }).slice(0, 100),
+        }))),
     ),
   ];
-
   if (pageCount > 1) {
-    components.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId('sf:settings:departments:manage:page:' + (safePage - 1))
-          .setLabel('Previous')
-          .setEmoji('⬅️')
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(safePage === 0),
-        new ButtonBuilder()
-          .setCustomId('sf:settings:departments:manage:page:' + safePage)
-          .setLabel('Page ' + (safePage + 1) + ' / ' + pageCount)
-          .setEmoji('📄')
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(true),
-        new ButtonBuilder()
-          .setCustomId('sf:settings:departments:manage:page:' + (safePage + 1))
-          .setLabel('Next')
-          .setEmoji('➡️')
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(safePage >= pageCount - 1),
-      ),
-    );
+    components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:departments:manage:page:' + (safePage - 1))
+        .setLabel(translate(locale, 'quickReply.picker.previous'))
+        .setEmoji('⬅️').setStyle(ButtonStyle.Secondary).setDisabled(safePage === 0),
+      new ButtonBuilder().setCustomId('sf:settings:departments:manage:page:' + safePage)
+        .setLabel(translate(locale, 'quickReply.list.page', {
+          page: safePage + 1, pages: pageCount, total: departments.length,
+        }).slice(0, 80))
+        .setEmoji('📄').setStyle(ButtonStyle.Secondary).setDisabled(true),
+      new ButtonBuilder().setCustomId('sf:settings:departments:manage:page:' + (safePage + 1))
+        .setLabel(translate(locale, 'quickReply.picker.next'))
+        .setEmoji('➡️').setStyle(ButtonStyle.Secondary).setDisabled(safePage >= pageCount - 1),
+    ));
   }
-
   components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()));
-
-  await renderSettingsView(
-    interaction,
-    [new EmbedBuilder()
-      .setTitle('⚙️ Manage Departments')
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('⚙️ ' + translate(locale, 'settings.departments.actions.manage'))
       .setDescription(
-        'Select a department to manage it.' +
-        (pageCount > 1
-          ? '\nShowing departments ' +
-            (safePage * pageSize + 1) +
-            '–' +
-            Math.min((safePage + 1) * pageSize, departments.length) +
-            ' of ' +
-            departments.length +
-            '.'
-          : ''),
-      )],
-    components,
-  );
+        translate(locale, 'settings.departments.actions.selectToManage') +
+        (pageCount > 1 ? '\n' + translate(locale, 'settings.departments.range', {
+          start: safePage * pageSize + 1,
+          end: Math.min((safePage + 1) * pageSize, departments.length),
+          total: departments.length,
+        }) : ''),
+      ),
+  ], components);
 }
 
 async function showDepartmentManager(interaction: SettingsViewInteraction, departmentId: string): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
-  const d = config.departments[departmentId];
-  if (!d) { await reject(interaction, '❌ Department not found.'); return; }
-  const tags = Object.values(d.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const locale = settings.locale;
+  const department = config.departments[departmentId];
+  if (!department) {
+    await reject(interaction, '❌ ' + translate(locale, 'settings.departments.notFound'));
+    return;
+  }
+  const tags = Object.values(department.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('⚙️ ' + d.name)
-      .setDescription('**Category:** ' + (d.categoryId ? '<#' + d.categoryId + '>' : 'Pending') + '\n**Staff:** ' + (d.staffRoleId ? '<@&' + d.staffRoleId + '>' : 'Administrators only') + '\n\n**Tags:** ' + (tags.length ? tags.map((t) => '🏷️ ' + t.name).join(' • ') : 'None')),
+      .setTitle('⚙️ ' + department.name)
+      .setDescription(
+        '**' + translate(locale, 'settings.departments.field.category') + ':** ' +
+        (department.categoryId ? '<#' + department.categoryId + '>' : translate(locale, 'settings.departments.value.pending')) + '\n' +
+        '**' + translate(locale, 'settings.departments.field.staff') + ':** ' +
+        (department.staffRoleId ? '<@&' + department.staffRoleId + '>' : translate(locale, 'settings.departments.value.adminsOnly')) +
+        '\n\n**' + translate(locale, 'settings.departments.field.tags') + ':** ' +
+        (tags.length ? tags.map((tag) => '🏷️ ' + tag.name).join(' • ') : translate(locale, 'settings.departments.noTags')),
+      ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:department:edit:' + d.id).setLabel('Edit Department').setEmoji('✏️').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('sf:settings:tag:add:' + d.id).setLabel('Add Tag').setEmoji('➕').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('sf:settings:tag:manage:' + d.id).setLabel('Manage Tags').setEmoji('🏷️').setStyle(ButtonStyle.Secondary).setDisabled(!tags.length),
+      new ButtonBuilder().setCustomId('sf:settings:department:edit:' + department.id)
+        .setLabel(translate(locale, 'settings.departments.actions.edit')).setEmoji('✏️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:tag:add:' + department.id)
+        .setLabel(translate(locale, 'settings.tags.actions.edit').replace('Edit Tag', translate(locale, 'settings.departments.actions.add')))
+        .setEmoji('➕').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sf:settings:tag:manage:' + department.id)
+        .setLabel(translate(locale, 'settings.tags.title')).setEmoji('🏷️')
+        .setStyle(ButtonStyle.Secondary).setDisabled(!tags.length),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:department:remove:' + d.id).setLabel('Remove Department').setEmoji('🗑️').setStyle(ButtonStyle.Danger).setDisabled(Object.keys(config.departments).length <= 1),
-      new ButtonBuilder().setCustomId('sf:settings:departments').setLabel('Back').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sf:settings:department:remove:' + department.id)
+        .setLabel(translate(locale, 'settings.departments.actions.remove')).setEmoji('🗑️')
+        .setStyle(ButtonStyle.Danger).setDisabled(Object.keys(config.departments).length <= 1),
+      new ButtonBuilder().setCustomId('sf:settings:departments')
+        .setLabel(translate(locale, 'settings.departments.actions.back')).setStyle(ButtonStyle.Secondary),
     ),
   ]);
 }
@@ -1475,115 +1485,70 @@ async function showTagManager(
   page = 0,
 ): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
-  const d = config.departments[departmentId];
-  if (!d) {
-    await reject(interaction, '❌ Department not found.');
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const locale = settings.locale;
+  const department = config.departments[departmentId];
+  if (!department) {
+    await reject(interaction, '❌ ' + translate(locale, 'settings.departments.notFound'));
     return;
   }
-
-  const tags = Object.values(d.tags ?? {}).sort((a, b) =>
-    a.name.localeCompare(b.name),
-  );
-
+  const tags = Object.values(department.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
   if (!tags.length) {
-    await renderSettingsView(
-      interaction,
-      [new EmbedBuilder()
-        .setTitle('🏷️ Tags • ' + d.name)
-        .setDescription('No tags configured.')],
-      [
-        new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder()
-            .setCustomId('sf:settings:department:manage:' + d.id)
-            .setLabel('Back to Department')
-            .setStyle(ButtonStyle.Secondary),
-        ),
-      ],
-    );
+    await renderSettingsView(interaction, [
+      new EmbedBuilder().setTitle('🏷️ ' + translate(locale, 'settings.tags.title') + ' • ' + department.name)
+        .setDescription(translate(locale, 'settings.tags.noTags')),
+    ], [new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:department:manage:' + department.id)
+        .setLabel(translate(locale, 'settings.tags.actions.backToDepartment')).setStyle(ButtonStyle.Secondary),
+    )]);
     return;
   }
 
   const pageSize = 25;
   const pageCount = Math.max(1, Math.ceil(tags.length / pageSize));
   const safePage = Math.min(Math.max(page, 0), pageCount - 1);
-  const visible = tags.slice(
-    safePage * pageSize,
-    (safePage + 1) * pageSize,
-  );
-
-  const components: Array<
-    ActionRowBuilder<StringSelectMenuBuilder> |
-    ActionRowBuilder<ButtonBuilder>
-  > = [
+  const visible = tags.slice(safePage * pageSize, (safePage + 1) * pageSize);
+  const components: Array<ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<ButtonBuilder>> = [
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
-        .setCustomId('sf:settings:tag:select:' + d.id)
-        .setPlaceholder('Choose a tag')
-        .addOptions(
-          visible.map((t) => ({
-            label: t.name.slice(0, 100),
-            value: t.id,
-            description: 'Subcategory of ' + d.name,
-          })),
-        ),
+        .setCustomId('sf:settings:tag:select:' + department.id)
+        .setPlaceholder(translate(locale, 'settings.tags.select').slice(0, 150))
+        .addOptions(visible.map((tag) => ({
+          label: tag.name.slice(0, 100),
+          value: tag.id,
+          description: translate(locale, 'settings.tags.subcategoryOf', { department: department.name }).slice(0, 100),
+        }))),
     ),
   ];
-
   if (pageCount > 1) {
-    components.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId('sf:settings:tag:manage-page:' + d.id + ':' + (safePage - 1))
-          .setLabel('Previous')
-          .setEmoji('⬅️')
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(safePage === 0),
-        new ButtonBuilder()
-          .setCustomId('sf:settings:tag:manage-page:' + d.id + ':' + safePage)
-          .setLabel('Page ' + (safePage + 1) + ' / ' + pageCount)
-          .setEmoji('📄')
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(true),
-        new ButtonBuilder()
-          .setCustomId('sf:settings:tag:manage-page:' + d.id + ':' + (safePage + 1))
-          .setLabel('Next')
-          .setEmoji('➡️')
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(safePage >= pageCount - 1),
-      ),
-    );
+    components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:tag:manage-page:' + department.id + ':' + (safePage - 1))
+        .setLabel(translate(locale, 'quickReply.picker.previous')).setEmoji('⬅️')
+        .setStyle(ButtonStyle.Secondary).setDisabled(safePage === 0),
+      new ButtonBuilder().setCustomId('sf:settings:tag:manage-page:' + department.id + ':' + safePage)
+        .setLabel(translate(locale, 'quickReply.list.page', { page: safePage + 1, pages: pageCount, total: tags.length }).slice(0, 80))
+        .setEmoji('📄').setStyle(ButtonStyle.Secondary).setDisabled(true),
+      new ButtonBuilder().setCustomId('sf:settings:tag:manage-page:' + department.id + ':' + (safePage + 1))
+        .setLabel(translate(locale, 'quickReply.picker.next')).setEmoji('➡️')
+        .setStyle(ButtonStyle.Secondary).setDisabled(safePage >= pageCount - 1),
+    ));
   }
-
-  components.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId('sf:settings:department:manage:' + d.id)
-        .setLabel('Back to Department')
-        .setStyle(ButtonStyle.Secondary),
-    ),
-  );
-
-  await renderSettingsView(
-    interaction,
-    [new EmbedBuilder()
-      .setTitle('🏷️ Tags • ' + d.name)
+  components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('sf:settings:department:manage:' + department.id)
+      .setLabel(translate(locale, 'settings.tags.actions.backToDepartment')).setStyle(ButtonStyle.Secondary),
+  ));
+  await renderSettingsView(interaction, [
+    new EmbedBuilder().setTitle('🏷️ ' + translate(locale, 'settings.tags.title') + ' • ' + department.name)
       .setDescription(
-        'Select a tag to edit or remove it.' +
-        (pageCount > 1
-          ? '\nShowing tags ' +
-            (safePage * pageSize + 1) +
-            '–' +
-            Math.min((safePage + 1) * pageSize, tags.length) +
-            ' of ' +
-            tags.length +
-            '.'
-          : ''),
-      )],
-    components,
-  );
+        translate(locale, 'settings.tags.selectToManage') +
+        (pageCount > 1 ? '\n' + translate(locale, 'settings.tags.range', {
+          start: safePage * pageSize + 1,
+          end: Math.min((safePage + 1) * pageSize, tags.length),
+          total: tags.length,
+        }) : ''),
+      ),
+  ], components);
 }
-
-
 
 async function showDepartments(interaction: SettingsViewInteraction): Promise<void> {
   await showTags(interaction);
@@ -1712,7 +1677,7 @@ async function showThemeSettings(
   const active = getThemeDefinition(config.theme);
   const chooser = new StringSelectMenuBuilder()
     .setCustomId('sf:settings:theme:select')
-    .setPlaceholder('Choose a visual theme for this server')
+    .setPlaceholder(translate(settings.locale, 'settings.theme.choose').slice(0, 150))
     .addOptions(UI_THEMES.map((theme) => ({
       label: theme.label,
       value: theme.id,
@@ -1738,6 +1703,7 @@ async function showThemeSettings(
 }
 
 async function showUseCases(interaction: ButtonInteraction): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   const presets = Object.entries(USE_CASE_PRESETS);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
   for (let i = 0; i < presets.length; i += 4) {
@@ -1752,11 +1718,10 @@ async function showUseCases(interaction: ButtonInteraction): Promise<void> {
     ));
   }
   rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()));
-
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🧩 Use Cases')
-      .setDescription('Optional department presets for common support operations. Each preset adds eight relevant starter tags (ticket subcategories). You can rename or remove them later in Departments & Tags. Departments are created without a Discord category; that category is provisioned only when the first ticket is opened.'),
+      .setTitle('🧩 ' + translate(settings.locale, 'settings.useCases.title'))
+      .setDescription(translate(settings.locale, 'settings.useCases.description')),
   ], rows);
 }
 
