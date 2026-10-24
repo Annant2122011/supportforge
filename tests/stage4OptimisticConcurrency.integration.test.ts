@@ -4,7 +4,7 @@ import test from 'node:test';
 
 import { closePostgresDatabase, getPostgresPool } from '../src/core/persistence/postgresDatabase';
 import { migratePostgres } from '../src/core/persistence/migrationRunner';
-import { saveQuickReply, getQuickReply } from '../src/services/quickReplyService';
+import { deleteQuickReply, saveQuickReply, getQuickReply, restoreQuickReplyRevision } from '../src/services/quickReplyService';
 import { saveWorkflowTemplate, listWorkflowTemplates } from '../src/services/workflowTemplateService';
 
 const hasPostgres =
@@ -70,6 +70,23 @@ test('quick reply saves require an expected version and reject stale concurrent 
     assert.equal(final?.version, 4);
     assert.equal(final?.enabled, false);
     assert.ok(['Concurrent A', 'Concurrent B'].includes(final?.body ?? ''));
+
+    const restored = await restoreQuickReplyRevision(guildId, actorId, created.id, 1, final!.version);
+    assert.equal(restored.version, 5);
+    assert.equal(restored.body, 'First version');
+    assert.equal(restored.enabled, true);
+
+    assert.equal(await deleteQuickReply(guildId, created.id, restored.version, actorId), true);
+    const restoredAfterDelete = await restoreQuickReplyRevision(guildId, actorId, created.id, 2, 6);
+    assert.equal(restoredAfterDelete.version, 7);
+    assert.equal(restoredAfterDelete.body, 'Second version');
+    assert.equal(restoredAfterDelete.enabled, false);
+    assert.equal((await getQuickReply(guildId, created.id, { isAdmin: true, roleIds: [] }))?.version, 7);
+
+    await assert.rejects(
+      restoreQuickReplyRevision(guildId, actorId, created.id, 1, 6),
+      /changed since it was opened/,
+    );
   } finally {
     await pool.query('DELETE FROM quick_reply_revisions WHERE guild_id=$1', [guildId]);
     await pool.query('DELETE FROM quick_replies WHERE guild_id=$1', [guildId]);
