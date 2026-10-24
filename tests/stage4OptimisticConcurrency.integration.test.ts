@@ -5,7 +5,7 @@ import test from 'node:test';
 import { closePostgresDatabase, getPostgresPool } from '../src/core/persistence/postgresDatabase';
 import { migratePostgres } from '../src/core/persistence/migrationRunner';
 import { deleteQuickReply, saveQuickReply, getQuickReply, restoreQuickReplyRevision } from '../src/services/quickReplyService';
-import { saveWorkflowTemplate, listWorkflowTemplates } from '../src/services/workflowTemplateService';
+import { deleteWorkflowTemplate, saveWorkflowTemplate, listWorkflowTemplates, restoreWorkflowTemplateRevision } from '../src/services/workflowTemplateService';
 
 const hasPostgres =
   process.env.SUPPORTFORGE_POSTGRES_TEST === '1' &&
@@ -131,6 +131,25 @@ test('workflow template saves require an expected version instead of silently re
     const saved = (await listWorkflowTemplates(guildId)).find((template) => template.id === created.id);
     assert.equal(saved?.version, 2);
     assert.deepEqual(saved?.definition, { conditions: [{ field: 'priority', equals: 'urgent' }], actions: [{ type: 'set_priority', value: 'critical' }] });
+
+    const restored = await restoreWorkflowTemplateRevision(guildId, created.id, 1, saved!.version, actorId);
+    assert.equal(restored.version, 3);
+    assert.deepEqual(restored.definition, definition);
+    assert.equal(restored.enabled, false);
+
+    assert.equal(await deleteWorkflowTemplate(guildId, created.id, restored.version, actorId), true);
+    const restoredAfterDelete = await restoreWorkflowTemplateRevision(guildId, created.id, 2, 4, actorId);
+    assert.equal(restoredAfterDelete.version, 5);
+    assert.deepEqual(restoredAfterDelete.definition, {
+      conditions: [{ field: 'priority', equals: 'urgent' }],
+      actions: [{ type: 'set_priority', value: 'critical' }],
+    });
+    assert.equal(restoredAfterDelete.enabled, false);
+
+    await assert.rejects(
+      restoreWorkflowTemplateRevision(guildId, created.id, 1, 4, actorId),
+      /changed since it was opened/,
+    );
   } finally {
     await pool.query('DELETE FROM workflow_template_revisions WHERE guild_id=$1', [guildId]);
     await pool.query('DELETE FROM workflow_templates WHERE guild_id=$1', [guildId]);
