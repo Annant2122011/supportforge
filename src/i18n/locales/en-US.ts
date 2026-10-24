@@ -440,6 +440,8 @@ const enUS = {
   'settings.customPanel.error.buttonNotFound': "Button not found.",
   'settings.customPanel.error.genericTitle': "Custom Panel action failed",
   'settings.customPanel.action.cancel': "Cancel",
+  'settings.customPanel.status.published': "Published",
+  'settings.customPanel.status.draft': "Draft",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
