@@ -621,6 +621,15 @@ const bnIN: Record<TranslationKey, string> = {
   'quickReply.command.deleteNotConfirmed': "মুছে ফেলার নিশ্চয়তা দেওয়া হয়নি। কোনো Quick Reply সরানো হয়নি।",
   'quickReply.command.deleted': "Quick Reply মুছে ফেলা হয়েছে।",
   'quickReply.command.deleteNotFound': "মিলযুক্ত Quick Reply পাওয়া যায়নি।",
+  'knowledge.command.publishedSuccess': "নিবন্ধ \"{title}\" এখন সংস্করণ {revision}-এ প্রকাশিত।",
+  'knowledge.command.archivedSuccess': "নিবন্ধ \"{title}\" এখন সংস্করণ {revision}-এ সংরক্ষণাগারভুক্ত।",
+  'knowledge.command.visibilityPublic': "সর্বজনীন",
+  'knowledge.command.visibilityStaff': "স্টাফ",
+  'quickReply.command.operationCreated': "তৈরি",
+  'quickReply.command.operationUpdated': "আপডেট",
+  'quickReply.command.operationDeleted': "মুছে ফেলা",
+  'quickReply.command.operationBaseline': "মূল রেকর্ড",
+  'quickReply.command.operationRestored': "পুনরুদ্ধার",
 };
 
 export default bnIN;
