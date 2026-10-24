@@ -143,7 +143,7 @@ function workflowRunDescription(run: WorkflowExecutionSummary): string {
   if (run.status === 'failed') {
     lines.push('', 'No later steps were run. Resume only after reviewing the recorded failed step.');
   }
-  return lines.join('\\n').slice(0, 3900);
+  return lines.join('\n').slice(0, 3900);
 }
 
 async function auditWorkflowRun(
@@ -606,7 +606,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         const runs = await listWorkflowExecutionRunsForTicket(guildId, ticket.id, 10);
         await interaction.editReply({
           embeds: [new EmbedBuilder().setTitle('Workflow Runs • Ticket #' + (ticket.ticketNumber ?? ticket.id.slice(0, 8)))
-            .setDescription(runs.length ? runs.map((run) => workflowRunDescription(run)).join('\\n\\n').slice(0, 3900) : 'No workflow runs are recorded for this ticket.')
+            .setDescription(runs.length ? runs.map((run) => workflowRunDescription(run)).join('\n\n').slice(0, 3900) : 'No workflow runs are recorded for this ticket.')
             .setFooter({ text: 'Manual admin-triggered runs only. No background workflow triggers are enabled.' })],
         });
         return true;
