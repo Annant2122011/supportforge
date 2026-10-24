@@ -540,6 +540,16 @@ const enUS = {
   'settings.customPanel.error.noChannels': "No accessible text channels were found where QueryFixr can view, send messages and embeds.",
   'settings.customPanel.panelPublished.cleanupWarning': "The old message could not be removed. Delete it manually to prevent duplicate entry points.",
   'settings.customPanel.panelDeleted.cleanupWarning': "The panel definition is deleted and its buttons are no longer functional, but the old Discord message could not be removed. Delete that message manually.",
+  'settings.customPanel.detail.panelId': "Panel ID",
+  'settings.customPanel.detail.status': "Status",
+  'settings.customPanel.detail.formTargetLine': "Form `{formId}` v{version}",
+  'settings.customPanel.detail.missingDepartment': "Missing department",
+  'settings.customPanel.detail.tagLabel': "tag",
+  'settings.customPanel.detail.restricted': "restricted",
+  'settings.customPanel.detail.confirmation': "confirmation",
+  'settings.customPanel.modal.editButtonTitle': "Edit Button",
+  'settings.customPanel.error.invalidStyle': "Button style must be primary, secondary, success, or danger.",
+  'settings.customPanel.error.unknown': "Unknown custom panel error.",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
