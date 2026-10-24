@@ -24,6 +24,7 @@ import {
   deleteQuickReply,
   getQuickReply,
   listQuickReplies,
+  listQuickReplyRevisions,
   renderQuickReply,
   saveQuickReply,
 } from '../services/quickReplyService';
@@ -31,6 +32,7 @@ import { linkRelatedTickets, listRelatedTickets, unlinkRelatedTickets } from '..
 import {
   deleteWorkflowTemplate,
   listWorkflowTemplates,
+  listWorkflowTemplateRevisions,
   previewWorkflowTemplateById,
   saveWorkflowTemplate,
   setWorkflowTemplateEnabled,
@@ -386,6 +388,22 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           : 'No quick replies are available to you.');
         return true;
       }
+      if (subcommand === 'history') {
+        if (!access.isAdmin) throw accessDenied('Manage Server or Administrator permission');
+        const replyId = interaction.options.getString('name-or-id', true).trim();
+        const revisions = await listQuickReplyRevisions(guildId, replyId);
+        const description = revisions.length
+          ? revisions.map((item) =>
+              '**v' + item.version + '** • ' + item.operation + ' • ' + (item.enabled ? 'enabled' : 'disabled') +
+              '\n' + item.name + ' • editor ' + item.changedBy + ' • ' + item.createdAt,
+            ).join('\n\n').slice(0, 3800)
+          : 'No revision history is recorded for this quick reply.';
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setTitle('Quick Reply Revision History').setDescription(description)
+            .setFooter({ text: 'History is retained in PostgreSQL; deleted replies remain listed here.' })],
+        });
+        return true;
+      }
       if (subcommand === 'show') {
         const reply = await getQuickReply(guildId, interaction.options.getString('name-or-id', true), { isAdmin: access.isAdmin, roleIds: access.roleIds });
         if (!reply) throw new Error('Quick reply not found or unavailable to your roles.');
@@ -417,7 +435,8 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         if (!access.isAdmin) throw accessDenied('Manage Server or Administrator permission');
         if (!interaction.options.getBoolean('confirm', true)) throw new Error('Delete was not confirmed. No quick reply was removed.');
         const quickReplyId = interaction.options.getString('name-or-id', true);
-        const deleted = await deleteQuickReply(guildId, quickReplyId);
+        const expectedVersion = interaction.options.getInteger('expected-version', true);
+        const deleted = await deleteQuickReply(guildId, quickReplyId, expectedVersion, actorId);
         if (deleted && config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
           action: 'QUICK_REPLY_DELETED', actorId, actorName: interaction.user.tag,
           detail: 'Deleted quick reply identified by ' + quickReplyId.slice(0, 80) + '.',
@@ -505,6 +524,22 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           : 'No workflow templates exist.');
         return true;
       }
+      if (subcommand === 'history') {
+        const templateId = interaction.options.getString('template-id', true).trim();
+        const revisions = await listWorkflowTemplateRevisions(guildId, templateId);
+        const description = revisions.length
+          ? revisions.map((item) =>
+              '**v' + item.version + '** • ' + item.operation + ' • ' +
+              (item.enabled ? 'catalogue enabled' : 'disabled') + (item.deleted ? ' • deleted' : '') +
+              '\n' + item.name + ' • editor ' + item.changedBy + ' • ' + item.createdAt,
+            ).join('\n\n').slice(0, 3800)
+          : 'No revision history is recorded for this workflow template.';
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setTitle('Workflow Template Revision History').setDescription(description)
+            .setFooter({ text: 'Catalogue history only. Workflow execution is not enabled.' })],
+        });
+        return true;
+      }
       if (subcommand === 'save') {
         let definition: unknown;
         try { definition = JSON.parse(interaction.options.getString('definition-json', true)); }
@@ -553,6 +588,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           guildId,
           templateId,
           interaction.options.getInteger('version', true),
+          actorId,
         );
         if (removed && config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
           action: 'WORKFLOW_TEMPLATE_DELETED', actorId, actorName: interaction.user.tag,
