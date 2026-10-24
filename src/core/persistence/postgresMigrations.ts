@@ -568,6 +568,191 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+  {
+    id: 14,
+    name: 'add_knowledge_base_and_quick_reply_productivity',
+    up: async (db) => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS knowledge_base_articles (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          slug TEXT NOT NULL,
+          title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 180),
+          body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 20000),
+          category TEXT NOT NULL DEFAULT 'General' CHECK (length(category) BETWEEN 1 AND 80),
+          tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          visibility TEXT NOT NULL DEFAULT 'public' CHECK (visibility IN ('public','staff')),
+          status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','published','archived')),
+          revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+          created_by TEXT NOT NULL,
+          updated_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          published_at TIMESTAMPTZ,
+          search_vector TSVECTOR NOT NULL DEFAULT ''::tsvector
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_articles_guild_slug
+          ON knowledge_base_articles (guild_id, slug);
+        CREATE INDEX IF NOT EXISTS idx_kb_articles_guild_status_updated
+          ON knowledge_base_articles (guild_id, status, updated_at DESC);
+        CREATE OR REPLACE FUNCTION supportforge_kb_article_search_vector_update()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $function$
+        BEGIN
+          NEW.search_vector :=
+            setweight(to_tsvector('simple'::regconfig, coalesce(NEW.title, '')), 'A') ||
+            setweight(to_tsvector('simple'::regconfig, coalesce(NEW.category, '')), 'B') ||
+            setweight(to_tsvector('simple'::regconfig, coalesce(array_to_string(NEW.tags, ' '), '')), 'B') ||
+            setweight(to_tsvector('simple'::regconfig, coalesce(NEW.body, '')), 'C');
+          RETURN NEW;
+        END;
+        $function$;
+
+        DROP TRIGGER IF EXISTS trg_supportforge_kb_article_search_vector ON knowledge_base_articles;
+        CREATE TRIGGER trg_supportforge_kb_article_search_vector
+          BEFORE INSERT OR UPDATE OF title, category, tags, body
+          ON knowledge_base_articles
+          FOR EACH ROW
+          EXECUTE FUNCTION supportforge_kb_article_search_vector_update();
+
+        CREATE INDEX IF NOT EXISTS idx_kb_articles_search_vector
+          ON knowledge_base_articles USING GIN (search_vector);
+
+        CREATE TABLE IF NOT EXISTS knowledge_base_article_revisions (
+          article_id TEXT NOT NULL REFERENCES knowledge_base_articles(id) ON DELETE CASCADE,
+          guild_id TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK (revision > 0),
+          slug TEXT NOT NULL,
+          title TEXT NOT NULL,
+          body TEXT NOT NULL,
+          category TEXT NOT NULL,
+          tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          visibility TEXT NOT NULL CHECK (visibility IN ('public','staff')),
+          status TEXT NOT NULL CHECK (status IN ('draft','published','archived')),
+          changed_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (article_id, revision)
+        );
+        CREATE INDEX IF NOT EXISTS idx_kb_revisions_guild_article
+          ON knowledge_base_article_revisions (guild_id, article_id, revision DESC);
+
+        CREATE TABLE IF NOT EXISTS knowledge_base_synonyms (
+          guild_id TEXT NOT NULL,
+          normalized_term TEXT NOT NULL,
+          synonyms TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          updated_by TEXT NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (guild_id, normalized_term)
+        );
+
+        CREATE TABLE IF NOT EXISTS knowledge_base_usage (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          article_id TEXT NOT NULL REFERENCES knowledge_base_articles(id) ON DELETE CASCADE,
+          action TEXT NOT NULL CHECK (action IN ('search_result','view','share')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_kb_usage_guild_action_time
+          ON knowledge_base_usage (guild_id, action, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_kb_usage_article_time
+          ON knowledge_base_usage (article_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS knowledge_base_feedback (
+          guild_id TEXT NOT NULL,
+          article_id TEXT NOT NULL REFERENCES knowledge_base_articles(id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL,
+          helpful BOOLEAN NOT NULL,
+          comment TEXT NOT NULL DEFAULT '' CHECK (length(comment) <= 500),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (guild_id, article_id, user_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_kb_feedback_guild_time
+          ON knowledge_base_feedback (guild_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS quick_reply_templates (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 80),
+          content TEXT NOT NULL CHECK (length(content) BETWEEN 1 AND 1900),
+          department_id TEXT NOT NULL DEFAULT '*',
+          tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          enabled BOOLEAN NOT NULL DEFAULT TRUE,
+          revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+          created_by TEXT NOT NULL,
+          updated_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_quick_reply_guild_name
+          ON quick_reply_templates (guild_id, lower(name));
+        CREATE INDEX IF NOT EXISTS idx_quick_reply_guild_enabled
+          ON quick_reply_templates (guild_id, enabled, department_id, lower(name));
+
+        CREATE TABLE IF NOT EXISTS quick_reply_usage (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          quick_reply_id TEXT NOT NULL REFERENCES quick_reply_templates(id) ON DELETE CASCADE,
+          actor_id TEXT NOT NULL,
+          used_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_quick_reply_usage_guild_time
+          ON quick_reply_usage (guild_id, used_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_quick_reply_usage_template_time
+          ON quick_reply_usage (quick_reply_id, used_at DESC);
+
+        CREATE TABLE IF NOT EXISTS quick_reply_template_revisions (
+          quick_reply_id TEXT NOT NULL REFERENCES quick_reply_templates(id) ON DELETE CASCADE,
+          guild_id TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK (revision > 0),
+          name TEXT NOT NULL,
+          content TEXT NOT NULL,
+          department_id TEXT NOT NULL,
+          tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          enabled BOOLEAN NOT NULL,
+          changed_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (quick_reply_id, revision)
+        );
+        CREATE INDEX IF NOT EXISTS idx_quick_reply_revisions_guild
+          ON quick_reply_template_revisions (guild_id, quick_reply_id, revision DESC);
+      `);
+    },
+  },
+  {
+    id: 15,
+    name: 'add_guild_scoped_related_ticket_links',
+    up: async (db) => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS related_ticket_links (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          ticket_a_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+          ticket_b_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+          note TEXT NOT NULL DEFAULT '' CHECK (length(note) <= 300),
+          status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','removed')),
+          created_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          removed_by TEXT,
+          removed_at TIMESTAMPTZ,
+          CHECK (ticket_a_id < ticket_b_id),
+          CHECK (
+            (status='active' AND removed_by IS NULL AND removed_at IS NULL) OR
+            (status='removed' AND removed_by IS NOT NULL AND removed_at IS NOT NULL)
+          )
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_related_ticket_active_pair
+          ON related_ticket_links (guild_id, ticket_a_id, ticket_b_id)
+          WHERE status='active';
+        CREATE INDEX IF NOT EXISTS idx_related_ticket_a_time
+          ON related_ticket_links (guild_id, ticket_a_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_related_ticket_b_time
+          ON related_ticket_links (guild_id, ticket_b_id, created_at DESC);
+      `);
+    },
+  },
 ];
 
 /** Latest migration identifier required by this application version. */

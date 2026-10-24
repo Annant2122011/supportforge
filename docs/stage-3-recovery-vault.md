@@ -66,3 +66,10 @@
 5. Continue Stage H2 locale completion for the remaining Settings pages, panel previews and selected reports under the Stage 1/2 release gate.
 
 **Release rule:** green CI, a valid dump file and an empty-target restore script are not proof of an actual Neon restore drill. Report source review, CI, test-guild acceptance, database restore and deployment as separate outcomes.
+
+
+## Combined Stage 3 + Stage 4 tree verification — 2026-10-24
+
+The Stage 3 reliability changes were integrated into the Stage 4 branch without replacing either stage's migration work. The merged migration set contains IDs 1–15, including migration 13 for recovery replay segments, migration 14 for Knowledge Base/quick replies, and migration 15 for related-ticket links. The combined head `deda4ffb5ef58f60db3fc00cb52103329d78d161` passed [ResolvX CI #2514](https://github.com/Annant2122011/supportforge/actions/runs/40084718577): **200/200 tests**, zero skipped, plus build and disposable PostgreSQL verification. The verifier confirmed recovery segments, Knowledge Base, quick-reply, related-link tables and zero orphan/stale lease records in the disposable database.
+
+**Still blocked:** an authorized non-production Discord recovery test and a real restore of a verified backup into an isolated non-production Neon target. These are release gates, not things CI can simulate by waving a green checkmark at PostgreSQL.

@@ -1,6 +1,6 @@
 # ResolveX Four-Stage Product Excellence Programme
 
-**Status:** Stage 3 implementation started; Stage 1/2 remain unmerged draft PRs pending ordered review and live acceptance  
+**Status:** Stage 3 recovery reliability plus Stage 4 Knowledge Base, quick replies, related-ticket links and transcript search are implemented on the stacked branch; current PR-head CI passed 201/201 tests. Stage 1/2 remain unmerged draft PRs pending ordered review and live acceptance  
 **Product surface:** Discord-first ResolveX  
 **Production persistence:** Neon PostgreSQL; SQLite is not an allowed live provider  
 **Delivery policy:** Small, reviewable commits and pull requests. No production deployment is implied by source changes or green CI.
@@ -8,6 +8,9 @@
 This programme groups the requested product improvements into four delivery stages. It is separate from the existing master roadmap labels A–R. Each programme stage is split into narrow implementation increments; it is not one enormous feature branch.
 
 **Current incremental status:** [Stage 3 Recovery Vault implementation and acceptance gaps](stage-3-recovery-vault.md).
+
+- [Stage 1/2 measurable scope and exit contract](stage-1-2-exit-contract.md)
+- [Stage 4 Knowledge Base and quick-reply implementation guide](stage-4-knowledge-productivity.md)
 
 ## Non-negotiable engineering rules
 
