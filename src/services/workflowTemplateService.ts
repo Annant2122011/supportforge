@@ -273,6 +273,71 @@ export async function setWorkflowTemplateEnabled(
   }
 }
 
+/** Restore a retained workflow definition into a new disabled revision. */
+export async function restoreWorkflowTemplateRevision(
+  guildId: string,
+  templateId: string,
+  revisionNumber: number,
+  expectedVersion: number,
+  actorId: string,
+): Promise<WorkflowTemplate> {
+  if (!Number.isInteger(revisionNumber) || revisionNumber < 1 ||
+      !Number.isInteger(expectedVersion) || expectedVersion < 1) {
+    throw new Error('Revision and expected current version must be positive integers.');
+  }
+  const client = await getPostgresPool().connect();
+  try {
+    await client.query('BEGIN');
+    const currentResult = await client.query<WorkflowRow & {
+      deleted_at: Date | string | null;
+    }>(
+      'SELECT ' + COLUMNS + ',deleted_at FROM workflow_templates ' +
+        'WHERE guild_id=$1 AND id=$2 FOR UPDATE',
+      [guildId, templateId],
+    );
+    const current = currentResult.rows[0];
+    if (!current) throw new Error('Workflow template was not found in this server.');
+    if (Number(current.version) !== expectedVersion) {
+      throw new Error('This workflow template changed since it was opened. Refresh its current version before restoring history.');
+    }
+
+    const history = await client.query<QueryResultRow & {
+      name: string;
+      definition: unknown;
+    }>(
+      'SELECT name,definition FROM workflow_template_revisions ' +
+        'WHERE guild_id=$1 AND template_id=$2 AND version=$3 LIMIT 1',
+      [guildId, templateId, revisionNumber],
+    );
+    const revision = history.rows[0];
+    if (!revision) throw new Error('That workflow revision does not exist in this server.');
+
+    const safeName = validName(revision.name);
+    const safeDefinition = validateWorkflowTemplateDefinition(revision.definition);
+    await assertWorkflowReferencesExist(guildId, safeDefinition);
+
+    const updated = await client.query<WorkflowRow>(
+      'UPDATE workflow_templates SET name=$4,definition=$5::jsonb,enabled=FALSE,deleted_at=NULL,' +
+        'version=version+1,updated_by=$6,updated_at=NOW() ' +
+        'WHERE guild_id=$1 AND id=$2 AND version=$3 RETURNING ' + COLUMNS,
+      [guildId, templateId, expectedVersion, safeName, JSON.stringify(safeDefinition), actorId],
+    );
+    if (!updated.rows[0]) throw new Error('This workflow template changed during history restoration. Refresh and retry.');
+    const saved = fromRow(updated.rows[0]);
+    await insertWorkflowRevision(client, saved, actorId, 'updated');
+    await client.query('COMMIT');
+    return saved;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === '23505') {
+      throw new Error('An active workflow template already uses that name. Resolve the name conflict before restoring.');
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function previewWorkflowTemplateById(
   guildId: string,
   templateId: string,
