@@ -1177,17 +1177,26 @@ async function showReportSettings(interaction: ButtonInteraction): Promise<void>
 async function showReportCategorySettings(interaction: ButtonInteraction, categoryId: string): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
   const category = settings.reports.categories[categoryId];
-  if (!category) { await reject(interaction, '❌ Report category not found.'); return; }
+  if (!category) {
+    await reject(interaction, '❌ ' + translate(settings.locale, 'settings.reports.error.categoryMissing'));
+    return;
+  }
   const subcategories = Object.values(category.subcategories);
   await renderSettingsView(interaction, [
     new EmbedBuilder()
       .setTitle(category.emoji + ' ' + category.name)
-      .setDescription('These are the report subcategories automatically available to moderators. They are independent of ticket departments and use cases.')
-      .addFields({ name: 'Subcategories', value: subcategories.map((sub) => '• ' + sub.name).join('\n').slice(0, 3900) || 'None' }),
+      .setDescription(translate(settings.locale, 'settings.reports.category.description'))
+      .addFields({
+        name: translate(settings.locale, 'settings.reports.category.subcategories'),
+        value: subcategories.map((sub) => '• ' + sub.name).join('\n').slice(0, 3900) ||
+          translate(settings.locale, 'settings.reports.value.noSubcategories'),
+      }),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:add:' + categoryId).setLabel('Add Subcategory').setEmoji('➕').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:select:' + categoryId).setLabel('Edit / Remove').setEmoji('✏️').setStyle(ButtonStyle.Primary).setDisabled(!subcategories.length),
+      new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:add:' + categoryId)
+        .setLabel(translate(settings.locale, 'settings.reports.action.addSubcategory')).setEmoji('➕').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:select:' + categoryId)
+        .setLabel(translate(settings.locale, 'settings.reports.action.editRemoveSubcategory')).setEmoji('✏️').setStyle(ButtonStyle.Primary).setDisabled(!subcategories.length),
       backButton(),
     ),
   ]);
@@ -1201,7 +1210,7 @@ async function showReportSubcategorySelector(
   const settings = await getAdvancedSettings(interaction.guild!.id);
   const category = settings.reports.categories[categoryId];
   if (!category) {
-    await reject(interaction, '❌ Report category not found.');
+    await reject(interaction, '❌ ' + translate(settings.locale, 'settings.reports.error.categoryMissing'));
     return;
   }
 
@@ -1223,7 +1232,7 @@ async function showReportSubcategorySelector(
         .setCustomId(
           'sf:settings:reports:subcategory:pick:' + categoryId,
         )
-        .setPlaceholder('Choose a subcategory')
+        .setPlaceholder(translate(settings.locale, 'settings.reports.selector.chooseSubcategory'))
         .addOptions(
           visible.map((sub) => ({
             label: sub.name.slice(0, 100),
@@ -1243,7 +1252,7 @@ async function showReportSubcategorySelector(
               ':' +
               (safePage - 1),
           )
-          .setLabel('Previous')
+          .setLabel(translate(settings.locale, 'settings.common.previous'))
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(safePage === 0),
         new ButtonBuilder()
@@ -1253,7 +1262,7 @@ async function showReportSubcategorySelector(
               ':' +
               safePage,
           )
-          .setLabel('Page ' + (safePage + 1) + ' / ' + pageCount)
+          .setLabel(translate(settings.locale, 'settings.reports.selector.page', { page: safePage + 1, pages: pageCount }))
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(true),
         new ButtonBuilder()
@@ -1263,7 +1272,7 @@ async function showReportSubcategorySelector(
               ':' +
               (safePage + 1),
           )
-          .setLabel('Next')
+          .setLabel(translate(settings.locale, 'settings.common.next'))
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(safePage >= pageCount - 1),
       ),
@@ -1275,11 +1284,10 @@ async function showReportSubcategorySelector(
   );
 
   await interaction.reply({
-    content:
-      'Select the report subcategory to edit or remove.' +
-      (pageCount > 1
-        ? ' Page ' + (safePage + 1) + ' of ' + pageCount + '.'
-        : ''),
+    content: translate(settings.locale, 'settings.reports.selector.prompt') +
+      (pageCount > 1 ? ' ' + translate(settings.locale, 'settings.reports.selector.pagePrompt', {
+        page: safePage + 1, pages: pageCount,
+      }) : ''),
     components,
     flags: MessageFlags.Ephemeral,
   });
@@ -3015,11 +3023,11 @@ export async function handleSettingsInteraction(
       const ticketRule = Object.values(settings.reports.flagRules).find((r) => r.action === 'tickets');
       const serverRule = Object.values(settings.reports.flagRules).find((r) => r.action === 'server');
       const channelRule = Object.values(settings.reports.flagRules).find((r) => r.action === 'channel');
-      await openModal(interaction, 'sf:settings:modal:report-rules', 'Report Flag Rules', [
-        new TextInputBuilder().setCustomId('tickets').setLabel('Ticket restriction threshold (0 = off)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(ticketRule?.threshold ?? 5)),
-        new TextInputBuilder().setCustomId('server').setLabel('Server ban threshold (0 = off)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(serverRule?.threshold ?? 10)),
-        new TextInputBuilder().setCustomId('channel').setLabel('Channel restriction threshold (0 = off)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(channelRule?.threshold ?? 0)),
-        new TextInputBuilder().setCustomId('channelId').setLabel('Channel ID / mention for channel rule').setStyle(TextInputStyle.Short).setRequired(false).setValue(channelRule?.channelId ? '<#' + channelRule.channelId + '>' : ''),
+      await openModal(interaction, 'sf:settings:modal:report-rules', translate(settings.locale, 'settings.reports.modal.flagRulesTitle'), [
+        new TextInputBuilder().setCustomId('tickets').setLabel(translate(settings.locale, 'settings.reports.modal.ticketThreshold')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String(ticketRule?.threshold ?? 5)),
+        new TextInputBuilder().setCustomId('server').setLabel(translate(settings.locale, 'settings.reports.modal.serverThreshold')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String(serverRule?.threshold ?? 10)),
+        new TextInputBuilder().setCustomId('channel').setLabel(translate(settings.locale, 'settings.reports.modal.channelThreshold')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String(channelRule?.threshold ?? 0)),
+        new TextInputBuilder().setCustomId('channelId').setLabel(translate(settings.locale, 'settings.reports.modal.channelId')).setStyle(TextInputStyle.Short).setRequired(false).setValue(channelRule?.channelId ? '<#' + channelRule.channelId + '>' : ''),
       ]);
       return true;
     }
@@ -3031,8 +3039,9 @@ export async function handleSettingsInteraction(
 
     if (id.startsWith('sf:settings:reports:subcategory:add:')) {
       const categoryId = id.slice('sf:settings:reports:subcategory:add:'.length);
-      await openModal(interaction, 'sf:settings:modal:report-subcategory:add:' + categoryId, 'Add Report Subcategory', [
-        new TextInputBuilder().setCustomId('name').setLabel('Subcategory name').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
+      const locale = (await getAdvancedSettings(guild.id)).locale;
+      await openModal(interaction, 'sf:settings:modal:report-subcategory:add:' + categoryId, translate(locale, 'settings.reports.modal.addSubcategoryTitle'), [
+        new TextInputBuilder().setCustomId('name').setLabel(translate(locale, 'settings.reports.modal.subcategoryName')).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
       ]);
       return true;
     }
@@ -3056,8 +3065,9 @@ export async function handleSettingsInteraction(
       const parts = id.split(':'); const categoryId = parts[5] ?? ''; const subcategoryId = parts[6] ?? '';
       const sub = (await getAdvancedSettings(guild.id)).reports.categories[categoryId]?.subcategories[subcategoryId];
       if (!sub) { await reject(interaction, '❌ Report subcategory not found.'); return true; }
-      await openModal(interaction, 'sf:settings:modal:report-subcategory:edit:' + categoryId + ':' + subcategoryId, 'Edit Report Subcategory', [
-        new TextInputBuilder().setCustomId('name').setLabel('Subcategory name').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(sub.name),
+      const locale = (await getAdvancedSettings(guild.id)).locale;
+      await openModal(interaction, 'sf:settings:modal:report-subcategory:edit:' + categoryId + ':' + subcategoryId, translate(locale, 'settings.reports.modal.editSubcategoryTitle'), [
+        new TextInputBuilder().setCustomId('name').setLabel(translate(locale, 'settings.reports.modal.subcategoryName')).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(sub.name),
       ]);
       return true;
     }
@@ -3860,8 +3870,11 @@ export async function handleSettingsInteraction(
         ensureRule('channel-default', 'channel', channelThreshold, channelId);
       });
       await refreshSettingsChannel(guild);
+      const locale = (await getAdvancedSettings(guild.id)).locale;
       await interaction.editReply({
-        embeds: [new EmbedBuilder().setTitle('✅ Report Flag Rules Updated').setDescription('Automatic actions now trigger at the configured flag thresholds. Set a threshold to **0** to disable that action.')],
+        embeds: [new EmbedBuilder()
+          .setTitle(translate(locale, 'settings.reports.success.rulesTitle'))
+          .setDescription(translate(locale, 'settings.reports.success.rulesDescription'))],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
       await auditSettingsAction(guild, interaction, 'REPORT_RULES_CHANGED', 'Updated automatic report flag thresholds and actions.');
@@ -3891,19 +3904,25 @@ export async function handleSettingsInteraction(
     if (interaction.customId.startsWith('sf:settings:modal:report-subcategory:add:')) {
       const categoryId = interaction.customId.slice('sf:settings:modal:report-subcategory:add:'.length);
       const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
-      if (!name) { await reject(interaction, '❌ Subcategory name cannot be empty.'); return true; }
-      const subId = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);
-      if (!subId) { await reject(interaction, '❌ Subcategory name must contain letters or numbers.'); return true; }
+      const locale = (await getAdvancedSettings(guild.id)).locale;
+      if (!name) {
+        await reject(interaction, '❌ ' + translate(locale, 'settings.reports.error.subcategoryEmpty'));
+        return true;
+      }
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);
+      const subId = slug || 'subcategory-' + randomBytes(6).toString('hex');
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       await updateAdvancedSettings(guild.id, (settings) => {
         const category = settings.reports.categories[categoryId];
         if (!category) return;
-        if (category.subcategories[subId]) throw new Error('A report subcategory with that name already exists.');
+        if (category.subcategories[subId]) throw new Error(translate(locale, 'settings.reports.error.subcategoryExists'));
         category.subcategories[subId] = { id: subId, name, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       }).catch(async (error) => { throw error; });
       await refreshSettingsChannel(guild);
       await interaction.editReply({
-        embeds: [new EmbedBuilder().setTitle('✅ Report Subcategory Added').setDescription('Added **' + name + '**.')],
+        embeds: [new EmbedBuilder()
+          .setTitle(translate(locale, 'settings.reports.success.addSubcategoryTitle'))
+          .setDescription(translate(locale, 'settings.reports.success.addSubcategoryDescription', { name }))],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
       await auditSettingsAction(guild, interaction, 'REPORT_SUBCATEGORY_ADDED', 'Added report subcategory ' + name + '.');
@@ -3912,15 +3931,18 @@ export async function handleSettingsInteraction(
 
     if (interaction.customId.startsWith('sf:settings:modal:report-subcategory:edit:')) {
       const parts = interaction.customId.split(':'); const categoryId = parts[5] ?? ''; const subcategoryId = parts[6] ?? '';
-      const sub = (await getAdvancedSettings(guild.id)).reports.categories[categoryId]?.subcategories[subcategoryId];
-      if (!sub) { await reject(interaction, '❌ Report subcategory not found.'); return true; }
+      const settings = await getAdvancedSettings(guild.id);
+      const sub = settings.reports.categories[categoryId]?.subcategories[subcategoryId];
+      if (!sub) { await reject(interaction, '❌ ' + translate(settings.locale, 'settings.reports.error.subcategoryMissing')); return true; }
       const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
-      if (!name) { await reject(interaction, '❌ Subcategory name cannot be empty.'); return true; }
+      if (!name) { await reject(interaction, '❌ ' + translate(settings.locale, 'settings.reports.error.subcategoryEmpty')); return true; }
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       await updateAdvancedSettings(guild.id, (settings) => { const item = settings.reports.categories[categoryId]?.subcategories[subcategoryId]; if (item) { item.name = name; item.updatedAt = new Date().toISOString(); } });
       await refreshSettingsChannel(guild);
       await interaction.editReply({
-        embeds: [new EmbedBuilder().setTitle('✅ Report Subcategory Updated').setDescription('Renamed the report subcategory to **' + name + '**.')],
+        embeds: [new EmbedBuilder()
+          .setTitle(translate(settings.locale, 'settings.reports.success.editSubcategoryTitle'))
+          .setDescription(translate(settings.locale, 'settings.reports.success.editSubcategoryDescription', { name }))],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
       return true;
