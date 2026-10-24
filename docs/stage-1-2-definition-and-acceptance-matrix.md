@@ -1,6 +1,6 @@
 # Stage 1 and Stage 2 — Definition, Evidence and Acceptance Matrix
 
-**Snapshot date:** 2026-10-23  
+**Snapshot date:** 2026-10-24  
 **Current review order:** PR #33 → PR #31 → PR #32 → PR #34 → PR #36  
 **Production persistence:** Neon PostgreSQL. No SQLite migration or production data switch is part of these stages.
 
@@ -66,6 +66,23 @@
 
 ### Current Stage 2 decision
 **Source and recorded CI evidence: substantial. Stage exit criteria: not yet met.** PR #32 remains an open draft stacked on PR #31. It must only be reviewed after #33 and #31 are integrated in order. The automated check does not establish production Neon connectivity, backup recovery or actual Discord permissions.
+
+## Re-audit update — 2026-10-24
+
+### Current branch/PR truth
+
+- PR #33 (baseline cleanup), #31 (Stage 1), #32 (Stage 2), #34 (Stage 3), and #36 (Stage 4) remain open drafts in the intended stack. Do not merge them out of order.
+- PR #33's recorded CI passed on its cleanup head. PR #31 CI #2052 passed 138/138 tests; PR #32 CI #2065 passed 172/172 tests. These are the recorded commit-level results, not live acceptance.
+- Stage 3's recovery/restore/SLA refinement passed [CI #2389](https://github.com/Annant2122011/supportforge/actions/runs/40053953590) on implementation head `f16b73dac24e5885875d632db959f9f0e012c071`: build passed, 194/194 tests, zero skipped, disposable PostgreSQL passed.
+- The previous combined Stage 4 head `873fc628346df93339d85026e23ca37d661ff212` passed [CI #2392](https://github.com/Annant2122011/supportforge/actions/runs/40054037568): build passed, 210/210 tests, zero skipped, disposable PostgreSQL passed. Later fixture and telemetry refinements have superseded that head; the newest recorded run [CI #2398](https://github.com/Annant2122011/supportforge/actions/runs/40054123277) is still in progress for head `87f049aa98d0a486110fb4784c3fcfc33391b12e`. Do not use CI #2392 to certify this newer head until #2398 completes successfully.
+- Stage 1/2 still have partial Stage H2 Settings/panel-preview/report translation coverage. Live Discord acceptance and an isolated non-production Neon backup/restore drill remain not run. Therefore neither Stage 1 nor Stage 2 is production-accepted.
+
+### Stage 3/4 refinements included on the feature stack
+
+- Recovery restore refuses to target a database matching the running bot's configured PostgreSQL URLs; malformed configured URLs fail closed.
+- SLA partial-sweep errors are reported as failed operational task telemetry instead of being counted as successful; other guilds continue processing.
+- Quick replies/workflow templates retain immutable revision ledgers and use version-checked soft deletion. The PostgreSQL verifier now checks those ledger tables and referential integrity.
+- Workflow templates remain a validated catalogue only. Automatic execution is deliberately out of scope until a separate execution plan has reviewed service-level authorization, state transitions, durable audit and outbox behavior.
 
 ## Cross-stage release gate
 
