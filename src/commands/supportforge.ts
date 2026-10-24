@@ -64,6 +64,7 @@ import {
   resolveRelatedTicketReference,
   unlinkRelatedTicket,
 } from '../services/relatedTicketService';
+import { searchArchivedTicketMessages } from '../services/transcriptSearchService';
 import {
   deleteSupportSlaPolicy,
   evaluateTicketSla,
@@ -1273,6 +1274,14 @@ export const data =
             .setDescription('Create a ticket without using the support panel button')
             .addStringOption((option) => option.setName('department-id').setDescription('Department ID from Settings → Departments').setRequired(true).setMaxLength(28))
             .addStringOption((option) => option.setName('tag-id').setDescription('Tag ID belonging to the selected department').setRequired(true).setMaxLength(28)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('search-archive')
+            .setDescription('Search archived text in a ticket (configured department staff or administrators)')
+            .addStringOption((option) => option.setName('ticket-id').setDescription('Durable ticket ID or original channel ID').setRequired(true).setMaxLength(100))
+            .addStringOption((option) => option.setName('query').setDescription('Text to find in archived messages').setRequired(true).setMinLength(2).setMaxLength(120))
+            .addIntegerOption((option) => option.setName('limit').setDescription('Maximum results to show (default 5)').setRequired(false).setMinValue(1).setMaxValue(10)),
         )
         .addSubcommand((subcommand) =>
           subcommand
@@ -3878,10 +3887,57 @@ export async function execute(
     // ─────────────────────────────────────────────
 
     if (group === 'ticket') {
-      await executeTicketCommand(
-        interaction,
-      );
+      if (subcommand === 'search-archive') {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        try {
+          const ticket = await resolveRelatedTicketReference(
+            guild.id,
+            interaction.options.getString('ticket-id', true),
+          );
+          const admin = isAdminLike(interaction);
+          const staffDepartments = await accessibleStaffDepartments(interaction);
+          if (!admin && (!ticket.departmentId || !staffDepartments.includes(ticket.departmentId))) {
+            throw new Error('Archived transcript search is limited to configured staff for that ticket department or a server administrator.');
+          }
 
+          const results = await searchArchivedTicketMessages({
+            guildId: guild.id,
+            ticketId: ticket.id,
+            query: interaction.options.getString('query', true),
+            limit: interaction.options.getInteger('limit') ?? 5,
+          });
+          const config = await getGuildConfig(guild.id);
+          if (!results.length) {
+            await interaction.editReply('No archived message matched that text in this ticket. The archive may be incomplete if historic backfill did not finish.');
+            return;
+          }
+          const fields = results.map((match) => {
+            const timestamp = Math.floor(Date.parse(match.createdAt) / 1000);
+            const author = match.authorDisplayName.replace(/@/g, '@\\u200b').slice(0, 100);
+            const safeSnippet = match.contentSnippet
+              .replace(/[*_~|]/g, '')
+              .split(String.fromCharCode(96)).join('ˋ');
+            return {
+              name: ('<t:' + timestamp + ':f> · ' + author + (match.isBot ? ' (bot)' : '') + (match.deletedAt ? ' · archived as deleted' : '')).slice(0, 256),
+              value: (safeSnippet || '[No text content]') + '\nMessage ID: ' + match.messageId,
+              inline: false,
+            };
+          });
+          await interaction.editReply({
+            embeds: [new EmbedBuilder()
+              .setColor(getThemeColor(config.theme))
+              .setTitle('🗂️ Archived Ticket Search')
+              .setDescription('Ticket ' + (ticket.ticketNumber ? '#' + ticket.ticketNumber : ticket.id) + ' · query matched ' + results.length + ' archived message(s). Only text snippets are shown; attachments and private staff audit notes are not included.')
+              .addFields(fields)
+              .setFooter({ text: 'Results are server-scoped and department-permission checked. Incomplete archive backfill may omit historic messages.' })],
+            allowedMentions: { parse: [] },
+          });
+        } catch (error) {
+          await interaction.editReply('❌ ' + (error instanceof Error ? error.message : 'Archived transcript search failed safely.'));
+        }
+        return;
+      }
+      await executeTicketCommand(interaction);
       return;
     }
 
