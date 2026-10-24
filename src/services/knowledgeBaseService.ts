@@ -447,10 +447,14 @@ async function getKnowledgeSynonymExpansions(guildId: string, tokens: string[]):
   if (!tokens.length) return [];
   const terms = Array.from(new Set([tokens.join(' '), ...tokens]));
   const result = await getPostgresPool().query<QueryResultRow & { normalized_term: string; synonyms: string[] }>(
-    'SELECT normalized_term,synonyms FROM knowledge_base_synonyms WHERE guild_id=$1 AND normalized_term=ANY($2::text[])',
+    'SELECT normalized_term,synonyms FROM knowledge_base_synonyms ' +
+      'WHERE guild_id=$1 AND (normalized_term=ANY($2::text[]) OR synonyms && $2::text[])',
     [guildId, terms],
   );
-  return result.rows.flatMap((row) => Array.isArray(row.synonyms) ? row.synonyms : []);
+  return result.rows.flatMap((row) => [
+    row.normalized_term,
+    ...(Array.isArray(row.synonyms) ? row.synonyms : []),
+  ]);
 }
 
 export async function recordKnowledgeUsage(
@@ -700,7 +704,7 @@ export async function searchKnowledgeBase(args: {
         title: row.title,
         category: row.category,
         tags: Array.isArray(row.tags) ? row.tags : [],
-        body: row.body,
+        body: row.body.slice(0, 2500),
       }),
     })).filter((entry) => entry.score >= 1.25)
       .sort((a, b) => b.score - a.score || Date.parse(String(b.row.updated_at)) - Date.parse(String(a.row.updated_at)))
