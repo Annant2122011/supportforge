@@ -84,7 +84,7 @@ test('workflow template saves require an expected version instead of silently re
   const guildId = 'stage4-workflow-' + randomUUID();
   const actorId = 'stage4-test-admin';
   const name = 'Escalation policy ' + guildId.slice(-8);
-  const definition = { conditions: [], actions: [] };
+  const definition = { conditions: [], actions: [{ type: 'set_priority', value: 'high' }] };
 
   try {
     const created = await saveWorkflowTemplate(guildId, actorId, name, definition);
@@ -92,7 +92,7 @@ test('workflow template saves require an expected version instead of silently re
     assert.equal(created.enabled, false);
 
     await assert.rejects(
-      saveWorkflowTemplate(guildId, actorId, name, { conditions: [], actions: [] }),
+      saveWorkflowTemplate(guildId, actorId, name, { conditions: [], actions: [{ type: 'set_priority', value: 'normal' }] }),
       /already exists at version 1.*expected-version/,
     );
 
@@ -100,7 +100,7 @@ test('workflow template saves require an expected version instead of silently re
       guildId,
       actorId,
       name,
-      { conditions: [{ field: 'priority', equals: 'urgent' }], actions: [] },
+      { conditions: [{ field: 'priority', equals: 'urgent' }], actions: [{ type: 'set_priority', value: 'critical' }] },
       created.version,
     );
     assert.equal(updated.version, 2);
@@ -113,7 +113,7 @@ test('workflow template saves require an expected version instead of silently re
 
     const saved = (await listWorkflowTemplates(guildId)).find((template) => template.id === created.id);
     assert.equal(saved?.version, 2);
-    assert.deepEqual(saved?.definition, { conditions: [{ field: 'priority', equals: 'urgent' }], actions: [] });
+    assert.deepEqual(saved?.definition, { conditions: [{ field: 'priority', equals: 'urgent' }], actions: [{ type: 'set_priority', value: 'critical' }] });
   } finally {
     await pool.query('DELETE FROM workflow_template_revisions WHERE guild_id=$1', [guildId]);
     await pool.query('DELETE FROM workflow_templates WHERE guild_id=$1', [guildId]);
