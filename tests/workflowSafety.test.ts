@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { previewWorkflowTemplate, validateWorkflowTemplateDefinition } from '../src/core/domain/workflowSafety';
+import { getWorkflowExecutionBlockReason, previewWorkflowTemplate, validateWorkflowTemplateDefinition } from '../src/core/domain/workflowSafety';
 
 test('workflow template only accepts allowlisted conditions and typed actions', () => {
   const definition = validateWorkflowTemplateDefinition({
@@ -11,6 +11,7 @@ test('workflow template only accepts allowlisted conditions and typed actions', 
   assert.equal(definition.conditions.length, 2);
   assert.equal(definition.actions.length, 2);
   assert.equal(previewWorkflowTemplate(definition).executable, false);
+  assert.match(getWorkflowExecutionBlockReason(definition) ?? '', /reassignment is blocked/i);
   assert.match(previewWorkflowTemplate(definition).warnings.join(' '), /reassignment is blocked/i);
 });
 
@@ -20,6 +21,7 @@ test('manual workflow preview marks supported non-routing actions executable aft
     actions: [{ type: 'set_priority', value: 'high' }, { type: 'send_quick_reply', value: 'refund-ready' }],
   });
   assert.equal(previewWorkflowTemplate(definition).executable, true);
+  assert.equal(getWorkflowExecutionBlockReason(definition), null);
   assert.match(previewWorkflowTemplate(definition).warnings.join(' '), /never run automatically/i);
 });
 
