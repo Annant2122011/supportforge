@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parseQuickReplyPage, quickReplyHasTag, renderQuickReply, validateQuickReplyInput, type QuickReply } from '../src/services/quickReplyService';
+import { parseQuickReplyPage, quickReplyHasTag, renderQuickReply, validateQuickReplyDiscordPayload, validateQuickReplyInput, type QuickReply } from '../src/services/quickReplyService';
 
 const validReply = (): QuickReply => ({
   id:'reply-1',guildId:'guild-1',name:'Refund update',body:'Hello {username}, ticket {ticket_number} is {priority}.',
@@ -56,4 +56,13 @@ test('quick-reply select menu page tokens accept bounded decimal pages and rejec
   for (const value of ['', ' ', '-1', '+1', '1.0', '1e2', '100000', '1x', '\\d', '１２']) {
     assert.equal(parseQuickReplyPage(value),null,'Expected invalid page token: '+JSON.stringify(value));
   }
+});
+
+
+test('quick-reply payload validation reserves space for its delivery marker', () => {
+  const marker = 'm'.repeat(66);
+  assert.doesNotThrow(() => validateQuickReplyDiscordPayload('x'.repeat(1934), marker));
+  assert.throws(() => validateQuickReplyDiscordPayload('x'.repeat(1935), marker), /2,000-character message limit/);
+  assert.doesNotThrow(() => validateQuickReplyDiscordPayload('🙂'.repeat(900), marker));
+  assert.throws(() => validateQuickReplyDiscordPayload('🙂'.repeat(968), marker), /2,000-character message limit/);
 });
