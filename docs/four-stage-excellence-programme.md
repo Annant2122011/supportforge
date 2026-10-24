@@ -1,6 +1,6 @@
 # ResolveX Four-Stage Product Excellence Programme
 
-**Status:** Consolidated Stage 4 source-code head `dd740bd0b6721a13c41705468dd78607a4b91af2` passed [CI #2574](https://github.com/Annant2122011/supportforge/actions/runs/40094178966) (212/212 tests, zero skips, disposable PostgreSQL passed). Later commits update acceptance documentation only. Live Discord acceptance and isolated Neon restore remain not run.  
+**Status:** Consolidated Stage 4 source-code head `a9df9eb69d6ca3bfcdf74973b9c2c4f5b89c430f` passed [CI #2679](https://github.com/Annant2122011/supportforge/actions/runs/40098339439) (215/215 tests, zero skips, disposable PostgreSQL passed). Later commits update acceptance documentation only. Live Discord acceptance and isolated Neon restore remain not run.  
 **Product surface:** Discord-first ResolveX  
 **Production persistence:** Neon PostgreSQL; SQLite is not an allowed live provider  
 **Delivery policy:** Small, reviewable commits and pull requests. No production deployment is implied by source changes or green CI.
@@ -102,10 +102,10 @@ Knowledge Base and quick replies are persistent, permission-safe and usable with
 
 ## Consolidated acceptance status — 2026-10-24
 
-- **Stage 1:** acceptance definition and evidence matrix are documented. Historical CI #2052 passed 138 tests; live Discord acceptance and isolated Neon backup/restore remain outstanding. Localization H2 has named remaining coverage gaps.
+- **Stage 1:** acceptance definition and evidence matrix are documented. Historical CI #2052 passed 138 tests; the later combined candidate also passes CI. Live Discord acceptance and isolated Neon backup/restore remain outstanding. Stage H now has 143 complete translation keys across all supported locales, with detailed Settings subpages/public ticket-panel preview/fuller report copy and live locale acceptance still open.
 - **Stage 2:** Setup Doctor, health diagnostics and safe configuration-history flows are documented and implemented on the stacked feature branch. Historical CI #2065 passed 172 tests; real test-guild repair/re-check and Neon restore acceptance remain outstanding.
 - **Stage 3:** [PR #34 CI #2396](https://github.com/Annant2122011/supportforge/actions/runs/40054056156) passed 194/194 tests with zero skips and PostgreSQL verification. Live recovery/destructive scenarios, large-guild SLA tests, and the isolated Neon restore drill remain unrun.
-- **Stage 4:** [Consolidated PR #39 tested source head CI #2574](https://github.com/Annant2122011/supportforge/actions/runs/40094178966) passed build, 212/212 tests with zero skips and disposable PostgreSQL verification. Workflow execution is manual and admin-confirmed only; department reassignment is deliberately blocked pending safe Discord permission/category reconciliation.
+- **Stage 4:** [Consolidated PR #39 tested source head CI #2679](https://github.com/Annant2122011/supportforge/actions/runs/40098339439) passed build, 215/215 tests with zero skips and disposable PostgreSQL verification. Stage I ticket-specific article suggestions and Stage J Part 1 quick-reply button/command parity are implemented in the candidate. Workflow execution is manual and admin-confirmed only; department reassignment is deliberately blocked pending safe Discord permission/category reconciliation.
 - **PR/release state:** PR #39 remains open and unmerged. No test-guild acceptance, live Neon restore, or production deployment is claimed. Keep the PR chain in order: #33 → #31 → #32 → #34 → #39.
 
 ## Current Stage 1 implementation log
