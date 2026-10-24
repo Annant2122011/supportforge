@@ -552,6 +552,10 @@ const hiIN: Record<TranslationKey, string> = {
   'settings.customPanel.modal.editButtonTitle': "बटन संपादित करें",
   'settings.customPanel.error.invalidStyle': "बटन शैली primary, secondary, success या danger होनी चाहिए।",
   'settings.customPanel.error.unknown': "अज्ञात कस्टम पैनल त्रुटि।",
+  'settings.reports.selector.editOrRemovePrompt': "**{name}** को संपादित करें या हटाएँ।",
+  'settings.reports.action.edit': "संपादित करें",
+  'settings.reports.action.remove': "हटाएँ",
+  'settings.reports.error.thresholdsInvalid': "सीमाएँ 0 से 100000 तक पूर्णांक होनी चाहिए। चैनल प्रतिबंध चालू होने पर चैनल देना आवश्यक है।",
 };
 
 export default hiIN;
