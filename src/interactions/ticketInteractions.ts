@@ -5299,8 +5299,8 @@ async function showQuickReplySelector(
   existingSessionId?: string,
 ): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
-  const settings = await getAdvancedSettings(interaction.guildId!);
   try {
+    const settings = await getAdvancedSettings(interaction.guildId!);
     let sessionId = existingSessionId;
     let session = existingSessionId
       ? getQuickReplyPickerSession(existingSessionId, interaction)
