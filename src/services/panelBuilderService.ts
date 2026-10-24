@@ -316,7 +316,7 @@ export function buildCustomPanelEmbed(
     .setDescription(view.description || translate(locale, 'panelBuilder.fallback.description'))
     .setFooter({ text: view.footer || translate(locale, 'panelBuilder.fallback.footer') })
     .setAuthor({
-      name: guildName + ' • ResolvX Support',
+      name: guildName + ' • ' + translate(locale, 'panelBuilder.authorSuffix'),
       ...(view.iconUrl ? { iconURL: view.iconUrl } : {}),
     })
     .setTimestamp(new Date(panel.updatedAt));
