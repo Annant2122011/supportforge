@@ -1035,7 +1035,7 @@ export const data =
     .addSubcommandGroup((group) =>
       group
         .setName('workflow')
-        .setDescription('Store and validate safe workflow templates; execution is not enabled')
+        .setDescription('Manage safe workflow templates and manually execute reviewed actions')
         .addSubcommand((subcommand) => subcommand.setName('list').setDescription('List workflow templates (admin only)'))
         .addSubcommand((subcommand) =>
           subcommand.setName('save').setDescription('Create a template, or update one using its current version (admin only)')
@@ -1048,7 +1048,18 @@ export const data =
             .addStringOption((option) => option.setName('template-id').setDescription('Template ID').setRequired(true).setMaxLength(36)),
         )
         .addSubcommand((subcommand) =>
-          subcommand.setName('enable').setDescription('Enable a validated template for future rollout (does not execute it)')
+          subcommand.setName('execute').setDescription('Run a reviewed workflow in this active ticket (admin confirmation required)')
+            .addStringOption((option) => option.setName('template-id').setDescription('Enabled workflow template ID').setRequired(true).setMaxLength(36))
+            .addBooleanOption((option) => option.setName('confirm').setDescription('Must be true to execute the workflow').setRequired(true)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('resume').setDescription('Resume an interrupted workflow run (admin confirmation required)')
+            .addStringOption((option) => option.setName('run-id').setDescription('Workflow run ID shown by execute or runs').setRequired(true).setMaxLength(36))
+            .addBooleanOption((option) => option.setName('confirm').setDescription('Must be true to resume the workflow').setRequired(true)),
+        )
+        .addSubcommand((subcommand) => subcommand.setName('runs').setDescription('List recent workflow runs for this ticket (admin only)'))
+        .addSubcommand((subcommand) =>
+          subcommand.setName('enable').setDescription('Enable a reviewed template for manual execution; never automatic')
             .addStringOption((option) => option.setName('template-id').setDescription('Template ID').setRequired(true).setMaxLength(36))
             .addIntegerOption((option) => option.setName('version').setDescription('Current version from workflow list').setRequired(true).setMinValue(1))
             .addBooleanOption((option) => option.setName('enabled').setDescription('Enable/disable the template catalogue item').setRequired(true)),
