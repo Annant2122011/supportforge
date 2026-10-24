@@ -2628,7 +2628,7 @@ export async function execute(
           (item.allowedRoleIds?.length ? ' · role-restricted' : '') +
           (item.confirmationMessage ? ' · confirmation enabled' : ''),
         );
-        const embed = buildCustomPanelEmbed(panel, guild.name, themeColor, true)
+        const embed = buildCustomPanelEmbed(panel, guild.name, themeColor, true, false, (await getAdvancedSettings(guild.id)).locale)
           .setTitle(panel.name + ' · ' + panel.title)
           .addFields({ name: 'Panel ID', value: '`' + panel.id + '`', inline: true }, { name: 'Status', value: panel.publishedMessageId ? 'Published' : 'Draft', inline: true }, { name: 'Ordered ticket buttons', value: buttonLines.join('\n').slice(0, 1024) });
         await interaction.editReply({ embeds: [embed] });
@@ -2662,7 +2662,7 @@ export async function execute(
       }
 
       if (action === 'preview') {
-        const embed = buildCustomPanelEmbed(panel, guild.name, themeColor, true);
+        const embed = buildCustomPanelEmbed(panel, guild.name, themeColor, true, false, (await getAdvancedSettings(guild.id)).locale);
         await interaction.editReply({ embeds: [embed], components: buildCustomPanelComponents(panel, true) });
         return;
       }
@@ -2673,7 +2673,7 @@ export async function execute(
         const targetChannel = channel as TextChannel;
         const oldChannelId = panel.publishedChannelId;
         const oldMessageId = panel.publishedMessageId;
-        const payload = { embeds: [buildCustomPanelEmbed(panel, guild.name, themeColor)], components: buildCustomPanelComponents(panel, false) };
+        const payload = { embeds: [buildCustomPanelEmbed(panel, guild.name, themeColor, false, false, (await getAdvancedSettings(guild.id)).locale)], components: buildCustomPanelComponents(panel, false) };
         // Preserve the last known-good public panel until the new publication
         // has a durable Neon snapshot and channel/message pointer.
         const message = await targetChannel.send(payload);
