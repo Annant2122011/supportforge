@@ -15,9 +15,11 @@ import { PostgresJsonDocumentRepository, importLegacyJsonDocuments } from '../sr
 import { PostgresTicketRepository } from '../src/repositories/postgresTicketRepository';
 import {
   deleteQuickReply,
+  getQuickReplyUsageMetrics,
   listQuickReplies,
   listQuickReplyRevisions,
   saveQuickReply,
+  searchQuickRepliesPage,
 } from '../src/services/quickReplyService';
 import {
   deleteWorkflowTemplate,
@@ -719,5 +721,132 @@ test(
     );
     assert.equal(complete.rows[0].status, 'completed');
     assert.equal(complete.rows[0].discord_message_id, 'discord-message-recovered-1');
+  },
+);
+
+
+test(
+  'PostgreSQL quick-reply search pages are server-filtered and delivery usage is idempotent',
+  { skip: !postgresIntegrationEnabled },
+  async () => {
+    await migratePostgres();
+    const pool = getPostgresPool();
+    const suffix = randomUUID();
+    const guildId = 'quick-reply-ledger-guild-' + suffix;
+    const ticketId = 'quick-reply-ledger-ticket-' + suffix;
+    const channelId = 'quick-reply-ledger-channel-' + suffix;
+    const ownerId = 'quick-reply-ledger-owner-' + suffix;
+    const ticket: TicketRepositoryRecord = {
+      id: ticketId,
+      guildId,
+      channelId,
+      ticketNumber: '91',
+      status: 'open',
+      departmentId: 'billing',
+      tagId: 'refund',
+      ownerId,
+      priority: 'normal',
+      claimedByIds: [],
+      participantIds: [ownerId],
+      metadata: {},
+      createdAt: '2026-10-24T12:00:00.000Z',
+      updatedAt: '2026-10-24T12:00:00.000Z',
+      deletedAt: null,
+      deletionReason: null,
+    };
+    const replyIds = [randomUUID(), randomUUID(), randomUUID()];
+    const interactionId = 'quick-reply-interaction-' + suffix;
+    const marker = 'quick-reply-marker-' + suffix;
+
+    await new PostgresTicketRepository(pool).create(ticket);
+    try {
+      const replies = [
+        { id: replyIds[0]!, name: 'Refund status', category: 'Billing', tags: ['refund','return'] },
+        { id: replyIds[1]!, name: 'Refund receipt', category: 'Billing', tags: ['receipt'] },
+        { id: replyIds[2]!, name: 'Password help', category: 'Technical', tags: ['account'] },
+      ];
+      for (const reply of replies) {
+        await pool.query(
+          'INSERT INTO quick_replies ' +
+            '(id,guild_id,name,normalized_name,body,category,tags,allowed_role_ids,enabled,version,created_by,updated_by) ' +
+            'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,TRUE,1,$9,$9)',
+          [
+            reply.id, guildId, reply.name, reply.name.toLocaleLowerCase('en-US'),
+            'Hello {username}, this is a safe test reply.', reply.category, reply.tags, [], 'integration-test',
+          ],
+        );
+      }
+
+      const page = await searchQuickRepliesPage(
+        guildId,
+        { isAdmin: false, roleIds: [] },
+        { query: 'refund', category: 'Billing', page: 1, pageSize: 1, enabledOnly: true },
+      );
+      assert.equal(page.total, 2);
+      assert.equal(page.page, 1);
+      assert.equal(page.pageCount, 2);
+      assert.equal(page.replies.length, 1);
+      assert.equal(page.replies[0]?.name, 'Refund status');
+
+      const exactTag = await searchQuickRepliesPage(
+        guildId,
+        { isAdmin: false, roleIds: [] },
+        { tag: 'refund', enabledOnly: true },
+      );
+      const substringTag = await searchQuickRepliesPage(
+        guildId,
+        { isAdmin: false, roleIds: [] },
+        { tag: 'fund', enabledOnly: true },
+      );
+      assert.equal(exactTag.total, 1);
+      assert.equal(exactTag.replies[0]?.id, replyIds[0]);
+      assert.equal(substringTag.total, 0);
+
+      await pool.query(
+        'INSERT INTO quick_reply_send_intents ' +
+          '(interaction_id,guild_id,quick_reply_id,ticket_id,channel_id,actor_id,marker,status) ' +
+          "VALUES ($1,$2,$3,$4,$5,$6,$7,'pending') ON CONFLICT (interaction_id) DO NOTHING",
+        [interactionId, guildId, replyIds[0], ticketId, channelId, 'integration-actor', marker],
+      );
+      await pool.query(
+        'INSERT INTO quick_reply_send_intents ' +
+          '(interaction_id,guild_id,quick_reply_id,ticket_id,channel_id,actor_id,marker,status) ' +
+          "VALUES ($1,$2,$3,$4,$5,$6,$7,'pending') ON CONFLICT (interaction_id) DO NOTHING",
+        [interactionId, guildId, replyIds[0], ticketId, channelId, 'integration-actor', marker],
+      );
+      await pool.query(
+        "UPDATE quick_reply_send_intents SET status='completed',discord_message_id=$2,completed_at=NOW() WHERE interaction_id=$1",
+        [interactionId, 'discord-message-' + suffix],
+      );
+      await pool.query(
+        "INSERT INTO quick_reply_usage_events (id,guild_id,quick_reply_id,send_intent_id,event_type) VALUES ($1,$2,$3,$4,'sent') ON CONFLICT (send_intent_id) DO NOTHING",
+        [randomUUID(), guildId, replyIds[0], interactionId],
+      );
+      await pool.query(
+        "INSERT INTO quick_reply_usage_events (id,guild_id,quick_reply_id,send_intent_id,event_type) VALUES ($1,$2,$3,$4,'sent') ON CONFLICT (send_intent_id) DO NOTHING",
+        [randomUUID(), guildId, replyIds[0], interactionId],
+      );
+      const intents = await pool.query(
+        'SELECT COUNT(*)::int AS count FROM quick_reply_send_intents WHERE guild_id=$1 AND interaction_id=$2',
+        [guildId, interactionId],
+      );
+      const usage = await pool.query(
+        'SELECT COUNT(*)::int AS count FROM quick_reply_usage_events WHERE guild_id=$1 AND send_intent_id=$2',
+        [guildId, interactionId],
+      );
+      assert.equal(intents.rows[0]?.count, 1);
+      assert.equal(usage.rows[0]?.count, 1);
+
+      const metrics = await getQuickReplyUsageMetrics(guildId, 30);
+      assert.equal(metrics.totalSends, 1);
+      assert.equal(metrics.replies[0]?.quickReplyId, replyIds[0]);
+      assert.equal(metrics.replies[0]?.sentCount, 1);
+    } finally {
+      await pool.query('DELETE FROM quick_reply_usage_events WHERE guild_id=$1', [guildId]);
+      await pool.query('DELETE FROM quick_reply_send_intents WHERE guild_id=$1', [guildId]);
+      await pool.query('DELETE FROM quick_reply_revisions WHERE guild_id=$1', [guildId]);
+      await pool.query('DELETE FROM quick_replies WHERE guild_id=$1', [guildId]);
+      await pool.query('DELETE FROM tickets WHERE guild_id=$1 AND id=$2', [guildId, ticketId]);
+    }
   },
 );
