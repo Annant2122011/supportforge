@@ -76,3 +76,8 @@
 ## Latest combined CI evidence — 2026-10-24
 
 The combined Stage 3 + Stage 4 head `deda4ffb5ef58f60db3fc00cb52103329d78d161` passed [ResolvX CI #2514](https://github.com/Annant2122011/supportforge/actions/runs/40084718577): build passed, **200/200 tests passed**, zero skipped, and the PostgreSQL schema/integrity verifier passed, including recovery replay segments, Knowledge Base, quick replies and related-ticket links. This is automated evidence only. Test-guild acceptance and isolated non-production Neon restore remain outstanding.
+
+
+## Current PR-head verification — 2026-10-24
+
+The current PR #38 head `13e989a1c284fdecee8e9c056237d6b5d0d2fbff` passed [GitHub Actions run #40085125143](https://github.com/Annant2122011/supportforge/actions/runs/40085125143): TypeScript build passed, **201/201 tests passed**, zero skipped, and PostgreSQL schema/integrity verification passed. The workflow also emitted dependency deprecation warnings and expected simulated-failure logs from failure-path tests; the job concluded successfully. This verifies the current PR head in a disposable PostgreSQL environment, not live Discord behavior or a Neon restore drill.
