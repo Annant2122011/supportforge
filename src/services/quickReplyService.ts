@@ -125,6 +125,13 @@ async function insertQuickReplyRevision(
       reply.category, reply.tags, reply.allowedRoleIds, reply.enabled, operation, actorId],
   );
 }
+/** Parse the page token stored in a quick-reply select menu custom ID. */
+export function parseQuickReplyPage(rawPage: string): number | null {
+  if (!/^\\d{1,5}$/.test(rawPage)) return null;
+  const page = Number(rawPage);
+  return Number.isInteger(page) && page >= 0 && page <= 99_999 ? page : null;
+}
+
 const PLACEHOLDERS = new Set(['user','username','ticket_id','ticket_number','department','priority','staff']);
 const TOKEN_PATTERN = /\{([a-z][a-z0-9_]*)\}/gi;
 const BRACED_TEXT_PATTERN = /\{([^{}]*)\}/g;
