@@ -1,6 +1,6 @@
 import type { TranslationKey } from './en-US';
 
-const bnIN: Partial<Record<TranslationKey, string>> = {
+const bnIN: Record<TranslationKey, string> = {
   'common.ok': 'ঠিক আছে',
   'common.cancel': 'বাতিল করুন',
   'common.back': 'ফিরে যান',
@@ -31,6 +31,9 @@ const bnIN: Partial<Record<TranslationKey, string>> = {
   'ticket.reopened': 'টিকিট #{ticketNumber} আবার খোলা হয়েছে।',
   'ticket.priority.changed': 'টিকিটের অগ্রাধিকার {priority} করা হয়েছে।',
   'ticket.priority.commandSuccess': 'টিকিট #{ticketNumber}-এর অগ্রাধিকার এখন {priority}।',
+  'ticket.intake.outsideHours': '⏰ {timezone} সময় অঞ্চলে সহায়তা বর্তমানে বন্ধ। নির্ধারিত সহায়তার সময়নীতি অনুযায়ী নতুন টিকিট খোলা সীমাবদ্ধ। {nextOpening}',
+  'ticket.intake.nextOpening': 'পরবর্তী খোলার সময়: {nextOpening}।',
+  'ticket.intake.noNextOpening': 'পরবর্তী খোলার সময় নির্ধারিত নেই; সার্ভার প্রশাসকের সঙ্গে যোগাযোগ করুন।',
   'supportHours.open': 'সহায়তা পরিষেবা এখন খোলা।',
   'supportHours.closed': 'সহায়তা পরিষেবা এখন বন্ধ।',
   'forms.submit': 'উত্তর জমা দিন',
