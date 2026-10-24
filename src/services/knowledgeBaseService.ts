@@ -275,10 +275,16 @@ async function recordKnowledgeUsage(
   actorId: string | null,
   eventType: 'search_result' | 'view' | 'shared',
 ): Promise<void> {
-  await getPostgresPool().query(
-    'INSERT INTO knowledge_base_usage (id,guild_id,article_id,actor_id,event_type) VALUES ($1,$2,$3,$4,$5)',
-    [randomUUID(),guildId,articleId,actorId,eventType],
-  );
+  try {
+    await getPostgresPool().query(
+      'INSERT INTO knowledge_base_usage (id,guild_id,article_id,actor_id,event_type) VALUES ($1,$2,$3,$4,$5)',
+      [randomUUID(),guildId,articleId,actorId,eventType],
+    );
+  } catch {
+    // Usage is telemetry, not part of the customer's search/view/share contract.
+    // Never log query text, article body, IDs, connection details or raw DB errors.
+    console.warn('Knowledge Base usage telemetry write failed; the primary action continues.');
+  }
 }
 
 export async function updateKnowledgeArticle(
