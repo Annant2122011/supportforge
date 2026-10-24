@@ -45,7 +45,7 @@ test('restore refuses altered, incomplete, mismatched or empty backup manifests'
 });
 
 
-test('restore refuses targets matching the running bot configured database', () => {
+test('restore refuses any target matching the bot’s currently configured database', () => {
   assert.throws(
     () => assertRestoreTargetDistinctFromConfiguredDatabase(
       'postgresql://restore-user:secret@ep-live.neon.tech:5432/resolvx?sslmode=require',
@@ -62,7 +62,7 @@ test('restore refuses targets matching the running bot configured database', () 
   );
 });
 
-test('restore allows an isolated database and ignores absent optional database URLs', () => {
+test('restore allows a separate empty restore database and ignores absent optional URLs', () => {
   assert.doesNotThrow(() =>
     assertRestoreTargetDistinctFromConfiguredDatabase(
       'postgresql://restore-user:secret@ep-restore.neon.tech:5432/resolvx_restore',
