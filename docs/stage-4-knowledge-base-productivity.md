@@ -73,7 +73,7 @@ The latest consolidated implementation is verified by exact-head CI #2574 below.
 - [ ] A backup is generated from a non-production Neon source; manifest checksum is verified; restore into a freshly created empty non-production target completes; schema migration level, table counts, ticket/event/outbox integrity and an application-level smoke test are recorded.
 - [ ] A failed restore drill is repeated only after inspecting the isolated target; never switch the restore script to drop/clean populated targets.
 - [ ] Audit logs are checked for correct actors and absence of user-written body/comment content in operational telemetry.
-- [ ] Stage H2 remaining Settings pages, panel previews and selected report translations are either finished or explicitly retained as an accepted release limitation.
+- [ ] Stage H2 detailed support-hours/workspace/storage/manual/repair pages, remaining custom-panel builder shell copy and fuller report rule/category details are finished or explicitly retained as release limitations. Current Settings/localization coverage and test evidence are tracked in `docs/stage-h-translation-architecture.md`.
 - [ ] Large-guild tests cover more than one SLA sweep batch, concurrent policy edits, backup size limits, high message counts and role changes during article/reply access.
 
 ## Known limits retained intentionally
@@ -163,6 +163,6 @@ Ticket panel button ─┐
 
 ## Re-audit status and remaining release gates
 
-- The latest consolidated source head `52b2352e3af2588cdb264632920b5197b77ffca6` passed [CI #2697](https://github.com/Annant2122011/supportforge/actions/runs/40098628840): TypeScript build passed, 215/215 tests passed, zero skipped, and disposable PostgreSQL verification passed. This head also includes localized custom-panel draft-preview controls.
+- The latest consolidated tested source head `3d3dae5d07e06cd47989b8c2e283943a66fcf01f` passed [CI #2739](https://github.com/Annant2122011/supportforge/actions/runs/40101705001): TypeScript build passed, 216/216 tests passed, zero skipped, and disposable PostgreSQL verification passed. This head includes localized Defaults, Retention, Team/Voice and Inactivity Automation settings plus catalog placeholder-parity coverage.
 - Stage 1/2 still record incomplete Stage H2 translation coverage for selected Settings screens, panel previews and reports. That remains a release limitation until those screens have been covered and tested in a supported locale; historical CI does not prove live locale acceptance.
 - Discord test-guild acceptance and a backup/restore drill into an isolated non-production Neon database remain not run. No production merge, deploy or 100% production acceptance is claimed.
