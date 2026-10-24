@@ -387,10 +387,14 @@ async function executeAction(
       priority: current.priority ?? 'normal',
       staff: staff?.displayName ?? 'Support staff',
     });
-    await channel.send({
+    const sent = await channel.send({
       content: rendered.slice(0, 1800) + marker,
-      allowedMentions: { parse:[] },
+      allowedMentions: { parse: [] },
     });
+    await pool.query(
+      'UPDATE workflow_execution_steps SET destination_message_id=$3,result=$4::jsonb,updated_at=NOW() WHERE run_id=$1 AND step_index=$2',
+      [run.id, step.step_index, sent.id, JSON.stringify({ sent: true })],
+    );
     return;
   }
 }
@@ -450,7 +454,7 @@ async function resumeRunUnlocked(
         );
         if (refreshedStep.rows[0]?.status !== 'completed') {
           await pool.query(
-            "UPDATE workflow_execution_steps SET status='completed',result='{}'::jsonb,error_code=NULL,completed_at=NOW(),updated_at=NOW() WHERE run_id=$1 AND step_index=$2",
+            "UPDATE workflow_execution_steps SET status='completed',error_code=NULL,completed_at=NOW(),updated_at=NOW() WHERE run_id=$1 AND step_index=$2",
             [run.id,index],
           );
         }
