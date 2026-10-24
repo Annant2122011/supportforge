@@ -33,6 +33,7 @@ import { getPersistedTicket, getPersistedTicketStatus } from '../services/ticket
 import { UI_THEMES, getThemeColor } from '../services/uiThemeService';
 import { buildSystemDiagnosticsEmbed, runSystemDiagnostics } from '../services/systemDiagnosticsService';
 import { getTicketRecoveryPreview } from '../services/ticketArchiveService';
+import { renderQuickReplyTemplate } from '../core/domain/knowledgeTools';
 import {
   createKnowledgeArticle,
   createQuickReply,
@@ -1996,6 +1997,73 @@ export async function runSupportForgeRepair(
   return { supportCategoryId: supportCategory.id, recoveredTickets };
 }
 
+function interactionRoleIds(interaction: ChatInputCommandInteraction): string[] {
+  const member = interaction.member;
+  if (!member) return [];
+  return Array.isArray(member.roles)
+    ? member.roles
+    : member.roles.cache.map((role) => role.id);
+}
+
+async function accessibleStaffDepartments(
+  interaction: ChatInputCommandInteraction,
+): Promise<string[]> {
+  const guild = interaction.guild;
+  if (!guild) return [];
+  const config = await getGuildConfig(guild.id);
+  if (isAdminLike(interaction)) return Object.keys(config.departments);
+  const roles = new Set(interactionRoleIds(interaction));
+  return Object.values(config.departments)
+    .filter((department) => Boolean(department.staffRoleId && roles.has(department.staffRoleId)))
+    .map((department) => department.id);
+}
+
+async function canViewStaffKnowledge(
+  interaction: ChatInputCommandInteraction,
+): Promise<boolean> {
+  if (isAdminLike(interaction)) return true;
+  return (await accessibleStaffDepartments(interaction)).length > 0;
+}
+
+async function auditProductSettingsAction(
+  interaction: ChatInputCommandInteraction,
+  action: string,
+  detail: string,
+): Promise<void> {
+  const guild = interaction.guild;
+  if (!guild) return;
+  const config = await getGuildConfig(guild.id).catch(() => null);
+  if (!config?.supportCategoryId) return;
+  await logSettingsEvent(guild, config.supportCategoryId, {
+    action,
+    actorId: interaction.user.id,
+    actorName: interaction.user.tag,
+    detail,
+  });
+}
+
+function parseCommaSeparatedTags(value: string | null): string[] | undefined {
+  if (value === null) return undefined;
+  if (value.trim().toLowerCase() === 'none' || !value.trim()) return [];
+  return value.split(',').map((tag) => tag.trim()).filter(Boolean).slice(0, 20);
+}
+
+function splitDisplayLines(lines: string[], maxLength = 3500): string[] {
+  const pages: string[] = [];
+  let current = '';
+  for (const line of lines) {
+    const next = current ? current + '\n' + line : line;
+    if (next.length > maxLength && current) {
+      pages.push(current);
+      current = line;
+    } else {
+      current = next;
+    }
+  }
+  if (current) pages.push(current);
+  return pages.length ? pages : ['No entries found.'];
+}
+
 export async function execute(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
@@ -2055,7 +2123,9 @@ export async function execute(
     group === 'form' ||
     group === 'panel' ||
     group === 'diagnostics' ||
-    (group === 'feedback' && subcommand === 'summary')
+    (group === 'feedback' && subcommand === 'summary') ||
+    (group === 'knowledge' && ['create', 'edit', 'publish', 'archive', 'history', 'synonyms', 'metrics'].includes(subcommand)) ||
+    (group === 'quick-reply' && ['create', 'edit', 'archive', 'metrics'].includes(subcommand))
   ) {
     if (!isAdminLike(interaction)) {
       await interaction.reply({
@@ -2069,6 +2139,323 @@ export async function execute(
   }
 
   try {
+    if (group === 'knowledge') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        const action = subcommand;
+        const staffAccess = await canViewStaffKnowledge(interaction);
+        const admin = isAdminLike(interaction);
+        const config = await getGuildConfig(guild.id);
+
+        if (action === 'create') {
+          const visibilityValue = interaction.options.getString('visibility') ?? 'public';
+          if (visibilityValue !== 'public' && visibilityValue !== 'staff') throw new Error('Choose public or staff-only visibility.');
+          const article = await createKnowledgeArticle({
+            guildId: guild.id,
+            title: interaction.options.getString('title', true),
+            body: interaction.options.getString('body', true),
+            category: interaction.options.getString('category') ?? 'General',
+            tags: parseCommaSeparatedTags(interaction.options.getString('tags')) ?? [],
+            visibility: visibilityValue,
+            actorId: interaction.user.id,
+          });
+          await auditProductSettingsAction(interaction, 'KB_ARTICLE_CREATED', 'Created draft article ' + article.id + ' (revision ' + article.revision + ').');
+          await interaction.editReply('✅ Draft article created.\n\n**Title:** ' + article.title + '\n**ID:** `' + article.id + '`\n**Slug:** `' + article.slug + '`\n**Visibility:** ' + article.visibility + '\n**Revision:** ' + article.revision + '\n\nReview it and use `/supportforge knowledge publish` when ready.');
+          return;
+        }
+
+        if (action === 'edit') {
+          const id = interaction.options.getString('article-id', true).trim();
+          const title = interaction.options.getString('title');
+          const body = interaction.options.getString('body');
+          const category = interaction.options.getString('category');
+          const tags = parseCommaSeparatedTags(interaction.options.getString('tags'));
+          const visibilityValue = interaction.options.getString('visibility');
+          if (title === null && body === null && category === null && tags === undefined && visibilityValue === null) {
+            throw new Error('Provide at least one field to update.');
+          }
+          if (visibilityValue !== null && visibilityValue !== 'public' && visibilityValue !== 'staff') throw new Error('Choose public or staff-only visibility.');
+          const article = await updateKnowledgeArticle({
+            guildId: guild.id,
+            articleId: id,
+            actorId: interaction.user.id,
+            ...(title !== null ? { title } : {}),
+            ...(body !== null ? { body } : {}),
+            ...(category !== null ? { category } : {}),
+            ...(tags !== undefined ? { tags } : {}),
+            ...(visibilityValue !== null ? { visibility: visibilityValue } : {}),
+          });
+          await auditProductSettingsAction(interaction, 'KB_ARTICLE_EDITED', 'Updated article ' + article.id + ' to revision ' + article.revision + '; publishing status=' + article.status + '.');
+          await interaction.editReply('✅ Article updated to revision **' + article.revision + '**. ' + (article.status === 'draft' ? 'It is now a draft and must be published again before customers can search it.' : ''));
+          return;
+        }
+
+        if (action === 'publish' || action === 'archive') {
+          const id = interaction.options.getString('article-id', true).trim();
+          const article = await setKnowledgeArticleStatus(guild.id, id, action === 'publish' ? 'published' : 'archived', interaction.user.id);
+          await auditProductSettingsAction(interaction, action === 'publish' ? 'KB_ARTICLE_PUBLISHED' : 'KB_ARTICLE_ARCHIVED', (action === 'publish' ? 'Published' : 'Archived') + ' article ' + article.id + ' at revision ' + article.revision + '.');
+          await interaction.editReply((action === 'publish' ? '✅ Published' : '✅ Archived') + ' **' + article.title + '**. Revision: ' + article.revision + '. ' + (action === 'archive' ? 'It is removed from search without deleting its revision history.' : 'It is now available in permitted searches.'));
+          return;
+        }
+
+        if (action === 'list') {
+          const statusValue = interaction.options.getString('status') ?? 'published';
+          if (!['all', 'published', 'draft', 'archived'].includes(statusValue)) throw new Error('Unknown article status.');
+          if (statusValue !== 'published' && !admin) throw new Error('Manage Server or Administrator is required to list drafts and archived articles.');
+          const articles = await listKnowledgeArticles(guild.id, statusValue as 'all' | 'published' | 'draft' | 'archived');
+          const lines = articles.slice(0, 25).map((article) =>
+            '• **' + article.title + '** · `' + article.id + '` · ' + article.status + ' · rev ' + article.revision + ' · ' + article.visibility + ' · `' + article.slug + '`',
+          );
+          const pages = splitDisplayLines(lines.length ? lines : ['No articles found for this status.']);
+          const description = pages[0] + (pages.length > 1 ? '\n\nShowing page 1 of ' + pages.length + '; use Search or Show for a specific article.' : '');
+          await interaction.editReply({ embeds: [new EmbedBuilder().setColor(getThemeColor(config.theme)).setTitle('📚 Knowledge Base').setDescription(description.slice(0, 4000)).setFooter({ text: articles.length + ' article(s) • draft edits create revisions; published edits require republishing' })] });
+          return;
+        }
+
+        if (action === 'search') {
+          const results = await searchKnowledgeBase({
+            guildId: guild.id,
+            query: interaction.options.getString('query', true),
+            includeStaff: staffAccess,
+            limit: 5,
+          });
+          if (!results.length) {
+            await interaction.editReply('No published article matched confidently. You can still use the normal support ticket panel; knowledge suggestions never block human support.');
+            return;
+          }
+          const description = results.map((result, index) =>
+            '**' + (index + 1) + '. ' + result.article.title + '**' +
+            (result.confidence === 'suggestion' ? ' · *Possible match, please verify*' : '') +
+            '\nCategory: ' + result.article.category + ' · Tags: ' + (result.article.tags.join(', ') || 'none') +
+            '\nSlug: `' + result.article.slug + '` · ID: `' + result.article.id + '`' +
+            '\n' + result.article.body.replace(/\s+/g, ' ').slice(0, 380) + (result.article.body.length > 380 ? '…' : ''),
+          ).join('\n\n');
+          await interaction.editReply({ embeds: [new EmbedBuilder().setColor(getThemeColor(config.theme)).setTitle('🔎 Knowledge Base Search').setDescription(description.slice(0, 4000)).setFooter({ text: 'Deterministic full-text/tag search; typo matches are suggestions, not definitive answers.' })] });
+          return;
+        }
+
+        if (action === 'show' || action === 'share') {
+          const key = interaction.options.getString('article', true).trim();
+          const article = await getKnowledgeArticle(guild.id, key, { publishedOnly: !admin, includeStaff: staffAccess });
+          if (!article || (!admin && article.status !== 'published')) throw new Error('Published article not found or you do not have permission to view it.');
+          if (action === 'show') {
+            if (article.status === 'published') await recordKnowledgeArticleView(guild.id, article.id).catch(() => undefined);
+            const text = '**Category:** ' + article.category + '\n**Tags:** ' + (article.tags.join(', ') || 'none') + '\n**Revision:** ' + article.revision + ' · **Visibility:** ' + article.visibility + '\n\n' + article.body;
+            await interaction.editReply({ embeds: [new EmbedBuilder().setColor(getThemeColor(config.theme)).setTitle(article.title.slice(0, 256)).setDescription(text.slice(0, 4000)).setFooter({ text: 'Article slug: ' + article.slug + ' • ID: ' + article.id })] });
+            return;
+          }
+          if (!staffAccess) throw new Error('Only configured department staff or administrators can share an article into a ticket.');
+          const ticket = await getPersistedTicket(interaction.channelId);
+          if (!ticket || ticket.guildId !== guild.id || ticket.deletedAt || !['open','claimed','pending','reopened'].includes(ticket.status)) {
+            throw new Error('Share an article from an active managed ticket channel or private ticket thread.');
+          }
+          const channel = guild.channels.cache.get(interaction.channelId) ?? await guild.channels.fetch(interaction.channelId);
+          if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.PrivateThread)) {
+            throw new Error('The current channel is not a supported ticket text channel or private thread.');
+          }
+          const sendable = channel as TextChannel | ThreadChannel;
+          await sendable.send({
+            embeds: [new EmbedBuilder().setColor(getThemeColor(config.theme)).setTitle(article.title.slice(0, 256)).setDescription(article.body.slice(0, 4000)).addFields({ name: 'Knowledge Base', value: 'Category: ' + article.category + ' · Article ID: ' + article.id }).setFooter({ text: 'Shared by ' + interaction.user.tag + ' • ResolvX Knowledge Base' })],
+            allowedMentions: { parse: [] },
+          });
+          await recordKnowledgeArticleShare(guild.id, article.id).catch(() => undefined);
+          await interaction.editReply('✅ Shared **' + article.title + '** in this ticket channel.');
+          return;
+        }
+
+        if (action === 'history') {
+          const id = interaction.options.getString('article-id', true).trim();
+          const history = await getKnowledgeArticleRevisions(guild.id, id);
+          await interaction.editReply(history.length ? history.map((item) => '• Rev **' + item.revision + '** · ' + item.status + ' · <@' + item.changedBy + '> · <t:' + Math.floor(Date.parse(item.createdAt) / 1000) + ':R> · ' + item.title).join('\n').slice(0, 3900) : 'No revision history was found.');
+          return;
+        }
+
+        if (action === 'synonyms') {
+          const operation = interaction.options.getString('action', true);
+          const term = interaction.options.getString('term')?.trim() ?? '';
+          if (operation === 'list') {
+            const entries = await listKnowledgeSynonyms(guild.id);
+            const lines = entries.map((entry) => '• **' + entry.term + '** → ' + (entry.synonyms.join(', ') || '(no synonyms)'));
+            await interaction.editReply(lines.length ? lines.slice(0, 60).join('\n').slice(0, 3900) : 'No search synonyms configured.');
+            return;
+          }
+          if (!term) throw new Error('Provide a canonical term for Set or Delete.');
+          if (operation === 'delete') {
+            const deleted = await deleteKnowledgeSynonyms(guild.id, term);
+            await auditProductSettingsAction(interaction, 'KB_SYNONYM_DELETED', 'Deleted synonym mapping for "' + term + '": ' + deleted + '.');
+            await interaction.editReply(deleted ? '✅ Removed synonym mapping for **' + term + '**.' : 'No synonym mapping existed for that term.');
+            return;
+          }
+          if (operation === 'set') {
+            const raw = interaction.options.getString('synonyms');
+            if (raw === null) throw new Error('Provide comma-separated synonyms when using Set.');
+            const synonyms = await saveKnowledgeSynonyms(guild.id, term, raw.split(',').map((item) => item.trim()), interaction.user.id);
+            await auditProductSettingsAction(interaction, 'KB_SYNONYM_SET', 'Updated search synonyms for "' + term + '" (' + synonyms.length + ' entries).');
+            await interaction.editReply('✅ Synonym mapping saved for **' + term + '**: ' + (synonyms.join(', ') || 'no alternative terms') + '.');
+            return;
+          }
+          throw new Error('Choose List, Set or Delete.');
+        }
+
+        if (action === 'feedback') {
+          const articleId = interaction.options.getString('article-id', true).trim();
+          await submitKnowledgeArticleFeedback({
+            guildId: guild.id,
+            articleId,
+            userId: interaction.user.id,
+            helpful: interaction.options.getBoolean('helpful', true),
+            comment: interaction.options.getString('comment') ?? '',
+            includeStaff: staffAccess,
+          });
+          await interaction.editReply('Thanks. Your article feedback was saved. You can update your vote later; only aggregate results are shown in reports.');
+          return;
+        }
+
+        if (action === 'metrics') {
+          const days = interaction.options.getInteger('days') ?? 30;
+          const to = new Date(Date.now() + 1000).toISOString();
+          const from = new Date(Date.now() - days * 86400000).toISOString();
+          const metrics = await getKnowledgeBaseMetrics(guild.id, from, to);
+          await interaction.editReply({ embeds: [new EmbedBuilder().setColor(getThemeColor(config.theme)).setTitle('📊 Knowledge Base Metrics • ' + days + ' days').setDescription(
+            'Published: **' + metrics.publishedArticles + '** · Drafts: **' + metrics.draftArticles + '** · Archived: **' + metrics.archivedArticles + '**\n' +
+            'Article views: **' + metrics.views + '** · Search results shown: **' + metrics.searchResultViews + '** · Shares: **' + metrics.shares + '**\n' +
+            'Feedback votes: **' + metrics.feedbackVotes + '** · Helpful: **' + metrics.helpfulVotes + '** · Helpful rate: **' + (metrics.helpfulRate === null ? 'no votes' : Math.round(metrics.helpfulRate * 100) + '%') + '\n\n' +
+            'Usage is aggregated by guild. Search text and article body content are not stored in usage logs.',
+          ).setFooter({ text: 'Feedback counts the latest vote per user/article in the selected update window.' })] });
+          return;
+        }
+        await interaction.editReply('Unsupported knowledge-base action.');
+      } catch (error) {
+        await interaction.editReply('❌ ' + (error instanceof Error ? error.message : 'Knowledge Base operation failed safely.'));
+      }
+      return;
+    }
+
+    if (group === 'quick-reply') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        const action = subcommand;
+        const departmentIds = await accessibleStaffDepartments(interaction);
+        const admin = isAdminLike(interaction);
+        const config = await getGuildConfig(guild.id);
+
+        if (!admin && departmentIds.length === 0) {
+          throw new Error('Configured department staff or Manage Server is required for quick replies.');
+        }
+
+        if (action === 'create') {
+          const template = await createQuickReply({
+            guildId: guild.id,
+            name: interaction.options.getString('name', true),
+            content: interaction.options.getString('content', true),
+            departmentId: interaction.options.getString('department-id') ?? '*',
+            tags: parseCommaSeparatedTags(interaction.options.getString('tags')) ?? [],
+            actorId: interaction.user.id,
+          });
+          await auditProductSettingsAction(interaction, 'QUICK_REPLY_CREATED', 'Created quick reply ' + template.id + ', revision ' + template.revision + '.');
+          await interaction.editReply('✅ Quick reply created. **' + template.name + '** · ID `' + template.id + '` · scope ' + template.departmentId + '.');
+          return;
+        }
+
+        if (action === 'edit') {
+          const id = interaction.options.getString('id', true).trim();
+          const name = interaction.options.getString('name');
+          const content = interaction.options.getString('content');
+          const departmentId = interaction.options.getString('department-id');
+          const tags = parseCommaSeparatedTags(interaction.options.getString('tags'));
+          const enabled = interaction.options.getBoolean('enabled');
+          if (name === null && content === null && departmentId === null && tags === undefined && enabled === null) {
+            throw new Error('Provide at least one field to update.');
+          }
+          const template = await updateQuickReply({
+            guildId: guild.id,
+            id,
+            actorId: interaction.user.id,
+            ...(name !== null ? { name } : {}),
+            ...(content !== null ? { content } : {}),
+            ...(departmentId !== null ? { departmentId } : {}),
+            ...(tags !== undefined ? { tags } : {}),
+            ...(enabled !== null ? { enabled } : {}),
+          });
+          await auditProductSettingsAction(interaction, 'QUICK_REPLY_UPDATED', 'Updated quick reply ' + template.id + ' to revision ' + template.revision + '.');
+          await interaction.editReply('✅ Updated **' + template.name + '** to revision ' + template.revision + '.');
+          return;
+        }
+
+        if (action === 'archive') {
+          const id = interaction.options.getString('id', true).trim();
+          const template = await setQuickReplyEnabled(guild.id, id, false, interaction.user.id);
+          await auditProductSettingsAction(interaction, 'QUICK_REPLY_ARCHIVED', 'Disabled quick reply ' + template.id + ' at revision ' + template.revision + '.');
+          await interaction.editReply('✅ Archived quick reply **' + template.name + '**. Usage history and the definition remain stored.');
+          return;
+        }
+
+        if (action === 'list') {
+          const requestedDepartment = interaction.options.getString('department-id')?.trim();
+          const allowed = admin ? Object.keys(config.departments) : departmentIds;
+          if (requestedDepartment && !admin && !allowed.includes(requestedDepartment)) throw new Error('You cannot list replies outside your assigned department.');
+          if (requestedDepartment && admin && requestedDepartment !== '*' && !config.departments[requestedDepartment]) throw new Error('Department ID was not found in this server.');
+          const departmentFilter = requestedDepartment ?? (admin ? '*' : undefined);
+          const results = await listQuickReplies(guild.id, {
+            departmentIds: departmentFilter && departmentFilter !== '*' ? [departmentFilter] : (admin ? Object.keys(config.departments) : departmentIds),
+          });
+          const lines = results.map((template) =>
+            '• **' + template.name + '** · ID `' + template.id + '` · scope ' + template.departmentId + ' · rev ' + template.revision + (template.tags.length ? ' · ' + template.tags.join(', ') : ''),
+          );
+          await interaction.editReply(lines.length ? lines.slice(0, 30).join('\n').slice(0, 3900) : 'No active quick replies are available to your department.');
+          return;
+        }
+
+        if (action === 'use') {
+          const id = interaction.options.getString('id', true).trim();
+          const ticket = await getPersistedTicket(interaction.channelId);
+          if (!ticket || ticket.guildId !== guild.id || ticket.deletedAt || !['open','claimed','pending','reopened'].includes(ticket.status)) {
+            throw new Error('Quick replies can only be sent from an active managed ticket text channel or private thread.');
+          }
+          if (!admin && !departmentIds.includes(ticket.departmentId ?? '')) {
+            throw new Error('You are not a member of this ticket department’s configured staff roles.');
+          }
+          const template = await getQuickReply(guild.id, id);
+          if (!template || !template.enabled) throw new Error('Quick reply was not found or is disabled.');
+          if (template.departmentId !== '*' && template.departmentId !== ticket.departmentId) {
+            throw new Error('This quick reply is scoped to a different department.');
+          }
+          const channel = guild.channels.cache.get(interaction.channelId) ?? await guild.channels.fetch(interaction.channelId);
+          if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.PrivateThread)) {
+            throw new Error('The current channel is not a supported ticket text channel or private thread.');
+          }
+          const owner = ticket.ownerId ? await guild.members.fetch(ticket.ownerId).catch(() => null) : null;
+          const department = ticket.departmentId ? config.departments[ticket.departmentId] : undefined;
+          const content = renderQuickReplyTemplate(template.content, {
+            user: owner?.displayName ?? 'customer',
+            ticket_number: ticket.ticketNumber ?? ticket.id.slice(0, 8),
+            department: department?.name ?? 'Support',
+            channel: channel.name,
+            guild: guild.name,
+          });
+          await (channel as TextChannel | ThreadChannel).send({ content, allowedMentions: { parse: [] } });
+          await recordQuickReplyUsage(guild.id, template.id, interaction.user.id).catch((error) => {
+            console.warn('Quick reply was sent but usage telemetry could not be written:', error instanceof Error ? error.message : 'unknown error');
+          });
+          await interaction.editReply('✅ Sent quick reply **' + template.name + '** in this ticket.');
+          return;
+        }
+
+        if (action === 'metrics') {
+          const days = interaction.options.getInteger('days') ?? 30;
+          const to = new Date(Date.now() + 1000).toISOString();
+          const from = new Date(Date.now() - days * 86400000).toISOString();
+          const metrics = await getQuickReplyMetrics(guild.id, from, to);
+          await interaction.editReply(metrics.length ? metrics.map((item) => '• **' + item.name + '** · ' + item.uses + ' use(s)').join('\n').slice(0, 3900) : 'No quick reply usage was recorded in this window.');
+          return;
+        }
+        await interaction.editReply('Unsupported quick-reply action.');
+      } catch (error) {
+        await interaction.editReply('❌ ' + (error instanceof Error ? error.message : 'Quick reply operation failed safely.'));
+      }
+      return;
+    }
+
     if (group === 'feedback') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
