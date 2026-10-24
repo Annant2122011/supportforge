@@ -878,6 +878,38 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+
+  {
+    id: 18,
+    name: 'ensure_durable_recovery_replay_segments_after_premerge_stage4_versions',
+    up: async (db) => {
+      // Some pre-merge Stage 4 test databases may have recorded id 13 for the
+      // Knowledge Base before Stage 3 claimed id 13 for the recovery ledger.
+      // This forward-compatible, idempotent guard repairs those databases
+      // without reusing or rewriting any existing migration marker.
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS ticket_recovery_replay_segments (
+          recovery_event_id TEXT NOT NULL REFERENCES ticket_recovery_events(id) ON DELETE CASCADE,
+          original_message_id TEXT NOT NULL,
+          segment_key TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','completed')),
+          discord_message_id TEXT,
+          attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+          attempt_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          last_error TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (recovery_event_id, original_message_id, segment_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_ticket_recovery_replay_segments_pending
+          ON ticket_recovery_replay_segments (recovery_event_id, status, updated_at)
+          WHERE status='pending';
+        CREATE INDEX IF NOT EXISTS idx_ticket_recovery_replay_segments_message
+          ON ticket_recovery_replay_segments (discord_message_id)
+          WHERE discord_message_id IS NOT NULL;
+      `);
+    },
+  },
 ];
 
  /** Latest migration identifier required by this application version. */
