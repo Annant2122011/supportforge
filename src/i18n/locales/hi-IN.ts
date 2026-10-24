@@ -540,6 +540,8 @@ const hiIN: Record<TranslationKey, string> = {
   'settings.customPanel.roles.allowEveryone': "सभी को अनुमति दें",
   'settings.customPanel.form.tagPickerDescription': "यह फ़ॉर्म सभी टैग पर लागू होता है। वह टैग चुनें जिसके टिकटों में यही फ़ॉर्म खुले।",
   'settings.customPanel.error.noChannels': "ऐसा कोई सुलभ टेक्स्ट चैनल नहीं मिला जहाँ QueryFixr संदेश देख, भेज और एम्बेड पोस्ट कर सके।",
+  'settings.customPanel.panelPublished.cleanupWarning': "पुराना संदेश हटाया नहीं जा सका। दोहरे प्रवेश बिंदु रोकने के लिए उसे मैन्युअल रूप से हटाएँ।",
+  'settings.customPanel.panelDeleted.cleanupWarning': "पैनल परिभाषा हट चुकी है और उसके बटन अब काम नहीं करते, लेकिन पुराना Discord संदेश नहीं हट सका। उसे मैन्युअल रूप से हटाएँ।",
 };
 
 export default hiIN;
