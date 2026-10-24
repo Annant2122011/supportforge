@@ -8,6 +8,7 @@ import { basename, resolve } from 'node:path';
 import { Pool } from 'pg';
 
 import {
+  assertRestoreTargetDistinctFromConfiguredDatabase,
   isAllowedRestoreTargetLabel,
   isSafeBackupFilename,
   RESTORE_TARGET_CONFIRMATION,
@@ -112,6 +113,12 @@ async function main(): Promise<void> {
   const targetValue = required('RESTORE_DATABASE_URL_UNPOOLED');
   const target = postgresUrl(targetValue, 'RESTORE_DATABASE_URL_UNPOOLED');
   const targetDatabaseName = decodeURIComponent(target.pathname.replace(/^\//, '')) || '(default)';
+  // Protect active app and migration targets before the restore script redirects
+  // its process-local database environment to the destination.
+  assertRestoreTargetDistinctFromConfiguredDatabase(target.toString(), [
+    process.env.DATABASE_URL,
+    process.env.DATABASE_URL_UNPOOLED,
+  ]);
   if (target.hostname.toLowerCase() === manifest.databaseHost.toLowerCase() &&
       targetDatabaseName.toLowerCase() === manifest.databaseName.toLowerCase()) {
     throw new Error('Restore target matches the backup source host and database. Refusing to restore onto the source.');
