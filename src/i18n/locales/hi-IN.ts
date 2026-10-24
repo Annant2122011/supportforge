@@ -27,6 +27,8 @@ const hiIN: Record<TranslationKey, string> = {
   'settings.repair.title': "मरम्मत प्रणाली",
   'settings.repair.description': "Neon डेटा रीसेट किए बिना प्रबंधित ढाँचे की मरम्मत करें। Restore & Update Discord ढाँचे का समन्वय करता है और GitHub Actions deployment का अनुरोध करता है। स्वचालित push और स्वतंत्र server watchdog इस बटन के बिना भी code deploy करते हैं। Restore Channel मूल Discord channel deletion संभालता है; Ticket Deletion Review टिकट-बटन से हुई deletion और गलती से हटाने वाले प्रश्न को संभालता है। Normal Repair deployment किए बिना ढाँचे की जाँच करता है। Storage Repair बंद और संग्रहित श्रेणियों की पुष्टि करता है।",
   'settings.repair.action.restoreUpdate': "पुनर्स्थापित करें और अपडेट करें",
+  'settings.repair.action.restoreChannel': "चैनल पुनर्स्थापित करें",
+  'settings.repair.action.deletionReview': "टिकट हटाने की समीक्षा",
   'settings.repair.action.normal': "सामान्य मरम्मत",
   'settings.repair.action.storage': "भंडारण मरम्मत",
   'settings.repair.action.setup': "सेटअप",
