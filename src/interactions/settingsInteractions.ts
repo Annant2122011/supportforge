@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import {
   ActionRowBuilder,
   ButtonBuilder,
