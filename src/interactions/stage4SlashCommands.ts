@@ -2,7 +2,7 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlag
 
 import { getGuildConfig } from '../services/configService';
 import { getAdvancedSettings } from '../services/advancedSettingsService';
-import { translate } from '../i18n/translationService';
+import { formatLocaleDate, translate } from '../i18n/translationService';
 import { isKnowledgeShareableConfidence } from '../core/domain/knowledgeSearch';
 import { getPersistedTicket } from '../services/ticketPersistenceService';
 import { logSettingsEvent, logTicketEvent } from '../services/auditLogService';
@@ -26,7 +26,8 @@ import {
 import {
   deleteQuickReply,
   getQuickReply,
-  listQuickReplies,
+  getQuickReplyUsageMetrics,
+  searchQuickRepliesPage,
   listQuickReplyRevisions,
   restoreQuickReplyRevision,
   saveQuickReply,
@@ -470,10 +471,68 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         throw accessDenied('a configured department staff role (administrators may list/show replies)');
       }
       if (subcommand === 'list') {
-        const replies = await listQuickReplies(guildId, { isAdmin: access.isAdmin, roleIds: access.roleIds }, interaction.options.getString('category') ?? undefined, interaction.options.getString('tag') ?? undefined);
-        await interaction.editReply(replies.length
-          ? replies.map((reply) => '**' + reply.name + '** • ' + reply.category + ' • ' + reply.id + ' • v' + reply.version + '\nTags: ' + (reply.tags.join(', ') || 'none')).join('\n\n').slice(0, 4000)
-          : 'No quick replies are available to you.');
+        const pageNumber = interaction.options.getInteger('page') ?? 1;
+        const result = await searchQuickRepliesPage(
+          guildId,
+          { isAdmin: access.isAdmin, roleIds: access.roleIds },
+          {
+            category: interaction.options.getString('category') ?? undefined,
+            tag: interaction.options.getString('tag') ?? undefined,
+            query: interaction.options.getString('query') ?? undefined,
+            page: pageNumber - 1,
+            pageSize: 10,
+          },
+        );
+        const settings = await getAdvancedSettings(guildId);
+        if (!result.total) {
+          await interaction.editReply(translate(settings.locale, 'quickReply.list.noResults'));
+          return true;
+        }
+        const description = result.replies.map((reply) =>
+          '**' + reply.name + '** • ' + reply.category + ' • v' + reply.version + '\n' +
+          translate(settings.locale, 'quickReply.list.tags') + ': ' + (reply.tags.join(', ') || translate(settings.locale, 'common.none')) +
+          (access.isAdmin && !reply.enabled ? '\n⚪ ' + translate(settings.locale, 'common.disabled') : ''),
+        ).join('\n\n').slice(0, 3800);
+        await interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setTitle(translate(settings.locale, 'quickReply.list.title'))
+            .setDescription(description)
+            .setFooter({ text: translate(settings.locale, 'quickReply.list.page', {
+              page: result.page + 1,
+              pages: result.pageCount,
+              total: result.total,
+            }) })],
+          allowedMentions: { parse: [] },
+        });
+        return true;
+      }
+      if (subcommand === 'metrics') {
+        if (!access.isAdmin) throw accessDenied('Manage Server or Administrator permission');
+        const days = interaction.options.getInteger('days') ?? 30;
+        const settings = await getAdvancedSettings(guildId);
+        const summary = await getQuickReplyUsageMetrics(guildId, days);
+        const description = summary.replies.length
+          ? summary.replies.slice(0, 15).map((item) =>
+              translate(settings.locale, 'quickReply.metrics.replyLine', {
+                name: item.name,
+                category: item.category,
+                count: item.sentCount,
+                last: item.lastSentAt ? formatLocaleDate(settings.locale, item.lastSentAt) : translate(settings.locale, 'quickReply.metrics.never'),
+              }),
+            ).join('\n\n').slice(0, 3800)
+          : translate(settings.locale, 'quickReply.metrics.none');
+        await interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setTitle(translate(settings.locale, 'quickReply.metrics.title'))
+            .setDescription(
+              translate(settings.locale, 'quickReply.metrics.summary', {
+                total: summary.totalSends,
+                days: summary.days,
+              }) + '\n\n' + description,
+            )
+            .setFooter({ text: translate(settings.locale, 'quickReply.metrics.footer') })],
+          allowedMentions: { parse: [] },
+        });
         return true;
       }
       if (subcommand === 'history') {
