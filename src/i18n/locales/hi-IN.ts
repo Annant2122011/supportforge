@@ -1026,6 +1026,13 @@ const hiIN: Record<TranslationKey, string> = {
   'forms.settings.embed.continue': "जारी रखने के लिए नीचे दिए गए नियंत्रण इस्तेमाल करें।",
   'forms.settings.detail.statusActive': "सक्रिय",
   'forms.settings.detail.statusInactive': "निष्क्रिय",
+  'forms.settings.pageIndicator': "पृष्ठ {page} / {pages}",
+  'quickReply.picker.initializationFailed': "Quick Reply पिकर शुरू नहीं हो सका। इसे टिकट पैनल से फिर खोलें।",
+  'quickReply.picker.filterUnavailable': "Quick Reply फ़िल्टरिंग अभी अस्थायी रूप से उपलब्ध नहीं है।",
+  'quickReply.picker.selectionRequired': "मौजूदा सूची से एक Quick Reply चुनें।",
+  'quickReply.picker.sendFailed': "Quick Reply सुरक्षित रूप से नहीं भेजा जा सका।",
+  'quickReply.picker.invalidThreadControl': "यह Quick Reply नियंत्रण अब मौजूदा टिकट थ्रेड से मेल नहीं खाता।",
+  'knowledge.command.invalidShareControl': "यह लेख-साझा नियंत्रण इस टिकट में अब मान्य नहीं है। फिर से /supportforge knowledge suggest चलाएँ।",
 };
 
 export default hiIN;
