@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { QueryResultRow } from 'pg';
+import type { PoolClient, QueryResultRow } from 'pg';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
 import {
@@ -184,7 +184,7 @@ function normalizeSynonymList(values: readonly string[]): string[] {
   return result;
 }
 
-async function inTransaction<T>(operation: (client: Awaited<ReturnType<ReturnType<typeof getPostgresPool>['connect']>>) => Promise<T>): Promise<T> {
+async function inTransaction<T>(operation: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await getPostgresPool().connect();
   try {
     await client.query('BEGIN');
@@ -200,7 +200,7 @@ async function inTransaction<T>(operation: (client: Awaited<ReturnType<ReturnTyp
 }
 
 async function insertArticleRevision(
-  client: Awaited<ReturnType<ReturnType<typeof getPostgresPool>['connect']>>,
+  client: PoolClient,
   article: KnowledgeArticle,
   changedBy: string,
 ): Promise<void> {
@@ -361,7 +361,8 @@ export async function searchKnowledgeBase(args: {
   }
   const tokens = normalized.split(' ').filter(Boolean);
   const synonyms = await getKnowledgeSynonymExpansions(args.guildId, tokens);
-  const expanded = Array.from(new Set([normalized, ...synonyms])).slice(0, 12).join(' ');
+  const expansions = Array.from(new Set([normalized, ...synonyms])).slice(0, 12);
+  const expanded = expansions.map((term) => '"' + term.replace(/"/g, '') + '"').join(' OR ');
   const limit = Math.max(1, Math.min(10, Math.floor(args.limit ?? 5)));
   const visibilitySql = args.includeStaff ? '' : "AND visibility='public' ";
   const pool = getPostgresPool();
