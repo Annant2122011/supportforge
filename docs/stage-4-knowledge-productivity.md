@@ -2,7 +2,7 @@
 
 **Implementation branch:** feature/stage-4-knowledge-productivity  
 **Pull request:** [#38, Stage 4: Knowledge Base and staff productivity](https://github.com/Annant2122011/supportforge/pull/38)  
-**Persistence:** PostgreSQL migration 13; Neon remains the production source of truth.  
+**Persistence:** PostgreSQL migration 14 (after Stage 3 migration 13); Neon remains the production source of truth.  
 **Delivery status:** Increment 1 implemented; full Stage 4 exit criteria are not yet complete.
 
 ## Increment 1 — Deterministic Knowledge Base
