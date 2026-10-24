@@ -35,6 +35,21 @@ test('Stage H form settings formats dynamic page, department, and status text sa
   );
 });
 
+test('Stage H localizes dynamic form and template rows while preserving configured names and IDs', () => {
+  assert.equal(
+    localizeFormSettingsText('hi-IN', '• **Order Support** · form_123 · v2 · **ACTIVE** · department billing · tag refunds · 3 field(s)'),
+    '• **Order Support** · form_123 · v2 · **सक्रिय** · विभाग billing · टैग refunds · 3 फ़ील्ड',
+  );
+  assert.equal(
+    localizeFormSettingsText('bn-IN', '• **Returns** · template_123 · 2 field(s)'),
+    '• **Returns** · template_123 · 2টি ফিল্ড',
+  );
+  assert.equal(
+    localizeFormSettingsText('hi-IN', '1. **Order ID** · order_id · short_text · required · step 1'),
+    '1. **Order ID** · order_id · short_text · आवश्यक · चरण 1',
+  );
+});
+
 test('Stage H report flow has complete translated category and review copy', () => {
   for (const locale of ['en-US', 'hi-IN', 'bn-IN']) {
     for (const key of [
