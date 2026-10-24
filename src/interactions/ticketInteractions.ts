@@ -3994,11 +3994,11 @@ async function showReportTargetSelector(interaction: ButtonInteraction, page = 0
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId('ticket:report:target')
-        .setPlaceholder('Choose the reported user')
+        .setPlaceholder(translate(reportSettings.locale, 'ticket.report.target.placeholder'))
         .addOptions(visibleTargets.map((id) => ({
           label: 'User ' + id.slice(-6),
           value: id,
-          description: id === getField(topic, 'owner') ? 'Ticket owner' : 'Ticket participant',
+          description: id === getField(topic, 'owner') ? translate(reportSettings.locale, 'ticket.report.target.owner') : translate(reportSettings.locale, 'ticket.report.target.participant'),
         }))),
     ),
   ];
@@ -4008,17 +4008,17 @@ async function showReportTargetSelector(interaction: ButtonInteraction, page = 0
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
           .setCustomId('ticket:panel:report:page:' + (safePage - 1))
-          .setLabel('Previous')
+          .setLabel(translate(reportSettings.locale, 'ticket.report.previous'))
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(safePage === 0),
         new ButtonBuilder()
           .setCustomId('ticket:panel:report:page:' + safePage)
-          .setLabel('Page ' + (safePage + 1) + ' / ' + pageCount)
+          .setLabel(translate(reportSettings.locale, 'ticket.report.page', { page: safePage + 1, pages: pageCount }))
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(true),
         new ButtonBuilder()
           .setCustomId('ticket:panel:report:page:' + (safePage + 1))
-          .setLabel('Next')
+          .setLabel(translate(reportSettings.locale, 'ticket.report.next'))
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(safePage >= pageCount - 1),
       ),
@@ -4026,8 +4026,8 @@ async function showReportTargetSelector(interaction: ButtonInteraction, page = 0
   }
 
   await interaction.editReply({
-    content: '🚩 **Report a user**\nChoose the participant whose behaviour you want to report.' +
-      (pageCount > 1 ? '\nPage ' + (safePage + 1) + ' of ' + pageCount + '.' : ''),
+    content: '🚩 **' + translate(reportSettings.locale, 'ticket.report.target.title') + '**\n' + translate(reportSettings.locale, 'ticket.report.target.prompt') +
+      (pageCount > 1 ? '\n' + translate(reportSettings.locale, 'ticket.report.page', { page: safePage + 1, pages: pageCount }) + '.' : ''),
     components,
   });
 }
@@ -4042,26 +4042,26 @@ async function handleReportTargetSelection(interaction: StringSelectMenuInteract
       )
     : '';
 
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   if (!isTicketParticipant(topic, targetId, interaction.user.id)) {
-    await replyError(interaction, '❌ That user is no longer a reportable participant on this ticket.');
+    await replyError(interaction, '❌ ' + translate(settings.locale, 'ticket.report.error.notParticipant'));
     return;
   }
 
-  const settings = await getAdvancedSettings(interaction.guild!.id);
 
   const rows = Object.values(settings.reports.categories).slice(0, 25);
   await interaction.editReply({
-    content: '🚩 **Report category**\nChoose the category that best describes the behaviour. The category set is built into ResolvX and is separate from ticket use-case/departments.',
+    content: '🚩 **' + translate(settings.locale, 'ticket.report.category.title') + '**\n' + translate(settings.locale, 'ticket.report.category.description'),
     components: [
       new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
         new StringSelectMenuBuilder()
           .setCustomId('ticket:report:category:' + targetId)
-          .setPlaceholder('Choose a report category')
+          .setPlaceholder(translate(settings.locale, 'ticket.report.category.placeholder'))
           .addOptions(rows.map((category) => ({
             label: category.name.slice(0, 100),
             value: category.id,
             emoji: category.emoji,
-            description: 'Select a subcategory next',
+            description: translate(settings.locale, 'ticket.report.category.optionDescription'),
           }))),
       ),
     ],
@@ -4078,13 +4078,13 @@ async function renderReportSubcategorySelector(
   const category = settings.reports.categories[categoryId];
 
   if (!category) {
-    await replyError(interaction, '❌ That report category is no longer available.');
+    await replyError(interaction, '❌ ' + translate(settings.locale, 'ticket.report.error.categoryUnavailable'));
     return;
   }
 
   const subcategories = Object.values(category.subcategories);
   if (!subcategories.length) {
-    await replyError(interaction, '❌ That report category has no configured subcategories.');
+    await replyError(interaction, '❌ ' + translate(settings.locale, 'ticket.report.error.noSubcategories'));
     return;
   }
 
@@ -4097,7 +4097,7 @@ async function renderReportSubcategorySelector(
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId('ticket:report:subcategory:' + targetId + ':' + categoryId)
-        .setPlaceholder('Choose a report subcategory')
+        .setPlaceholder(translate(settings.locale, 'ticket.report.subcategory.placeholder'))
         .addOptions(visible.map((sub) => ({
           label: sub.name.slice(0, 100),
           value: sub.id,
@@ -4111,17 +4111,17 @@ async function renderReportSubcategorySelector(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
           .setCustomId('ticket:report:subcategory:page:' + targetId + ':' + categoryId + ':' + (safePage - 1))
-          .setLabel('Previous')
+          .setLabel(translate(settings.locale, 'ticket.report.previous'))
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(safePage === 0),
         new ButtonBuilder()
           .setCustomId('ticket:report:subcategory:page:' + targetId + ':' + categoryId + ':' + safePage)
-          .setLabel('Page ' + (safePage + 1) + ' / ' + pageCount)
+          .setLabel(translate(settings.locale, 'ticket.report.page', { page: safePage + 1, pages: pageCount }))
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(true),
         new ButtonBuilder()
           .setCustomId('ticket:report:subcategory:page:' + targetId + ':' + categoryId + ':' + (safePage + 1))
-          .setLabel('Next')
+          .setLabel(translate(settings.locale, 'ticket.report.next'))
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(safePage >= pageCount - 1),
       ),
@@ -4129,8 +4129,8 @@ async function renderReportSubcategorySelector(
   }
 
   const payload = {
-    content: '🚩 **Report subcategory**\nChoose the most specific reason.' +
-      (pageCount > 1 ? '\nPage ' + (safePage + 1) + ' of ' + pageCount + '.' : ''),
+    content: '🚩 **' + translate(settings.locale, 'ticket.report.subcategory.title') + '**\n' + translate(settings.locale, 'ticket.report.subcategory.description') +
+      (pageCount > 1 ? '\n' + translate(settings.locale, 'ticket.report.page', { page: safePage + 1, pages: pageCount }) + '.' : ''),
     components,
   };
 
@@ -4152,14 +4152,14 @@ async function handleReportCategorySelection(interaction: StringSelectMenuIntera
       )
     : '';
 
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   if (!isTicketParticipant(topic, targetId, interaction.user.id)) {
-    await replyError(interaction, '❌ That user is no longer a reportable participant on this ticket.');
+    await replyError(interaction, '❌ ' + translate(settings.locale, 'ticket.report.error.notParticipant'));
     return;
   }
 
-  const settings = await getAdvancedSettings(interaction.guild!.id);
   if (!settings.reports.categories[interaction.values[0]]) {
-    await replyError(interaction, '❌ That report category is no longer configured.');
+    await replyError(interaction, '❌ ' + translate(settings.locale, 'ticket.report.error.categoryNotConfigured'));
     return;
   }
 
@@ -4184,20 +4184,20 @@ async function handleReportSubcategorySelection(interaction: StringSelectMenuInt
     !isTicketParticipant(topic, targetId, interaction.user.id) ||
     !settings.reports.categories[categoryId]?.subcategories[subcategoryId]
   ) {
-    await replyError(interaction, '❌ This report selection is no longer valid for the current ticket.');
+    await replyError(interaction, '❌ ' + translate(settings.locale, 'ticket.report.error.selectionInvalid'));
     return;
   }
 
   await interaction.showModal(
     new ModalBuilder()
       .setCustomId('ticket:report:modal:' + targetId + ':' + categoryId + ':' + subcategoryId)
-      .setTitle('Report User')
+      .setTitle(translate(settings.locale, 'ticket.report.modal.title'))
       .addComponents(
         new ActionRowBuilder<TextInputBuilder>().addComponents(
           new TextInputBuilder()
             .setCustomId('description')
-            .setLabel('What happened? (optional)')
-            .setPlaceholder('Briefly describe the behaviour. Maximum 500 characters.')
+            .setLabel(translate(settings.locale, 'ticket.report.modal.descriptionLabel'))
+            .setPlaceholder(translate(settings.locale, 'ticket.report.modal.descriptionPlaceholder'))
             .setStyle(TextInputStyle.Paragraph)
             .setRequired(false)
             .setMaxLength(500),
@@ -4209,10 +4209,11 @@ async function handleReportSubcategorySelection(interaction: StringSelectMenuInt
 async function handleReportModal(interaction: ModalSubmitInteraction): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
-    await replyError(interaction, '❌ This report can only be submitted from a ticket.');
+    await replyError(interaction, '❌ ' + translate('en-US', 'ticket.report.error.ticketOnly'));
     return;
   }
 
+  const settings = await getAdvancedSettings(interaction.guild.id);
   const parts = interaction.customId.split(':');
   const targetUserId = parts[3] ?? '';
   const categoryId = parts[4] ?? '';
@@ -4220,25 +4221,24 @@ async function handleReportModal(interaction: ModalSubmitInteraction): Promise<v
   const topic = interaction.channel.topic ?? '';
   const staff = getStaffContext(interaction, topic);
   if (!staff.authorized) {
-    await replyError(interaction, '❌ Only configured moderators or administrators can submit reports.');
+    await replyError(interaction, '❌ ' + translate(settings.locale, 'ticket.report.error.staffOnly'));
     return;
   }
 
   if (!isTicketTopic(topic) || !isActiveTicketStatus(getTicketStatus(topic))) {
-    await replyError(interaction, '❌ Reporting is only available on an active ResolvX ticket.');
+    await replyError(interaction, '❌ ' + translate(settings.locale, 'ticket.report.error.activeTicketOnly'));
     return;
   }
 
   if (!isTicketParticipant(topic, targetUserId, interaction.user.id)) {
-    await replyError(interaction, '❌ The reported user is no longer a participant on this ticket.');
+    await replyError(interaction, '❌ ' + translate(settings.locale, 'ticket.report.error.reportedParticipantMissing'));
     return;
   }
 
-  const settings = await getAdvancedSettings(interaction.guild.id);
   if (
     !settings.reports.categories[categoryId]?.subcategories[subcategoryId]
   ) {
-    await replyError(interaction, '❌ The selected report reason is no longer configured.');
+    await replyError(interaction, '❌ ' + translate(settings.locale, 'ticket.report.error.reasonMissing'));
     return;
   }
 
@@ -4258,11 +4258,11 @@ async function handleReportModal(interaction: ModalSubmitInteraction): Promise<v
   });
 
   await interaction.editReply({
-    content: '🚩 **Review report**\nChoose whether this incident should count as a serious violation (a flag) or simply be recorded without adding a flag.',
+    content: '🚩 **' + translate(settings.locale, 'ticket.report.review.title') + '**\n' + translate(settings.locale, 'ticket.report.review.description'),
     components: [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId('ticket:report:decision:' + nonce + ':flag').setLabel('Flag Violation').setEmoji('🚩').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId('ticket:report:decision:' + nonce + ':record').setLabel('Record Only').setEmoji('📝').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('ticket:report:decision:' + nonce + ':flag').setLabel(translate(settings.locale, 'ticket.report.review.flagButton')).setEmoji('🚩').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('ticket:report:decision:' + nonce + ':record').setLabel(translate(settings.locale, 'ticket.report.review.recordOnlyButton')).setEmoji('📝').setStyle(ButtonStyle.Secondary),
       ),
     ],
   });
@@ -4478,7 +4478,7 @@ export async function executeTicketReportCommand(interaction: ChatInputCommandIn
         item.id.toLowerCase() === subcategoryInput.toLowerCase() || item.name.toLowerCase() === subcategoryInput.toLowerCase())
     : undefined;
   if (!selectedCategory || !selectedSubcategory) {
-    await replyError(interaction, 'Report category/subcategory not found. Enter the configured name or ID shown in Settings → Reports.');
+    await replyError(interaction, translate(reportSettings.locale, 'ticket.report.command.categoryMissing'));
     return;
   }
   const categoryId = selectedCategory.id;
