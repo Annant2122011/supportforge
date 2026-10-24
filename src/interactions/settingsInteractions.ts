@@ -149,67 +149,25 @@ async function isDepartmentStaff(interaction: ButtonInteraction | StringSelectMe
   return Boolean(member?.roles.cache.some((role) => roleIds.has(role.id)));
 };
 
-function manualQuickEmbed(): EmbedBuilder {
+function manualQuickEmbed(locale: string): EmbedBuilder {
   return new EmbedBuilder()
-    .setTitle('📖 ResolvX Staff Manual • Quick Overview')
-    .setDescription(
-      '**1. Ticket lifecycle**\n' +
-      'Open → Claimed/Pending → Closed → Archived. Reopened tickets return to the active workflow.\n\n' +
-      '**2. Main staff controls**\n' +
-      'Claim a ticket when you take ownership. Pending means you are waiting for information. Resume returns it to Open. Close creates the transcript and makes the ticket read-only.\n\n' +
-      '**3. Priority**\n' +
-      '🟣 Critical • 🔴 Urgent • 🟠 High • 🟡 Normal • 🟢 Low. Priority is shown in the ticket name and panel.\n\n' +
-      '**4. Ticket tools**\n' +
-      'Use Add User, Priority, Tag, Note and History from the ticket panel.\n\n' +
-      '**5. Audit & Settings**\n' +
-      'The audit log records important activity. Settings is button-driven. Staff can read the Manual; administrators can change configuration.\n\n' +
-      '**6. Important rule**\n' +
-      'Closed and archived tickets are read-only. Do not work around the lock by sending messages manually.',
-    )
-    .setFooter({ text: 'Private manual view • only you can see this response' })
+    .setTitle(translate(locale, 'settings.manual.quick.title'))
+    .setDescription(translate(locale, 'settings.manual.quick.content'))
+    .setFooter({ text: translate(locale, 'settings.manual.quick.footer') })
     .setTimestamp();
 }
 
-function manualDetailedEmbeds(): EmbedBuilder[] {
+function manualDetailedEmbeds(locale: string): EmbedBuilder[] {
   return [
     new EmbedBuilder()
-      .setTitle('📖 ResolvX Staff Manual • Detailed • Page 1')
-      .setDescription(
-        '**Getting started**\n' +
-        'ResolvX keeps ticket work private and structured. Your department role controls which support areas and audit/settings resources you can access. Use the buttons in the ticket panel instead of attempting manual channel-management actions.\n\n' +
-        '**Ticket states**\n' +
-        '• **Open:** Active ticket waiting for staff action.\n' +
-        '• **Claimed:** A staff member has taken ownership.\n' +
-        '• **Pending:** Waiting for the customer or another dependency.\n' +
-        '• **Reopened:** A previously closed ticket has returned to active work.\n' +
-        '• **Closed:** Transcript saved; ticket becomes read-only.\n' +
-        '• **Archived:** Historical terminal state.\n\n' +
-        '**Claiming and pending**\n' +
-        'Claim only when you intend to own the work. Pending should be used when progress genuinely depends on a response. Resume moves a pending ticket back to Open.\n\n' +
-        '**Closing**\n' +
-        'ResolvX generates and uploads the transcript before committing the Closed state. If transcript creation fails, the ticket is not treated as safely closed. Reopen is available only from Closed, and Archive is the deliberate terminal historical action.',
-      )
-      .setFooter({ text: 'Private manual view • Page 1 of 2' })
+      .setTitle(translate(locale, 'settings.manual.detailed.page1.title'))
+      .setDescription(translate(locale, 'settings.manual.detailed.page1.content'))
+      .setFooter({ text: translate(locale, 'settings.manual.detailed.page1.footer') })
       .setTimestamp(),
     new EmbedBuilder()
-      .setTitle('📖 ResolvX Staff Manual • Detailed • Page 2')
-      .setDescription(
-        '**Priority & tags**\n' +
-        'Priority is not cosmetic. It is displayed in the ticket name, panel color, and status area. Use the lowest accurate priority and increase it when urgency changes. Tags add searchable operational context.\n\n' +
-        '**Internal notes & history**\n' +
-        'Internal notes are staff-only workflow context. History reads the audit record for the ticket. Do not put customer-facing promises, passwords, tokens, or other secrets into notes.\n\n' +
-        '**Panel navigation**\n' +
-        'When conversation activity pushes the panel away from view, ResolvX may collapse or move it. Restore/Move Panel brings the controls back to the bottom without duplicating old panels.\n\n' +
-        '**Audit log**\n' +
-        'The audit log records ticket and administrative activity. Use **Daily Summary** for the current day, **Audit Data Settings** for retention controls, and **Developer Options** for the continuous technical audit stream.\n\n' +
-        '**Settings & priority roles**\n' +
-        'Administrators can configure departments, retention, appearance, storage and optional priority roles. Priority roles are never created automatically. Claimed and Pending are status states, not extra role types.\n\n' +
-        '**Retention**\n' +
-        'Closed and archived tickets are not silently deleted. When a retention rule finds eligible tickets, an approval step is required. Review the eligible tickets before approving deletion.\n\n' +
-        '**Safety**\n' +
-        'Never bypass ResolvX permissions. Never expose private tickets. When a workflow looks stale, use the supported panel controls or ask an administrator to run Repair System.',
-      )
-      .setFooter({ text: 'Private manual view • Page 2 of 2' })
+      .setTitle(translate(locale, 'settings.manual.detailed.page2.title'))
+      .setDescription(translate(locale, 'settings.manual.detailed.page2.content'))
+      .setFooter({ text: translate(locale, 'settings.manual.detailed.page2.footer') })
       .setTimestamp(),
   ];
 }
@@ -265,8 +223,9 @@ async function showManual(interaction: SettingsViewInteraction): Promise<void> {
 
 
 async function showManualVersion(interaction: ButtonInteraction, detailed: boolean): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   await interaction.reply({
-    embeds: detailed ? manualDetailedEmbeds() : [manualQuickEmbed()],
+    embeds: detailed ? manualDetailedEmbeds(settings.locale) : [manualQuickEmbed(settings.locale)],
     flags: MessageFlags.Ephemeral,
   });
 }
