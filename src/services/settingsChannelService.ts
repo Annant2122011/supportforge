@@ -316,9 +316,9 @@ export function buildSettingsDashboardEmbed(
 
   return new EmbedBuilder()
     .setTitle(
-      settings.settingsDashboard.title === SETTINGS_TITLE
+      !settings.settingsDashboard.title || settings.settingsDashboard.title === SETTINGS_TITLE
         ? '⚙️ ' + translate(settings.locale, 'settings.title')
-        : settings.settingsDashboard.title || SETTINGS_TITLE,
+        : settings.settingsDashboard.title,
     )
     .setColor(getThemeColor(theme))
     .setDescription(
