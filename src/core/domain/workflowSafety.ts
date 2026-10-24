@@ -115,24 +115,31 @@ export function evaluateWorkflowConditions(
   return { matches: conditions.every((condition) => condition.matches), conditions };
 }
 
+export function getWorkflowExecutionBlockReason(
+  definition: WorkflowTemplateDefinition,
+): string | null {
+  if (definition.actions.some((action) => action.type === 'assign_department')) {
+    return 'Department reassignment is blocked in the manual executor until Discord category and role-permission reconciliation can be guaranteed.';
+  }
+  return null;
+}
+
 export function previewWorkflowTemplate(definition: WorkflowTemplateDefinition): {
   executable: boolean;
   conditionCount: number;
   actionCount: number;
   warnings: string[];
 } {
-  const departmentReassignmentBlocked = definition.actions.some(
-    (action) => action.type === 'assign_department',
-  );
+  const executionBlockReason = getWorkflowExecutionBlockReason(definition);
   return {
-    executable: !departmentReassignmentBlocked,
+    executable: executionBlockReason === null,
     conditionCount: definition.conditions.length,
     actionCount: definition.actions.length,
     warnings: [
       'Workflows run manually only after an administrator explicitly confirms execution in an active ticket. They never run automatically.',
-      'Department reassignment is blocked in the manual executor until Discord category and role-permission reconciliation can be guaranteed.',
       'Actions are allowlisted, validated against current guild configuration, and recorded in the durable PostgreSQL execution ledger.',
       'Send actions suppress unsolicited mentions and never evaluate raw code or SQL.',
+      ...(executionBlockReason ? [executionBlockReason] : []),
     ],
   };
 }
