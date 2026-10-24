@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { previewWorkflowTemplate, validateWorkflowTemplateDefinition } from '../src/core/domain/workflowSafety';
+import { evaluateWorkflowConditions, previewWorkflowTemplate, validateWorkflowTemplateDefinition } from '../src/core/domain/workflowSafety';
 
 test('workflow template only accepts allowlisted conditions and typed actions', () => {
   const definition = validateWorkflowTemplateDefinition({
@@ -33,4 +33,44 @@ test('workflow caps limit execution blast radius and validate configured referen
   assert.throws(() => validateWorkflowTemplateDefinition({ conditions: Array(6).fill({field:'status',equals:'open'}), actions: [{type:'add_tag',value:'refund'}] }), /at most five/);
   assert.throws(() => validateWorkflowTemplateDefinition({ conditions: [], actions: [] }), /1–10/);
   assert.throws(() => validateWorkflowTemplateDefinition({ conditions: [], actions: [{type:'add_tag',value:'tag with spaces'}] }), /validated configured ID/);
+});
+
+
+test('workflow condition evaluation is deterministic and fails closed on missing ticket metadata', () => {
+  const definition = validateWorkflowTemplateDefinition({
+    conditions: [
+      { field: 'status', equals: 'open' },
+      { field: 'priority', equals: 'urgent' },
+      { field: 'departmentId', equals: 'billing' },
+    ],
+    actions: [{ type: 'set_priority', value: 'critical' }],
+  });
+  const match = evaluateWorkflowConditions(definition, {
+    status: 'open',
+    priority: 'urgent',
+    departmentId: 'billing',
+  });
+  assert.equal(match.matches, true);
+  assert.ok(match.conditions.every((item) => item.matches));
+
+  const mismatch = evaluateWorkflowConditions(definition, {
+    status: 'open',
+    priority: null,
+    departmentId: 'billing',
+  });
+  assert.equal(mismatch.matches, false);
+  assert.equal(mismatch.conditions[1]?.actual, null);
+  assert.equal(mismatch.conditions[1]?.matches, false);
+});
+
+test('empty workflow conditions match without implicit filters', () => {
+  const definition = validateWorkflowTemplateDefinition({
+    conditions: [],
+    actions: [{ type: 'set_priority', value: 'high' }],
+  });
+  assert.deepEqual(evaluateWorkflowConditions(definition, {
+    status: 'open',
+    priority: 'normal',
+    departmentId: null,
+  }), { matches: true, conditions: [] });
 });
