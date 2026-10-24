@@ -1039,6 +1039,13 @@ const bnIN: Record<TranslationKey, string> = {
   'ticket.report.error.targetNotParticipant': "লক্ষ্য ব্যবহারকারীকে এই টিকিটের অংশগ্রহণকারী হতে হবে।",
   'ticket.report.error.selfReport': "আপনি নিজের বিরুদ্ধে রিপোর্ট করতে পারবেন না।",
   'panelBuilder.authorSuffix': "ResolvX সহায়তা",
+  'settings.reports.command.enabled': "নিরাপত্তা রিপোর্ট এখন **সক্রিয়**।",
+  'settings.reports.command.disabled': "নিরাপত্তা রিপোর্ট এখন **নিষ্ক্রিয়**।",
+  'settings.reports.command.categoryListTitle': "রিপোর্টের বিভাগসমূহ",
+  'settings.reports.command.pageOutOfRange': "পৃষ্ঠা {page} নেই। এই ফলাফলে {pages}টি পৃষ্ঠা আছে।",
+  'settings.reports.command.subcategoryAdded': "রিপোর্টের উপবিভাগ **{name}** যোগ হয়েছে (ID: {id})।",
+  'settings.reports.command.subcategoryRenamed': "রিপোর্টের উপবিভাগের নাম বদলে **{name}** করা হয়েছে।",
+  'settings.reports.command.subcategoryRemoved': "রিপোর্টের উপবিভাগ **{name}** মুছে ফেলা হয়েছে।",
 };
 
 export default bnIN;
