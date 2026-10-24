@@ -542,6 +542,33 @@ const MIGRATIONS: readonly PostgresMigration[] = [
     },
   },
   {
+    id: 13,
+    name: 'add_durable_recovery_replay_segment_ledger',
+    up: async (db) => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS ticket_recovery_replay_segments (
+          recovery_event_id TEXT NOT NULL REFERENCES ticket_recovery_events(id) ON DELETE CASCADE,
+          original_message_id TEXT NOT NULL,
+          segment_key TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','completed')),
+          discord_message_id TEXT,
+          attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+          attempt_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          last_error TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (recovery_event_id, original_message_id, segment_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_ticket_recovery_replay_segments_pending
+          ON ticket_recovery_replay_segments (recovery_event_id, status, updated_at)
+          WHERE status='pending';
+        CREATE INDEX IF NOT EXISTS idx_ticket_recovery_replay_segments_message
+          ON ticket_recovery_replay_segments (discord_message_id)
+          WHERE discord_message_id IS NOT NULL;
+      `);
+    },
+  },
+  {
     id: 14,
     name: 'add_knowledge_base_and_quick_reply_productivity',
     up: async (db) => {
