@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  expandKnowledgeQuery,
+  buildKnowledgeSearchExpression,
+  expandKnowledgeQueries,
   isKnowledgeShareableConfidence,
   normalizeKnowledgeText,
   scoreKnowledgeCandidate,
@@ -62,14 +63,22 @@ test('empty query does not create false-positive matches', () => {
 });
 
 
-test('knowledge search expands full configured phrases without substring collisions', () => {
-  const expanded = expandKnowledgeQuery('refund policy', [
+test('knowledge search expands whole-term and phrase synonyms as independent alternatives', () => {
+  const variants = expandKnowledgeQueries('refund policy', [
     { normalizedTerm: 'refund', synonyms: ['return', 'money back'] },
     { normalizedTerm: 'refund policy', synonyms: ['refund rules'] },
     { normalizedTerm: 'fund', synonyms: ['investment'] },
   ]);
-  assert.equal(expanded, 'refund policy return money back refund rules');
-  assert.ok(!expanded.includes('investment'));
+  assert.deepEqual(variants, [
+    'refund policy',
+    'return policy',
+    'money back policy',
+    'refund rules',
+  ]);
+  const expression = buildKnowledgeSearchExpression(variants);
+  assert.match(expression, /\(refund policy\) OR \(return policy\)/);
+  assert.ok(!expression.includes('investment'));
+  assert.ok(!expression.includes('money back policy refund rules'), 'synonyms must not become one mandatory AND query');
 });
 
 test('only medium and high confidence Knowledge Base results receive direct-share controls', () => {
