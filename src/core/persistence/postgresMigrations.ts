@@ -770,9 +770,28 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+  {
+    id: 15,
+    name: 'record_explicit_quick_reply_and_workflow_restore_operations',
+    up: async (db) => {
+      await db.query(`
+        ALTER TABLE quick_reply_revisions
+          DROP CONSTRAINT IF EXISTS quick_reply_revisions_operation_check;
+        ALTER TABLE quick_reply_revisions
+          ADD CONSTRAINT quick_reply_revisions_operation_check
+          CHECK (operation IN ('created','updated','deleted','baseline','restored'));
+
+        ALTER TABLE workflow_template_revisions
+          DROP CONSTRAINT IF EXISTS workflow_template_revisions_operation_check;
+        ALTER TABLE workflow_template_revisions
+          ADD CONSTRAINT workflow_template_revisions_operation_check
+          CHECK (operation IN ('created','updated','enabled','disabled','deleted','baseline','restored'));
+      `);
+    },
+  },
 ];
 
-/** Latest migration identifier required by this application version. */
+ /** Latest migration identifier required by this application version. */
 export const CURRENT_POSTGRES_MIGRATION_ID = MIGRATIONS[MIGRATIONS.length - 1]!.id;
 
 export async function runPostgresMigrations(
