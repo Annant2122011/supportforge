@@ -1032,7 +1032,7 @@ async function showPanelSettings(interaction: ButtonInteraction): Promise<void> 
           translate(settings.locale, 'settings.panel.value.visualBudget', { lines: settings.panelActivity.visualLineBudget }),
           translate(settings.locale, 'settings.panel.value.messageCap', { cap: settings.panelActivity.messageBudget }),
           translate(settings.locale, 'settings.panel.value.minimumMessages', { count: settings.panelActivity.minimumMessagesBeforeMove }),
-        ].join('\\n'),
+        ].join('\n'),
       }),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -1072,12 +1072,12 @@ async function showReportSettings(interaction: ButtonInteraction): Promise<void>
   const categories = Object.values(settings.reports.categories);
   const rules = Object.values(settings.reports.flagRules).filter((rule) => rule.enabled).sort((a, b) => a.threshold - b.threshold);
   const categoryText = categories.map((category) =>
-    category.emoji + ' **' + category.name + '**\\n' +
+    category.emoji + ' **' + category.name + '**\n' +
     Object.values(category.subcategories).map((sub) => '• ' + sub.name).join(' • ')
-  ).join('\\n\\n').slice(0, 3800) || translate(settings.locale, 'settings.reports.value.noCategories');
+  ).join('\n\n').slice(0, 3800) || translate(settings.locale, 'settings.reports.value.noCategories');
 
   const ruleText = rules.length
-    ? rules.map((rule) => '• **' + rule.threshold + ' flags** → **' + rule.action + '**' + (rule.channelId ? ' in <#' + rule.channelId + '>' : '')).join('\\n')
+    ? rules.map((rule) => '• **' + rule.threshold + ' flags** → **' + rule.action + '**' + (rule.channelId ? ' in <#' + rule.channelId + '>' : '')).join('\n')
     : translate(settings.locale, 'settings.reports.value.noAutomaticActions');
 
   await renderSettingsView(interaction, [
@@ -1604,7 +1604,8 @@ async function showThemeSettings(
   interaction: SettingsViewInteraction,
   notice = '',
 ): Promise<void> {
-  const config = await getGuildConfig(interaction.guild!.id);\n  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const config = await getGuildConfig(interaction.guild!.id);
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   const active = getThemeDefinition(config.theme);
   const chooser = new StringSelectMenuBuilder()
     .setCustomId('sf:settings:theme:select')
