@@ -9,6 +9,9 @@ This programme groups the requested product improvements into four delivery stag
 
 **Current incremental status:** [Stage 3 Recovery Vault implementation and acceptance gaps](stage-3-recovery-vault.md).
 
+- [Stage 1/2 measurable scope and exit contract](stage-1-2-exit-contract.md)
+- [Stage 4 Knowledge Base and quick-reply implementation guide](stage-4-knowledge-productivity.md)
+
 ## Non-negotiable engineering rules
 
 - Preserve existing guild configuration, ticket records, message archives, migration history, and recovery metadata.
