@@ -984,7 +984,8 @@ export const data =
         .setDescription('Manage permission-controlled canned staff responses')
         .addSubcommand((subcommand) =>
           subcommand.setName('list').setDescription('List quick replies available to you')
-            .addStringOption((option) => option.setName('category').setDescription('Optional category filter').setRequired(false).setMaxLength(80)),
+            .addStringOption((option) => option.setName('category').setDescription('Optional category filter').setRequired(false).setMaxLength(80))
+            .addStringOption((option) => option.setName('tag').setDescription('Optional exact tag filter').setRequired(false).setMaxLength(32)),
         )
         .addSubcommand((subcommand) =>
           subcommand.setName('show').setDescription('Preview a quick reply and its supported placeholders')
