@@ -134,12 +134,15 @@ function canUse(reply: QuickReply, access: QuickReplyAccess): boolean {
   return access.isAdmin || (reply.enabled && (reply.allowedRoleIds.length===0 || reply.allowedRoleIds.some((role)=>access.roleIds.includes(role))));
 }
 
-export async function listQuickReplies(guildId: string, access: QuickReplyAccess, category?: string): Promise<QuickReply[]> {
+export async function listQuickReplies(guildId: string, access: QuickReplyAccess, category?: string, tag?: string): Promise<QuickReply[]> {
   const result = await getPostgresPool().query<QuickReplyRow>(
     'SELECT '+COLUMNS+' FROM quick_replies WHERE guild_id=$1 AND deleted_at IS NULL AND ($2::boolean OR enabled=TRUE) AND ($3::text IS NULL OR LOWER(category)=LOWER($3)) ORDER BY category,name LIMIT 100',
     [guildId,access.isAdmin,category?.trim()||null],
   );
-  return result.rows.map(fromRow).filter((reply)=>canUse(reply,access));
+  const normalizedTag = tag ? normalizeName(tag) : null;
+  return result.rows.map(fromRow)
+    .filter((reply) => canUse(reply, access))
+    .filter((reply) => !normalizedTag || reply.tags.some((item) => normalizeName(item) === normalizedTag));
 }
 
 export async function getQuickReply(guildId: string, idOrName: string, access: QuickReplyAccess): Promise<QuickReply|null> {
