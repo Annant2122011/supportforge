@@ -1046,6 +1046,10 @@ const bnIN: Record<TranslationKey, string> = {
   'settings.reports.command.subcategoryAdded': "রিপোর্টের উপবিভাগ **{name}** যোগ হয়েছে (ID: {id})।",
   'settings.reports.command.subcategoryRenamed': "রিপোর্টের উপবিভাগের নাম বদলে **{name}** করা হয়েছে।",
   'settings.reports.command.subcategoryRemoved': "রিপোর্টের উপবিভাগ **{name}** মুছে ফেলা হয়েছে।",
+  'forms.settings.list.item': "• **{name}** · {id} · v{version} · **{status}** · বিভাগ {department} · ট্যাগ {tag} · {count}টি ফিল্ড",
+  'forms.settings.detail.field': "{index}. **{label}** · {id} · {type} · {status} · ধাপ {step}",
+  'forms.settings.templates.item': "• **{name}** · {id} · {count}টি ফিল্ড",
+  'forms.settings.template.field': "{index}. **{label}** · {id} · {type}",
 };
 
 export default bnIN;
