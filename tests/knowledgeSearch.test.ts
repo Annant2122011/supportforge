@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  expandKnowledgeQuery,
+  isKnowledgeShareableConfidence,
   normalizeKnowledgeText,
   scoreKnowledgeCandidate,
   shouldOfferKnowledgeResult,
@@ -57,4 +59,21 @@ test('empty query does not create false-positive matches', () => {
   });
   assert.equal(score.score, 0);
   assert.equal(shouldOfferKnowledgeResult(score), false);
+});
+
+
+test('knowledge search expands full configured phrases without substring collisions', () => {
+  const expanded = expandKnowledgeQuery('refund policy', [
+    { normalizedTerm: 'refund', synonyms: ['return', 'money back'] },
+    { normalizedTerm: 'refund policy', synonyms: ['refund rules'] },
+    { normalizedTerm: 'fund', synonyms: ['investment'] },
+  ]);
+  assert.equal(expanded, 'refund policy return money back refund rules');
+  assert.ok(!expanded.includes('investment'));
+});
+
+test('only medium and high confidence Knowledge Base results receive direct-share controls', () => {
+  assert.equal(isKnowledgeShareableConfidence('high'), true);
+  assert.equal(isKnowledgeShareableConfidence('medium'), true);
+  assert.equal(isKnowledgeShareableConfidence('low'), false);
 });
