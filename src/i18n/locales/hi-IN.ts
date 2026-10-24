@@ -716,6 +716,11 @@ const hiIN: Record<TranslationKey, string> = {
   'settings.recovery.page': "पृष्ठ {page} / {pages}",
   'settings.recovery.ticketLine': "• **टिकट #{number}** • {messages} संग्रहीत संदेश • मूल चैनल ID: {channelId}",
   'settings.recovery.accidentalReady': " • **गलती से हटाया गया चिह्नित, पुनर्स्थापना के लिए तैयार**",
+  'settings.recovery.listNativeTitle': "चैनल पुनर्स्थापित करें",
+  'settings.recovery.listReviewTitle': "टिकट हटाने की समीक्षा",
+  'settings.recovery.recordMissingTitle': "रिकवरी रिकॉर्ड अब उपलब्ध नहीं है",
+  'settings.recovery.recordMissingDescription': "रिकवरी सूची रीफ़्रेश करें। रिकॉर्ड पहले ही पुनर्स्थापित या समीक्षित हो सकता है।",
+  'settings.recovery.backToList': "सूची पर वापस जाएँ",
 };
 
 export default hiIN;
