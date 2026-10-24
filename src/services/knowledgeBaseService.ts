@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
-import { expandKnowledgeQuery, normalizeKnowledgeText, scoreKnowledgeCandidate, shouldOfferKnowledgeResult, type KnowledgeConfidence } from '../core/domain/knowledgeSearch';
+import { buildKnowledgeSearchExpression, expandKnowledgeQueries, normalizeKnowledgeText, scoreKnowledgeCandidate, shouldOfferKnowledgeResult, type KnowledgeConfidence } from '../core/domain/knowledgeSearch';
 
 export type KnowledgeArticleStatus = 'draft' | 'published' | 'archived';
 export type KnowledgeVisibility = 'public' | 'staff';
@@ -485,10 +485,11 @@ export async function searchKnowledgeBase(
     'SELECT normalized_term,synonyms FROM knowledge_base_synonyms WHERE guild_id=$1 ORDER BY normalized_term LIMIT 100',
     [guildId],
   );
-  const expandedQuery = expandKnowledgeQuery(query, synonymResult.rows.map((row) => ({
+  const expandedQueries = expandKnowledgeQueries(query, synonymResult.rows.map((row) => ({
     normalizedTerm: row.normalized_term,
     synonyms: Array.isArray(row.synonyms) ? row.synonyms : [],
   })));
+  const searchExpression = buildKnowledgeSearchExpression(expandedQueries);
   const permissionPredicate = 'guild_id=$1 AND status=\'published\' AND ' +
     '(visibility=\'public\' OR $3::boolean OR $4::boolean) AND ' +
     '(cardinality(allowed_role_ids)=0 OR allowed_role_ids && $5::text[] OR $3::boolean)';
@@ -496,21 +497,31 @@ export async function searchKnowledgeBase(
     'SELECT ' + ARTICLE_COLUMNS + ',ts_rank_cd(search_vector,websearch_to_tsquery(\'english\'::regconfig,$2)) AS search_rank ' +
       'FROM knowledge_base_articles WHERE ' + permissionPredicate + ' AND search_vector @@ websearch_to_tsquery(\'english\'::regconfig,$2) ' +
       'ORDER BY search_rank DESC,updated_at DESC LIMIT 50',
-    [guildId,expandedQuery,access.isAdmin,access.isStaff,access.roleIds],
+    [guildId, searchExpression, access.isAdmin, access.isStaff, access.roleIds],
   );
   const metadataCandidates = await pool.query<KnowledgeArticleRow>(
     'SELECT ' + ARTICLE_COLUMNS + ' FROM knowledge_base_articles WHERE ' + permissionPredicate +
       ' AND $2::text IS NOT NULL ORDER BY updated_at DESC LIMIT 500',
-    [guildId,expandedQuery,access.isAdmin,access.isStaff,access.roleIds],
+    [guildId, searchExpression, access.isAdmin, access.isStaff, access.roleIds],
   );
-  const articleMap = new Map<string,{ row: KnowledgeArticleRow; score: number }>();
+  const articleMap = new Map<string, { row: KnowledgeArticleRow; score: number }>();
   for (const row of metadataCandidates.rows) {
     const article = fromRow(row);
     if (!canRead(article, access)) continue;
-    const scored = scoreKnowledgeCandidate(expandedQuery,{
-      title:article.title,summary:article.summary,category:article.category,tags:article.tags,
-    });
-    if (shouldOfferKnowledgeResult(scored)) articleMap.set(article.id,{row,score:scored.score});
+    const candidate = {
+      title: article.title,
+      summary: article.summary,
+      category: article.category,
+      tags: article.tags,
+    };
+    const score = Math.max(
+      0,
+      ...expandedQueries.map((variant) => scoreKnowledgeCandidate(variant, candidate).score),
+    );
+    const confidence: KnowledgeConfidence = score >= 0.72 ? 'high' : score >= 0.48 ? 'medium' : 'low';
+    if (shouldOfferKnowledgeResult({ score, confidence })) {
+      articleMap.set(article.id, { row, score });
+    }
   }
   for (const row of fts.rows) {
     const article = fromRow(row);
