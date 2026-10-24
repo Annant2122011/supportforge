@@ -65,7 +65,7 @@ import type { TranslationKey } from '../i18n/locales/en-US';
 import { ensureDepartmentCategory } from '../services/departmentCategoryService';
 import { endTicketVoiceMode, startTicketVoiceMode, syncTicketVoiceParticipants } from '../services/voiceModeService';
 import { getUserFlagCount, isTicketCreationRestricted, recordReport } from '../services/reportService';
-import { getQuickReply, listQuickReplies, renderQuickReply } from '../services/quickReplyService';
+import { listQuickReplies, sendQuickReplyInTicket } from '../services/quickReplyService';
 import { getKnowledgeArticle, recordKnowledgeArticleShare } from '../services/knowledgeBaseService';
 
 import {
@@ -5156,43 +5156,18 @@ async function handleQuickReplySelection(interaction: StringSelectMenuInteractio
   if (!(await safeDeferReply(interaction))) return;
   try {
     const context = await getQuickReplyTicketContext(interaction);
-    const replyId = interaction.values[0];
-    if (!replyId) throw new Error('Choose one quick reply from the current list.');
-    const reply = await getQuickReply(interaction.guildId!, replyId, context.access);
-    if (!reply || !reply.enabled) {
-      throw new Error('That quick reply is no longer enabled or available to your role. Open the selector again.');
-    }
-
-    const owner = context.ticket.ownerId
-      ? await context.guild.members.fetch(context.ticket.ownerId).catch(() => null)
-      : null;
-    const staff = await context.guild.members.fetch(interaction.user.id).catch(() => null);
-    const rendered = renderQuickReply(reply, {
-      user: owner?.displayName ?? 'customer',
-      username: owner?.user.username ?? 'customer',
-      ticketId: context.ticket.id,
-      ticketNumber: context.ticket.ticketNumber ?? context.ticket.id.slice(0, 8),
-      department: context.department?.name ?? context.ticket.departmentId ?? 'Support',
-      priority: context.ticket.priority ?? 'normal',
-      staff: staff?.displayName ?? interaction.user.username,
+    const quickReplyId = interaction.values[0];
+    if (!quickReplyId) throw new Error('Choose one quick reply from the current list.');
+    const reply = await sendQuickReplyInTicket({
+      guild: context.guild,
+      channel: context.channel,
+      quickReplyId,
+      actorId: interaction.user.id,
+      actorName: interaction.user.tag,
+      actorUsername: interaction.user.username,
+      isAdmin: context.access.isAdmin,
+      roleIds: context.access.roleIds,
     });
-
-    await context.channel.send({ content: rendered, allowedMentions: { parse: [] } });
-    if (context.config.supportCategoryId) {
-      try {
-        await logTicketEvent(context.guild, context.config.supportCategoryId, {
-          ticketNumber: context.ticket.ticketNumber ?? context.ticket.id,
-          ticketChannelId: context.ticket.channelId,
-          event: 'QUICK_REPLY_SENT',
-          actorId: interaction.user.id,
-          actor: interaction.user.tag,
-          actorName: interaction.user.tag,
-          detail: 'Sent quick reply ' + reply.id + ' version ' + reply.version + ' from the ticket panel.',
-        });
-      } catch {
-        console.warn('Quick reply was sent, but its ticket audit notification failed.');
-      }
-    }
     await interaction.editReply('Sent quick reply "' + reply.name + '". Automatic mentions are disabled; the ticket remains open.');
   } catch (error) {
     await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : 'Quick reply could not be sent safely.');
