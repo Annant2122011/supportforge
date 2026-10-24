@@ -22,6 +22,9 @@ test('quick replies trim fields, deduplicate tags/roles, and bound content',()=>
 
 test('quick replies reject unsupported interpolation and malformed role gates',()=>{
   assert.throws(()=>validateQuickReplyInput({name:'Bad reply',body:'Run {javascript} now'}),/Unsupported placeholder/);
+  assert.throws(()=>validateQuickReplyInput({name:'Bad reply',body:'Run {user name} now'}),/Unsupported placeholder/);
+  assert.throws(()=>validateQuickReplyInput({name:'Bad reply',body:'Run {{user}} now'}),/braces must be complete and non-nested/);
+  assert.throws(()=>validateQuickReplyInput({name:'Bad reply',body:'Run {user now'}),/braces must be complete and non-nested/);
   assert.throws(()=>validateQuickReplyInput({name:'A',body:'Short'}),/2–80 characters/);
   assert.throws(()=>validateQuickReplyInput({name:'Valid',body:'Hello',allowedRoleIds:['everyone']}),/valid Discord role IDs/);
 });
