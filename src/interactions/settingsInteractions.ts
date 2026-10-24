@@ -1129,8 +1129,18 @@ async function showReportSettings(interaction: ButtonInteraction): Promise<void>
     Object.values(category.subcategories).map((sub) => '• ' + sub.name).join(' • ')
   ).join('\n\n').slice(0, 3800) || translate(settings.locale, 'settings.reports.value.noCategories');
 
+  const actionKeys: Record<'tickets' | 'channel' | 'server', TranslationKey> = {
+    tickets: 'settings.reports.ruleAction.tickets',
+    channel: 'settings.reports.ruleAction.channel',
+    server: 'settings.reports.ruleAction.server',
+  };
   const ruleText = rules.length
-    ? rules.map((rule) => '• **' + rule.threshold + ' flags** → **' + rule.action + '**' + (rule.channelId ? ' in <#' + rule.channelId + '>' : '')).join('\n')
+    ? rules.map((rule) => {
+        const actionKey = actionKeys[rule.action as keyof typeof actionKeys] ?? 'settings.reports.ruleAction.unknown';
+        return '• **' + translate(settings.locale, 'settings.reports.flagThreshold', { threshold: rule.threshold }) +
+          ' → **' + translate(settings.locale, actionKey) + '**' +
+          (rule.channelId ? ' • <#' + rule.channelId + '>' : '');
+      }).join('\n')
     : translate(settings.locale, 'settings.reports.value.noAutomaticActions');
 
   await renderSettingsView(interaction, [
