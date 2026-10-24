@@ -292,10 +292,10 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
 
         const description = results.map((result, index) =>
           '**' + (index + 1) + '. ' + result.title + '** • ' + result.confidence.toUpperCase() +
-          ' confidence • score ' + result.score + '\\n' +
-          (result.summary || 'No summary') + '\\nCategory: ' + result.category +
-          (result.tags.length ? '\\nTags: ' + result.tags.join(', ') : ''),
-        ).join('\\n\\n').slice(0, 3600);
+          ' confidence • score ' + result.score + '\n' +
+          (result.summary || 'No summary') + '\nCategory: ' + result.category +
+          (result.tags.length ? '\nTags: ' + result.tags.join(', ') : ''),
+        ).join('\n\n').slice(0, 3600);
         const shareable = results.filter((result) => result.confidence !== 'low').slice(0, 5);
         const components = shareable.length
           ? [new ActionRowBuilder<ButtonBuilder>().addComponents(
