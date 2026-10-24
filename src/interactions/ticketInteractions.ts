@@ -5118,7 +5118,10 @@ async function getQuickReplyTicketContext(interaction: QuickReplyInteraction) {
   };
 }
 
-async function showQuickReplySelector(interaction: ButtonInteraction): Promise<void> {
+async function showQuickReplySelector(
+  interaction: ButtonInteraction,
+  requestedPage = 0,
+): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
   try {
     const context = await getQuickReplyTicketContext(interaction);
@@ -5131,7 +5134,12 @@ async function showQuickReplySelector(interaction: ButtonInteraction): Promise<v
       return;
     }
 
-    const options = replies.slice(0, 25).map((reply) => ({
+    const pageSize = 25;
+    const pageCount = Math.max(1, Math.ceil(replies.length / pageSize));
+    const page = Number.isInteger(requestedPage)
+      ? Math.max(0, Math.min(pageCount - 1, requestedPage))
+      : 0;
+    const options = replies.slice(page * pageSize, (page + 1) * pageSize).map((reply) => ({
       label: reply.name.slice(0, 100),
       value: reply.id,
       description: (reply.category + ' • ' + (reply.tags.join(', ') || 'no tags')).slice(0, 100),
@@ -5142,10 +5150,30 @@ async function showQuickReplySelector(interaction: ButtonInteraction): Promise<v
       .setMinValues(1)
       .setMaxValues(1)
       .addOptions(options);
-    const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu);
+    const components: Array<ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<ButtonBuilder>> = [
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
+    ];
+    if (pageCount > 1) {
+      components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId('ticket:quick-reply:page:' + (page - 1))
+          .setLabel('Previous')
+          .setEmoji('⬅️')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(page === 0),
+        new ButtonBuilder()
+          .setCustomId('ticket:quick-reply:page:' + (page + 1))
+          .setLabel('Next')
+          .setEmoji('➡️')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(page >= pageCount - 1),
+      ));
+    }
     await interaction.editReply({
-      content: 'Choose a quick reply to send into this ticket. The text is rendered with current ticket details; automatic mentions are disabled.',
-      components: [row],
+      content:
+        'Choose a quick reply to send into this ticket. Page ' + (page + 1) + ' of ' + pageCount +
+        '. Text is rendered with current ticket details; automatic mentions are disabled.',
+      components,
     });
   } catch (error) {
     await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : 'Quick replies are temporarily unavailable.');
@@ -6526,6 +6554,19 @@ export async function handleTicketInteraction(
     | ModalSubmitInteraction,
 ): Promise<void> {
   try {
+    if (interaction.isButton() && interaction.customId.startsWith('ticket:quick-reply:page:')) {
+      const rawPage = interaction.customId.slice('ticket:quick-reply:page:'.length);
+      const page = Number(rawPage);
+      if (!/^\\d{1,3}$/.test(rawPage) || !Number.isInteger(page) || page < 0 || page > 999) {
+        if (await safeDeferReply(interaction)) {
+          await interaction.editReply('This quick-reply page control is invalid. Reopen Quick Reply from the ticket panel.');
+        }
+        return;
+      }
+      await showQuickReplySelector(interaction, page);
+      return;
+    }
+
     if (interaction.isButton() && interaction.customId.startsWith('sf:kb:share:')) {
       if (!(await safeDeferReply(interaction))) return;
       const parts = interaction.customId.split(':');
