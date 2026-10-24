@@ -822,6 +822,12 @@ const hiIN: Record<TranslationKey, string> = {
   'settings.appearance.emptyFields': "पैनल रूप के फ़ील्ड खाली नहीं हो सकते।",
   'settings.appearance.savedTitle': "रूप अपडेट हुआ",
   'settings.appearance.savedDescription': "पैनल शीर्षक, विवरण और फ़ुटर सहेजे गए और सहायता पैनल रीफ़्रेश हुआ।",
+  'settings.dashboard.brandingSaved': "इस सर्वर के लिए Settings डैशबोर्ड की ब्रांडिंग सहेजी और रीफ़्रेश की गई।",
+  'settings.dashboard.modal.buttonLabel': "बटन लेबल (रीसेट करने के लिए default लिखें)",
+  'settings.dashboard.modal.emoji': "इमोजी (हटाने के लिए none लिखें)",
+  'settings.dashboard.modal.description': "डैशबोर्ड विवरण",
+  'settings.dashboard.modal.footer': "डैशबोर्ड फ़ुटर",
+  'settings.dashboard.modal.title': "डैशबोर्ड शीर्षक",
 };
 
 export default hiIN;
