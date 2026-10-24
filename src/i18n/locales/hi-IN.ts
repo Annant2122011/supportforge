@@ -48,6 +48,7 @@ const hiIN: Record<TranslationKey, string> = {
   'settings.tags.subcategoryOf': "{department} की उपश्रेणी",
   'settings.tags.selectToManage': "संपादित या हटाने के लिए कोई टैग चुनें।",
   'settings.tags.range': "कुल {total} में से टैग {start}–{end} दिख रहे हैं।",
+  'settings.tags.detail': "टैग **{tag}**, **{department}** विभाग का है। टैग केवल उपश्रेणियाँ हैं और Discord श्रेणियाँ नहीं बनाते।",
   'settings.tags.actions.edit': "टैग संपादित करें",
   'settings.tags.actions.remove': "टैग हटाएँ",
   'settings.tags.actions.backToDepartment': "विभाग पर वापस जाएँ",
