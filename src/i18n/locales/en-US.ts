@@ -750,6 +750,7 @@ const enUS = {
   'settings.recovery.replayed': "Previously replayed message records: **{count}**",
   'settings.recovery.snapshotStatus': "Archive snapshot: **{status}**",
   'settings.recovery.historyStatus': "Historic message scan: **{status}**",
+  'settings.recovery.restoreEligibility': "Restore eligibility",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
