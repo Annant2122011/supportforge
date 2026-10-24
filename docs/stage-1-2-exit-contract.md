@@ -72,3 +72,8 @@ Stage 2 is not accepted if diagnostics hide later results, report unknown checks
 The current Stage 4 stack contains the Stage 3 recovery segment ledger, restart/operation locking, SLA/CSAT and backup/restore safeguards. The combined code head `deda4ffb5ef58f60db3fc00cb52103329d78d161` passed [ResolvX CI #2514](https://github.com/Annant2122011/supportforge/actions/runs/40084718577): build passed, **200/200 tests passed**, zero skipped, and disposable PostgreSQL schema/integrity verification passed. This does not change the Stage 1/2 acceptance status: PRs #33, #31 and #32 are not merged, and authorized non-production Discord acceptance plus isolated non-production Neon restore remain BLOCKED / NOT RUN.
 
 The next merge sequence remains #33 → #31 → #32 → #34 → #38. Re-run CI whenever a PR base changes; CI on a stacked feature branch does not by itself certify the final `main` merge result.
+
+
+## Current downstream verification — 2026-10-24
+
+The latest combined Stage 3 + Stage 4 PR #38 head `13e989a1c284fdecee8e9c056237d6b5d0d2fbff` passed [GitHub Actions run #40085125143](https://github.com/Annant2122011/supportforge/actions/runs/40085125143): build passed, **201/201 tests passed**, zero skipped, and PostgreSQL schema/integrity verification passed. This is evidence for the current stacked feature branch only. It does not replace Stage 1/2 PR integration, authorized non-production Discord acceptance or an isolated Neon restore drill.
