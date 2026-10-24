@@ -64,7 +64,7 @@ const COLUMNS = 'id,guild_id,name,body,category,tags,allowed_role_ids,enabled,ve
 export interface QuickReplyRevision {
   version: number;
   name: string;
-  operation: 'created' | 'updated' | 'deleted' | 'baseline';
+  operation: 'created' | 'updated' | 'deleted' | 'baseline' | 'restored';
   enabled: boolean;
   changedBy: string;
   createdAt: string;
@@ -362,7 +362,7 @@ export async function restoreQuickReplyRevision(
     );
     if (!updated.rows[0]) throw new Error('This quick reply changed during history restoration. Refresh and retry.');
     const saved = fromRow(updated.rows[0]);
-    await insertQuickReplyRevision(client, saved, actorId, 'updated');
+    await insertQuickReplyRevision(client, saved, actorId, 'restored');
     await client.query('COMMIT');
     return saved;
   } catch (error) {
