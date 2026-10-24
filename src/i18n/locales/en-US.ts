@@ -1044,6 +1044,10 @@ const enUS = {
   'settings.reports.command.subcategoryAdded': "Added report subcategory **{name}** (ID: {id}).",
   'settings.reports.command.subcategoryRenamed': "Renamed report subcategory to **{name}**.",
   'settings.reports.command.subcategoryRemoved': "Removed report subcategory **{name}**.",
+  'forms.settings.list.item': "• **{name}** · {id} · v{version} · **{status}** · department {department} · tag {tag} · {count} field(s)",
+  'forms.settings.detail.field': "{index}. **{label}** · {id} · {type} · {status} · step {step}",
+  'forms.settings.templates.item': "• **{name}** · {id} · {count} field(s)",
+  'forms.settings.template.field': "{index}. **{label}** · {id} · {type}",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
