@@ -6,6 +6,8 @@ const bnIN: Record<TranslationKey, string> = {
   'common.back': 'ফিরে যান',
   'common.enabled': 'চালু',
   'common.disabled': 'বন্ধ',
+  'common.none': "কোনোটিই নয়",
+  'settings.team.value.people': "{count} জন",
   'settings.title': 'ResolveX সেটিংস',
   'settings.locale.title': 'সার্ভারের ভাষা',
   'settings.locale.current': 'বর্তমান ভাষা: {locale}',
