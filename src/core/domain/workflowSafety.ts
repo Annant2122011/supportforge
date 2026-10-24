@@ -119,7 +119,7 @@ export function getWorkflowExecutionBlockReason(
   definition: WorkflowTemplateDefinition,
 ): string | null {
   if (definition.actions.some((action) => action.type === 'assign_department')) {
-    return 'Department reassignment is blocked in the manual executor until Discord category and role-permission reconciliation can be guaranteed.';
+    return 'Department reassignment is blocked in the manual executor until Discord category and role-permission reconciliation can be guaranteed. Use /supportforge ticket department for that action or remove assign_department from the workflow.';
   }
   return null;
 }
