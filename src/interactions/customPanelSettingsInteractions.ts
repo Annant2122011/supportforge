@@ -100,9 +100,11 @@ async function render(
     : { label: 'Midnight Indigo', color: 0x5865f2 };
   const embed = new EmbedBuilder()
     .setColor(theme.color)
-    .setAuthor({ name: 'ResolvX • Custom Panel Builder' })
+    .setAuthor({ name: 'QueryFixr • Custom Panel Builder' })
     .setTitle(title.slice(0, 256))
-    .setDescription((description || 'Choose an action below.').slice(0, 4096))
+    .setDescription((description || (interaction.guild
+      ? translate((await getAdvancedSettings(interaction.guild.id)).locale, 'settings.customPanel.generic.chooseAction')
+      : translate('en-US', 'settings.customPanel.generic.chooseAction'))).slice(0, 4096))
     .setFooter({ text: theme.label + ' theme • drafts persist in Neon PostgreSQL' });
   await interaction.editReply({ content: '', embeds: [embed, ...extraEmbeds].slice(0, 10), components });
 }
@@ -377,7 +379,7 @@ async function showPanel(interaction: PanelSettingsInteraction, panelId: string)
 
 async function showButtonManager(interaction: PanelSettingsInteraction, panelId: string): Promise<void> {
   const panel = await getCustomPanel(interaction.guild!.id, panelId);
-  if (!panel) throw new Error('Panel not found.');
+  if (!panel) throw new Error(translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'settings.customPanel.error.notFound'));
   const settings = await getAdvancedSettings(interaction.guild!.id);
   const components: PanelComponents = [
     row(
@@ -411,7 +413,7 @@ async function showTargetTypePicker(
 ): Promise<void> {
   const panel = await getCustomPanel(interaction.guild!.id, panelId);
   const button = panel?.buttons.find((candidate) => candidate.id === buttonId);
-  if (!panel || !button) throw new Error('Button not found.');
+  if (!panel || !button) throw new Error(translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'settings.customPanel.error.buttonMissing'));
   const settings = await getAdvancedSettings(interaction.guild!.id);
   const chooser = new StringSelectMenuBuilder()
     .setCustomId(PREFIX + 'retarget-type:' + panelId + ':' + buttonId)
@@ -428,7 +430,7 @@ async function showTargetTypePicker(
 
 async function showButtonDetail(interaction: PanelSettingsInteraction, panelId: string, buttonId: string): Promise<void> {
   const panel = await getCustomPanel(interaction.guild!.id, panelId);
-  if (!panel) throw new Error('Panel not found.');
+  if (!panel) throw new Error(translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'settings.customPanel.error.notFound'));
   const settings = await getAdvancedSettings(interaction.guild!.id);
   const index = panel.buttons.findIndex((button) => button.id === buttonId);
   const button = panel.buttons[index];
@@ -678,7 +680,7 @@ async function showFormTagPicker(
 
 async function showPanelAccess(interaction: PanelSettingsInteraction, panelId: string, buttonId?: string): Promise<void> {
   const panel = await getCustomPanel(interaction.guild!.id, panelId);
-  if (!panel) throw new Error('Panel not found.');
+  if (!panel) throw new Error(translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'settings.customPanel.error.notFound'));
   const settings = await getAdvancedSettings(interaction.guild!.id);
   const button = buttonId ? panel.buttons.find((candidate) => candidate.id === buttonId) : undefined;
   if (buttonId && !button) throw new Error(translate(settings.locale, 'settings.customPanel.error.buttonMissing'));
@@ -798,7 +800,7 @@ export async function handleCustomPanelSettingsInteraction(
       const buttonId = parts[5] ?? '';
       const departmentId = interaction.values[0] ?? '';
       const config = await getGuildConfig(guild.id);
-      if (!config.departments[departmentId]) throw new Error('That department no longer exists. Refresh the builder.');
+      if (!config.departments[departmentId]) throw new Error(translate((await getAdvancedSettings(guild.id)).locale, 'settings.customPanel.error.departmentMissing'));
       const updated = await retargetCustomPanelButton(guild.id, panelId, buttonId, {
         targetType: 'department', departmentId, tagId: null,
       });
@@ -876,7 +878,7 @@ export async function handleCustomPanelSettingsInteraction(
     if (interaction.isButton() && id.startsWith(PREFIX + 'preview:')) {
       const panelId = id.slice((PREFIX + 'preview:').length);
       const panel = await getCustomPanel(guild.id, panelId);
-      if (!panel) throw new Error('Panel not found.');
+      if (!panel) throw new Error(translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'settings.customPanel.error.notFound'));
       const theme = await getGuildTheme(guild.id);
       const settings = await getAdvancedSettings(guild.id);
       const embed = buildCustomPanelEmbed(panel, guild.name, theme.color, true);
@@ -906,14 +908,14 @@ export async function handleCustomPanelSettingsInteraction(
     if (interaction.isButton() && id.startsWith(PREFIX + 'update:')) {
       const panelId = id.slice((PREFIX + 'update:').length);
       const panel = await getCustomPanel(guild.id, panelId);
-      if (!panel) throw new Error('Panel not found.');
+      if (!panel) throw new Error(translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'settings.customPanel.error.notFound'));
       await interaction.showModal(updatePanelModal((await getAdvancedSettings(guild.id)).locale, panelId, panel));
       return true;
     }
     if (interaction.isButton() && id.startsWith(PREFIX + 'appearance:')) {
       const panelId = id.slice((PREFIX + 'appearance:').length);
       const panel = await getCustomPanel(guild.id, panelId);
-      if (!panel) throw new Error('Panel not found.');
+      if (!panel) throw new Error(translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'settings.customPanel.error.notFound'));
       await interaction.showModal(appearancePanelModal((await getAdvancedSettings(guild.id)).locale, panel));
       return true;
     }
@@ -1019,7 +1021,7 @@ export async function handleCustomPanelSettingsInteraction(
       const buttonId = parts[5] ?? '';
       const panel = await getCustomPanel(guild.id, panelId);
       const button = panel?.buttons.find((candidate) => candidate.id === buttonId);
-      if (!button) throw new Error('Button not found.');
+      if (!button) throw new Error(translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'settings.customPanel.error.buttonMissing'));
       await interaction.showModal(editButtonModal((await getAdvancedSettings(guild.id)).locale, panelId, button));
       return true;
     }
@@ -1045,7 +1047,7 @@ export async function handleCustomPanelSettingsInteraction(
       const buttonId = parts[5] ?? '';
       const panel = await getCustomPanel(guild.id, panelId);
       const button = panel?.buttons.find((candidate) => candidate.id === buttonId);
-      if (!button) throw new Error('Button not found.');
+      if (!button) throw new Error(translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'settings.customPanel.error.buttonMissing'));
       const settings = await getAdvancedSettings(guild.id);
       await render(interaction, translate(settings.locale, 'settings.customPanel.buttonRemoval.title'), translate(settings.locale, 'settings.customPanel.buttonRemoval.description', { label: button.label }), [
         row(makeButton(PREFIX + 'delete-button-confirm:' + panelId + ':' + buttonId, translate(settings.locale, 'settings.customPanel.buttonRemoval.confirm'), ButtonStyle.Danger, '🗑️'), makeButton(PREFIX + 'button:' + panelId + ':' + buttonId, translate(settings.locale, 'common.cancel'), ButtonStyle.Secondary, '↩️')),
@@ -1080,7 +1082,7 @@ export async function handleCustomPanelSettingsInteraction(
       const targetChannelId = interaction.values[0];
       if (!targetChannelId) throw new Error(translate((await getAdvancedSettings(guild.id)).locale, 'settings.customPanel.error.chooseChannel'));
       const panel = await getCustomPanel(guild.id, panelId);
-      if (!panel) throw new Error('Panel not found.');
+      if (!panel) throw new Error(translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'settings.customPanel.error.notFound'));
       if (panel.buttons.length < 1) throw new Error(translate((await getAdvancedSettings(guild.id)).locale, 'settings.customPanel.error.mustAddButton'));
       const settings = await getAdvancedSettings(guild.id);
       const target = await guild.channels.fetch(targetChannelId);
@@ -1133,7 +1135,7 @@ export async function handleCustomPanelSettingsInteraction(
     if (interaction.isButton() && id.startsWith(PREFIX + 'delete:')) {
       const panelId = id.slice((PREFIX + 'delete:').length);
       const panel = await getCustomPanel(guild.id, panelId);
-      if (!panel) throw new Error('Panel not found.');
+      if (!panel) throw new Error(translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'settings.customPanel.error.notFound'));
       const settings = await getAdvancedSettings(guild.id);
       await render(interaction, translate(settings.locale, 'settings.customPanel.panelDeletion.title'), translate(settings.locale, 'settings.customPanel.panelDeletion.description', { name: panel.name, id: panel.id }), [
         row(makeButton(PREFIX + 'delete-confirm:' + panel.id, translate(settings.locale, 'settings.customPanel.panelDeletion.confirm'), ButtonStyle.Danger, '🗑️'), makeButton(PREFIX + 'detail:' + panel.id, translate(settings.locale, 'common.cancel'), ButtonStyle.Secondary, '↩️')),
@@ -1143,7 +1145,7 @@ export async function handleCustomPanelSettingsInteraction(
     if (interaction.isButton() && id.startsWith(PREFIX + 'delete-confirm:')) {
       const panelId = id.slice((PREFIX + 'delete-confirm:').length);
       const panel = await getCustomPanel(guild.id, panelId);
-      if (!panel) throw new Error('Panel not found.');
+      if (!panel) throw new Error(translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'settings.customPanel.error.notFound'));
       const settings = await getAdvancedSettings(guild.id);
 
       // Remove the durable definition first. If Neon rejects the delete, the
