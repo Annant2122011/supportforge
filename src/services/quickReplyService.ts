@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { QueryResultRow } from 'pg';
+import type { PoolClient, QueryResultRow } from 'pg';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
 
@@ -60,6 +60,30 @@ interface QuickReplyRow extends QueryResultRow {
 }
 
 const COLUMNS = 'id,guild_id,name,body,category,tags,allowed_role_ids,enabled,version,created_by,updated_by,created_at,updated_at';
+
+export interface QuickReplyRevision {
+  version: number;
+  name: string;
+  operation: 'created' | 'updated' | 'deleted' | 'baseline';
+  enabled: boolean;
+  changedBy: string;
+  createdAt: string;
+}
+
+async function insertQuickReplyRevision(
+  client: PoolClient,
+  reply: QuickReply,
+  actorId: string,
+  operation: QuickReplyRevision['operation'],
+): Promise<void> {
+  await client.query(
+    'INSERT INTO quick_reply_revisions ' +
+      '(id,guild_id,quick_reply_id,version,name,body,category,tags,allowed_role_ids,enabled,operation,changed_by) ' +
+      'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
+    [randomUUID(), reply.guildId, reply.id, reply.version, reply.name, reply.body,
+      reply.category, reply.tags, reply.allowedRoleIds, reply.enabled, operation, actorId],
+  );
+}
 const PLACEHOLDERS = new Set(['user','username','ticket_id','ticket_number','department','priority','staff']);
 const TOKEN_PATTERN = /\{([a-z][a-z0-9_]*)\}/gi;
 
@@ -102,7 +126,7 @@ function canUse(reply: QuickReply, access: QuickReplyAccess): boolean {
 
 export async function listQuickReplies(guildId: string, access: QuickReplyAccess, category?: string): Promise<QuickReply[]> {
   const result = await getPostgresPool().query<QuickReplyRow>(
-    'SELECT '+COLUMNS+' FROM quick_replies WHERE guild_id=$1 AND ($2::boolean OR enabled=TRUE) AND ($3::text IS NULL OR LOWER(category)=LOWER($3)) ORDER BY category,name LIMIT 100',
+    'SELECT '+COLUMNS+' FROM quick_replies WHERE guild_id=$1 AND deleted_at IS NULL AND ($2::boolean OR enabled=TRUE) AND ($3::text IS NULL OR LOWER(category)=LOWER($3)) ORDER BY category,name LIMIT 100',
     [guildId,access.isAdmin,category?.trim()||null],
   );
   return result.rows.map(fromRow).filter((reply)=>canUse(reply,access));
@@ -111,7 +135,7 @@ export async function listQuickReplies(guildId: string, access: QuickReplyAccess
 export async function getQuickReply(guildId: string, idOrName: string, access: QuickReplyAccess): Promise<QuickReply|null> {
   const value=idOrName.trim();
   const result=await getPostgresPool().query<QuickReplyRow>(
-    'SELECT '+COLUMNS+' FROM quick_replies WHERE guild_id=$1 AND (id=$2 OR normalized_name=$3) LIMIT 1',
+    'SELECT '+COLUMNS+' FROM quick_replies WHERE guild_id=$1 AND deleted_at IS NULL AND (id=$2 OR normalized_name=$3) LIMIT 1',
     [guildId,value,normalizeName(value)],
   );
   const row=result.rows[0];
@@ -137,7 +161,7 @@ export async function saveQuickReply(
   try {
     await client.query('BEGIN');
     const currentResult = await client.query<QuickReplyRow>(
-      'SELECT ' + COLUMNS + ' FROM quick_replies WHERE guild_id=$1 AND normalized_name=$2 FOR UPDATE',
+      'SELECT ' + COLUMNS + ' FROM quick_replies WHERE guild_id=$1 AND normalized_name=$2 AND deleted_at IS NULL FOR UPDATE',
       [guildId, normalizedName],
     );
     const current = currentResult.rows[0];
@@ -166,8 +190,10 @@ export async function saveQuickReply(
       if (!updated.rows[0]) {
         throw new Error('This quick reply changed during the save. Refresh the list and retry.');
       }
+      const saved = fromRow(updated.rows[0]);
+      await insertQuickReplyRevision(client, saved, actorId, 'updated');
       await client.query('COMMIT');
-      return fromRow(updated.rows[0]);
+      return saved;
     }
 
     if (expectedVersion !== undefined) {
@@ -182,8 +208,10 @@ export async function saveQuickReply(
         valid.tags, valid.allowedRoleIds, valid.enabled ?? true, actorId,
       ],
     );
+    const saved = fromRow(inserted.rows[0]);
+    await insertQuickReplyRevision(client, saved, actorId, 'created');
     await client.query('COMMIT');
-    return fromRow(inserted.rows[0]);
+    return saved;
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);
     if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === '23505') {
@@ -195,13 +223,77 @@ export async function saveQuickReply(
   }
 }
 
-export async function deleteQuickReply(guildId: string, idOrName: string): Promise<boolean> {
-  const value=idOrName.trim();
-  const result=await getPostgresPool().query(
-    'DELETE FROM quick_replies WHERE guild_id=$1 AND (id=$2 OR normalized_name=$3)',
-    [guildId,value,normalizeName(value)],
+export async function deleteQuickReply(
+  guildId: string,
+  idOrName: string,
+  expectedVersion: number,
+  actorId: string,
+): Promise<boolean> {
+  if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
+    throw new Error('Expected version must be a positive integer to delete a quick reply.');
+  }
+  const value = idOrName.trim();
+  const client = await getPostgresPool().connect();
+  try {
+    await client.query('BEGIN');
+    const found = await client.query<QuickReplyRow>(
+      'SELECT ' + COLUMNS + ' FROM quick_replies WHERE guild_id=$1 AND deleted_at IS NULL ' +
+        'AND (id=$2 OR normalized_name=$3) FOR UPDATE',
+      [guildId, value, normalizeName(value)],
+    );
+    const row = found.rows[0];
+    if (!row) {
+      await client.query('COMMIT');
+      return false;
+    }
+    if (Number(row.version) !== expectedVersion) {
+      throw new Error('This quick reply changed since it was opened. Refresh the list and confirm deletion using its current version.');
+    }
+    const updated = await client.query<QuickReplyRow>(
+      'UPDATE quick_replies SET enabled=FALSE,deleted_at=NOW(),version=version+1,updated_by=$4,updated_at=NOW() ' +
+        'WHERE guild_id=$1 AND id=$2 AND version=$3 AND deleted_at IS NULL RETURNING ' + COLUMNS,
+      [guildId, row.id, expectedVersion, actorId],
+    );
+    if (!updated.rows[0]) throw new Error('This quick reply changed during deletion. Refresh and retry.');
+    await insertQuickReplyRevision(client, fromRow(updated.rows[0]), actorId, 'deleted');
+    await client.query('COMMIT');
+    return true;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function listQuickReplyRevisions(
+  guildId: string,
+  idOrName: string,
+): Promise<QuickReplyRevision[]> {
+  const value = idOrName.trim();
+  const found = await getPostgresPool().query<QueryResultRow & { id: string }>(
+    'SELECT id FROM quick_replies WHERE guild_id=$1 AND (id=$2 OR normalized_name=$3) ' +
+      'ORDER BY (deleted_at IS NULL) DESC,updated_at DESC LIMIT 1',
+    [guildId, value, normalizeName(value)],
   );
-  return (result.rowCount??0)>0;
+  const replyId = found.rows[0]?.id;
+  if (!replyId) throw new Error('Quick reply was not found in this server.');
+  const result = await getPostgresPool().query<QueryResultRow & {
+    version: number; name: string; operation: QuickReplyRevision['operation'];
+    enabled: boolean; changed_by: string; created_at: Date | string;
+  }>(
+    'SELECT version,name,operation,enabled,changed_by,created_at FROM quick_reply_revisions ' +
+      'WHERE guild_id=$1 AND quick_reply_id=$2 ORDER BY version DESC LIMIT 50',
+    [guildId, replyId],
+  );
+  return result.rows.map((row) => ({
+    version: Number(row.version),
+    name: row.name,
+    operation: row.operation,
+    enabled: Boolean(row.enabled),
+    changedBy: row.changed_by,
+    createdAt: iso(row.created_at),
+  }));
 }
 
 export function renderQuickReply(reply: QuickReply, context: QuickReplyContext): string {
