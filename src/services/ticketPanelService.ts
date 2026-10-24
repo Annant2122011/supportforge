@@ -209,9 +209,9 @@ export function buildTicketPanelComponents(
         .setEmoji('📝')
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
-        .setCustomId('ticket:panel:report')
-        .setLabel('Report User')
-        .setEmoji('🛡️')
+        .setCustomId('ticket:panel:quick-reply')
+        .setLabel('Quick Reply')
+        .setEmoji('💬')
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
         .setCustomId('ticket:panel:move-bottom')
@@ -219,10 +219,10 @@ export function buildTicketPanelComponents(
         .setEmoji('⬇️')
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
-        .setCustomId('ticket:panel:quick-reply')
-        .setLabel('Quick Reply')
-        .setEmoji('💬')
-        .setStyle(ButtonStyle.Primary),
+        .setCustomId('ticket:panel:history')
+        .setLabel('History')
+        .setEmoji('📜')
+        .setStyle(ButtonStyle.Secondary),
     );
 
     return voiceControls.components.length
