@@ -17,6 +17,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { QueryResult, QueryResultRow } from 'pg';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
+import { withPostgresAdvisoryLock } from '../core/persistence/operationLock';
 import { getGuildConfig } from './configService';
 import { getThemeColor } from './uiThemeService';
 import {
@@ -1067,7 +1068,7 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
 }
 
 /** Recreate a deleted ticket in a new channel and replay its archived conversation. */
-export async function restoreArchivedTicket(
+async function restoreArchivedTicketUnlocked(
   guild: Guild,
   ticketId: string,
   source: 'discord_native' | 'ticket_button',
@@ -1224,4 +1225,18 @@ export async function restoreArchivedTicket(
     failedMessages: replay.failed,
     ticketNumber: ticket.ticketNumber ?? ticketId.slice(0, 8),
   };
+}
+
+
+/** Serialize restore attempts for this ticket/deletion path across bot processes. */
+export async function restoreArchivedTicket(
+  guild: Guild,
+  ticketId: string,
+  source: 'discord_native' | 'ticket_button',
+): Promise<{ channelId: string; restoredMessages: number; failedMessages: number; ticketNumber: string }> {
+  return withPostgresAdvisoryLock(
+    'resolvx:ticket-restore:' + guild.id + ':' + ticketId + ':' + source,
+    'A restoration for this ticket is already running in another process. Check the recovery record before retrying.',
+    () => restoreArchivedTicketUnlocked(guild, ticketId, source),
+  );
 }
