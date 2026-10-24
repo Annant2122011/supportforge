@@ -25,9 +25,9 @@ import {
   getQuickReply,
   listQuickReplies,
   listQuickReplyRevisions,
-  renderQuickReply,
   restoreQuickReplyRevision,
   saveQuickReply,
+  sendQuickReplyInTicket,
 } from '../services/quickReplyService';
 import { linkRelatedTickets, listRelatedTickets, unlinkRelatedTickets } from '../services/relatedTicketService';
 import {
@@ -548,33 +548,18 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         return true;
       }
       if (subcommand === 'send') {
-        const ticket = await requireTicketInCurrentChannel(interaction);
-        if (!canHandleTicketForStaff(access, ticket, config)) {
-          throw accessDenied('the staff role configured for this ticket department');
-        }
-        const reply = await getQuickReply(guildId, interaction.options.getString('name-or-id', true), { isAdmin: access.isAdmin, roleIds: access.roleIds });
-        if (!reply) throw new Error('Quick reply not found or unavailable to your roles.');
-        const department = ticket.departmentId ? config.departments[ticket.departmentId] : undefined;
-        const rendered = renderQuickReply(reply, {
-          user: ticket.ownerId ? '<@' + ticket.ownerId + '>' : 'customer',
-          username: interaction.user.username,
-          ticketId: ticket.id,
-          ticketNumber: ticket.ticketNumber ?? '',
-          department: department?.name ?? ticket.departmentId ?? '',
-          priority: ticket.priority ?? 'normal',
-          staff: interaction.user.username,
-        });
-        await requireTextChannel(interaction).send({ content: rendered, allowedMentions: { parse: [] } });
-        if (config.supportCategoryId) await logTicketEvent(interaction.guild!, config.supportCategoryId, {
-          ticketNumber: ticket.ticketNumber ?? ticket.id,
-          ticketChannelId: ticket.channelId,
-          event: 'QUICK_REPLY_SENT',
+        const channel = requireTextChannel(interaction);
+        const reply = await sendQuickReplyInTicket({
+          guild: interaction.guild!,
+          channel,
+          quickReplyId: interaction.options.getString('name-or-id', true),
           actorId,
-          actor: interaction.user.tag,
           actorName: interaction.user.tag,
-          detail: 'Sent quick reply ' + reply.id + ' version ' + reply.version + '.',
+          actorUsername: interaction.user.username,
+          isAdmin: access.isAdmin,
+          roleIds: access.roleIds,
         });
-        await interaction.editReply('Sent quick reply "' + reply.name + '". User/role mentions were suppressed.');
+        await interaction.editReply('Sent quick reply "' + reply.name + '". Automatic mentions are disabled; the ticket remains open.');
         return true;
       }
     }
