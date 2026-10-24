@@ -3946,7 +3946,7 @@ function isTicketParticipant(topic: string, userId: string, reporterId?: string)
 async function showReportTargetSelector(interaction: ButtonInteraction, page = 0): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
-    await replyError(interaction, '❌ Reporting is only available inside a ticket.');
+    await replyError(interaction, '❌ ' + translate('en-US', 'ticket.report.error.ticketOnly'));
     return;
   }
 
@@ -3957,20 +3957,20 @@ async function showReportTargetSelector(interaction: ButtonInteraction, page = 0
   const reportSettings = await getAdvancedSettings(interaction.guild.id);
 
   if (!isTicketTopic(topic) || !isActiveTicketStatus(getTicketStatus(topic))) {
-    await replyError(interaction, '❌ Reporting is only available on an active ResolvX ticket.');
+    await replyError(interaction, '❌ ' + translate(reportSettings.locale, 'ticket.report.error.activeTicketOnly'));
     return;
   }
 
   if (!reportSettings.reports.enabled) {
     await interaction.editReply(
-      '🛡️ User reporting is currently disabled by the server administrators.',
+      '🛡️ ' + translate(reportSettings.locale, 'ticket.report.error.disabled'),
     );
     return;
   }
 
   const staff = getStaffContext(interaction, topic);
   if (!staff.authorized) {
-    await replyError(interaction, '❌ Only configured moderators or administrators can submit a report.');
+    await replyError(interaction, '❌ ' + translate(reportSettings.locale, 'ticket.report.error.staffOnly'));
     return;
   }
 
@@ -3981,7 +3981,7 @@ async function showReportTargetSelector(interaction: ButtonInteraction, page = 0
   ].filter((id): id is string => Boolean(id) && id !== interaction.user.id)));
 
   if (!targetIds.length) {
-    await replyError(interaction, '❌ There are no other reportable participants on this ticket.');
+    await replyError(interaction, '❌ ' + translate(reportSettings.locale, 'ticket.report.error.noOtherParticipants'));
     return;
   }
 
@@ -4274,6 +4274,7 @@ async function handleReportDecision(interaction: ButtonInteraction): Promise<voi
   const nonce = parts[3] ?? '';
   const decision = parts[4] ?? '';
   prunePendingReportDecisions();
+  const locale = interaction.guild ? (await getAdvancedSettings(interaction.guild.id)).locale : 'en-US';
   const pending = pendingReportDecisions.get(nonce);
 
   if (
@@ -4284,7 +4285,7 @@ async function handleReportDecision(interaction: ButtonInteraction): Promise<voi
     pending.channelId !== interaction.channel?.id ||
     (decision !== 'flag' && decision !== 'record')
   ) {
-    await replyError(interaction, '❌ This report review has expired or is not assigned to you.');
+    await replyError(interaction, '❌ ' + translate(locale, 'ticket.report.error.reviewExpired'));
     return;
   }
 
@@ -4450,19 +4451,20 @@ async function renderDepartmentSelector(interaction: ButtonInteraction | StringS
 export async function executeTicketReportCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
-    await replyError(interaction, 'Reporting must be run inside an active ResolvX ticket.');
+    await replyError(interaction, translate('en-US', 'ticket.report.error.ticketOnly'));
     return;
   }
   const channel = interaction.channel as TextChannel;
+  const reportSettings = await getAdvancedSettings(interaction.guild.id);
   const topic = await getEffectiveTicketTopic(channel, channel.topic ?? '');
   const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
   if (!isTicketTopic(topic) || !isActiveTicketStatus(status)) {
-    await replyError(interaction, 'Reporting is only available inside an active ResolvX ticket.');
+    await replyError(interaction, translate(reportSettings.locale, 'ticket.report.error.activeTicketOnly'));
     return;
   }
   const staff = getStaffContext(interaction, topic);
   if (!staff.authorized) {
-    await replyError(interaction, 'Only configured staff or administrators can submit a report.');
+    await replyError(interaction, translate(reportSettings.locale, 'ticket.report.error.staffOnly'));
     return;
   }
   const target = interaction.options.getUser('target', true);
@@ -4470,7 +4472,6 @@ export async function executeTicketReportCommand(interaction: ChatInputCommandIn
   const subcategoryInput = interaction.options.getString('subcategory-id', true).trim();
   const description = interaction.options.getString('description') ?? '';
   const flagged = interaction.options.getBoolean('flag', true);
-  const reportSettings = await getAdvancedSettings(interaction.guild.id);
   const selectedCategory = Object.values(reportSettings.reports.categories).find((item) =>
     item.id.toLowerCase() === categoryInput.toLowerCase() || item.name.toLowerCase() === categoryInput.toLowerCase());
   const selectedSubcategory = selectedCategory
@@ -4489,11 +4490,11 @@ export async function executeTicketReportCommand(interaction: ChatInputCommandIn
     ...(getField(topic, 'claimed_by') ?? '').split(',').filter(Boolean),
   ].filter((id): id is string => Boolean(id)));
   if (!participants.has(target.id)) {
-    await replyError(interaction, 'The target must be a participant in this ticket.');
+    await replyError(interaction, translate(reportSettings.locale, 'ticket.report.error.targetNotParticipant'));
     return;
   }
   if (target.id === interaction.user.id) {
-    await replyError(interaction, 'You cannot report yourself.');
+    await replyError(interaction, translate(reportSettings.locale, 'ticket.report.error.selfReport'));
     return;
   }
   try {
