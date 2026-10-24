@@ -63,15 +63,73 @@ export async function listWorkflowTemplates(guildId:string):Promise<WorkflowTemp
  const result=await getPostgresPool().query<WorkflowRow>('SELECT '+COLUMNS+' FROM workflow_templates WHERE guild_id=$1 ORDER BY name LIMIT 100',[guildId]);
  return result.rows.map(fromRow);
 }
-export async function saveWorkflowTemplate(guildId:string,actorId:string,name:string,definition:unknown):Promise<WorkflowTemplate> {
- const safeName=validName(name),safeDefinition=validateWorkflowTemplateDefinition(definition);
- await assertWorkflowReferencesExist(guildId, safeDefinition);
- const result=await getPostgresPool().query<WorkflowRow>(
-  'INSERT INTO workflow_templates (id,guild_id,name,definition,enabled,version,created_by,updated_by) VALUES ($1,$2,$3,$4::jsonb,FALSE,1,$5,$5) '+
-  'ON CONFLICT (guild_id,name) DO UPDATE SET definition=EXCLUDED.definition,enabled=FALSE,version=workflow_templates.version+1,updated_by=EXCLUDED.updated_by,updated_at=NOW() RETURNING '+COLUMNS,
-  [randomUUID(),guildId,safeName,JSON.stringify(safeDefinition),actorId]);
- return fromRow(result.rows[0]);
+export async function saveWorkflowTemplate(
+  guildId: string,
+  actorId: string,
+  name: string,
+  definition: unknown,
+  expectedVersion?: number,
+): Promise<WorkflowTemplate> {
+  const safeName = validName(name);
+  const safeDefinition = validateWorkflowTemplateDefinition(definition);
+  if (expectedVersion !== undefined && (!Number.isInteger(expectedVersion) || expectedVersion < 1)) {
+    throw new Error('Expected version must be a positive integer when updating a workflow template.');
+  }
+  await assertWorkflowReferencesExist(guildId, safeDefinition);
+
+  const pool = getPostgresPool();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const currentResult = await client.query<WorkflowRow>(
+      'SELECT ' + COLUMNS + ' FROM workflow_templates WHERE guild_id=$1 AND name=$2 FOR UPDATE',
+      [guildId, safeName],
+    );
+    const current = currentResult.rows[0];
+
+    if (current) {
+      if (expectedVersion === undefined) {
+        throw new Error(
+          'A workflow template with this name already exists at version ' + current.version +
+          '. Pass the current expected-version from /supportforge workflow list to update it.',
+        );
+      }
+      if (Number(current.version) !== expectedVersion) {
+        throw new Error('This workflow template changed since you opened it. Refresh the list and retry with the current version.');
+      }
+      const updated = await client.query<WorkflowRow>(
+        'UPDATE workflow_templates SET definition=$4::jsonb,enabled=FALSE,version=version+1,' +
+          'updated_by=$5,updated_at=NOW() WHERE guild_id=$1 AND id=$2 AND version=$3 RETURNING ' + COLUMNS,
+        [guildId, current.id, expectedVersion, JSON.stringify(safeDefinition), actorId],
+      );
+      if (!updated.rows[0]) {
+        throw new Error('This workflow template changed during the save. Refresh the list and retry.');
+      }
+      await client.query('COMMIT');
+      return fromRow(updated.rows[0]);
+    }
+
+    if (expectedVersion !== undefined) {
+      throw new Error('No workflow template with this name exists at that version. Omit expected-version to create a new template.');
+    }
+    const inserted = await client.query<WorkflowRow>(
+      'INSERT INTO workflow_templates (id,guild_id,name,definition,enabled,version,created_by,updated_by) ' +
+        'VALUES ($1,$2,$3,$4::jsonb,FALSE,1,$5,$5) RETURNING ' + COLUMNS,
+      [randomUUID(), guildId, safeName, JSON.stringify(safeDefinition), actorId],
+    );
+    await client.query('COMMIT');
+    return fromRow(inserted.rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === '23505') {
+      throw new Error('Another administrator created a workflow template with this name concurrently. Refresh the list before retrying.');
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
 }
+
 export async function setWorkflowTemplateEnabled(guildId:string,templateId:string,expectedVersion:number,enabled:boolean,actorId:string):Promise<WorkflowTemplate> {
  if(!Number.isInteger(expectedVersion)||expectedVersion<1) throw new Error('Expected version must be a positive integer.');
  const pool = getPostgresPool();
