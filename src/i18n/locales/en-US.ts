@@ -628,6 +628,8 @@ const enUS = {
   'quickReply.command.operationDeleted': "deleted",
   'quickReply.command.operationBaseline': "baseline",
   'quickReply.command.operationRestored': "restored",
+  'knowledge.command.suggestionLine': "**{index}. {title}** • {confidence} confidence • score {score}\n{summary}\n{category}",
+  'knowledge.command.searchResultLine': "**{index}. {title}** • {confidence} confidence • score {score}\nID: {id}\n{summary}\n{category}",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
