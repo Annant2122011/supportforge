@@ -110,3 +110,13 @@ This is combined-code CI evidence only. Test-guild role/command acceptance and a
 The Stage 4 feature head `e23f1d1292d0026b85fc5df56d87ac48da53c100` passed [ResolvX CI #2465](https://github.com/Annant2122011/supportforge/actions/runs/40055278428): build passed, **215/215 tests passed**, zero skipped, and disposable PostgreSQL verification passed. This run validates that feature head only; it predates the current reconciliation with Stage 3 PR #34, so it is not the final combined-stack result.
 
 The integration audit found a migration-number collision: Stage 3 requires migration 13 for the durable recovery segment ledger, while the older Stage 4 branch used migration 13 for Knowledge Base/productivity tables. The combined branch is being corrected to use Stage 3 migration 13 and Stage 4 migrations 14–17, bring forward Stage 3's durable replay implementation, and add the corresponding PostgreSQL verifier and integration test. The final combined-head CI run is the next acceptance gate.
+
+## 2026-10-24 Support Tools interaction wiring
+
+- The existing ticket-panel Support Tools button now routes to a dedicated component handler rather than landing in the generic unknown-button path.
+- Public Knowledge Base search is available to users in active tickets. Results are ephemeral, staff-only articles respect configured department staff membership and article allowed-role IDs, and suggestions never block normal ticket support.
+- Quick replies are offered only to administrators or staff assigned to the current ticket department. Ticket state, department role, quick-reply access and enabled status are rechecked before every send. Messages suppress all automatic mentions and audit entries omit reply bodies.
+- Related-ticket and workflow-run history in the button menu are administrator-only because metadata can cross ticket/department boundaries.
+- Article sharing rechecks the active ticket and article visibility, shares explicitly to the ticket, records article usage and writes a ticket audit event.
+- The tool handler is additive: claim/close/reopen/delete and other existing lifecycle controls continue through their original handlers.
+- Test-guild interaction and permission acceptance is still required; component routing passing CI does not prove behavior against real Discord permissions.
