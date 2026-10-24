@@ -708,6 +708,14 @@ const hiIN: Record<TranslationKey, string> = {
   'settings.diagnostics.refreshFailures': "\n\n⚠️ इनका रीफ़्रेश विफल हुआ: {failures}। अनुमति जाँचने के बाद Settings Refresh कार्रवाई का उपयोग करें।",
   'settings.diagnostics.restoreFailed': "कॉन्फ़िगरेशन पुनर्स्थापना पूरी नहीं हुई। लॉग जाँचें और आंशिक विफलता होने पर सहेजे गए पूर्व-पुनर्स्थापना चेकपॉइंट का उपयोग करें।",
   'settings.recovery.modalOpenFailed': "सेटिंग्स फ़ॉर्म नहीं खुल सका। कृपया फिर प्रयास करें।",
+  'settings.recovery.nativeIntro': "केवल मूल Discord हटाने की घटनाएँ। ये रिकॉर्ड टिकट-बटन वाली गलती से हटाने की समीक्षा में नहीं आते।",
+  'settings.recovery.noNative': "पुनर्स्थापना के लिए कोई मूल Discord चैनल हटाने की घटना उपलब्ध नहीं है।",
+  'settings.recovery.ticketIntro': "केवल टिकट-बटन से हटाए गए रिकॉर्ड। प्रश्न का उत्तर देने या गलती से हटाया गया चिह्नित टिकट पुनर्स्थापित करने के लिए रिकॉर्ड चुनें।",
+  'settings.recovery.noTicket': "समीक्षा या गलती से हटाए गए टिकट की पुनर्प्राप्ति के लिए कोई टिकट-बटन रिकॉर्ड लंबित नहीं है।",
+  'settings.recovery.nothingThisPage': "इस पृष्ठ पर दिखाने के लिए कुछ नहीं है।",
+  'settings.recovery.page': "पृष्ठ {page} / {pages}",
+  'settings.recovery.ticketLine': "• **टिकट #{number}** • {messages} संग्रहीत संदेश • मूल चैनल ID: {channelId}",
+  'settings.recovery.accidentalReady': " • **गलती से हटाया गया चिह्नित, पुनर्स्थापना के लिए तैयार**",
 };
 
 export default hiIN;
