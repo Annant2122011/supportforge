@@ -1001,6 +1001,12 @@ export const data =
             .addStringOption((option) => option.setName('name-or-id').setDescription('Quick reply name or ID, including deleted replies').setRequired(true).setMaxLength(80)),
         )
         .addSubcommand((subcommand) =>
+          subcommand.setName('restore-revision').setDescription('Restore historical quick-reply content as a new version (admin only)')
+            .addStringOption((option) => option.setName('name-or-id').setDescription('Current or deleted quick reply name or ID').setRequired(true).setMaxLength(80))
+            .addIntegerOption((option) => option.setName('revision').setDescription('Historical revision number from quick-reply history').setRequired(true).setMinValue(1))
+            .addIntegerOption((option) => option.setName('expected-version').setDescription('Current record version, including a deleted tombstone version').setRequired(true).setMinValue(1)),
+        )
+        .addSubcommand((subcommand) =>
           subcommand.setName('delete').setDescription('Delete a quick reply using its current version (admin only)')
             .addStringOption((option) => option.setName('name-or-id').setDescription('Name or ID').setRequired(true).setMaxLength(80))
             .addIntegerOption((option) => option.setName('expected-version').setDescription('Current version shown by quick-reply list').setRequired(true).setMinValue(1))
