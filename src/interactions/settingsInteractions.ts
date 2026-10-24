@@ -2759,14 +2759,14 @@ export async function handleSettingsInteraction(
       const saved = settings.settingsDashboard.buttonCustomizations[key];
       const label = new TextInputBuilder()
         .setCustomId('label')
-        .setLabel('Button label (type default to reset)')
+        .setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.modal.buttonLabel'))
         .setStyle(TextInputStyle.Short)
         .setMaxLength(80)
         .setRequired(true)
         .setValue((saved?.label ?? SETTINGS_LAYOUT_LABELS[key]).slice(0, 80));
       const emoji = new TextInputBuilder()
         .setCustomId('emoji')
-        .setLabel('Emoji (type none to remove)')
+        .setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.modal.emoji'))
         .setStyle(TextInputStyle.Short)
         .setMaxLength(100)
         .setRequired(false)
@@ -2778,11 +2778,11 @@ export async function handleSettingsInteraction(
 
     if (id === SETTINGS_LAYOUT_PREFIX + ':edit') {
       const settings = await getAdvancedSettings(guild.id);
-      const description = new TextInputBuilder().setCustomId('description').setLabel('Dashboard description').setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setRequired(false);
+      const description = new TextInputBuilder().setCustomId('description').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.modal.description')).setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setRequired(false);
       if (settings.settingsDashboard.description) description.setValue(settings.settingsDashboard.description.slice(0, 4000));
-      const footer = new TextInputBuilder().setCustomId('footer').setLabel('Dashboard footer').setStyle(TextInputStyle.Short).setMaxLength(1800).setRequired(false).setValue(settings.settingsDashboard.footer.slice(0, 1800));
+      const footer = new TextInputBuilder().setCustomId('footer').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.modal.footer')).setStyle(TextInputStyle.Short).setMaxLength(1800).setRequired(false).setValue(settings.settingsDashboard.footer.slice(0, 1800));
       await openModal(interaction, 'sf:settings:modal:dashboard-builder', 'Settings Dashboard Branding', [
-        new TextInputBuilder().setCustomId('title').setLabel('Dashboard title').setStyle(TextInputStyle.Short).setMaxLength(256).setRequired(true).setValue(settings.settingsDashboard.title.slice(0, 256)),
+        new TextInputBuilder().setCustomId('title').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.modal.title')).setStyle(TextInputStyle.Short).setMaxLength(256).setRequired(true).setValue(settings.settingsDashboard.title.slice(0, 256)),
         description,
         footer,
       ]);
