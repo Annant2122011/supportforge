@@ -90,7 +90,7 @@ async function insertQuickReplyRevision(
 }
 const PLACEHOLDERS = new Set(['user','username','ticket_id','ticket_number','department','priority','staff']);
 const TOKEN_PATTERN = /\{([a-z][a-z0-9_]*)\}/gi;
-const BRACED_TEXT_PATTERN = /\\{([^{}]*)\\}/g;
+const BRACED_TEXT_PATTERN = /\{([^{}]*)\}/g;
 
 function iso(value: Date | string): string {
   const time = value instanceof Date ? value.getTime() : Date.parse(value);
