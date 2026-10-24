@@ -163,6 +163,6 @@ Ticket panel button ─┐
 
 ## Re-audit status and remaining release gates
 
-- The latest consolidated source head `a9df9eb69d6ca3bfcdf74973b9c2c4f5b89c430f` passed [CI #2679](https://github.com/Annant2122011/supportforge/actions/runs/40098339439): TypeScript build passed, 215/215 tests passed, zero skipped, and disposable PostgreSQL verification passed.
+- The latest consolidated source head `52b2352e3af2588cdb264632920b5197b77ffca6` passed [CI #2697](https://github.com/Annant2122011/supportforge/actions/runs/40098628840): TypeScript build passed, 215/215 tests passed, zero skipped, and disposable PostgreSQL verification passed. This head also includes localized custom-panel draft-preview controls.
 - Stage 1/2 still record incomplete Stage H2 translation coverage for selected Settings screens, panel previews and reports. That remains a release limitation until those screens have been covered and tested in a supported locale; historical CI does not prove live locale acceptance.
 - Discord test-guild acceptance and a backup/restore drill into an isolated non-production Neon database remain not run. No production merge, deploy or 100% production acceptance is claimed.
