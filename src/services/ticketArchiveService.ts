@@ -893,11 +893,19 @@ async function findRecoveryMarkerInHistory(
   }
 }
 
-function isPostgresOrNetworkError(error: unknown): boolean {
-  if (!error || typeof error !== 'object' || !('code' in error)) return false;
-  const code = (error as { code?: unknown }).code;
-  return typeof code === 'string' &&
-    (/^[0-9A-Z]{5}$/.test(code) || /^(ECONN|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|UND_ERR_CONNECT_TIMEOUT)/.test(code));
+class RecoverySegmentPersistenceError extends Error {
+  public constructor(message: string, cause: unknown) {
+    super(message, { cause });
+    this.name = 'RecoverySegmentPersistenceError';
+  }
+}
+
+async function persistRecoverySegment<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    throw new RecoverySegmentPersistenceError('Could not persist ticket recovery segment state.', error);
+  }
 }
 
 /**
@@ -915,13 +923,13 @@ async function sendRecoverySegment(
 ): Promise<void> {
   const pool = getPostgresPool();
   const marker = recoverySegmentMarker(recoveryEventId, originalMessageId, segmentKey);
-  await pool.query(
+  await persistRecoverySegment(() => pool.query(
     'INSERT INTO ticket_recovery_replay_segments ' +
       '(recovery_event_id,original_message_id,segment_key,status,attempts,attempt_started_at,created_at,updated_at) ' +
       "VALUES ($1,$2,$3,'pending',0,NOW(),NOW(),NOW()) ON CONFLICT (recovery_event_id,original_message_id,segment_key) DO NOTHING",
     [recoveryEventId, originalMessageId, segmentKey],
-  );
-  const state = await pool.query<QueryResultRow & {
+  ));
+  const state = await persistRecoverySegment(() => pool.query<QueryResultRow & {
     status: 'pending' | 'completed';
     discord_message_id: string | null;
     attempt_started_at: Date | string;
@@ -929,9 +937,9 @@ async function sendRecoverySegment(
     'SELECT status,discord_message_id,attempt_started_at FROM ticket_recovery_replay_segments ' +
       'WHERE recovery_event_id=$1 AND original_message_id=$2 AND segment_key=$3 LIMIT 1',
     [recoveryEventId, originalMessageId, segmentKey],
-  );
+  ));
   const saved = state.rows[0];
-  if (!saved) throw new Error('Recovery segment intent could not be read back from PostgreSQL.');
+  if (!saved) throw new RecoverySegmentPersistenceError('Recovery segment intent was not returned by PostgreSQL.', new Error('Missing row'));
   if (saved.status === 'completed') {
     if (saved.discord_message_id) seenMarkers.set(marker, saved.discord_message_id);
     return;
@@ -944,38 +952,40 @@ async function sendRecoverySegment(
       saved.attempt_started_at instanceof Date ? saved.attempt_started_at : new Date(saved.attempt_started_at),
     );
   if (knownMessageId) {
-    await pool.query(
+    await persistRecoverySegment(() => pool.query(
       "UPDATE ticket_recovery_replay_segments SET status='completed',discord_message_id=$4,last_error=NULL,updated_at=NOW() " +
         'WHERE recovery_event_id=$1 AND original_message_id=$2 AND segment_key=$3',
       [recoveryEventId, originalMessageId, segmentKey, knownMessageId],
-    );
+    ));
     seenMarkers.set(marker, knownMessageId);
     return;
   }
 
   // Persist the search lower bound before the send. A retry can then search
   // every message created since this attempt, not just the newest 100.
-  await pool.query(
+  await persistRecoverySegment(() => pool.query(
     'UPDATE ticket_recovery_replay_segments SET attempts=attempts+1,attempt_started_at=NOW(),last_error=NULL,updated_at=NOW() ' +
       "WHERE recovery_event_id=$1 AND original_message_id=$2 AND segment_key=$3 AND status='pending'",
     [recoveryEventId, originalMessageId, segmentKey],
-  );
+  ));
 
   try {
     const sent = await channel.send(payload);
     seenMarkers.set(marker, sent.id);
-    await pool.query(
+    await persistRecoverySegment(() => pool.query(
       "UPDATE ticket_recovery_replay_segments SET status='completed',discord_message_id=$4,last_error=NULL,updated_at=NOW() " +
         'WHERE recovery_event_id=$1 AND original_message_id=$2 AND segment_key=$3',
       [recoveryEventId, originalMessageId, segmentKey, sent.id],
-    );
+    ));
   } catch (error) {
-    const safeError = error instanceof Error ? error.name.slice(0, 80) : 'UnknownError';
-    await pool.query(
-      'UPDATE ticket_recovery_replay_segments SET last_error=$4,updated_at=NOW() ' +
-        'WHERE recovery_event_id=$1 AND original_message_id=$2 AND segment_key=$3',
-      [recoveryEventId, originalMessageId, segmentKey, safeError],
-    ).catch(() => undefined);
+    if (!(error instanceof RecoverySegmentPersistenceError)) {
+      const safeError = error instanceof Error ? error.name.slice(0, 80) : 'UnknownError';
+      await pool.query(
+        'UPDATE ticket_recovery_replay_segments SET last_error=$4,updated_at=NOW() ' +
+          'WHERE recovery_event_id=$1 AND original_message_id=$2 AND segment_key=$3',
+        [recoveryEventId, originalMessageId, segmentKey, safeError],
+      ).catch(() => undefined);
+    }
     throw error;
   }
 }
@@ -1121,7 +1131,7 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
               allowedMentions: { parse: [] },
             }, recoveryEventId, archived.message_id, 'attachment:' + attachment.attachment_id, seenMarkers);
           } catch (error) {
-            if (isPostgresOrNetworkError(error)) throw error;
+            if (error instanceof RecoverySegmentPersistenceError) throw error;
             unavailable.push(attachment.original_filename + ' (upload failed: ' + (error instanceof Error ? error.name : 'unknown error') + ')');
           }
         } else {
