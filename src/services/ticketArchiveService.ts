@@ -13,10 +13,11 @@ import {
   type TextChannel,
   type ThreadChannel,
 } from 'discord.js';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type { QueryResult, QueryResultRow } from 'pg';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
+import { extractRecoverySegmentMarkers, recoverySegmentMarker } from '../core/domain/recoveryReplayMarkers';
 import { withPostgresAdvisoryLock } from '../core/persistence/operationLock';
 import { getGuildConfig } from './configService';
 import { getThemeColor } from './uiThemeService';
@@ -851,26 +852,11 @@ async function permissionOverwritePayload(
   return Array.from(map.values());
 }
 
-const RECOVERY_SEGMENT_PATTERN = /\u2063[\u200B\u200C]{64}\u2063/g;
-
-function recoverySegmentMarker(recoveryEventId: string, originalMessageId: string, segmentKey: string): string {
-  const hex = createHash('sha256')
-    .update(recoveryEventId + ':' + originalMessageId + ':' + segmentKey)
-    .digest('hex')
-    .slice(0, 16);
-  const bits = hex.split('').map((character) => Number.parseInt(character, 16).toString(2).padStart(4, '0')).join('');
-  // Deterministic zero-width marker: restored text remains readable, but retries can find sends.
-  return '\u2063' + bits.split('').map((bit) => bit === '0' ? '\u200B' : '\u200C').join('') + '\u2063';
-}
-
 function recoveryMarkersInMessage(message: Message): string[] {
-  const candidates = [message.content, ...message.embeds.map((embed) => embed.footer?.text ?? '')];
-  const markers: string[] = [];
-  for (const candidate of candidates) {
-    RECOVERY_SEGMENT_PATTERN.lastIndex = 0;
-    for (const match of candidate.matchAll(RECOVERY_SEGMENT_PATTERN)) markers.push(match[0]);
-  }
-  return markers;
+  return extractRecoverySegmentMarkers([
+    message.content,
+    ...message.embeds.map((embed) => embed.footer?.text ?? ''),
+  ]);
 }
 
 async function sendRecoverySegment(
