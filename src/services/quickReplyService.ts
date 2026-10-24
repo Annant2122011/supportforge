@@ -130,6 +130,11 @@ export function validateQuickReplyInput(input: QuickReplyInput): QuickReplyInput
   }
   return {name,body,category,tags,allowedRoleIds:roleIds,...(input.enabled === undefined ? {} : {enabled:input.enabled})};
 }
+export function quickReplyHasTag(tags: readonly string[], tag?: string): boolean {
+  const normalizedTag = tag ? normalizeName(tag) : null;
+  return !normalizedTag || tags.some((item) => normalizeName(item) === normalizedTag);
+}
+
 function canUse(reply: QuickReply, access: QuickReplyAccess): boolean {
   return access.isAdmin || (reply.enabled && (reply.allowedRoleIds.length===0 || reply.allowedRoleIds.some((role)=>access.roleIds.includes(role))));
 }
@@ -139,10 +144,9 @@ export async function listQuickReplies(guildId: string, access: QuickReplyAccess
     'SELECT '+COLUMNS+' FROM quick_replies WHERE guild_id=$1 AND deleted_at IS NULL AND ($2::boolean OR enabled=TRUE) AND ($3::text IS NULL OR LOWER(category)=LOWER($3)) ORDER BY category,name LIMIT 100',
     [guildId,access.isAdmin,category?.trim()||null],
   );
-  const normalizedTag = tag ? normalizeName(tag) : null;
   return result.rows.map(fromRow)
     .filter((reply) => canUse(reply, access))
-    .filter((reply) => !normalizedTag || reply.tags.some((item) => normalizeName(item) === normalizedTag));
+    .filter((reply) => quickReplyHasTag(reply.tags, tag));
 }
 
 export async function getQuickReply(guildId: string, idOrName: string, access: QuickReplyAccess): Promise<QuickReply|null> {
