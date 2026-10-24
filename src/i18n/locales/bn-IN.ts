@@ -552,6 +552,10 @@ const bnIN: Record<TranslationKey, string> = {
   'settings.customPanel.modal.editButtonTitle': "বোতাম সম্পাদনা",
   'settings.customPanel.error.invalidStyle': "বোতামের স্টাইল primary, secondary, success অথবা danger হতে হবে।",
   'settings.customPanel.error.unknown': "অজানা কাস্টম প্যানেল ত্রুটি।",
+  'settings.reports.selector.editOrRemovePrompt': "**{name}** সম্পাদনা করুন বা সরান।",
+  'settings.reports.action.edit': "সম্পাদনা",
+  'settings.reports.action.remove': "সরান",
+  'settings.reports.error.thresholdsInvalid': "সীমা 0 থেকে 100000-এর মধ্যে পূর্ণসংখ্যা হতে হবে। চ্যানেল সীমাবদ্ধতা চালু থাকলে একটি চ্যানেল দিতে হবে।",
 };
 
 export default bnIN;
