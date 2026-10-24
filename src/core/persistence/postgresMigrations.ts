@@ -933,6 +933,46 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+  {
+    id: 19,
+    name: 'add_locale_neutral_knowledge_search_vector',
+    up: async (db) => {
+      await db.query(`
+        ALTER TABLE knowledge_base_articles
+          ADD COLUMN IF NOT EXISTS simple_search_vector TSVECTOR NOT NULL DEFAULT ''::TSVECTOR;
+
+        CREATE OR REPLACE FUNCTION resolvx_refresh_knowledge_search_vector() RETURNS TRIGGER
+        LANGUAGE plpgsql AS $search$
+        BEGIN
+          NEW.search_vector :=
+            setweight(to_tsvector('english', COALESCE(NEW.title,'')), 'A') ||
+            setweight(to_tsvector('english', COALESCE(NEW.category,'')), 'A') ||
+            setweight(to_tsvector('english', COALESCE(array_to_string(NEW.tags,' '),'')), 'B') ||
+            setweight(to_tsvector('english', COALESCE(NEW.summary,'')), 'B') ||
+            setweight(to_tsvector('english', COALESCE(NEW.body,'')), 'C');
+          NEW.simple_search_vector :=
+            setweight(to_tsvector('simple', COALESCE(NEW.title,'')), 'A') ||
+            setweight(to_tsvector('simple', COALESCE(NEW.category,'')), 'A') ||
+            setweight(to_tsvector('simple', COALESCE(array_to_string(NEW.tags,' '),'')), 'B') ||
+            setweight(to_tsvector('simple', COALESCE(NEW.summary,'')), 'B') ||
+            setweight(to_tsvector('simple', COALESCE(NEW.body,'')), 'C');
+          RETURN NEW;
+        END;
+        $search$;
+
+        UPDATE knowledge_base_articles
+          SET simple_search_vector =
+            setweight(to_tsvector('simple', COALESCE(title,'')), 'A') ||
+            setweight(to_tsvector('simple', COALESCE(category,'')), 'A') ||
+            setweight(to_tsvector('simple', COALESCE(array_to_string(tags,' '),'')), 'B') ||
+            setweight(to_tsvector('simple', COALESCE(summary,'')), 'B') ||
+            setweight(to_tsvector('simple', COALESCE(body,'')), 'C');
+
+        CREATE INDEX IF NOT EXISTS idx_knowledge_base_articles_simple_search
+          ON knowledge_base_articles USING GIN (simple_search_vector);
+      `);
+    },
+  },
 ];
 
 /** Latest migration identifier required by this application version. */
