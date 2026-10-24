@@ -556,6 +556,7 @@ const bnIN: Record<TranslationKey, string> = {
   'settings.reports.action.edit': "সম্পাদনা",
   'settings.reports.action.remove': "সরান",
   'settings.reports.error.thresholdsInvalid': "সীমা 0 থেকে 100000-এর মধ্যে পূর্ণসংখ্যা হতে হবে। চ্যানেল সীমাবদ্ধতা চালু থাকলে একটি চ্যানেল দিতে হবে।",
+  'settings.customPanel.generic.chooseAction': "নিচে একটি কাজ বেছে নিন।",
 };
 
 export default bnIN;
