@@ -1035,8 +1035,32 @@ export const data =
     .addSubcommandGroup((group) =>
       group
         .setName('workflow')
-        .setDescription('Store and validate safe workflow templates; execution is not enabled')
+        .setDescription('Store safe workflow templates and run them manually on the current ticket; no background automation')
         .addSubcommand((subcommand) => subcommand.setName('list').setDescription('List workflow templates (admin only)'))
+        .addSubcommand((subcommand) =>
+          subcommand.setName('runs').setDescription('List recent workflow runs for the current ticket (admin only)'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('execute').setDescription('Manually run an enabled workflow on the current active ticket (admin only)')
+            .addStringOption((option) => option.setName('template-id').setDescription('Enabled workflow template ID').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('version').setDescription('Current version from workflow list').setRequired(true).setMinValue(1))
+            .addStringOption((option) => option.setName('confirmation').setDescription('Type RUN followed by template ID and v# exactly').setRequired(true).setMaxLength(100)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('resume').setDescription('Resume a stopped workflow run on this same ticket (admin only)')
+            .addStringOption((option) => option.setName('run-id').setDescription('Workflow run ID from the run summary').setRequired(true).setMaxLength(36))
+            .addStringOption((option) => option.setName('confirmation').setDescription('Type RESUME followed by the run ID exactly').setRequired(true).setMaxLength(60)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('resolve-step').setDescription('Resolve an ambiguous send after manually checking ticket history (admin only)')
+            .addStringOption((option) => option.setName('run-id').setDescription('Workflow run ID').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('step').setDescription('Zero-based step index from the run summary').setRequired(true).setMinValue(0).setMaxValue(9))
+            .addStringOption((option) => option.setName('decision').setDescription('Complete only if delivered, or retry after checking history').setRequired(true).addChoices(
+              { name: 'Mark completed (message exists)', value: 'complete' },
+              { name: 'Retry (possible duplicate acknowledged)', value: 'retry' },
+            ))
+            .addStringOption((option) => option.setName('confirmation').setDescription('Type RESOLVE run-id STEP index COMPLETE or RETRY exactly').setRequired(true).setMaxLength(120)),
+        )
         .addSubcommand((subcommand) =>
           subcommand.setName('save').setDescription('Create a template, or update one using its current version (admin only)')
             .addStringOption((option) => option.setName('name').setDescription('Template name').setRequired(true).setMaxLength(80))
@@ -1051,7 +1075,7 @@ export const data =
           subcommand.setName('enable').setDescription('Enable a validated template for future rollout (does not execute it)')
             .addStringOption((option) => option.setName('template-id').setDescription('Template ID').setRequired(true).setMaxLength(36))
             .addIntegerOption((option) => option.setName('version').setDescription('Current version from workflow list').setRequired(true).setMinValue(1))
-            .addBooleanOption((option) => option.setName('enabled').setDescription('Enable/disable the template catalogue item').setRequired(true)),
+            .addBooleanOption((option) => option.setName('enabled').setDescription('Allow/disallow explicit admin-only manual runs; no automatic triggers').setRequired(true)),
         )
         .addSubcommand((subcommand) =>
           subcommand.setName('history').setDescription('Show version and deletion history for a workflow template (admin only)')
