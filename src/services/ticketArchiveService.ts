@@ -859,15 +859,125 @@ function recoveryMarkersInMessage(message: Message): string[] {
   ]);
 }
 
+function recoveryMarkerMessageMap(messages: Iterable<Message>): Map<string, string> {
+  const markers = new Map<string, string>();
+  for (const message of messages) {
+    for (const marker of recoveryMarkersInMessage(message)) markers.set(marker, message.id);
+  }
+  return markers;
+}
+
+async function findRecoveryMarkerInHistory(
+  channel: TextChannel,
+  marker: string,
+  notBefore: Date,
+): Promise<string | null> {
+  const minimumTimestamp = notBefore.getTime();
+  let before: string | undefined;
+  while (true) {
+    const options: { limit: number; before?: string } = { limit: 100 };
+    if (before) options.before = before;
+    const page = await channel.messages.fetch(options);
+    if (page.size === 0) return null;
+
+    for (const message of page.values()) {
+      if (message.createdTimestamp < minimumTimestamp) continue;
+      if (recoveryMarkersInMessage(message).includes(marker)) return message.id;
+    }
+
+    const oldest = Array.from(page.values()).reduce((current, candidate) =>
+      BigInt(candidate.id) < BigInt(current.id) ? candidate : current,
+    );
+    if (oldest.createdTimestamp < minimumTimestamp || page.size < 100) return null;
+    before = oldest.id;
+  }
+}
+
+function isPostgresOrNetworkError(error: unknown): boolean {
+  if (!error || typeof error !== 'object' || !('code' in error)) return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' &&
+    (/^[0-9A-Z]{5}$/.test(code) || /^(ECONN|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|UND_ERR_CONNECT_TIMEOUT)/.test(code));
+}
+
+/**
+ * Persist intent before sending and completion after Discord accepts the send.
+ * If the completion write fails, a retry searches channel history from the
+ * previous attempt timestamp for the invisible deterministic marker.
+ */
 async function sendRecoverySegment(
   channel: TextChannel,
   payload: MessageCreateOptions,
-  marker: string,
-  seenMarkers: Set<string>,
+  recoveryEventId: string,
+  originalMessageId: string,
+  segmentKey: string,
+  seenMarkers: Map<string, string>,
 ): Promise<void> {
-  if (seenMarkers.has(marker)) return;
-  await channel.send(payload);
-  seenMarkers.add(marker);
+  const pool = getPostgresPool();
+  const marker = recoverySegmentMarker(recoveryEventId, originalMessageId, segmentKey);
+  await pool.query(
+    'INSERT INTO ticket_recovery_replay_segments ' +
+      '(recovery_event_id,original_message_id,segment_key,status,attempts,attempt_started_at,created_at,updated_at) ' +
+      "VALUES ($1,$2,$3,'pending',0,NOW(),NOW(),NOW()) ON CONFLICT (recovery_event_id,original_message_id,segment_key) DO NOTHING",
+    [recoveryEventId, originalMessageId, segmentKey],
+  );
+  const state = await pool.query<QueryResultRow & {
+    status: 'pending' | 'completed';
+    discord_message_id: string | null;
+    attempt_started_at: Date | string;
+  }>(
+    'SELECT status,discord_message_id,attempt_started_at FROM ticket_recovery_replay_segments ' +
+      'WHERE recovery_event_id=$1 AND original_message_id=$2 AND segment_key=$3 LIMIT 1',
+    [recoveryEventId, originalMessageId, segmentKey],
+  );
+  const saved = state.rows[0];
+  if (!saved) throw new Error('Recovery segment intent could not be read back from PostgreSQL.');
+  if (saved.status === 'completed') {
+    if (saved.discord_message_id) seenMarkers.set(marker, saved.discord_message_id);
+    return;
+  }
+
+  const knownMessageId = seenMarkers.get(marker) ??
+    await findRecoveryMarkerInHistory(
+      channel,
+      marker,
+      saved.attempt_started_at instanceof Date ? saved.attempt_started_at : new Date(saved.attempt_started_at),
+    );
+  if (knownMessageId) {
+    await pool.query(
+      "UPDATE ticket_recovery_replay_segments SET status='completed',discord_message_id=$4,last_error=NULL,updated_at=NOW() " +
+        'WHERE recovery_event_id=$1 AND original_message_id=$2 AND segment_key=$3',
+      [recoveryEventId, originalMessageId, segmentKey, knownMessageId],
+    );
+    seenMarkers.set(marker, knownMessageId);
+    return;
+  }
+
+  // Persist the search lower bound before the send. A retry can then search
+  // every message created since this attempt, not just the newest 100.
+  await pool.query(
+    'UPDATE ticket_recovery_replay_segments SET attempts=attempts+1,attempt_started_at=NOW(),last_error=NULL,updated_at=NOW() ' +
+      "WHERE recovery_event_id=$1 AND original_message_id=$2 AND segment_key=$3 AND status='pending'",
+    [recoveryEventId, originalMessageId, segmentKey],
+  );
+
+  try {
+    const sent = await channel.send(payload);
+    seenMarkers.set(marker, sent.id);
+    await pool.query(
+      "UPDATE ticket_recovery_replay_segments SET status='completed',discord_message_id=$4,last_error=NULL,updated_at=NOW() " +
+        'WHERE recovery_event_id=$1 AND original_message_id=$2 AND segment_key=$3',
+      [recoveryEventId, originalMessageId, segmentKey, sent.id],
+    );
+  } catch (error) {
+    const safeError = error instanceof Error ? error.name.slice(0, 80) : 'UnknownError';
+    await pool.query(
+      'UPDATE ticket_recovery_replay_segments SET last_error=$4,updated_at=NOW() ' +
+        'WHERE recovery_event_id=$1 AND original_message_id=$2 AND segment_key=$3',
+      [recoveryEventId, originalMessageId, segmentKey, safeError],
+    ).catch(() => undefined);
+    throw error;
+  }
 }
 
 async function replayArchivedMessages(channel: TextChannel, ticketId: string, recoveryEventId: string): Promise<{ restored: number; failed: number }> {
