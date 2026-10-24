@@ -983,9 +983,11 @@ export const data =
         .setName('quick-reply')
         .setDescription('Manage permission-controlled canned staff responses')
         .addSubcommand((subcommand) =>
-          subcommand.setName('list').setDescription('List quick replies available to you')
+          subcommand.setName('list').setDescription('List quick replies available to you using server-side filters and pagination')
             .addStringOption((option) => option.setName('category').setDescription('Optional category filter').setRequired(false).setMaxLength(80))
-            .addStringOption((option) => option.setName('tag').setDescription('Optional exact tag filter').setRequired(false).setMaxLength(32)),
+            .addStringOption((option) => option.setName('tag').setDescription('Optional exact tag filter').setRequired(false).setMaxLength(32))
+            .addStringOption((option) => option.setName('query').setDescription('Optional name/category/tag search text').setRequired(false).setMaxLength(80))
+            .addIntegerOption((option) => option.setName('page').setDescription('Page number, starting at 1').setRequired(false).setMinValue(1).setMaxValue(100000)),
         )
         .addSubcommand((subcommand) =>
           subcommand.setName('show').setDescription('Preview a quick reply and its supported placeholders')
@@ -1020,6 +1022,10 @@ export const data =
         .addSubcommand((subcommand) =>
           subcommand.setName('send').setDescription('Send a permitted quick reply in the current ticket (staff only)')
             .addStringOption((option) => option.setName('name-or-id').setDescription('Name or ID').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('metrics').setDescription('Show privacy-safe aggregate quick reply usage (admin only)')
+            .addIntegerOption((option) => option.setName('days').setDescription('Window in days').setRequired(false).setMinValue(1).setMaxValue(366)),
         ),
     )
     .addSubcommandGroup((group) =>
