@@ -550,6 +550,10 @@ const enUS = {
   'settings.customPanel.modal.editButtonTitle': "Edit Button",
   'settings.customPanel.error.invalidStyle': "Button style must be primary, secondary, success, or danger.",
   'settings.customPanel.error.unknown': "Unknown custom panel error.",
+  'settings.reports.selector.editOrRemovePrompt': "Edit or remove **{name}**.",
+  'settings.reports.action.edit': "Edit",
+  'settings.reports.action.remove': "Remove",
+  'settings.reports.error.thresholdsInvalid': "Thresholds must be whole numbers from 0 to 100000. A channel must be supplied when channel restriction is enabled.",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
