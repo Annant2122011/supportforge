@@ -6562,7 +6562,7 @@ export async function handleTicketInteraction(
     if (interaction.isButton() && interaction.customId.startsWith('ticket:quick-reply:page:')) {
       const rawPage = interaction.customId.slice('ticket:quick-reply:page:'.length);
       const page = Number(rawPage);
-      if (!/^\d{1,3}$/.test(rawPage) || !Number.isInteger(page) || page < 0 || page > 999) {
+      if (!/^\d{1,5}$/.test(rawPage) || !Number.isInteger(page) || page < 0 || page > 99999) {
         if (await safeDeferReply(interaction)) {
           await interaction.editReply(translate((await getAdvancedSettings(interaction.guildId!)).locale, 'quickReply.picker.invalidPage'));
         }
