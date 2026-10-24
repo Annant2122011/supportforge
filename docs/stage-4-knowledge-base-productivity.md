@@ -115,7 +115,7 @@ The underlying article store/search is the first increment. The missing ticket i
 - The response is ephemeral and tenant-scoped. It lists the deterministic PostgreSQL/typo-tolerant search results, but only medium/high confidence results receive direct-share buttons. A low-confidence/no-result result does not block ordinary human support.
 - Clicking Share revalidates the original channel ID, guild, active ticket status, the actor's current department staff role, article publication state, visibility and article role restrictions. It never trusts the old search result as authorization.
 - Sharing posts a clearly labelled excerpt to the same ticket, suppresses automatic mentions, leaves the ticket open, records article-share usage and writes an audit event. A failure to write the audit-channel notification does not misreport a successful share.
-- Search synonym expansion now matches complete canonical terms and multi-word phrases, not only individual tokens. The pure tests cover phrase matches, substring collisions and confidence-gated share eligibility.
+- Search synonym expansion now matches complete canonical terms and multi-word phrases, then evaluates each expansion as an independent PostgreSQL OR branch and scores typo-tolerant metadata against the best matching variant. This avoids the previous failure mode where appending every synonym made all of them mandatory AND terms. Pure tests cover phrase matches, substring collisions, independent alternatives and confidence-gated share eligibility.
 - No AI or model provider is used. Semantic/RAG retrieval remains outside Stage I and is not implied by this deterministic implementation.
 
 ## Stage J — Quick Replies architecture
@@ -163,6 +163,6 @@ Ticket panel button ─┐
 
 ## Re-audit status and remaining release gates
 
-- The previous consolidated source head passed CI #2574 (212/212 tests, zero skips, disposable PostgreSQL verification). This new Stage I/Stage J increment changes source and therefore needs a fresh exact-head CI run.
+- The latest consolidated source head `a9df9eb69d6ca3bfcdf74973b9c2c4f5b89c430f` passed [CI #2679](https://github.com/Annant2122011/supportforge/actions/runs/40098339439): TypeScript build passed, 215/215 tests passed, zero skipped, and disposable PostgreSQL verification passed.
 - Stage 1/2 still record incomplete Stage H2 translation coverage for selected Settings screens, panel previews and reports. That remains a release limitation until those screens have been covered and tested in a supported locale; historical CI does not prove live locale acceptance.
 - Discord test-guild acceptance and a backup/restore drill into an isolated non-production Neon database remain not run. No production merge, deploy or 100% production acceptance is claimed.
