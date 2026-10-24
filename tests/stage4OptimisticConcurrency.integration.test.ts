@@ -71,6 +71,7 @@ test('quick reply saves require an expected version and reject stale concurrent 
     assert.equal(final?.enabled, false);
     assert.ok(['Concurrent A', 'Concurrent B'].includes(final?.body ?? ''));
   } finally {
+    await pool.query('DELETE FROM quick_reply_revisions WHERE guild_id=$1', [guildId]);
     await pool.query('DELETE FROM quick_replies WHERE guild_id=$1', [guildId]);
     await pool.query('DELETE FROM app_documents WHERE POSITION($1 IN document_key)>0', [guildId]);
     await closePostgresDatabase();
@@ -114,6 +115,7 @@ test('workflow template saves require an expected version instead of silently re
     assert.equal(saved?.version, 2);
     assert.deepEqual(saved?.definition, { conditions: [{ field: 'priority', equals: 'urgent' }], actions: [] });
   } finally {
+    await pool.query('DELETE FROM workflow_template_revisions WHERE guild_id=$1', [guildId]);
     await pool.query('DELETE FROM workflow_templates WHERE guild_id=$1', [guildId]);
     await pool.query('DELETE FROM app_documents WHERE POSITION($1 IN document_key)>0', [guildId]);
     await closePostgresDatabase();
