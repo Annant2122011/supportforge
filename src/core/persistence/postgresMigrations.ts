@@ -479,6 +479,95 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+  {
+    id: 12,
+    name: 'add_sla_policy_and_ticket_csat_storage',
+    up: async (db) => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS support_sla_policies (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          department_id TEXT NOT NULL DEFAULT '*',
+          priority TEXT NOT NULL DEFAULT '*',
+          first_response_minutes INTEGER NOT NULL CHECK (first_response_minutes BETWEEN 1 AND 43200),
+          resolution_minutes INTEGER NOT NULL CHECK (resolution_minutes BETWEEN 1 AND 43200),
+          pause_while_pending BOOLEAN NOT NULL DEFAULT TRUE,
+          warning_ratio NUMERIC(4,3) NOT NULL DEFAULT 0.800 CHECK (warning_ratio BETWEEN 0.500 AND 0.990),
+          enabled BOOLEAN NOT NULL DEFAULT TRUE,
+          version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_by TEXT
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_support_sla_policy_scope
+          ON support_sla_policies (guild_id, department_id, priority);
+        CREATE INDEX IF NOT EXISTS idx_support_sla_policy_guild_enabled
+          ON support_sla_policies (guild_id, enabled);
+
+        CREATE TABLE IF NOT EXISTS support_csat_responses (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL,
+          rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+          comment TEXT NOT NULL DEFAULT '',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (guild_id, ticket_id, user_id),
+          CHECK (length(comment) <= 500)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_support_csat_guild_created
+          ON support_csat_responses (guild_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_support_csat_ticket
+          ON support_csat_responses (ticket_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS support_sla_alerts (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+          policy_id TEXT NOT NULL REFERENCES support_sla_policies(id) ON DELETE CASCADE,
+          target_type TEXT NOT NULL CHECK (target_type IN ('first_response','resolution')),
+          progress TEXT NOT NULL CHECK (progress IN ('warning','breached')),
+          policy_version INTEGER NOT NULL CHECK (policy_version > 0),
+          cycle_started_at TIMESTAMPTZ NOT NULL,
+          observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          detail TEXT NOT NULL DEFAULT '',
+          UNIQUE (guild_id,ticket_id,policy_id,target_type,progress,policy_version,cycle_started_at)
+        );
+        CREATE INDEX IF NOT EXISTS idx_support_sla_alerts_guild_observed
+          ON support_sla_alerts (guild_id, observed_at DESC);
+      `);
+    },
+  },
+  {
+    id: 13,
+    name: 'add_durable_recovery_replay_segment_ledger',
+    up: async (db) => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS ticket_recovery_replay_segments (
+          recovery_event_id TEXT NOT NULL REFERENCES ticket_recovery_events(id) ON DELETE CASCADE,
+          original_message_id TEXT NOT NULL,
+          segment_key TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','completed')),
+          discord_message_id TEXT,
+          attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+          attempt_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          last_error TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (recovery_event_id, original_message_id, segment_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_ticket_recovery_replay_segments_pending
+          ON ticket_recovery_replay_segments (recovery_event_id, status, updated_at)
+          WHERE status='pending';
+        CREATE INDEX IF NOT EXISTS idx_ticket_recovery_replay_segments_message
+          ON ticket_recovery_replay_segments (discord_message_id)
+          WHERE discord_message_id IS NOT NULL;
+      `);
+    },
+  },
 ];
 
 /** Latest migration identifier required by this application version. */

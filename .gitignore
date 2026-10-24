@@ -12,3 +12,9 @@ data/*.json
 data/*.sqlite
 data/*.sqlite-*
 .neon
+
+# Local PostgreSQL backups and manifests (never commit ticket/customer data)
+backups/
+*.dump
+*.dump.manifest.json
+
