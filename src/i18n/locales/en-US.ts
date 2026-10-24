@@ -714,6 +714,11 @@ const enUS = {
   'settings.recovery.page': "Page {page} / {pages}",
   'settings.recovery.ticketLine': "• **Ticket #{number}** • {messages} archived message(s) • original channel ID: {channelId}",
   'settings.recovery.accidentalReady': " • **marked accidental, ready to restore**",
+  'settings.recovery.listNativeTitle': "Restore Channel",
+  'settings.recovery.listReviewTitle': "Ticket Deletion Review",
+  'settings.recovery.recordMissingTitle': "Recovery record no longer available",
+  'settings.recovery.recordMissingDescription': "Refresh the recovery list. The record may already have been restored or reviewed.",
+  'settings.recovery.backToList': "Back to list",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
