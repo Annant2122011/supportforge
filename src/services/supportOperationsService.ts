@@ -379,7 +379,8 @@ async function persistSlaAlert(
 export async function sweepSupportSlaAlerts(client: Client): Promise<number> {
   let alerts = 0;
   for (const guild of client.guilds.cache.values()) {
-    await runTrackedOperationalTask('ticket-sla-monitor', guild.id, async () => {
+    try {
+      await runTrackedOperationalTask('ticket-sla-monitor', guild.id, async () => {
       const pool = getPostgresPool();
       let cursor = slaSweepCursorByGuild.get(guild.id) ?? null;
       let active = await pool.query<QueryResultRow & { id: string }>(
@@ -404,6 +405,7 @@ export async function sweepSupportSlaAlerts(client: Client): Promise<number> {
       if (active.rows.length === 250 && lastId) slaSweepCursorByGuild.set(guild.id, lastId);
       else slaSweepCursorByGuild.delete(guild.id);
       const config = await getGuildConfig(guild.id);
+      let failedTicketChecks = 0;
       for (const row of active.rows) {
         try {
           const evaluation = await evaluateTicketSla(guild.id, row.id);
@@ -432,13 +434,27 @@ export async function sweepSupportSlaAlerts(client: Client): Promise<number> {
             }
           }
         } catch (error) {
+          failedTicketChecks += 1;
           console.warn(
-            'ResolvX SLA monitor skipped ticket ' + row.id + ' after a check failure:',
+            'ResolvX SLA monitor could not evaluate ticket ' + row.id + ':',
             error instanceof Error ? error.message : 'unknown error',
           );
         }
       }
-    });
+      if (failedTicketChecks > 0) {
+        throw new Error(
+          'The SLA sweep could not evaluate ' + failedTicketChecks + ' of ' + active.rows.length +
+          ' tickets. Any successfully stored alerts remain durable; the next scheduled pass will retry the batch.',
+        );
+      }
+      });
+    } catch (error) {
+      // Keep one guild's transient failure from preventing other guilds being scanned.
+      console.warn(
+        'ResolvX SLA monitor did not complete for guild ' + guild.id + ':',
+        error instanceof Error ? error.message : 'unknown error',
+      );
+    }
   }
   return alerts;
 }
