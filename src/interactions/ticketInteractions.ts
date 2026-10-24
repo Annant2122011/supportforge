@@ -65,6 +65,7 @@ import type { TranslationKey } from '../i18n/locales/en-US';
 import { ensureDepartmentCategory } from '../services/departmentCategoryService';
 import { endTicketVoiceMode, startTicketVoiceMode, syncTicketVoiceParticipants } from '../services/voiceModeService';
 import { getUserFlagCount, isTicketCreationRestricted, recordReport } from '../services/reportService';
+import { getKnowledgeArticle, recordKnowledgeArticleShare } from '../services/knowledgeBaseService';
 
 import {
   findActivePersistedTickets,
@@ -6426,6 +6427,77 @@ export async function handleTicketInteraction(
     | ModalSubmitInteraction,
 ): Promise<void> {
   try {
+    if (interaction.isButton() && interaction.customId.startsWith('sf:kb:share:')) {
+      if (!(await safeDeferReply(interaction))) return;
+      const parts = interaction.customId.split(':');
+      const articleId = parts[3] ?? '';
+      const targetChannelId = parts[4] ?? '';
+      if (!interaction.guildId || !interaction.guild || !articleId || !targetChannelId ||
+          interaction.channelId !== targetChannelId) {
+        await interaction.editReply('This article-share control is no longer valid in this ticket. Run /supportforge knowledge suggest again.');
+        return;
+      }
+
+      const ticket = await getPersistedTicket(targetChannelId);
+      if (!ticket || ticket.guildId !== interaction.guildId || ticket.channelId !== targetChannelId ||
+          ticket.deletedAt || !['open', 'claimed', 'pending', 'reopened'].includes(ticket.status)) {
+        await interaction.editReply('This ticket is no longer active. No article was shared.');
+        return;
+      }
+
+      const config = await getGuildConfig(interaction.guildId);
+      const member = interaction.member;
+      const roleIds = !member ? [] : Array.isArray(member.roles)
+        ? member.roles
+        : member.roles.cache.map((role) => role.id);
+      const isAdmin = Boolean(
+        interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
+        interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild),
+      );
+      const department = ticket.departmentId ? config.departments[ticket.departmentId] : undefined;
+      const isTicketStaff = Boolean(department?.staffRoleId && roleIds.includes(department.staffRoleId));
+      if (!isAdmin && !isTicketStaff) {
+        await interaction.editReply('You need the staff role configured for this ticket department to share an article.');
+        return;
+      }
+
+      const access = { isAdmin, isStaff: isAdmin || isTicketStaff, roleIds };
+      const article = await getKnowledgeArticle(interaction.guildId, articleId, access);
+      if (!article || article.status !== 'published') {
+        await interaction.editReply('This published article is no longer available to your role. No content was shared.');
+        return;
+      }
+
+      const excerpt = article.body.slice(0, 2600);
+      const truncated = article.body.length > excerpt.length;
+      await interaction.channel?.send({
+        embeds: [new EmbedBuilder().setTitle('📚 Suggested article: ' + article.title)
+          .setDescription(
+            (article.summary ? article.summary + '\\n\\n' : '') +
+            '**Category:** ' + article.category + '\\n' +
+            '**Tags:** ' + (article.tags.join(', ') || 'none') + '\\n\\n' +
+            excerpt + (truncated ? '\\n\\nOpen /supportforge knowledge view with article ID ' + article.id + ' for the full article.' : '') +
+            '\\n\\n_This is a suggested resource, not a replacement for human support. The ticket remains open for follow-up._',
+          )
+          .setFooter({ text: 'Knowledge Base article ' + article.id + ' • revision ' + article.revision })],
+        allowedMentions: { parse: [] },
+      });
+      await recordKnowledgeArticleShare(interaction.guildId, article.id, access, interaction.user.id);
+      if (config.supportCategoryId) {
+        await logTicketEvent(interaction.guild, config.supportCategoryId, {
+          ticketNumber: ticket.ticketNumber ?? ticket.id,
+          ticketChannelId: ticket.channelId,
+          event: 'KNOWLEDGE_ARTICLE_SHARED',
+          actorId: interaction.user.id,
+          actor: interaction.user.tag,
+          actorName: interaction.user.tag,
+          detail: 'Shared published Knowledge Base article ' + article.id + ' revision ' + article.revision + ' via a ticket suggestion control.',
+        });
+      }
+      await interaction.editReply('Shared "' + article.title + '" in this ticket. Automatic mentions are disabled; the ticket remains open.');
+      return;
+    }
+
     if (interaction.customId.startsWith('ticket:thread:')) {
       if (interaction.isButton()) {
         const handled = await handlePrivateThreadAuxButton(interaction);
