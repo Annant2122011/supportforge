@@ -4,6 +4,8 @@
 **Review:** [PR #32](https://github.com/Annant2122011/supportforge/pull/32)  
 **Production store:** existing Neon PostgreSQL configuration and outbox tables. No new live database, SQL migration or AI dependency is introduced by this diagnostic slice.
 
+Use the [Stage 1/2 Exit Contract](stage-1-2-exit-contract.md) for the ordered dependency/merge requirements, testable exit criteria and explicit production acceptance gates.
+
 ## Delivered in this increment
 
 ### System Health
