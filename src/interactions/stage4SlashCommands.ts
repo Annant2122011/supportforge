@@ -35,6 +35,7 @@ import {
   listWorkflowTemplates,
   listWorkflowTemplateRevisions,
   previewWorkflowTemplateById,
+  restoreWorkflowTemplateRevision,
   saveWorkflowTemplate,
   setWorkflowTemplateEnabled,
 } from '../services/workflowTemplateService';
@@ -580,6 +581,24 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           detail: 'Saved validated workflow template ' + item.id + ' version ' + item.version + '; execution remains disabled.',
         });
         await interaction.editReply('Saved validated workflow template "' + item.name + '" v' + item.version + '. It remains non-executable; no ticket action was run.');
+        return true;
+      }
+      if (subcommand === 'restore-revision') {
+        const templateId = interaction.options.getString('template-id', true).trim();
+        const saved = await restoreWorkflowTemplateRevision(
+          guildId,
+          templateId,
+          interaction.options.getInteger('revision', true),
+          interaction.options.getInteger('expected-version', true),
+          actorId,
+        );
+        if (config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
+          action: 'WORKFLOW_TEMPLATE_REVISION_RESTORED',
+          actorId,
+          actorName: interaction.user.tag,
+          detail: 'Restored retained workflow definition for template ' + saved.id + ' into version ' + saved.version + '; left disabled for review.',
+        });
+        await interaction.editReply('Restored the selected workflow revision as version ' + saved.version + '. It is disabled and non-executable until reviewed.');
         return true;
       }
       if (subcommand === 'preview') {
