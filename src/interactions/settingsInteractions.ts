@@ -233,24 +233,36 @@ function findPriorityRole(
 const pendingResetAuditChoice = new Map<string, boolean>();
 
 async function showManual(interaction: SettingsViewInteraction): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('📖 Staff Manual')
-      .setDescription(
-        'A newcomer-friendly guide to ResolvX. Choose a concise overview or the full instructions. Each manual is delivered as an **ephemeral** response, so other staff do not see or accumulate your manual pages.',
-      )
+      .setTitle('📖 ' + translate(settings.locale, 'settings.manual.title'))
+      .setDescription(translate(settings.locale, 'settings.manual.description'))
       .addFields(
-        { name: 'Quick Overview', value: 'Core workflow and the controls you need most often.', inline: true },
-        { name: 'Detailed Manual', value: 'Full lifecycle, priorities, notes, audit, settings, retention and safety guidance.', inline: true },
+        {
+          name: translate(settings.locale, 'settings.manual.field.quick'),
+          value: translate(settings.locale, 'settings.manual.value.quick'),
+          inline: true,
+        },
+        {
+          name: translate(settings.locale, 'settings.manual.field.detailed'),
+          value: translate(settings.locale, 'settings.manual.value.detailed'),
+          inline: true,
+        },
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:manual:quick').setLabel('Display Quick Manual').setEmoji('⚡').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('sf:settings:manual:detailed').setLabel('Display Detailed Manual').setEmoji('📚').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sf:settings:manual:quick')
+        .setLabel(translate(settings.locale, 'settings.manual.action.quick'))
+        .setEmoji('⚡').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:manual:detailed')
+        .setLabel(translate(settings.locale, 'settings.manual.action.detailed'))
+        .setEmoji('📚').setStyle(ButtonStyle.Secondary),
       backButton(),
     ),
   ]);
 }
+
 
 async function showManualVersion(interaction: ButtonInteraction, detailed: boolean): Promise<void> {
   await interaction.reply({
@@ -4447,57 +4459,50 @@ async function showHomeAfterUpdate(interaction: ButtonInteraction): Promise<void
 }
 
 async function showRepairSystem(interaction: ButtonInteraction): Promise<void> {
-  const themeColor = getThemeColor((await getGuildConfig(interaction.guild!.id)).theme);
+  const config = await getGuildConfig(interaction.guild!.id);
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const locale = settings.locale;
+  const themeColor = getThemeColor(config.theme);
   await renderSettingsView(
     interaction,
     [
       new EmbedBuilder()
         .setColor(themeColor)
-        .setTitle('🛠️ Repair System')
-        .setDescription(
-          'ResolvX repairs managed infrastructure without resetting Neon data. Restore & Update reconciles Discord infrastructure and requests a GitHub Actions deployment. Automatic pushes to main and the independent server watchdog deploy code without requiring this button. ' +
-          'Restore Channel handles native Discord channel deletions; Ticket Deletion Review handles only ticket-button deletions and their accidental-deletion question. Normal Repair checks infrastructure without deploying code. Storage Repair verifies the Closed and Archive storage categories.',
-        ),
+        .setTitle('🛠️ ' + translate(locale, 'settings.repair.title'))
+        .setDescription(translate(locale, 'settings.repair.description')),
     ],
     [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
           .setCustomId('sf:settings:repair:all')
-          .setLabel('Restore & Update')
-          .setEmoji('🚀')
-          .setStyle(ButtonStyle.Success),
+          .setLabel(translate(locale, 'settings.repair.action.restoreUpdate'))
+          .setEmoji('🚀').setStyle(ButtonStyle.Success),
         new ButtonBuilder()
           .setCustomId('sf:settings:repair:normal')
-          .setLabel('Normal Repair')
-          .setEmoji('🔧')
-          .setStyle(ButtonStyle.Primary),
+          .setLabel(translate(locale, 'settings.repair.action.normal'))
+          .setEmoji('🔧').setStyle(ButtonStyle.Primary),
         new ButtonBuilder()
           .setCustomId('sf:settings:repair:storage')
-          .setLabel('Storage Repair')
-          .setEmoji('🗄️')
-          .setStyle(ButtonStyle.Secondary),
+          .setLabel(translate(locale, 'settings.repair.action.storage'))
+          .setEmoji('🗄️').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
           .setCustomId('sf:settings:setup')
-          .setLabel('Setup')
-          .setEmoji('🧭')
-          .setStyle(ButtonStyle.Secondary),
+          .setLabel(translate(locale, 'settings.repair.action.setup'))
+          .setEmoji('🧭').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
           .setCustomId('sf:settings:restore')
-          .setLabel('Restore')
-          .setEmoji('♻️')
-          .setStyle(ButtonStyle.Secondary),
+          .setLabel(translate(locale, 'settings.repair.action.restore'))
+          .setEmoji('♻️').setStyle(ButtonStyle.Secondary),
       ),
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
           .setCustomId('sf:settings:recovery:channels')
-          .setLabel('Restore Channel')
-          .setEmoji('♻️')
-          .setStyle(ButtonStyle.Success),
+          .setLabel(translate(locale, 'settings.repair.action.restoreChannel'))
+          .setEmoji('♻️').setStyle(ButtonStyle.Success),
         new ButtonBuilder()
           .setCustomId('sf:settings:recovery:review')
-          .setLabel('Ticket Deletion Review')
-          .setEmoji('🛡️')
-          .setStyle(ButtonStyle.Primary),
+          .setLabel(translate(locale, 'settings.repair.action.deletionReview'))
+          .setEmoji('🛡️').setStyle(ButtonStyle.Primary),
         backButton(),
       ),
     ],
