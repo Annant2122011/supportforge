@@ -1,6 +1,7 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, type ChatInputCommandInteraction, type TextChannel, type ThreadChannel } from 'discord.js';
 
 import { getGuildConfig } from '../services/configService';
+import { isKnowledgeShareableConfidence } from '../core/domain/knowledgeSearch';
 import { getPersistedTicket } from '../services/ticketPersistenceService';
 import { logSettingsEvent, logTicketEvent } from '../services/auditLogService';
 import {
@@ -296,7 +297,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           (result.summary || 'No summary') + '\nCategory: ' + result.category +
           (result.tags.length ? '\nTags: ' + result.tags.join(', ') : ''),
         ).join('\n\n').slice(0, 3600);
-        const shareable = results.filter((result) => result.confidence !== 'low').slice(0, 5);
+        const shareable = results.filter((result) => isKnowledgeShareableConfidence(result.confidence)).slice(0, 5);
         const components = shareable.length
           ? [new ActionRowBuilder<ButtonBuilder>().addComponents(
               ...shareable.map((result) => new ButtonBuilder()
