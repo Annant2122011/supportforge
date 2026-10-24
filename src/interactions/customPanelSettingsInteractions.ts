@@ -522,8 +522,9 @@ async function showDepartmentTagPicker(
   departmentId: string,
   page = 0,
 ): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   const department = (await getGuildConfig(interaction.guild!.id)).departments[departmentId];
-  if (!department) throw new Error('That department no longer exists. Refresh the panel builder.');
+  if (!department) throw new Error(translate(settings.locale, 'settings.customPanel.error.departmentMissing'));
   const tags = Object.values(department.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
   // Reserve one select option for "ask the customer", leaving at most 24 tags
   // per page so the picker never exceeds Discord's 25-option limit.
@@ -534,27 +535,27 @@ async function showDepartmentTagPicker(
   const components: PanelComponents = [
     selectRow(new StringSelectMenuBuilder()
       .setCustomId(PREFIX + 'department-tag-pick:' + panelId + ':' + departmentId + ':' + safePage)
-      .setPlaceholder('Choose a fixed tag or let the customer choose')
+      .setPlaceholder(translate(settings.locale, 'settings.customPanel.tag.choosePlaceholder'))
       .addOptions([
-        { label: 'Customer chooses a tag', value: '*', description: 'Show the existing tag picker when the panel button is clicked.' },
+        { label: translate(settings.locale, 'settings.customPanel.tag.askCustomer'), value: '*', description: translate(settings.locale, 'settings.customPanel.tag.askCustomerDescription') },
         ...visible.map((tag) => ({
           label: tag.name.slice(0, 100),
           value: tag.id,
-          description: 'Pin this button to the ' + tag.name + ' tag.',
+          description: translate(settings.locale, 'settings.customPanel.tag.pinDescription', { tag: tag.name }),
         })),
       ])),
   ];
   if (pageCount > 1) {
     components.push(row(
-      makeButton(PREFIX + 'department-tag-page:' + panelId + ':' + departmentId + ':' + (safePage - 1), 'Previous', ButtonStyle.Secondary, '⬅️', safePage === 0),
-      makeButton(PREFIX + 'department-tag-page:' + panelId + ':' + departmentId + ':' + (safePage + 1), 'Next', ButtonStyle.Secondary, '➡️', safePage >= pageCount - 1),
+      makeButton(PREFIX + 'department-tag-page:' + panelId + ':' + departmentId + ':' + (safePage - 1), translate(settings.locale, 'settings.customPanel.home.previous'), ButtonStyle.Secondary, '⬅️', safePage === 0),
+      makeButton(PREFIX + 'department-tag-page:' + panelId + ':' + departmentId + ':' + (safePage + 1), translate(settings.locale, 'settings.customPanel.home.next'), ButtonStyle.Secondary, '➡️', safePage >= pageCount - 1),
     ));
   }
-  components.push(row(makeButton(PREFIX + 'buttons:' + panelId, 'Cancel', ButtonStyle.Secondary, '↩️')));
+  components.push(row(makeButton(PREFIX + 'buttons:' + panelId, translate(settings.locale, 'common.cancel'), ButtonStyle.Secondary, '↩️')));
   await render(
     interaction,
-    'Choose Department Button Tag',
-    '**Department:** ' + department.name + '\nChoose a tag to pin to the button, or select **Customer chooses a tag** to use the normal ticket tag picker.\nPage ' + (safePage + 1) + ' / ' + pageCount,
+    translate(settings.locale, 'settings.customPanel.tag.title'),
+    '**' + translate(settings.locale, 'settings.customPanel.home.departments') + ':** ' + department.name + '\n' + translate(settings.locale, 'settings.customPanel.tag.description') + '\n' + translate(settings.locale, 'settings.customPanel.department.page', { page: safePage + 1, pages: pageCount }),
     components,
   );
 }
