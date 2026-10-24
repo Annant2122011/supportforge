@@ -46,6 +46,7 @@ const enUS = {
   'settings.tags.subcategoryOf': "Subcategory of {department}",
   'settings.tags.selectToManage': "Select a tag to edit or remove it.",
   'settings.tags.range': "Showing tags {start}–{end} of {total}.",
+  'settings.tags.detail': "Tag **{tag}** belongs to **{department}**. Tags are subcategories only and never create Discord categories.",
   'settings.tags.actions.edit': "Edit Tag",
   'settings.tags.actions.remove': "Remove Tag",
   'settings.tags.actions.backToDepartment': "Back to Department",
