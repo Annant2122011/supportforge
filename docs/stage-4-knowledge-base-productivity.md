@@ -114,7 +114,7 @@ The underlying article store/search is the first increment. The missing ticket i
 - `/supportforge knowledge suggest <query>` is available only in an active managed ticket and requires the staff role configured for that ticket's department (or server management permission).
 - The response is ephemeral and tenant-scoped. It lists the deterministic PostgreSQL/typo-tolerant search results, but only medium/high confidence results receive direct-share buttons. A low-confidence/no-result result does not block ordinary human support.
 - Clicking Share revalidates the original channel ID, guild, active ticket status, the actor's current department staff role, article publication state, visibility and article role restrictions. It never trusts the old search result as authorization.
-- Sharing posts a clearly labelled excerpt to the same ticket, suppresses automatic mentions, leaves the ticket open, records article-share usage and writes an audit event. A failure to write the audit-channel notification does not misreport a successful share.
+- Sharing posts a clearly labelled, size-bounded excerpt to the same ticket, suppresses automatic mentions, and leaves the ticket open. Usage metrics and audit-channel notifications are best-effort after successful delivery, so an observability failure does not falsely tell staff that a posted article failed.
 - Search synonym expansion now matches complete canonical terms and multi-word phrases, then evaluates each expansion as an independent PostgreSQL OR branch and scores typo-tolerant metadata against the best matching variant. This avoids the previous failure mode where appending every synonym made all of them mandatory AND terms. Pure tests cover phrase matches, substring collisions, independent alternatives and confidence-gated share eligibility.
 - No AI or model provider is used. Semantic/RAG retrieval remains outside Stage I and is not implied by this deterministic implementation.
 
@@ -157,12 +157,12 @@ Ticket panel button ─┐
 
 ### Implementation progress
 
-**Part 1 is underway in this branch:** a Quick Reply button opens a staff/role-filtered select menu in both standard ticket channels and private threads. Selecting an item and using `/supportforge quick-reply send` both call the shared delivery service. CI is required on the exact new source head before this increment is marked automated-verified.
+**Part 1 is implemented and CI-verified:** the Quick Reply button opens a staff/role-filtered select menu in both standard ticket channels and private threads. Selecting an item and using `/supportforge quick-reply send` call the same delivery service, which rechecks ticket state, department authorization and reply enablement. Template validation rejects unknown, malformed and nested placeholders; sends disable automatic mention parsing. The exact source head passed CI #2739 (216 tests, zero skips, disposable PostgreSQL verification).
 
 **Part 2 remains:** add scalable search/category/tag filtering and pagination beyond Discord's 25-option select limit, privacy-safe per-reply usage metrics, and a durable send-intent/reconciliation ledger for ambiguous Discord send outcomes. Do not retry an uncertain send blindly; an accepted Discord message and a PostgreSQL transaction cannot be made atomic.
 
 ## Re-audit status and remaining release gates
 
 - The latest consolidated tested source head `3d3dae5d07e06cd47989b8c2e283943a66fcf01f` passed [CI #2739](https://github.com/Annant2122011/supportforge/actions/runs/40101705001): TypeScript build passed, 216/216 tests passed, zero skipped, and disposable PostgreSQL verification passed. This head includes localized Defaults, Retention, Team/Voice and Inactivity Automation settings plus catalog placeholder-parity coverage.
-- Stage 1/2 still record incomplete Stage H2 translation coverage for selected Settings screens, panel previews and reports. That remains a release limitation until those screens have been covered and tested in a supported locale; historical CI does not prove live locale acceptance.
+- Stage H currently enforces 224 matching translation keys across English, Hindi and Bengali and tests placeholder parity. The dashboard, Defaults, Retention, Team/Voice, Inactivity Automation, panel automation, Appearance/Theme, Safety & Reports and custom-panel draft preview have localized built-in copy. Detailed support-hours/workspace/storage/manual/repair pages, remaining builder copy and fuller report rule/category content remain open.
 - Discord test-guild acceptance and a backup/restore drill into an isolated non-production Neon database remain not run. No production merge, deploy or 100% production acceptance is claimed.
