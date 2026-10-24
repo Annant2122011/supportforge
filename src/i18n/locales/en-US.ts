@@ -4,6 +4,8 @@ const enUS = {
   'common.back': 'Back',
   'common.enabled': 'Enabled',
   'common.disabled': 'Disabled',
+  'common.none': "None",
+  'settings.team.value.people': "{count} people",
   'settings.title': 'ResolveX Settings',
   'settings.locale.title': 'Server Language',
   'settings.locale.current': 'Current language: {locale}',
