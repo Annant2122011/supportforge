@@ -1046,6 +1046,10 @@ const hiIN: Record<TranslationKey, string> = {
   'settings.reports.command.subcategoryAdded': "रिपोर्ट उपश्रेणी **{name}** जोड़ी गई (ID: {id})।",
   'settings.reports.command.subcategoryRenamed': "रिपोर्ट उपश्रेणी का नाम बदलकर **{name}** कर दिया गया।",
   'settings.reports.command.subcategoryRemoved': "रिपोर्ट उपश्रेणी **{name}** हटाई गई।",
+  'forms.settings.list.item': "• **{name}** · {id} · v{version} · **{status}** · विभाग {department} · टैग {tag} · {count} फ़ील्ड",
+  'forms.settings.detail.field': "{index}. **{label}** · {id} · {type} · {status} · चरण {step}",
+  'forms.settings.templates.item': "• **{name}** · {id} · {count} फ़ील्ड",
+  'forms.settings.template.field': "{index}. **{label}** · {id} · {type}",
 };
 
 export default hiIN;
