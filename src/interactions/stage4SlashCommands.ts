@@ -404,6 +404,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           category: interaction.options.getString('category') ?? 'General',
           tags: commaList(interaction.options.getString('tags'), 'tags', 12),
           allowedRoleIds: commaList(interaction.options.getString('role-ids'), 'role IDs', 20),
+          enabled: interaction.options.getBoolean('enabled') ?? undefined,
         }, interaction.options.getInteger('expected-version') ?? undefined);
         if (config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
           action: 'QUICK_REPLY_SAVED', actorId, actorName: interaction.user.tag,
