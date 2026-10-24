@@ -147,9 +147,9 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         const articles = await listKnowledgeArticles(guildId, access, 25);
         const body = articles.length
           ? articles.map((article) =>
-              '**' + article.title + '** (' + article.status + ', r' + article.revision + ')\\nID: ' + article.id +
-              '\\nCategory: ' + article.category + ' • ' + article.visibility + '\\n' + (article.summary || 'No summary'),
-            ).join('\\n\\n')
+              '**' + article.title + '** (' + article.status + ', r' + article.revision + ')\nID: ' + article.id +
+              '\nCategory: ' + article.category + ' • ' + article.visibility + '\n' + (article.summary || 'No summary'),
+            ).join('\n\n')
           : 'No Knowledge Base articles are available to you.';
         await interaction.editReply({
           embeds: [new EmbedBuilder().setTitle('📚 Knowledge Base Articles').setDescription(body.slice(0, 4000))
@@ -170,7 +170,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         await interaction.editReply({
           embeds: [new EmbedBuilder()
             .setTitle(article.title)
-            .setDescription((article.summary ? article.summary + '\\n\\n' : '') + excerpt)
+            .setDescription((article.summary ? article.summary + '\n\n' : '') + excerpt)
             .addFields(
               { name: 'Category', value: article.category, inline: true },
               { name: 'Tags', value: article.tags.join(', ') || 'None', inline: true },
@@ -241,8 +241,8 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         }
         const body = results.map((result, index) =>
           '**' + (index + 1) + '. ' + result.title + '** • ' + result.confidence.toUpperCase() + ' confidence • score ' + result.score +
-          '\\nID: ' + result.id + '\\n' + (result.summary || 'No summary') + '\\nCategory: ' + result.category,
-        ).join('\\n\\n');
+          '\nID: ' + result.id + '\n' + (result.summary || 'No summary') + '\nCategory: ' + result.category,
+        ).join('\n\n');
         await interaction.editReply({
           embeds: [new EmbedBuilder().setTitle('🔎 Knowledge Base Search').setDescription(body.slice(0, 4000))
             .setFooter({ text: 'Deterministic PostgreSQL search and typo-tolerant fallback • suggestions never replace human support' })],
@@ -292,7 +292,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         const articleId = interaction.options.getString('article-id', true).trim();
         const revisions = await listKnowledgeArticleRevisions(guildId, articleId, access);
         await interaction.editReply(revisions.length
-          ? revisions.map((item) => 'r' + item.revision + ' • ' + item.status + ' • ' + item.createdAt + '\\n' + item.title + ' • editor ' + item.changedBy).join('\\n\\n').slice(0, 4000)
+          ? revisions.map((item) => 'r' + item.revision + ' • ' + item.status + ' • ' + item.createdAt + '\n' + item.title + ' • editor ' + item.changedBy).join('\n\n').slice(0, 4000)
           : 'No revision records were found.');
         return true;
       }
@@ -343,7 +343,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
       if (subcommand === 'synonyms-list') {
         const synonyms = await listKnowledgeSynonyms(guildId);
         await interaction.editReply(synonyms.length
-          ? synonyms.map((item) => '**' + item.term + '** → ' + (item.synonyms.join(', ') || 'no alternatives')).join('\\n').slice(0, 4000)
+          ? synonyms.map((item) => '**' + item.term + '** → ' + (item.synonyms.join(', ') || 'no alternatives')).join('\n').slice(0, 4000)
           : 'No synonyms have been configured.');
         return true;
       }
@@ -364,11 +364,11 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         await interaction.editReply({
           embeds: [new EmbedBuilder().setTitle('📊 Knowledge Base Metrics')
             .setDescription(
-              'Window: ' + days + ' days\\nPublished articles: ' + metrics.publishedArticles +
-              '\\nDraft articles: ' + metrics.draftArticles + '\\nArchived articles: ' + metrics.archivedArticles +
-              '\\nSearch-result appearances: ' + metrics.searchResultEvents + '\\nViews: ' + metrics.articleViews +
-              '\\nShares: ' + metrics.articleShares + '\\nHelpful votes: ' + metrics.helpfulVotes +
-              '\\nUnhelpful votes: ' + metrics.unhelpfulVotes,
+              'Window: ' + days + ' days\nPublished articles: ' + metrics.publishedArticles +
+              '\nDraft articles: ' + metrics.draftArticles + '\nArchived articles: ' + metrics.archivedArticles +
+              '\nSearch-result appearances: ' + metrics.searchResultEvents + '\nViews: ' + metrics.articleViews +
+              '\nShares: ' + metrics.articleShares + '\nHelpful votes: ' + metrics.helpfulVotes +
+              '\nUnhelpful votes: ' + metrics.unhelpfulVotes,
             )
             .setFooter({ text: 'Only per-server aggregate usage is displayed. Raw search queries are not stored.' })],
         });
@@ -382,7 +382,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
       if (subcommand === 'list') {
         const replies = await listQuickReplies(guildId, { isAdmin: access.isAdmin, roleIds: access.roleIds }, interaction.options.getString('category') ?? undefined);
         await interaction.editReply(replies.length
-          ? replies.map((reply) => '**' + reply.name + '** • ' + reply.category + ' • ' + reply.id + ' • v' + reply.version + '\\nTags: ' + (reply.tags.join(', ') || 'none')).join('\\n\\n').slice(0, 4000)
+          ? replies.map((reply) => '**' + reply.name + '** • ' + reply.category + ' • ' + reply.id + ' • v' + reply.version + '\nTags: ' + (reply.tags.join(', ') || 'none')).join('\n\n').slice(0, 4000)
           : 'No quick replies are available to you.');
         return true;
       }
@@ -473,7 +473,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
       if (subcommand === 'list') {
         const related = await listRelatedTickets(guildId, ticket.id);
         await interaction.editReply(related.length
-          ? related.map((item) => '**Ticket ' + (item.ticketNumber ?? item.ticketId.slice(0, 8)) + '** • <#' + item.channelId + '> • ' + item.status + ' • ' + (item.priority ?? 'normal') + '\\nID: ' + item.ticketId).join('\\n\\n').slice(0, 4000)
+          ? related.map((item) => '**Ticket ' + (item.ticketNumber ?? item.ticketId.slice(0, 8)) + '** • <#' + item.channelId + '> • ' + item.status + ' • ' + (item.priority ?? 'normal') + '\nID: ' + item.ticketId).join('\n\n').slice(0, 4000)
           : 'No related tickets are linked to this ticket.');
         return true;
       }
@@ -497,7 +497,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         const templates = await listWorkflowTemplates(guildId);
         await interaction.editReply(templates.length
           ? templates.map((item) => '**' + item.name + '** • ' + item.id + ' • v' + item.version + ' • ' + (item.enabled ? 'catalogue enabled' : 'disabled') +
-              '\\nConditions: ' + item.definition.conditions.length + ' • actions: ' + item.definition.actions.length).join('\\n\\n').slice(0, 4000)
+              '\nConditions: ' + item.definition.conditions.length + ' • actions: ' + item.definition.actions.length).join('\n\n').slice(0, 4000)
           : 'No workflow templates exist.');
         return true;
       }
@@ -517,7 +517,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         const preview = await previewWorkflowTemplateById(guildId, interaction.options.getString('template-id', true).trim());
         await interaction.editReply({
           embeds: [new EmbedBuilder().setTitle('Workflow template safety preview')
-            .setDescription('Executable: **no**\\nConditions: ' + preview.conditionCount + '\\nActions: ' + preview.actionCount + '\\n\\n' + preview.warnings.map((warning) => '• ' + warning).join('\\n').slice(0, 3500))],
+            .setDescription('Executable: **no**\nConditions: ' + preview.conditionCount + '\nActions: ' + preview.actionCount + '\n\n' + preview.warnings.map((warning) => '• ' + warning).join('\n').slice(0, 3500))],
         });
         return true;
       }
