@@ -4834,12 +4834,17 @@ A consolidated source review is tracked in [docs/stage-a-to-g-reverification.md]
 
 # Stage H — Translation and Localization Architecture
 
-**Status:** H1 implementation in progress on a separate feature branch. This is not yet merged to main.
+**Status:** H1 and initial H2 implementation are present on the consolidated feature branch; PR #39 remains an open draft and live Discord acceptance is outstanding.
 
 The two-part design and acceptance checklist are tracked in [docs/stage-h-translation-architecture.md](docs/stage-h-translation-architecture.md).
 
-- **H1 — Translation core:** supported-locale registry, canonical English catalog, partial Hindi/Bengali catalogs, safe interpolation, locale-aware date/number formatting, and a per-guild locale preference in the existing Neon-backed advanced-settings JSON document. No SQL migration or third-party i18n dependency.
+- **H1 — Translation core:** supported-locale registry, canonical English catalog, complete typed Hindi/Bengali catalogs, safe interpolation, locale-aware date/number formatting, and per-guild locale preference in the existing Neon-backed advanced-settings JSON document. Missing catalog keys fail verification rather than silently falling back to English. No SQL migration or third-party i18n dependency.
 - **H2 — User-facing localization:** Settings dashboard and slash-command language controls with parity; gradual coverage of ticket intake/lifecycle, forms, support-hours messages, settings, panel previews and selected reports; locale-specific interaction regression tests.
-- The canonical catalog defines typed keys. Missing translated keys fall back to English individually. Stable command names, internal IDs, audit action identifiers and user-generated content remain untranslated.
+- The canonical catalog defines typed keys that must exist in English, Hindi and Bengali. Stable command names, internal IDs, audit action identifiers, and user-generated content/custom labels remain untranslated.
 - H1 keeps broad message changes opt-in. A green CI run and non-production Discord acceptance are required before merging/rolling out the framework.
 
+
+
+### Stage H refinement — strict catalogs and Settings navigation
+
+On the consolidated Stage 4 feature branch, all three translation catalogs now contain the same 74 keys. TypeScript requires complete Hindi/Bengali catalog maps; the translation service no longer falls back per key to English. Unknown persisted locale values still resolve safely to en-US. The Settings dashboard's built-in navigation labels and default title/description/help are localized; custom per-server labels and copy are preserved. Remaining detailed Settings subpages, public panel previews, selected report surfaces and real-guild locale acceptance remain outstanding.
