@@ -289,6 +289,7 @@ function panelDraftDiffers(panel: NonNullable<Awaited<ReturnType<typeof getCusto
 
 async function showHome(interaction: PanelSettingsInteraction, page = 0): Promise<void> {
   const guildId = interaction.guild!.id;
+  const settings = await getAdvancedSettings(guildId);
   const panels = await listCustomPanels(guildId);
   const departments = Object.values((await getGuildConfig(guildId)).departments);
   const pageCount = Math.max(1, Math.ceil(panels.length / PAGE_SIZE));
@@ -296,34 +297,34 @@ async function showHome(interaction: PanelSettingsInteraction, page = 0): Promis
   const visiblePanels = panels.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
   const components: PanelComponents = [
     row(
-      makeButton(PREFIX + 'create', 'Create Panel Draft', ButtonStyle.Success, '➕'),
-      makeButton(PREFIX + 'list:' + safePage, 'Refresh List', ButtonStyle.Primary, '📋'),
-      makeButton('sf:settings:home', 'Back to Settings', ButtonStyle.Secondary, '↩️'),
+      makeButton(PREFIX + 'create', translate(settings.locale, 'settings.customPanel.home.create'), ButtonStyle.Success, '➕'),
+      makeButton(PREFIX + 'list:' + safePage, translate(settings.locale, 'settings.customPanel.home.refresh'), ButtonStyle.Primary, '📋'),
+      makeButton('sf:settings:home', translate(settings.locale, 'settings.customPanel.home.backSettings'), ButtonStyle.Secondary, '↩️'),
     ),
   ];
   if (visiblePanels.length) {
     components.push(selectRow(new StringSelectMenuBuilder()
       .setCustomId(PREFIX + 'select:' + safePage)
-      .setPlaceholder('Choose a saved panel to manage')
+      .setPlaceholder(translate(settings.locale, 'settings.customPanel.home.select'))
       .addOptions(visiblePanels.map((panel) => ({
         label: panel.name.slice(0, 100),
         value: panel.id,
-        description: (panel.publishedMessageId ? 'Published' : 'Draft') + ' • ' + panel.buttons.length + ' button(s)',
+        description: translate(settings.locale, 'settings.customPanel.home.selectDescription', { status: translate(settings.locale, panel.publishedMessageId ? 'settings.customPanel.status.published' : 'settings.customPanel.status.draft'), count: panel.buttons.length }),
       })))));
   }
   if (pageCount > 1) {
     components.push(row(
-      makeButton(PREFIX + 'list:' + (safePage - 1), 'Previous', ButtonStyle.Secondary, '⬅️', safePage === 0),
-      makeButton(PREFIX + 'list:' + (safePage + 1), 'Next', ButtonStyle.Secondary, '➡️', safePage >= pageCount - 1),
+      makeButton(PREFIX + 'list:' + (safePage - 1), translate(settings.locale, 'settings.customPanel.home.previous'), ButtonStyle.Secondary, '⬅️', safePage === 0),
+      makeButton(PREFIX + 'list:' + (safePage + 1), translate(settings.locale, 'settings.customPanel.home.next'), ButtonStyle.Secondary, '➡️', safePage >= pageCount - 1),
     ));
   }
   await render(
     interaction,
-    'Custom Ticket Panels',
-    'Create more than one branded support entry point without editing source code. Drafts, ordered buttons and role rules are saved in Neon. Choose a panel to manage its content, target buttons, access rules, preview and publishing.\n\n**Saved panels:** ' + panels.length +
-      '\n**Departments:** ' + departments.length +
-      '\n**List page:** ' + (safePage + 1) + ' / ' + pageCount +
-      '\n\nPanel deletion removes only its definition and published message. Existing tickets are independent and never deleted.',
+    translate(settings.locale, 'settings.customPanel.home.title'),
+    translate(settings.locale, 'settings.customPanel.home.description') + '\n\n**' + translate(settings.locale, 'settings.customPanel.home.savedPanels') + ':** ' + panels.length +
+      '\n**' + translate(settings.locale, 'settings.customPanel.home.departments') + ':** ' + departments.length +
+      '\n**' + translate(settings.locale, 'settings.customPanel.home.page') + ':** ' + (safePage + 1) + ' / ' + pageCount +
+      '\n\n' + translate(settings.locale, 'settings.customPanel.home.deleteWarning'),
     components,
   );
 }
@@ -333,6 +334,7 @@ async function showPanel(interaction: PanelSettingsInteraction, panelId: string)
   const panel = await getCustomPanel(guild.id, panelId);
   if (!panel) throw new Error('Panel not found. Return to Custom Panels and refresh the list.');
   const config = await getGuildConfig(guild.id);
+  const settings = await getAdvancedSettings(guild.id);
   const roleNames = panel.allowedRoleIds.map((id) => config.departments ? '<@&' + id + '>' : id);
   const lines = panel.buttons.length
     ? panel.buttons.map((item, index) =>
@@ -344,27 +346,28 @@ async function showPanel(interaction: PanelSettingsInteraction, panelId: string)
       ).join('\n')
     : 'No buttons yet. Add a department or a saved form button below.';
   const status = panel.publishedMessageId
-    ? 'Published in <#' + panel.publishedChannelId + '>' + (panelDraftDiffers(panel) ? ' • **Draft has unpublished changes**' : ' • up to date')
-    : 'Draft only';
+    ? translate(settings.locale, 'settings.customPanel.detail.statusPublished', { channel: '<#' + panel.publishedChannelId + '>' }) +
+      (panelDraftDiffers(panel) ? ' • **' + translate(settings.locale, 'settings.customPanel.detail.unpublished') + '**' : ' • ' + translate(settings.locale, 'settings.customPanel.detail.upToDate'))
+    : translate(settings.locale, 'settings.customPanel.detail.statusDraft');
   await render(
     interaction,
-    panel.name + ' • Panel Builder',
+    panel.name + ' • ' + translate(settings.locale, 'settings.customPanel.detail.titleSuffix'),
     '**Panel ID:** `' + panel.id + '`\n**Status:** ' + status +
-      '\n**Panel access:** ' + (roleNames.length ? roleNames.join(', ') : 'Everyone') +
-      '\n**Draft buttons:** ' + panel.buttons.length + ' / 25\n\n**Button order**\n' + lines +
-      '\n\nEdit the draft without touching the public message. Re-publish to apply new content, button order and role rules. Already-open tickets are unchanged.',
+      '\n**' + translate(settings.locale, 'settings.customPanel.detail.access') + ':** ' + (roleNames.length ? roleNames.join(', ') : translate(settings.locale, 'settings.customPanel.detail.everyone')) +
+      '\n**' + translate(settings.locale, 'settings.customPanel.detail.buttons') + ':** ' + panel.buttons.length + ' / 25\n\n**' + translate(settings.locale, 'settings.customPanel.detail.order') + '**\n' + (panel.buttons.length ? lines : translate(settings.locale, 'settings.customPanel.detail.noButtons')) +
+      '\n\n' + translate(settings.locale, 'settings.customPanel.detail.help'),
     [
       row(
-        makeButton(PREFIX + 'preview:' + panel.id, 'Live Preview', ButtonStyle.Primary, '👁️'),
-        makeButton(PREFIX + 'update:' + panel.id, 'Edit Details', ButtonStyle.Secondary, '✏️'),
-        makeButton(PREFIX + 'appearance:' + panel.id, 'Branding', ButtonStyle.Secondary, '🎨'),
-        makeButton(PREFIX + 'publish:' + panel.id, 'Publish / Update', ButtonStyle.Success, '🚀', panel.buttons.length === 0),
+        makeButton(PREFIX + 'preview:' + panel.id, translate(settings.locale, 'settings.customPanel.detail.preview'), ButtonStyle.Primary, '👁️'),
+        makeButton(PREFIX + 'update:' + panel.id, translate(settings.locale, 'settings.customPanel.detail.edit'), ButtonStyle.Secondary, '✏️'),
+        makeButton(PREFIX + 'appearance:' + panel.id, translate(settings.locale, 'settings.customPanel.detail.branding'), ButtonStyle.Secondary, '🎨'),
+        makeButton(PREFIX + 'publish:' + panel.id, translate(settings.locale, 'settings.customPanel.detail.publish'), ButtonStyle.Success, '🚀', panel.buttons.length === 0),
       ),
       row(
-        makeButton(PREFIX + 'buttons:' + panel.id, 'Manage Buttons', ButtonStyle.Primary, '🧩'),
-        makeButton(PREFIX + 'access:' + panel.id, 'Panel Access', ButtonStyle.Secondary, '🔐'),
-        makeButton(PREFIX + 'delete:' + panel.id, 'Delete Panel', ButtonStyle.Danger, '🗑️'),
-        makeButton(PREFIX + 'home', 'Panel List', ButtonStyle.Secondary, '↩️'),
+        makeButton(PREFIX + 'buttons:' + panel.id, translate(settings.locale, 'settings.customPanel.detail.manageButtons'), ButtonStyle.Primary, '🧩'),
+        makeButton(PREFIX + 'access:' + panel.id, translate(settings.locale, 'settings.customPanel.detail.access'), ButtonStyle.Secondary, '🔐'),
+        makeButton(PREFIX + 'delete:' + panel.id, translate(settings.locale, 'settings.customPanel.detail.delete'), ButtonStyle.Danger, '🗑️'),
+        makeButton(PREFIX + 'home', translate(settings.locale, 'settings.customPanel.detail.list'), ButtonStyle.Secondary, '↩️'),
       ),
     ],
   );
@@ -373,27 +376,28 @@ async function showPanel(interaction: PanelSettingsInteraction, panelId: string)
 async function showButtonManager(interaction: PanelSettingsInteraction, panelId: string): Promise<void> {
   const panel = await getCustomPanel(interaction.guild!.id, panelId);
   if (!panel) throw new Error('Panel not found.');
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   const components: PanelComponents = [
     row(
-      makeButton(PREFIX + 'add-department:' + panelId, 'Add Department Button', ButtonStyle.Success, '🎫', panel.buttons.length >= 25),
-      makeButton(PREFIX + 'add-form:' + panelId, 'Add Form Button', ButtonStyle.Primary, '📝', panel.buttons.length >= 25),
-      makeButton(PREFIX + 'detail:' + panelId, 'Panel Details', ButtonStyle.Secondary, '↩️'),
+      makeButton(PREFIX + 'add-department:' + panelId, translate(settings.locale, 'settings.customPanel.button.addDepartment'), ButtonStyle.Success, '🎫', panel.buttons.length >= 25),
+      makeButton(PREFIX + 'add-form:' + panelId, translate(settings.locale, 'settings.customPanel.button.addForm'), ButtonStyle.Primary, '📝', panel.buttons.length >= 25),
+      makeButton(PREFIX + 'detail:' + panelId, translate(settings.locale, 'settings.customPanel.button.details'), ButtonStyle.Secondary, '↩️'),
     ),
   ];
   if (panel.buttons.length) {
     components.push(selectRow(new StringSelectMenuBuilder()
       .setCustomId(PREFIX + 'button-select:' + panelId)
-      .setPlaceholder('Choose a button to edit, move or remove')
+      .setPlaceholder(translate(settings.locale, 'settings.customPanel.button.select'))
       .addOptions(panel.buttons.map((button) => ({
         label: button.label.slice(0, 100),
         value: button.id,
-        description: (button.targetType === 'form' ? 'Form target' : 'Department target') + (button.tagId ? ' • pinned tag' : ' • choose tag'),
+        description: translate(settings.locale, 'settings.customPanel.button.selectDescription', { target: translate(settings.locale, button.targetType === 'form' ? 'settings.customPanel.button.formTarget' : 'settings.customPanel.button.departmentTarget'), tag: translate(settings.locale, button.tagId ? 'settings.customPanel.button.pinnedTag' : 'settings.customPanel.button.chooseTag') }),
       })))));
   }
   await render(
     interaction,
-    panel.name + ' • Button Builder',
-    '**Button order controls the layout**. Move buttons up/down to reorder them. Up to 25 buttons are supported per published panel. A button can start a department flow or open a specific active form. Form buttons are pinned to a version; update the button if its form changes.\n\n**Current buttons:** ' + panel.buttons.length,
+    panel.name + ' • ' + translate(settings.locale, 'settings.customPanel.button.titleSuffix'),
+    translate(settings.locale, 'settings.customPanel.button.intro') + '\n\n**' + translate(settings.locale, 'settings.customPanel.button.current') + ':** ' + panel.buttons.length,
     components,
   );
 }
@@ -406,14 +410,15 @@ async function showTargetTypePicker(
   const panel = await getCustomPanel(interaction.guild!.id, panelId);
   const button = panel?.buttons.find((candidate) => candidate.id === buttonId);
   if (!panel || !button) throw new Error('Button not found.');
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   const chooser = new StringSelectMenuBuilder()
     .setCustomId(PREFIX + 'retarget-type:' + panelId + ':' + buttonId)
     .setPlaceholder('Choose what this button should open')
     .addOptions(
-      { label: 'Department ticket flow', value: 'department', description: 'Open the tag picker or a pinned department/tag ticket modal.', default: button.targetType === 'department' },
-      { label: 'Specific ticket form', value: 'form', description: 'Open a specific active, version-pinned form.', default: button.targetType === 'form' },
+      { label: translate(settings.locale, 'settings.customPanel.target.department'), value: 'department', description: translate(settings.locale, 'settings.customPanel.target.departmentDescription'), default: button.targetType === 'department' },
+      { label: translate(settings.locale, 'settings.customPanel.target.form'), value: 'form', description: translate(settings.locale, 'settings.customPanel.target.formDescription'), default: button.targetType === 'form' },
     );
-  await render(interaction, 'Change Button Target', 'Current target: **' + button.targetType + '**. Choose a new target type. The button identity rotates when the target is saved so clicks against the previous target are rejected.', [
+  await render(interaction, translate(settings.locale, 'settings.customPanel.target.title'), translate(settings.locale, 'settings.customPanel.target.current', { target: button.targetType }), [
     selectRow(chooser),
     row(makeButton(PREFIX + 'button:' + panelId + ':' + buttonId, 'Cancel', ButtonStyle.Secondary, '↩️')),
   ]);
@@ -705,6 +710,7 @@ async function showPublishChannelPicker(
   const panel = await getCustomPanel(interaction.guild!.id, panelId);
   if (!panel) throw new Error('Panel not found.');
   if (!panel.buttons.length) throw new Error('Add at least one button before publishing a panel.');
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   const channels = [...(await interaction.guild!.channels.fetch()).values()]
     .filter((channel): channel is import('discord.js').TextChannel =>
       Boolean(channel && channel.type === 0 && channel.viewable && channel.permissionsFor(interaction.guild!.members.me!)?.has(['ViewChannel', 'SendMessages', 'EmbedLinks'])),
@@ -719,7 +725,7 @@ async function showPublishChannelPicker(
   const components: PanelComponents = [
     selectRow(new StringSelectMenuBuilder()
       .setCustomId(PREFIX + 'channel:' + panelId)
-      .setPlaceholder('Choose where to publish this panel')
+      .setPlaceholder(translate(settings.locale, 'settings.customPanel.publish.channel'))
       .addOptions(visible.map((channel) => ({
         label: channel.name.slice(0, 100),
         value: channel.id,
@@ -735,8 +741,8 @@ async function showPublishChannelPicker(
   components.push(row(makeButton(PREFIX + 'detail:' + panelId, 'Cancel', ButtonStyle.Secondary, '↩️')));
   await render(
     interaction,
-    'Publish Custom Panel',
-    'Choose a text channel where ResolvX can view messages, post embeds and create buttons. After the new public message is saved, ResolvX attempts to remove the previous message.\n\n**Panel:** ' + panel.name + '\n**Available channels:** ' + channels.length + '\n**Page:** ' + (safePage + 1) + ' / ' + pageCount,
+    translate(settings.locale, 'settings.customPanel.publish.title'),
+    translate(settings.locale, 'settings.customPanel.publish.prompt') + '\n\n**Panel:** ' + panel.name + '\n**' + translate(settings.locale, 'settings.customPanel.publish.availableChannels') + ':** ' + channels.length + '\n**' + translate(settings.locale, 'settings.customPanel.publish.page') + ':** ' + (safePage + 1) + ' / ' + pageCount,
     components,
   );
 }
