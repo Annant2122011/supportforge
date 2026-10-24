@@ -455,6 +455,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
     }
 
     if (group === 'quick-reply') {
+      const settings = await getAdvancedSettings(guildId);
       const needsStaff = ['list','show','send'].includes(subcommand);
       // Administrators can inspect the library even when the guild has not
       // configured a staff role. Sending still requires staff membership and
@@ -532,14 +533,27 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         const replyId = interaction.options.getString('name-or-id', true).trim();
         const revisions = await listQuickReplyRevisions(guildId, replyId);
         const description = revisions.length
-          ? revisions.map((item) =>
-              '**v' + item.version + '** • ' + item.operation + ' • ' + (item.enabled ? 'enabled' : 'disabled') +
-              '\n' + item.name + ' • editor ' + item.changedBy + ' • ' + item.createdAt,
-            ).join('\n\n').slice(0, 3800)
-          : 'No revision history is recorded for this quick reply.';
+          ? revisions.map((item) => {
+              const operationKey = item.operation === 'created' ? 'quickReply.command.operationCreated'
+                : item.operation === 'updated' ? 'quickReply.command.operationUpdated'
+                : item.operation === 'deleted' ? 'quickReply.command.operationDeleted'
+                : item.operation === 'restored' ? 'quickReply.command.operationRestored'
+                : 'quickReply.command.operationBaseline';
+              return translate(settings.locale, 'quickReply.command.historyLine', {
+                version: item.version,
+                operation: translate(settings.locale, operationKey),
+                status: translate(settings.locale, item.enabled ? 'common.enabled' : 'common.disabled'),
+                name: item.name,
+                editor: item.changedBy,
+                createdAt: item.createdAt,
+              });
+            }).join('\n\n').slice(0, 3800)
+          : translate(settings.locale, 'quickReply.command.noHistory');
         await interaction.editReply({
-          embeds: [new EmbedBuilder().setTitle('Quick Reply Revision History').setDescription(description)
-            .setFooter({ text: 'History is retained in PostgreSQL; deleted replies remain listed here.' })],
+          embeds: [new EmbedBuilder()
+            .setTitle(translate(settings.locale, 'quickReply.command.historyTitle'))
+            .setDescription(description)
+            .setFooter({ text: translate(settings.locale, 'quickReply.command.historyFooter') })],
         });
         return true;
       }
@@ -558,16 +572,19 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           actorName: interaction.user.tag,
           detail: 'Restored retained quick reply content into new version ' + reply.version + '.',
         });
-        await interaction.editReply('Restored the selected historical content as quick reply version ' + reply.version + '. Prior versions remain unchanged.');
+        await interaction.editReply(translate(settings.locale, 'quickReply.command.restored', { version: reply.version }));
         return true;
       }
       if (subcommand === 'show') {
         const reply = await getQuickReply(guildId, interaction.options.getString('name-or-id', true), { isAdmin: access.isAdmin, roleIds: access.roleIds });
-        if (!reply) throw new Error('Quick reply not found or unavailable to your roles.');
+        if (!reply) throw new Error(translate(settings.locale, 'quickReply.command.notFound'));
         await interaction.editReply({
           embeds: [new EmbedBuilder().setTitle(reply.name).setDescription(reply.body)
-            .addFields({ name: 'Category', value: reply.category, inline: true },{ name:'Tags',value:reply.tags.join(', ')||'none',inline:true })
-            .setFooter({ text: 'Supported placeholders: {user}, {username}, {ticket_id}, {ticket_number}, {department}, {priority}, {staff}' })],
+            .addFields(
+              { name: translate(settings.locale, 'quickReply.command.category'), value: reply.category, inline: true },
+              { name: translate(settings.locale, 'quickReply.command.tags'), value: reply.tags.join(', ') || translate(settings.locale, 'common.none'), inline: true },
+            )
+            .setFooter({ text: translate(settings.locale, 'quickReply.command.placeholderFooter') })],
         });
         return true;
       }
@@ -585,12 +602,12 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           action: 'QUICK_REPLY_SAVED', actorId, actorName: interaction.user.tag,
           detail: 'Saved quick reply ' + reply.id + ' version ' + reply.version + '; role restrictions count=' + reply.allowedRoleIds.length + '.',
         });
-        await interaction.editReply('Saved quick reply "' + reply.name + '" at version ' + reply.version + '.');
+        await interaction.editReply(translate(settings.locale, 'quickReply.command.saved', { name: reply.name, version: reply.version }));
         return true;
       }
       if (subcommand === 'delete') {
         if (!access.isAdmin) throw accessDenied('Manage Server or Administrator permission');
-        if (!interaction.options.getBoolean('confirm', true)) throw new Error('Delete was not confirmed. No quick reply was removed.');
+        if (!interaction.options.getBoolean('confirm', true)) throw new Error(translate(settings.locale, 'quickReply.command.deleteNotConfirmed'));
         const quickReplyId = interaction.options.getString('name-or-id', true);
         const expectedVersion = interaction.options.getInteger('expected-version', true);
         const deleted = await deleteQuickReply(guildId, quickReplyId, expectedVersion, actorId);
@@ -598,7 +615,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           action: 'QUICK_REPLY_DELETED', actorId, actorName: interaction.user.tag,
           detail: 'Deleted quick reply identified by ' + quickReplyId.slice(0, 80) + '.',
         });
-        await interaction.editReply(deleted ? 'Quick reply deleted.' : 'No matching quick reply was found.');
+        await interaction.editReply(translate(settings.locale, deleted ? 'quickReply.command.deleted' : 'quickReply.command.deleteNotFound'));
         return true;
       }
       if (subcommand === 'send') {
