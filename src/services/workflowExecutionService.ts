@@ -5,7 +5,7 @@ import type { QueryResultRow } from 'pg';
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
 import { withPostgresAdvisoryLock } from '../core/persistence/operationLock';
 import { recoverySegmentMarker, extractRecoverySegmentMarkers } from '../core/domain/recoveryReplayMarkers';
-import { evaluateWorkflowConditions, validateWorkflowTemplateDefinition, type WorkflowAction, type WorkflowTemplateDefinition } from '../core/domain/workflowSafety';
+import { evaluateWorkflowConditions, getWorkflowExecutionBlockReason, validateWorkflowTemplateDefinition, type WorkflowAction, type WorkflowTemplateDefinition } from '../core/domain/workflowSafety';
 import type { EventActor } from '../core/events/domainEvents';
 import type { TicketPriority } from './advancedSettingsService';
 import { getGuildConfig } from './configService';
@@ -207,12 +207,8 @@ async function finishRun(
 }
 
 function assertWorkflowActionsExecutable(definition: WorkflowTemplateDefinition): void {
-  if (definition.actions.some((action) => action.type === 'assign_department')) {
-    throw new Error(
-      'This manual workflow cannot reassign departments yet because department changes must synchronize Discord category and role permissions. ' +
-      'Use the existing /supportforge ticket department command for that action, or remove assign_department from this template.',
-    );
-  }
+  const blockReason = getWorkflowExecutionBlockReason(definition);
+  if (blockReason) throw new Error(blockReason);
 }
 
 async function refreshTicketProjection(channel: TextChannel | ThreadChannel): Promise<void> {
