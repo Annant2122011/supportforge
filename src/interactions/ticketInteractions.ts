@@ -3272,7 +3272,7 @@ async function showTicketTagSelector(
           .setCustomId(
             'ticket:create-tag:page:' + departmentId + ':' + (safePage - 1) + (panelId ? ':' + panelId : ''),
           )
-          .setLabel('Previous')
+          .setLabel(translate(locale, 'quickReply.picker.previous'))
           .setEmoji('⬅️')
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(safePage === 0),
@@ -3286,7 +3286,7 @@ async function showTicketTagSelector(
           .setCustomId(
             'ticket:create-tag:page:' + departmentId + ':' + (safePage + 1) + (panelId ? ':' + panelId : ''),
           )
-          .setLabel('Next')
+          .setLabel(translate(locale, 'quickReply.picker.next'))
           .setEmoji('➡️')
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(safePage >= pageCount - 1),
@@ -5125,12 +5125,14 @@ async function showQuickReplySelector(
   if (!(await safeDeferReply(interaction))) return;
   try {
     const context = await getQuickReplyTicketContext(interaction);
+    const settings = await getAdvancedSettings(interaction.guildId!);
+    const locale = settings.locale;
     const replies = (await listQuickReplies(
       interaction.guildId!,
       context.access,
     )).filter((reply) => reply.enabled);
     if (!replies.length) {
-      await interaction.editReply('No enabled quick replies are available to your role. An administrator can configure them with /supportforge quick-reply save.');
+      await interaction.editReply(translate(locale, 'quickReply.picker.empty'));
       return;
     }
 
@@ -5146,7 +5148,7 @@ async function showQuickReplySelector(
     }));
     const menu = new StringSelectMenuBuilder()
       .setCustomId('ticket:quick-reply:select')
-      .setPlaceholder('Choose a saved response')
+      .setPlaceholder(translate(locale, 'quickReply.picker.placeholder').slice(0, 150))
       .setMinValues(1)
       .setMaxValues(1)
       .addOptions(options);
@@ -5170,9 +5172,7 @@ async function showQuickReplySelector(
       ));
     }
     await interaction.editReply({
-      content:
-        'Choose a quick reply to send into this ticket. Page ' + (page + 1) + ' of ' + pageCount +
-        '. Text is rendered with current ticket details; automatic mentions are disabled.',
+      content: translate(locale, 'quickReply.picker.prompt', { page: page + 1, pages: pageCount }),
       components,
     });
   } catch (error) {
@@ -5196,7 +5196,8 @@ async function handleQuickReplySelection(interaction: StringSelectMenuInteractio
       isAdmin: context.access.isAdmin,
       roleIds: context.access.roleIds,
     });
-    await interaction.editReply('Sent quick reply "' + reply.name + '". Automatic mentions are disabled; the ticket remains open.');
+    const settings = await getAdvancedSettings(interaction.guildId!);
+    await interaction.editReply(translate(settings.locale, 'quickReply.picker.sent', { name: reply.name }));
   } catch (error) {
     await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : 'Quick reply could not be sent safely.');
   }
@@ -6559,7 +6560,7 @@ export async function handleTicketInteraction(
       const page = Number(rawPage);
       if (!/^\d{1,3}$/.test(rawPage) || !Number.isInteger(page) || page < 0 || page > 999) {
         if (await safeDeferReply(interaction)) {
-          await interaction.editReply('This quick-reply page control is invalid. Reopen Quick Reply from the ticket panel.');
+          await interaction.editReply(translate((await getAdvancedSettings(interaction.guildId!)).locale, 'quickReply.picker.invalidPage'));
         }
         return;
       }
