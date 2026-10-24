@@ -2065,6 +2065,7 @@ async function handleTicketRecoveryInteraction(interaction: TicketRecoveryIntera
   if (!id.startsWith('sf:settings:recovery:')) return false;
   const guild = interaction.guild;
   if (!guild) return true;
+  const settings = await getAdvancedSettings(guild.id);
 
   if (id === 'sf:settings:recovery:channels') {
     await showRecoveryCandidates(interaction, 'discord_native');
@@ -2100,11 +2101,11 @@ async function handleTicketRecoveryInteraction(interaction: TicketRecoveryIntera
         await logSystemEvent(guild, config.supportCategoryId, 'TICKET_NATIVE_DELETION_RECOVERED',
           'Moderator ' + interaction.user.tag + ' restored ticket #' + restored.ticketNumber + ' from native Discord deletion. New channel ID: ' + restored.channelId + '. Replayed messages: ' + restored.restoredMessages + '. Failed messages: ' + restored.failedMessages + '.');
       }
-      const embed = await recoveryEmbed(guild, '✅ Ticket channel restored', 'Ticket #' + restored.ticketNumber + ' now exists in ' + '<#' + restored.channelId + '> with new channel ID ' + restored.channelId + ' and a new URL.\\n\\nReplayed messages: **' + restored.restoredMessages + '**\\nMessages that failed to replay: **' + restored.failedMessages + '**\\n\\nArchived author/channel/message IDs are included in each recovery message. The bot does not impersonate original users.');
-      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:channels', 'Back to Restore Channel', ButtonStyle.Secondary, '↩️'))] });
+      const embed = await recoveryEmbed(guild, '✅ ' + translate(settings.locale, 'settings.recovery.nativeRestoredTitle'), translate(settings.locale, 'settings.recovery.nativeRestoredDescription', { number: restored.ticketNumber, channel: '<#' + restored.channelId + '>', channelId: restored.channelId, restored: restored.restoredMessages, failed: restored.failedMessages }));
+      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:channels', translate(settings.locale, 'settings.recovery.backToRestoreChannel'), ButtonStyle.Secondary, '↩️'))] });
     } catch (error) {
       const embed = await recoveryEmbed(guild, '❌ Ticket recovery failed', error instanceof Error ? error.message : 'Unknown recovery error.');
-      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:channels', 'Back to Restore Channel', ButtonStyle.Secondary, '↩️'))] });
+      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:channels', translate(settings.locale, 'settings.recovery.backToRestoreChannel'), ButtonStyle.Secondary, '↩️'))] });
     }
     return true;
   }
@@ -2128,16 +2129,16 @@ async function handleTicketRecoveryInteraction(interaction: TicketRecoveryIntera
     const ticketId = parts[0] ?? '';
     const answer = parts[1] === 'yes' ? 'yes' : parts[1] === 'no' ? 'no' : null;
     if (!answer) {
-      await interaction.editReply('Invalid deletion-review answer.');
+      await interaction.editReply(translate(settings.locale, 'settings.recovery.invalidAnswer'));
       return true;
     }
     try {
       const ticket = await getPersistedTicketById(ticketId);
-      if (!ticket || ticket.guildId !== guild.id) throw new Error('Ticket deletion review belongs to a different server or no longer exists.');
+      if (!ticket || ticket.guildId !== guild.id) throw new Error(translate(settings.locale, 'settings.recovery.reviewCrossGuild'));
       const result = await answerTicketDeletionReview(ticketId, answer, interaction.user.id, interaction.user.tag);
       const config = await getGuildConfig(guild.id);
       const eventName = answer === 'yes' ? 'TICKET_DELETION_MARKED_ACCIDENTAL' : 'TICKET_DELETION_MARKED_INTENTIONAL';
-      const detail = 'Answer to “Was this ticket deleted by mistake?”: ' + (answer === 'yes' ? 'YES, deleted by mistake.' : 'NO, deletion was intentional.') +
+      const detail = translate(settings.locale, 'settings.recovery.question') + ': ' + translate(settings.locale, answer === 'yes' ? 'settings.recovery.reviewYes' : 'settings.recovery.reviewNo') +
         ' Reviewer: ' + interaction.user.tag + ' (' + interaction.user.id + '). Original channel ID: ' + result.originalChannelId + '.';
       if (config.supportCategoryId) {
         await ensureAuditDeveloperInfrastructure(guild, config.supportCategoryId);
@@ -2155,7 +2156,7 @@ async function handleTicketRecoveryInteraction(interaction: TicketRecoveryIntera
       if (answer === 'yes') {
         await showRecoveryCandidateDetail(interaction, ticketId, 'ticket_button');
       } else {
-        const embed = await recoveryEmbed(guild, '✅ Deletion review saved', 'The answer was recorded as **No, this deletion was intentional**. The response, reviewer ID and timestamp were written to the ticket audit stream and developer/system audit stream. This ticket will not appear in the accidental-deletion restoration path.');
+        const embed = await recoveryEmbed(guild, '✅ ' + translate(settings.locale, 'settings.recovery.reviewSavedTitle'), translate(settings.locale, 'settings.recovery.reviewSavedDescription'));
         await interaction.editReply({
           content: '',
           embeds: [embed],
@@ -2163,8 +2164,8 @@ async function handleTicketRecoveryInteraction(interaction: TicketRecoveryIntera
         });
       }
     } catch (error) {
-      const embed = await recoveryEmbed(guild, '❌ Could not save deletion review', error instanceof Error ? error.message : 'Unknown review error.');
-      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:review', 'Back to review list', ButtonStyle.Secondary, '↩️'))] });
+      const embed = await recoveryEmbed(guild, '❌ ' + translate(settings.locale, 'settings.recovery.reviewFailedTitle'), error instanceof Error ? error.message : translate(settings.locale, 'settings.recovery.unknownError'));
+      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:review', translate(settings.locale, 'settings.recovery.backToReviewList'), ButtonStyle.Secondary, '↩️'))] });
     }
     return true;
   }
@@ -2189,7 +2190,7 @@ async function handleTicketRecoveryInteraction(interaction: TicketRecoveryIntera
         await logSystemEvent(guild, config.supportCategoryId, 'TICKET_ACCIDENTAL_DELETION_RECOVERED',
           'Moderator ' + interaction.user.tag + ' restored ticket #' + restored.ticketNumber + ' after marking its ticket-button deletion accidental. New channel ID: ' + restored.channelId + '.');
       }
-      const embed = await recoveryEmbed(guild, '✅ Accidentally deleted ticket restored', 'Ticket #' + restored.ticketNumber + ' is available in ' + '<#' + restored.channelId + '>.\\n\\nReplayed messages: **' + restored.restoredMessages + '**\\nMessages that failed to replay: **' + restored.failedMessages + '**\\n\\nThe new channel has a new ID and URL. Recovery messages clearly show their original user and channel IDs.');
+      const embed = await recoveryEmbed(guild, '✅ ' + translate(settings.locale, 'settings.recovery.accidentalRestoredTitle'), translate(settings.locale, 'settings.recovery.accidentalRestoredDescription', { number: restored.ticketNumber, channel: '<#' + restored.channelId + '>', restored: restored.restoredMessages, failed: restored.failedMessages }));
       await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:review', 'Back to Ticket Deletion Review', ButtonStyle.Secondary, '↩️'))] });
     } catch (error) {
       const embed = await recoveryEmbed(guild, '❌ Ticket recovery failed', error instanceof Error ? error.message : 'Unknown recovery error.');
