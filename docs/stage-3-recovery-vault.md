@@ -53,8 +53,8 @@
 
 | Acceptance gate | Result |
 |---|---|
-| Source and tests for recovery preview, replay markers, backup/restore safeguards, SLA, CSAT and durable segment ledger | Implemented; latest CI passed on head f16b73d |
-| Build/test against disposable PostgreSQL | **PASS**: CI #2389, 194 tests, zero skipped; DB schema/integrity verification passed |
+| Source and tests for recovery preview, replay markers, backup/restore safeguards, SLA, CSAT and durable segment ledger | Implemented; latest exact-head CI #2396 passed on `d5245a8dcefc213a74c6469e56234357350ecc6c` |
+| Build/test against disposable PostgreSQL | **PASS**: [CI #2396](https://github.com/Annant2122011/supportforge/actions/runs/40054056156), 194/194 tests, zero skipped; DB schema/integrity verification passed |
 | Live Discord deletion/recovery/permissions/429/restart scenarios | **Blocked / not run** |
 | Isolated Neon backup and restore, including checksum/schema/row-count/application smoke test | **Blocked / not run** |
 | Real SLA alert timing and large-guild throughput | **Blocked / not run** |
