@@ -135,10 +135,10 @@ function readOptionalModalText(interaction: ModalSubmitInteraction, id: string):
   return value || undefined;
 }
 
-function parseStyle(value: string | undefined): SupportPanelButtonStyle {
+function parseStyle(value: string | undefined, locale: string): SupportPanelButtonStyle {
   const style = (value || 'primary').trim().toLowerCase();
   if (style !== 'primary' && style !== 'secondary' && style !== 'success' && style !== 'danger') {
-    throw new Error('Button style must be primary, secondary, success, or danger.');
+    throw new Error(translate(locale, 'settings.customPanel.error.invalidStyle'));
   }
   return style;
 }
@@ -254,7 +254,7 @@ function editButtonModal(
   const style = new TextInputBuilder().setCustomId('style').setLabel(translate(locale, 'settings.customPanel.modal.style')).setStyle(TextInputStyle.Short).setMaxLength(9).setRequired(true).setValue(button.style);
   const confirmation = new TextInputBuilder().setCustomId('confirmation').setLabel(translate(locale, 'settings.customPanel.modal.confirmationClear')).setStyle(TextInputStyle.Paragraph).setMaxLength(1000).setRequired(false);
   if (button.confirmationMessage) confirmation.setValue(button.confirmationMessage.slice(0, 1000));
-  return new ModalBuilder().setCustomId(PREFIX + 'modal:edit-button:' + panelId + ':' + button.id).setTitle('Edit Button')
+  return new ModalBuilder().setCustomId(PREFIX + 'modal:edit-button:' + panelId + ':' + button.id).setTitle(translate(locale, 'settings.customPanel.modal.editButtonTitle'))
     .addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(label),
       new ActionRowBuilder<TextInputBuilder>().addComponents(emoji),
@@ -334,7 +334,7 @@ async function showHome(interaction: PanelSettingsInteraction, page = 0): Promis
 async function showPanel(interaction: PanelSettingsInteraction, panelId: string): Promise<void> {
   const guild = interaction.guild!;
   const panel = await getCustomPanel(guild.id, panelId);
-  if (!panel) throw new Error('Panel not found. Return to Custom Panels and refresh the list.');
+  if (!panel) throw new Error(translate(settings.locale, 'settings.customPanel.error.notFound'));
   const config = await getGuildConfig(guild.id);
   const settings = await getAdvancedSettings(guild.id);
   const roleNames = panel.allowedRoleIds.map((id) => config.departments ? '<@&' + id + '>' : id);
@@ -714,7 +714,7 @@ async function showPublishChannelPicker(
   await prepare(interaction);
   const panel = await getCustomPanel(interaction.guild!.id, panelId);
   if (!panel) throw new Error('Panel not found.');
-  if (!panel.buttons.length) throw new Error('Add at least one button before publishing a panel.');
+  if (!panel.buttons.length) throw new Error(translate(settings.locale, 'settings.customPanel.error.mustAddButton'));
   const settings = await getAdvancedSettings(interaction.guild!.id);
   const channels = [...(await interaction.guild!.channels.fetch()).values()]
     .filter((channel): channel is import('discord.js').TextChannel =>
@@ -788,7 +788,7 @@ export async function handleCustomPanelSettingsInteraction(
       } else if (targetType === 'form') {
         await showFormPicker(interaction, panelId, 0, buttonId);
       } else {
-        throw new Error('Choose a supported button target.');
+        throw new Error(translate((await getAdvancedSettings(guild.id)).locale, 'settings.customPanel.error.unsupportedTarget'));
       }
       return true;
     }
@@ -951,7 +951,7 @@ export async function handleCustomPanelSettingsInteraction(
       const panelId = parts[4] ?? '';
       const departmentId = interaction.values[0] ?? '';
       const department = (await getGuildConfig(guild.id)).departments[departmentId];
-      if (!department) throw new Error('That department no longer exists. Refresh and try again.');
+      if (!department) throw new Error(translate((await getAdvancedSettings(guild.id)).locale, 'settings.customPanel.error.departmentMissing'));
       await showDepartmentTagPicker(interaction, panelId, department.id);
       return true;
     }
@@ -966,8 +966,8 @@ export async function handleCustomPanelSettingsInteraction(
       const departmentId = parts[5] ?? '';
       const tagValue = interaction.values[0] ?? '*';
       const department = (await getGuildConfig(guild.id)).departments[departmentId];
-      if (!department) throw new Error('That department no longer exists. Refresh and try again.');
-      if (tagValue !== '*' && !department.tags[tagValue]) throw new Error('That tag no longer exists. Refresh the tag picker.');
+      if (!department) throw new Error(translate((await getAdvancedSettings(guild.id)).locale, 'settings.customPanel.error.departmentMissing'));
+      if (tagValue !== '*' && !department.tags[tagValue]) throw new Error(translate((await getAdvancedSettings(guild.id)).locale, 'settings.customPanel.error.tagMissing'));
       await interaction.showModal(addDepartmentButtonModal((await getAdvancedSettings(guild.id)).locale, panelId, department.id, department.name, tagValue === '*' ? null : tagValue));
       return true;
     }
@@ -999,7 +999,7 @@ export async function handleCustomPanelSettingsInteraction(
       const formId = parts[5] ?? '';
       const tagId = interaction.values[0] ?? '';
       const form = (await listTicketForms(guild.id)).find((candidate) => candidate.id === formId && candidate.active);
-      if (!form) throw new Error('The selected form is no longer active.');
+      if (!form) throw new Error(translate((await getAdvancedSettings(guild.id)).locale, 'settings.customPanel.error.formInactive'));
       await interaction.showModal(addFormButtonModal((await getAdvancedSettings(guild.id)).locale, panelId, formId, tagId, form.name));
       return true;
     }
@@ -1078,7 +1078,7 @@ export async function handleCustomPanelSettingsInteraction(
     if (interaction.isStringSelectMenu() && id.startsWith(PREFIX + 'channel:')) {
       const panelId = id.slice((PREFIX + 'channel:').length);
       const targetChannelId = interaction.values[0];
-      if (!targetChannelId) throw new Error('Choose a channel first.');
+      if (!targetChannelId) throw new Error(translate((await getAdvancedSettings(guild.id)).locale, 'settings.customPanel.error.chooseChannel'));
       const panel = await getCustomPanel(guild.id, panelId);
       if (!panel) throw new Error('Panel not found.');
       if (panel.buttons.length < 1) throw new Error(translate((await getAdvancedSettings(guild.id)).locale, 'settings.customPanel.error.mustAddButton'));
@@ -1244,7 +1244,7 @@ export async function handleCustomPanelSettingsInteraction(
         tagId,
         label: interaction.fields.getTextInputValue('label'),
         emoji: readOptionalModalText(interaction, 'emoji') ?? null,
-        style: parseStyle(interaction.fields.getTextInputValue('style')),
+        style: parseStyle(interaction.fields.getTextInputValue('style'), (await getAdvancedSettings(guild.id)).locale),
         confirmationMessage: confirmationInput?.toLowerCase() === 'none' ? null : (confirmationInput ?? null),
       });
       await audit(interaction, 'CUSTOM_PANEL_BUTTON_ADDED', 'Added department button "' + button.label + '" to panel ' + panelId + '.');
@@ -1264,7 +1264,7 @@ export async function handleCustomPanelSettingsInteraction(
         tagId,
         label: interaction.fields.getTextInputValue('label'),
         emoji: readOptionalModalText(interaction, 'emoji') ?? null,
-        style: parseStyle(interaction.fields.getTextInputValue('style')),
+        style: parseStyle(interaction.fields.getTextInputValue('style'), (await getAdvancedSettings(guild.id)).locale),
         confirmationMessage: confirmationInput?.toLowerCase() === 'none' ? null : (confirmationInput ?? null),
       });
       await audit(interaction, 'CUSTOM_PANEL_FORM_BUTTON_ADDED', 'Added form-target button "' + button.label + '" for form ' + formId + ' to panel ' + panelId + '.');
@@ -1281,7 +1281,7 @@ export async function handleCustomPanelSettingsInteraction(
       const button = await updateCustomPanelButton(guild.id, panelId, buttonId, {
         label: interaction.fields.getTextInputValue('label'),
         emoji: emojiValue?.toLowerCase() === 'none' ? null : (emojiValue ?? null),
-        style: parseStyle(interaction.fields.getTextInputValue('style')),
+        style: parseStyle(interaction.fields.getTextInputValue('style'), (await getAdvancedSettings(guild.id)).locale),
         confirmationMessage: confirmationValue?.toLowerCase() === 'none' ? null : (confirmationValue ?? null),
       });
       await audit(interaction, 'CUSTOM_PANEL_BUTTON_UPDATED', 'Updated button "' + button.label + '" (' + buttonId + ') on panel ' + panelId + '.');
@@ -1290,11 +1290,11 @@ export async function handleCustomPanelSettingsInteraction(
     }
     return false;
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown custom panel error.';
+    const message = error instanceof Error ? error.message : translate(locale, 'settings.customPanel.error.unknown');
     const theme = await getGuildTheme(guild.id).catch(() => ({ label: 'Midnight Indigo', color: 0x5865f2 }));
-    const embed = new EmbedBuilder().setColor(theme.color).setTitle('Custom Panel action failed').setDescription(message.slice(0, 4096));
+    const embed = new EmbedBuilder().setColor(theme.color).setTitle(translate(locale, 'settings.customPanel.error.genericTitle')).setDescription(message.slice(0, 4096));
     if (interaction.deferred || interaction.replied) {
-      await interaction.editReply({ content: '', embeds: [embed], components: [row(makeButton(PREFIX + 'home', 'Custom Panels', ButtonStyle.Primary, '📋'))] }).catch(() => undefined);
+      await interaction.editReply({ content: '', embeds: [embed], components: [row(makeButton(PREFIX + 'home', translate(locale, 'settings.customPanel.detail.list'), ButtonStyle.Primary, '📋'))] }).catch(() => undefined);
     } else {
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral }).catch(() => undefined);
     }
