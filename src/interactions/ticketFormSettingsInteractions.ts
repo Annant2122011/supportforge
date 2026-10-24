@@ -17,6 +17,9 @@ import {
 
 import { getGuildConfig } from '../services/configService';
 import { getGuildTheme } from '../services/uiThemeService';
+import { getAdvancedSettings } from '../services/advancedSettingsService';
+import { translate } from '../i18n/translationService';
+import { localizeFormSettingsMessage, localizeFormSettingsText } from '../i18n/formSettingsCopy';
 import { logSettingsEvent } from '../services/auditLogService';
 import {
   applyTicketFormTemplate,
@@ -74,10 +77,12 @@ async function render(interaction: FormSettingsInteraction, content: string, com
   const description = heading ? localizedContent.replace(heading[0], '').trim() : localizedContent;
   for (const row of components) {
     for (const component of row.components) {
-      if (component instanceof ButtonBuilder && typeof component.data.label === 'string') {
-        component.setLabel(localizeFormSettingsText(locale, component.data.label));
-      } else if (component instanceof StringSelectMenuBuilder && typeof component.data.placeholder === 'string') {
-        component.setPlaceholder(localizeFormSettingsText(locale, component.data.placeholder));
+      if (component instanceof ButtonBuilder) {
+        const label = (component.toJSON() as { label?: string }).label;
+        if (label) component.setLabel(localizeFormSettingsText(locale, label));
+      } else if (component instanceof StringSelectMenuBuilder) {
+        const placeholder = (component.toJSON() as { placeholder?: string }).placeholder;
+        if (placeholder) component.setPlaceholder(localizeFormSettingsText(locale, placeholder));
       }
     }
   }
