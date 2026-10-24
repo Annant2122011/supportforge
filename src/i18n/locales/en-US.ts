@@ -1037,6 +1037,13 @@ const enUS = {
   'ticket.report.error.targetNotParticipant': "The target must be a participant in this ticket.",
   'ticket.report.error.selfReport': "You cannot report yourself.",
   'panelBuilder.authorSuffix': "ResolvX Support",
+  'settings.reports.command.enabled': "Safety reports are now **Enabled**.",
+  'settings.reports.command.disabled': "Safety reports are now **Disabled**.",
+  'settings.reports.command.categoryListTitle': "Report Categories",
+  'settings.reports.command.pageOutOfRange': "Page {page} does not exist. This result has {pages} page(s).",
+  'settings.reports.command.subcategoryAdded': "Added report subcategory **{name}** (ID: {id}).",
+  'settings.reports.command.subcategoryRenamed': "Renamed report subcategory to **{name}**.",
+  'settings.reports.command.subcategoryRemoved': "Removed report subcategory **{name}**.",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
