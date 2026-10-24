@@ -296,6 +296,86 @@ export async function listQuickReplyRevisions(
   }));
 }
 
+/** Restore the contents of a retained revision as a new current version. History is never rewritten. */
+export async function restoreQuickReplyRevision(
+  guildId: string,
+  actorId: string,
+  idOrName: string,
+  revisionNumber: number,
+  expectedVersion: number,
+): Promise<QuickReply> {
+  if (!Number.isInteger(revisionNumber) || revisionNumber < 1 ||
+      !Number.isInteger(expectedVersion) || expectedVersion < 1) {
+    throw new Error('Revision and expected current version must be positive integers.');
+  }
+  const value = idOrName.trim();
+  if (!value) throw new Error('A quick reply name or ID is required.');
+  const client = await getPostgresPool().connect();
+  try {
+    await client.query('BEGIN');
+    const currentResult = await client.query<QuickReplyRow & {
+      normalized_name: string;
+      deleted_at: Date | string | null;
+    }>(
+      'SELECT ' + COLUMNS + ',normalized_name,deleted_at FROM quick_replies ' +
+        'WHERE guild_id=$1 AND (id=$2 OR normalized_name=$3) ' +
+        'ORDER BY (deleted_at IS NULL) DESC,updated_at DESC LIMIT 1 FOR UPDATE',
+      [guildId, value, normalizeName(value)],
+    );
+    const current = currentResult.rows[0];
+    if (!current) throw new Error('Quick reply was not found in this server.');
+    if (Number(current.version) !== expectedVersion) {
+      throw new Error('This quick reply changed since it was opened. Refresh its current version before restoring history.');
+    }
+
+    const revisionResult = await client.query<QueryResultRow & {
+      name: string;
+      body: string;
+      category: string;
+      tags: string[];
+      allowed_role_ids: string[];
+      enabled: boolean;
+    }>(
+      'SELECT name,body,category,tags,allowed_role_ids,enabled FROM quick_reply_revisions ' +
+        'WHERE guild_id=$1 AND quick_reply_id=$2 AND version=$3 LIMIT 1',
+      [guildId, current.id, revisionNumber],
+    );
+    const revision = revisionResult.rows[0];
+    if (!revision) throw new Error('That quick reply revision does not exist in this server.');
+
+    const restored = validateQuickReplyInput({
+      name: revision.name,
+      body: revision.body,
+      category: revision.category,
+      tags: revision.tags ?? [],
+      allowedRoleIds: revision.allowed_role_ids ?? [],
+      enabled: Boolean(revision.enabled),
+    });
+    const updated = await client.query<QuickReplyRow>(
+      'UPDATE quick_replies SET name=$4,normalized_name=$5,body=$6,category=$7,tags=$8,allowed_role_ids=$9,' +
+        'enabled=$10,deleted_at=NULL,version=version+1,updated_by=$11,updated_at=NOW() ' +
+        'WHERE guild_id=$1 AND id=$2 AND version=$3 RETURNING ' + COLUMNS,
+      [
+        guildId, current.id, expectedVersion, restored.name, normalizeName(restored.name), restored.body,
+        restored.category, restored.tags, restored.allowedRoleIds, restored.enabled ?? false, actorId,
+      ],
+    );
+    if (!updated.rows[0]) throw new Error('This quick reply changed during history restoration. Refresh and retry.');
+    const saved = fromRow(updated.rows[0]);
+    await insertQuickReplyRevision(client, saved, actorId, 'updated');
+    await client.query('COMMIT');
+    return saved;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === '23505') {
+      throw new Error('A different active quick reply already uses that name. Resolve the name conflict before restoring.');
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export function renderQuickReply(reply: QuickReply, context: QuickReplyContext): string {
   const values: Record<string,string> = {
     user:context.user,
