@@ -705,6 +705,7 @@ const enUS = {
   'settings.diagnostics.restoredDescription': "**Restored:** `{restored}`\n**Pre-restore checkpoint:** `{checkpoint}`\n\nRestored guild/advanced settings, support-hours policies and current schemas for forms present in the checkpoint using new immutable versions. Existing submissions, historical form versions and forms created after the checkpoint were not deleted.{refreshFailures}",
   'settings.diagnostics.refreshFailures': "\n\n⚠️ Refresh failed for: {failures}. Use the Settings Refresh action after checking permissions.",
   'settings.diagnostics.restoreFailed': "Configuration restore was not completed. Check the diagnostic logs and use the saved pre-restore checkpoint if an operation partially failed.",
+  'settings.recovery.modalOpenFailed': "The settings form could not be opened. Please try again.",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
