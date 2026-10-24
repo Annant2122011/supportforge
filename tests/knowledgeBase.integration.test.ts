@@ -63,6 +63,20 @@ test('Knowledge Base persistence enforces stale revisions, publication, and arti
     assert.equal(published.revision, 3);
     assert.equal((await getKnowledgeArticle(guildId, publicArticle.id, visitor))?.revision, 3);
 
+    const localizedArticle = await createKnowledgeArticle(guildId, actorId, {
+      title: 'সহায়তা কেন্দ্র ' + suffix,
+      summary: 'গ্রাহক সহায়তা ও ফেরত নীতি',
+      body: 'গ্রাহক সহায়তা দল ফেরত নীতি এবং অর্থ ফেরতের অনুরোধ পর্যালোচনা করে।',
+      category: 'সহায়তা',
+      tags: ['ফেরত', 'সহায়তা'],
+    });
+    await setKnowledgeArticleStatus(guildId, localizedArticle.id, 1, actorId, 'published');
+    const localizedResults = await searchKnowledgeBase(guildId, 'সহায়তা ফেরত', visitor, 'stage4-test-visitor');
+    assert.ok(
+      localizedResults.some((article) => article.id === localizedArticle.id),
+      'indexed locale-neutral search must find Bengali body terms even when English full-text stemming cannot',
+    );
+
     const staffArticle = await createKnowledgeArticle(guildId, actorId, {
       title: 'Staff escalation ' + suffix,
       body: 'Private staff escalation process VerificationTokenBlue',
