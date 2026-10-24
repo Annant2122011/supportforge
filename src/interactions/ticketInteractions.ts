@@ -5190,6 +5190,7 @@ async function handleQuickReplySelection(interaction: StringSelectMenuInteractio
       guild: context.guild,
       channel: context.channel,
       quickReplyId,
+      sendIntentId: interaction.id,
       actorId: interaction.user.id,
       actorName: interaction.user.tag,
       actorUsername: interaction.user.username,
@@ -5197,7 +5198,11 @@ async function handleQuickReplySelection(interaction: StringSelectMenuInteractio
       roleIds: context.access.roleIds,
     });
     const settings = await getAdvancedSettings(interaction.guildId!);
-    await interaction.editReply(translate(settings.locale, 'quickReply.picker.sent', { name: reply.name }));
+    await interaction.editReply(translate(
+      settings.locale,
+      reply.status === 'uncertain' ? 'quickReply.picker.uncertain' : 'quickReply.picker.sent',
+      { name: reply.reply.name },
+    ));
   } catch (error) {
     await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : 'Quick reply could not be sent safely.');
   }
