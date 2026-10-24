@@ -1036,6 +1036,7 @@ const enUS = {
   'ticket.report.error.reviewExpired': "This report review has expired or is not assigned to you.",
   'ticket.report.error.targetNotParticipant': "The target must be a participant in this ticket.",
   'ticket.report.error.selfReport': "You cannot report yourself.",
+  'panelBuilder.authorSuffix': "ResolvX Support",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
