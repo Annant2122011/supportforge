@@ -43,6 +43,17 @@
 - Added disposable-PostgreSQL integration tests for concurrent quick-reply edits, disabled-state preservation, stale workflow writes, Knowledge Base publication/revision safety, public/staff/role access, hidden search results and duplicate article ratings.
 - These additions require the new PR-head CI run to complete before they are marked verified.
 
+## 2026-10-24 integrity and release-safety refinement
+
+- Quick replies now write immutable revision snapshots in the same PostgreSQL transaction as create/update/delete; delete is a version-checked soft delete. `/supportforge quick-reply history` can inspect retained versions, including deleted records.
+- Workflow templates now retain immutable snapshots for create/update/enable/disable/delete, with compare-and-swap on expected version and soft delete. `/supportforge workflow history` exposes the ledger. Catalog enablement remains non-executable metadata.
+- The restore utility now refuses a target matching either currently configured `DATABASE_URL` or `DATABASE_URL_UNPOOLED` before changing process-local variables; malformed configured URLs fail closed. The archive-source mismatch, empty-target, checksum, explicit confirmation, migration and orphan checks remain in force.
+- The PostgreSQL verifier requires quick-reply/workflow history tables and checks for orphaned productivity revisions, in addition to the existing Knowledge Base insert/update search-vector smoke test inside a rolled-back transaction.
+- SLA task telemetry now marks a partial sweep as failed if any ticket could not be evaluated, while continuing with other guilds and preserving already persisted/idempotent alerts.
+- Knowledge Base article paging supports 7 pages at 3,500 characters, matching the service's 20,000-character article limit.
+
+These changes require CI on the latest exact PR head. The older passing CI run below is retained as historical evidence only and does not certify this refinement commit.
+
 ## Stage 1 and Stage 2 acceptance truth
 
 - Stage 1 recorded CI #2052 passed build, 138/138 tests, zero skips and disposable PostgreSQL verification.
