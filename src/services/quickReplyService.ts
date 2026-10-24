@@ -273,7 +273,7 @@ export async function listQuickReplyRevisions(
   const value = idOrName.trim();
   const found = await getPostgresPool().query<QueryResultRow & { id: string }>(
     'SELECT id FROM quick_replies WHERE guild_id=$1 AND (id=$2 OR normalized_name=$3) ' +
-      'ORDER BY (deleted_at IS NULL) DESC,updated_at DESC LIMIT 1',
+      'ORDER BY (id=$2) DESC,(deleted_at IS NULL) DESC,updated_at DESC LIMIT 1',
     [guildId, value, normalizeName(value)],
   );
   const replyId = found.rows[0]?.id;
@@ -319,7 +319,7 @@ export async function restoreQuickReplyRevision(
     }>(
       'SELECT ' + COLUMNS + ',normalized_name,deleted_at FROM quick_replies ' +
         'WHERE guild_id=$1 AND (id=$2 OR normalized_name=$3) ' +
-        'ORDER BY (deleted_at IS NULL) DESC,updated_at DESC LIMIT 1 FOR UPDATE',
+        'ORDER BY (id=$2) DESC,(deleted_at IS NULL) DESC,updated_at DESC LIMIT 1 FOR UPDATE',
       [guildId, value, normalizeName(value)],
     );
     const current = currentResult.rows[0];
