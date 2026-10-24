@@ -24,6 +24,8 @@ const enUS = {
   'settings.dashboard.field.serverTheme': "Server theme",
   'settings.dashboard.field.configurationSnapshot': "Configuration snapshot",
   'settings.value.noTimer': "No timer (365-day maximum)",
+  'settings.value.days': "{count} days",
+  'settings.value.noneSuffix': " (none)",
   'settings.value.configured': "Configured",
   'settings.value.notConfigured': "Not configured",
   'settings.value.panelBudget': "{lines} lines • {cap} message cap",
