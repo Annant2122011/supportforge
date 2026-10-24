@@ -95,7 +95,7 @@ test('knowledge search finds exact terms inside long article bodies, including n
   });
   assert.ok(result.score >= 0.5, 'a complete body-token match should be offered');
   assert.equal(shouldOfferKnowledgeResult(result), true);
-  const nonEnglish = scoreKnowledgeCandidate('বাংলা ফেরত', {
+  const nonEnglish = scoreKnowledgeCandidate('সহায়তা ফেরত', {
     title: 'Account support', summary: 'General account help', category: 'General', tags: ['account'], bodyTokens,
   });
   assert.ok(nonEnglish.score >= 0.5, 'Unicode body tokens should be searchable without English stemming');
