@@ -3,7 +3,7 @@
 **Implementation branch:** feature/stage-4-knowledge-productivity  
 **Pull request:** [#38, Stage 4: Knowledge Base and staff productivity](https://github.com/Annant2122011/supportforge/pull/38)  
 **Persistence:** PostgreSQL migration 14 (after Stage 3 migration 13); Neon remains the production source of truth.  
-**Delivery status:** Increment 1 implemented; full Stage 4 exit criteria are not yet complete.
+**Delivery status:** Core Knowledge Base, quick replies, related-ticket links and archived transcript search are implemented; full Stage 4 exit criteria still require controlled acceptance and the remaining workflow/productivity checks.
 
 ## Increment 1 — Deterministic Knowledge Base
 
@@ -33,6 +33,20 @@
 - Immutable quick-reply revisions and usage events are stored in PostgreSQL. Metrics return aggregate use counts.
 - A reply is sent before its usage event is recorded. If that telemetry write fails, the sent reply is not falsely reported as unsent; the failure is logged for operator follow-up.
 
+## Related-ticket links
+
+- `/supportforge related link`, `list` and `unlink` maintain guild-scoped relationships between two existing durable tickets.
+- Links are idempotent, self-links and cross-guild references are rejected, and duplicate link attempts return the existing relationship instead of adding a second copy.
+- The command requires Manage Server/Administrator or configured staff roles covering both ticket departments. Listing filters links whose other ticket belongs to a department the staff member cannot access.
+- Unlinking is a soft removal that preserves the link, actor and removal timestamp.
+
+## Archived transcript search
+
+- `/supportforge ticket search-archive` searches archived message text within one durable ticket, rather than scanning every guild transcript.
+- Search is available to administrators and configured staff for the target ticket's department. The service independently verifies ticket/guild identity.
+- Results are bounded to ten rows maximum, return short context snippets with author/time/message metadata, disable mentions, and omit attachment URLs and staff-only audit-channel notes.
+- No match reports the archive/backfill limitation; it does not claim the ticket never contained matching text.
+
 ## Database and safety contract
 
 - Tables are guild-scoped and every read/update includes the guild identifier.
@@ -40,17 +54,15 @@
 - Publishing, editing, archive operations, and synonym mutations use the server Settings audit stream when configured.
 - No AI dependency, webhook, public API, production database operation or deployment is introduced.
 - Search and feedback are ephemeral by default; article share and quick-reply use are explicit actions that post into a ticket channel.
-- Migration verification now checks the new article, revision, synonym, usage, feedback, quick-reply and quick-reply revision tables.
+- Migration verification checks the recovery replay segment ledger plus the article, revision, synonym, usage, feedback, quick-reply, quick-reply revision and related-ticket link tables. Transcript search uses the existing archive tables, not a duplicate transcript store.
 
 ## Remaining Stage 4 increments
 
-1. Add a staff-only automatic article suggestion at form/ticket start with feedback loops, ensuring suggestions can never block ticket creation.
-2. Add guarded related-ticket linking, templates and duplicate override audit, using existing ticket IDs and authorization rather than a separate ticket source of truth.
-3. Extend safe workflows only with validated conditions/actions, immutable versions, preview, audit and rollback; no arbitrary graph execution.
-4. Complete transcript archive navigation, content search and attachment access with retention/role checks and recovery metadata.
-5. Add accessibility/mobile embed review, performance tests for large per-guild article sets and rate-limited usage metrics.
-6. Expand PostgreSQL integration tests for data isolation, article status visibility, unique slug races, immutable revision correctness, synonym isolation, vote uniqueness, quick-reply department scopes and failed sends/telemetry.
-7. Update product/operator documentation, then complete the full staged PR integration sequence and authorized non-production Discord acceptance.
+1. Add optional article suggestions to supported form/ticket entry points. Suggestions must be staff/customer-visibility filtered and must never delay or block ticket creation.
+2. Implement a deliberately constrained workflow v1 only after a concrete trigger/action allowlist, immutable versions, preview, audit, idempotency and compensation behavior are covered by tests. Do not add arbitrary graph execution or actions that bypass ticket permissions/state transitions.
+3. Expand transcript archive navigation and attachment-reference browsing with retention, department permission and recovery-state checks; transcript text search is implemented in this increment.
+4. Add realistic scale/rate-limit and concurrency tests for large per-guild article catalogs, search usage telemetry, concurrent article slug creation, related-link races and concurrent restore operations.
+5. Complete the authorized non-production Discord acceptance, isolated Neon backup/restore drill and ordered merge/retest of PRs #33 → #31 → #32 → #34 → #38. Do not mark the product production-ready solely because feature-branch CI is green.
 
 ## Acceptance criteria
 
@@ -59,3 +71,8 @@
 - Large-guild test confirms pagination and bounded response bodies. The fuzzy fallback's 500-article candidate cap is visible in operator documentation.
 - Restore and archival tests show article/reply history is not silently deleted.
 - Stage 1 and Stage 2 release gates remain separately satisfied; successful Stage 4 CI is not a substitute for those gates.
+
+
+## Latest combined CI evidence — 2026-10-24
+
+The combined Stage 3 + Stage 4 head `deda4ffb5ef58f60db3fc00cb52103329d78d161` passed [ResolvX CI #2514](https://github.com/Annant2122011/supportforge/actions/runs/40084718577): build passed, **200/200 tests passed**, zero skipped, and the PostgreSQL schema/integrity verifier passed, including recovery replay segments, Knowledge Base, quick replies and related-ticket links. This is automated evidence only. Test-guild acceptance and isolated non-production Neon restore remain outstanding.

@@ -65,3 +65,10 @@ Stage 2 is not accepted if diagnostics hide later results, report unknown checks
 - PRs #33, #31 and #32 were still drafts at the latest branch audit; the actual test-guild run and isolated Neon restore are BLOCKED / NOT RUN.
 - Stage 3 recorded additional CI for archive preview, SLA/CSAT/metrics, and backup/restore tooling; these remain distinct from a successful live Neon restore drill.
 - Stage 4 PR #38 adds KB/quick-reply capability. Its status depends on CI for the current head and controlled acceptance; no later-stage feature can waive Stage 1/2 gates.
+
+
+## Combined-tree verification addendum — 2026-10-24
+
+The current Stage 4 stack contains the Stage 3 recovery segment ledger, restart/operation locking, SLA/CSAT and backup/restore safeguards. The combined code head `deda4ffb5ef58f60db3fc00cb52103329d78d161` passed [ResolvX CI #2514](https://github.com/Annant2122011/supportforge/actions/runs/40084718577): build passed, **200/200 tests passed**, zero skipped, and disposable PostgreSQL schema/integrity verification passed. This does not change the Stage 1/2 acceptance status: PRs #33, #31 and #32 are not merged, and authorized non-production Discord acceptance plus isolated non-production Neon restore remain BLOCKED / NOT RUN.
+
+The next merge sequence remains #33 → #31 → #32 → #34 → #38. Re-run CI whenever a PR base changes; CI on a stacked feature branch does not by itself certify the final `main` merge result.
