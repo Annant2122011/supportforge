@@ -1905,11 +1905,12 @@ const RECOVERY_PAGE_SIZE = 20;
 
 async function recoveryEmbed(guild: Guild, title: string, description: string): Promise<EmbedBuilder> {
   const config = await getGuildConfig(guild.id);
+  const settings = await getAdvancedSettings(guild.id);
   return new EmbedBuilder()
     .setColor(getThemeColor(config.theme))
     .setTitle(title.slice(0, 256))
-    .setDescription((description || 'Use the controls below to continue.').slice(0, 3900))
-    .setFooter({ text: getThemeDefinition(config.theme).label + ' theme • ResolvX Ticket Recovery' })
+    .setDescription((description || translate(settings.locale, 'settings.recovery.genericContinue')).slice(0, 3900))
+    .setFooter({ text: translate(settings.locale, 'settings.recovery.footer', { theme: getThemeDefinition(config.theme).label }) })
     .setTimestamp();
 }
 
