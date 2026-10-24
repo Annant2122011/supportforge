@@ -1,4 +1,4 @@
-import { EmbedBuilder, MessageFlags, type ChatInputCommandInteraction, type TextChannel, type ThreadChannel } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, type ChatInputCommandInteraction, type TextChannel, type ThreadChannel } from 'discord.js';
 
 import { getGuildConfig } from '../services/configService';
 import { getPersistedTicket } from '../services/ticketPersistenceService';
@@ -272,6 +272,46 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           });
         }
         await interaction.editReply('Article "' + article.title + '" is now ' + article.status + ' at revision ' + article.revision + '.');
+        return true;
+      }
+
+      if (subcommand === 'suggest') {
+        if (!access.isStaff) throw accessDenied('a configured department staff role');
+        const ticket = await requireTicketInCurrentChannel(interaction);
+        if (!canHandleTicketForStaff(access, ticket, config)) {
+          throw accessDenied('the staff role configured for this ticket department');
+        }
+        const query = interaction.options.getString('query', true);
+        const results = await searchKnowledgeBase(guildId, query, access, actorId);
+        if (!results.length) {
+          await interaction.editReply(
+            'No confident article match was found for this ticket. This does not block human support; continue helping the customer normally.',
+          );
+          return true;
+        }
+
+        const description = results.map((result, index) =>
+          '**' + (index + 1) + '. ' + result.title + '** • ' + result.confidence.toUpperCase() +
+          ' confidence • score ' + result.score + '\\n' +
+          (result.summary || 'No summary') + '\\nCategory: ' + result.category +
+          (result.tags.length ? '\\nTags: ' + result.tags.join(', ') : ''),
+        ).join('\\n\\n').slice(0, 3600);
+        const shareable = results.filter((result) => result.confidence !== 'low').slice(0, 5);
+        const components = shareable.length
+          ? [new ActionRowBuilder<ButtonBuilder>().addComponents(
+              ...shareable.map((result) => new ButtonBuilder()
+                .setCustomId('sf:kb:share:' + result.id + ':' + ticket.channelId)
+                .setLabel('Share ' + (results.findIndex((item) => item.id === result.id) + 1))
+                .setEmoji('📚')
+                .setStyle(ButtonStyle.Secondary)),
+            )]
+          : [];
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setTitle('📚 Suggested Knowledge Base articles')
+            .setDescription(description)
+            .setFooter({ text: 'Share buttons are shown only for medium/high confidence. Suggestions never replace human support.' })],
+          components,
+        });
         return true;
       }
 
