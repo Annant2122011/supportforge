@@ -15,14 +15,16 @@ export interface RelatedTicket {
   linkedAt: string;
 }
 
-function canonicalPair(left: string, right: string): [string,string] {
-  if (!left.trim() || !right.trim()) throw new Error('Both ticket IDs are required.');
+export function canonicalRelatedTicketPair(leftValue: string, rightValue: string): [string, string] {
+  const left = leftValue.trim();
+  const right = rightValue.trim();
+  if (!left || !right) throw new Error('Both ticket IDs are required.');
   if (left === right) throw new Error('A ticket cannot be linked to itself.');
-  return left < right ? [left,right] : [right,left];
+  return left < right ? [left, right] : [right, left];
 }
 
 export async function linkRelatedTickets(guildId: string,leftTicketId: string,rightTicketId: string,actorId: string): Promise<void> {
-  const [left,right]=canonicalPair(leftTicketId,rightTicketId);
+  const [left,right]=canonicalRelatedTicketPair(leftTicketId,rightTicketId);
   const client=await getPostgresPool().connect();
   try {
     await client.query('BEGIN');
