@@ -531,6 +531,11 @@ const enUS = {
   'settings.customPanel.error.mustAddButton': "Add at least one button before publishing a panel.",
   'settings.customPanel.error.invalidChannel': "Publish target must be a standard text channel.",
   'settings.customPanel.error.unsupportedTarget': "Choose a supported button target.",
+  'settings.customPanel.roles.panelTitle': "Panel Access Rules",
+  'settings.customPanel.roles.buttonTitle': "Button Access Rules",
+  'settings.customPanel.roles.current': "Current allowed roles",
+  'settings.customPanel.roles.description': "Choose roles below. Selection replaces the current allowed-role list. An empty selection permits everyone at this level. Panel and button rules are combined: when both are restricted, the member must satisfy both.",
+  'settings.customPanel.roles.allowEveryone': "Allow Everyone",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
