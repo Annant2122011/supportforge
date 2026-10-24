@@ -2248,7 +2248,7 @@ export async function execute(
 
         if (action === 'show' || action === 'share') {
           const key = interaction.options.getString('article', true).trim();
-          const article = await getKnowledgeArticle(guild.id, key, { publishedOnly: !admin, includeStaff: staffAccess });
+          const article = await getKnowledgeArticle(guild.id, key, { publishedOnly: action === 'share' || !admin, includeStaff: staffAccess });
           if (!article || (!admin && article.status !== 'published')) throw new Error('Published article not found or you do not have permission to view it.');
           if (action === 'show') {
             if (article.status === 'published') await recordKnowledgeArticleView(guild.id, article.id).catch(() => undefined);
