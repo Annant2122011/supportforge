@@ -25,6 +25,8 @@ async function main(): Promise<void> {
     'knowledge_base_article_feedback',
     'quick_replies',
     'quick_reply_revisions',
+    'quick_reply_send_intents',
+    'quick_reply_usage_events',
     'workflow_templates',
     'workflow_template_revisions',
     'related_ticket_links',
@@ -60,6 +62,8 @@ async function main(): Promise<void> {
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM workflow_template_revisions'),
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM related_ticket_links'),
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM ticket_recovery_replay_segments'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM quick_reply_send_intents'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM quick_reply_usage_events'),
   ]);
 
   // Exercise the database-maintained full-text index inside a transaction so
@@ -131,13 +135,21 @@ async function main(): Promise<void> {
     "SELECT COUNT(*)::text AS count FROM outbox_events WHERE status = 'processing' AND (processing_started_at IS NULL OR processing_started_at < NOW() - INTERVAL '10 minutes')",
   );
 
+  const invalidQuickReplyUsage = await pool.query<{ count: string }>(
+    "SELECT COUNT(*)::text AS count FROM quick_reply_usage_events u " +
+      "LEFT JOIN quick_reply_send_intents i ON i.interaction_id=u.send_intent_id " +
+      "WHERE i.interaction_id IS NULL OR i.status <> 'completed' OR i.discord_message_id IS NULL " +
+      "OR u.guild_id <> i.guild_id OR u.quick_reply_id <> i.quick_reply_id",
+  );
+
   if (
     Number(orphanEvents.rows[0]?.count ?? 0) !== 0 ||
     Number(orphanOutbox.rows[0]?.count ?? 0) !== 0 ||
     Number(orphanProductivityRevisions.rows[0]?.count ?? 0) !== 0 ||
-    Number(invalidProcessing.rows[0]?.count ?? 0) !== 0
+    Number(invalidProcessing.rows[0]?.count ?? 0) !== 0 ||
+    Number(invalidQuickReplyUsage.rows[0]?.count ?? 0) !== 0
   ) {
-    throw new Error('PostgreSQL verification found orphaned ticket events/outbox/history records or stale processing leases.');
+    throw new Error('PostgreSQL verification found orphaned ticket events/outbox/history records, stale processing leases, or quick-reply usage without a completed matching delivery.');
   }
 
   console.log('────────────────────────────────────────────');
@@ -161,6 +173,7 @@ async function main(): Promise<void> {
   console.log(`Orphan productivity revision records: ${orphanProductivityRevisions.rows[0]?.count ?? '0'}`);
   console.log(`Stale processing records: ${invalidProcessing.rows[0]?.count ?? '0'}`);
   console.log(`Recovery replay segments: ${counts[17].rows[0]?.count ?? '0'}`);
+  console.log(`Quick Reply send intents / usage events: ${counts[18].rows[0]?.count ?? '0'} / ${counts[19].rows[0]?.count ?? '0'}`);
   console.log('✅ Required tables, referential integrity, and active outbox lease state verified.');
 }
 
