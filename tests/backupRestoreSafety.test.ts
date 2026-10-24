@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  assertRestoreTargetDistinctFromConfiguredDatabase,
   isAllowedRestoreTargetLabel,
   isSafeBackupFilename,
   RESTORE_TARGET_CONFIRMATION,
@@ -41,4 +42,31 @@ test('restore refuses altered, incomplete, mismatched or empty backup manifests'
   assert.throws(() => validateBackupManifest(manifest, 'other.dump', manifest.sha256, manifest.sizeBytes), /filename does not match/);
   assert.throws(() => validateBackupManifest(manifest, manifest.filename, manifest.sha256, 0), /size does not match/);
   assert.throws(() => validateBackupManifest(null, manifest.filename, manifest.sha256, manifest.sizeBytes), /missing or malformed/);
+});
+
+
+test('restore refuses targets matching the running bot configured database', () => {
+  assert.throws(
+    () => assertRestoreTargetDistinctFromConfiguredDatabase(
+      'postgresql://restore-user:secret@ep-live.neon.tech:5432/resolvx?sslmode=require',
+      ['postgresql://app:secret@ep-live.neon.tech:5432/resolvx?sslmode=require'],
+    ),
+    /matches a database configured for the running bot/,
+  );
+  assert.throws(
+    () => assertRestoreTargetDistinctFromConfiguredDatabase(
+      'postgresql://restore-user:secret@ep-test.neon.tech:5432/resolvx',
+      ['not-a-postgres-url'],
+    ),
+    /configured PostgreSQL URL could not be validated/,
+  );
+});
+
+test('restore allows an isolated database and ignores absent optional database URLs', () => {
+  assert.doesNotThrow(() =>
+    assertRestoreTargetDistinctFromConfiguredDatabase(
+      'postgresql://restore-user:secret@ep-restore.neon.tech:5432/resolvx_restore',
+      ['postgresql://app:secret@ep-live.neon.tech:5432/resolvx', undefined, ''],
+    ),
+  );
 });
