@@ -44,6 +44,7 @@ import {
   getQuickReply,
   getQuickReplyMetrics,
   listKnowledgeArticles,
+  listKnowledgeArticlesPage,
   listKnowledgeSynonyms,
   listQuickReplies,
   recordKnowledgeArticleShare,
@@ -887,7 +888,8 @@ export const data =
         )
         .addSubcommand((subcommand) =>
           subcommand.setName('list').setDescription('List published articles, or all article states for administrators')
-            .addStringOption((option) => option.setName('status').setDescription('Article state').setRequired(false).addChoices({name:'Published',value:'published'},{name:'Drafts',value:'draft'},{name:'Archived',value:'archived'},{name:'All states',value:'all'})),
+            .addStringOption((option) => option.setName('status').setDescription('Article state').setRequired(false).addChoices({name:'Published',value:'published'},{name:'Drafts',value:'draft'},{name:'Archived',value:'archived'},{name:'All states',value:'all'}))
+            .addIntegerOption((option) => option.setName('page').setDescription('Result page').setRequired(false).setMinValue(1).setMaxValue(999)),
         )
         .addSubcommand((subcommand) =>
           subcommand.setName('search').setDescription('Search published articles using full-text, tags and typo-tolerant suggestions')
@@ -2202,13 +2204,24 @@ export async function execute(
           const statusValue = interaction.options.getString('status') ?? 'published';
           if (!['all', 'published', 'draft', 'archived'].includes(statusValue)) throw new Error('Unknown article status.');
           if (statusValue !== 'published' && !admin) throw new Error('Manage Server or Administrator is required to list drafts and archived articles.');
-          const articles = await listKnowledgeArticles(guild.id, statusValue as 'all' | 'published' | 'draft' | 'archived');
-          const lines = articles.slice(0, 25).map((article) =>
+          const page = interaction.options.getInteger('page') ?? 1;
+          const result = await listKnowledgeArticlesPage(guild.id, statusValue as 'all' | 'published' | 'draft' | 'archived', {
+            includeStaff: staffAccess,
+            page,
+            pageSize: 20,
+          });
+          const pages = Math.max(1, Math.ceil(result.total / result.pageSize));
+          if (page > pages) throw new Error('Page ' + page + ' does not exist. This list has ' + pages + ' page(s).');
+          const lines = result.articles.map((article) =>
             '• **' + article.title + '** · `' + article.id + '` · ' + article.status + ' · rev ' + article.revision + ' · ' + article.visibility + ' · `' + article.slug + '`',
           );
-          const pages = splitDisplayLines(lines.length ? lines : ['No articles found for this status.']);
-          const description = pages[0] + (pages.length > 1 ? '\n\nShowing page 1 of ' + pages.length + '; use Search or Show for a specific article.' : '');
-          await interaction.editReply({ embeds: [new EmbedBuilder().setColor(getThemeColor(config.theme)).setTitle('📚 Knowledge Base').setDescription(description.slice(0, 4000)).setFooter({ text: articles.length + ' article(s) • draft edits create revisions; published edits require republishing' })] });
+          await interaction.editReply({
+            embeds: [new EmbedBuilder()
+              .setColor(getThemeColor(config.theme))
+              .setTitle('📚 Knowledge Base • Page ' + page + ' / ' + pages)
+              .setDescription((lines.length ? lines.join('\n') : 'No articles found for this status.').slice(0, 4000))
+              .setFooter({ text: result.total + ' visible article(s) • public articles shown to everyone; staff articles only to staff/admins' })],
+          });
           return;
         }
 
