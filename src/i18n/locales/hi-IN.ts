@@ -1038,6 +1038,7 @@ const hiIN: Record<TranslationKey, string> = {
   'ticket.report.error.reviewExpired': "इस रिपोर्ट की समीक्षा की समय-सीमा समाप्त हो गई है या यह आपको असाइन नहीं की गई है।",
   'ticket.report.error.targetNotParticipant': "लक्षित उपयोगकर्ता इस टिकट का प्रतिभागी होना चाहिए।",
   'ticket.report.error.selfReport': "आप अपनी रिपोर्ट स्वयं नहीं कर सकते।",
+  'panelBuilder.authorSuffix': "ResolvX सहायता",
 };
 
 export default hiIN;
