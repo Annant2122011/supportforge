@@ -16,6 +16,8 @@ import {
 } from 'discord.js';
 
 import { getGuildConfig } from '../services/configService';
+import { getAdvancedSettings } from '../services/advancedSettingsService';
+import { translate } from '../i18n/translationService';
 import { getGuildTheme } from '../services/uiThemeService';
 import { logSettingsEvent } from '../services/auditLogService';
 import {
@@ -865,17 +867,29 @@ export async function handleCustomPanelSettingsInteraction(
       const panel = await getCustomPanel(guild.id, panelId);
       if (!panel) throw new Error('Panel not found.');
       const theme = await getGuildTheme(guild.id);
+      const settings = await getAdvancedSettings(guild.id);
       const embed = buildCustomPanelEmbed(panel, guild.name, theme.color, true);
       const previewRows = buildCustomPanelComponents(panel, true);
       // Reserve one row for navigation. Discord permits five action rows per message.
       const visiblePreviewRows = previewRows.slice(0, 4);
       const previewNote = panel.buttons.length > 20
-        ? 'Private draft preview. First 20 buttons are shown so navigation fits within Discord’s five-row limit; publishing includes all ' + panel.buttons.length + ' buttons.'
-        : 'Private draft preview. Ticket buttons are disabled here and only become active after publishing.';
-      await render(interaction, panel.name + ' • Live Preview', previewNote, [
-        ...visiblePreviewRows,
-        row(makeButton(PREFIX + 'detail:' + panel.id, 'Back to Panel Details', ButtonStyle.Secondary, '↩️')),
-      ], [embed]);
+        ? translate(settings.locale, 'settings.customPanel.previewLongNote', { count: panel.buttons.length })
+        : translate(settings.locale, 'settings.customPanel.previewNote');
+      await render(
+        interaction,
+        panel.name + ' • ' + translate(settings.locale, 'settings.customPanel.previewTitle'),
+        previewNote,
+        [
+          ...visiblePreviewRows,
+          row(makeButton(
+            PREFIX + 'detail:' + panel.id,
+            translate(settings.locale, 'settings.customPanel.backToDetails'),
+            ButtonStyle.Secondary,
+            '↩️',
+          )),
+        ],
+        [embed],
+      );
       return true;
     }
     if (interaction.isButton() && id.startsWith(PREFIX + 'update:')) {
