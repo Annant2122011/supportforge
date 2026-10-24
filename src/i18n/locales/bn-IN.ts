@@ -26,6 +26,8 @@ const bnIN: Record<TranslationKey, string> = {
   'settings.dashboard.field.serverTheme': "সার্ভার থিম",
   'settings.dashboard.field.configurationSnapshot': "কনফিগারেশনের সারাংশ",
   'settings.value.noTimer': "কোনো টাইমার নেই (সর্বোচ্চ ৩৬৫ দিন)",
+  'settings.value.days': "{count} দিন",
+  'settings.value.noneSuffix': " (কোনোটিই নয়)",
   'settings.value.configured': "কনফিগার করা হয়েছে",
   'settings.value.notConfigured': "কনফিগার করা হয়নি",
   'settings.value.panelBudget': "{lines} লাইন • {cap} বার্তার সীমা",
