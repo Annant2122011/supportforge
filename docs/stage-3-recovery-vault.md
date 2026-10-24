@@ -45,11 +45,9 @@
 
 ## Automated evidence and Stage 1/2 re-audit
 
-### Recorded runs before the current recovery-lock increment
-- Stage 1: [CI #2052](https://github.com/Annant2122011/supportforge/actions/runs/39972706424), build passed, 138/138 tests, zero skipped, disposable PostgreSQL verification passed.
-- Stage 2: [CI #2065](https://github.com/Annant2122011/supportforge/actions/runs/39974451567), build passed, 172/172 tests, zero skipped, disposable PostgreSQL verification passed.
-- Stage 3 before the newest lock test: [CI #2254](https://github.com/Annant2122011/supportforge/actions/runs/40008064111), build passed, 186/186 tests, zero skipped, disposable PostgreSQL verification passed.
-- Latest Stage 3 head `f16b73dac24e5885875d632db959f9f0e012c071` passed [CI #2389](https://github.com/Annant2122011/supportforge/actions/runs/40053953590): build passed, **194/194 tests passed**, zero skipped, and disposable PostgreSQL verification passed, including the recovery segment ledger.
+### Latest exact-head evidence
+
+- Stage 3: [CI #2389](https://github.com/Annant2122011/supportforge/actions/runs/40053953590) for `f16b73dac24e5885875d632db959f9f0e012c071`, build passed, **194/194 tests**, zero skipped, disposable PostgreSQL verification passed.
 
 | Acceptance gate | Result |
 |---|---|
