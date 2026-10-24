@@ -126,6 +126,13 @@ async function insertQuickReplyRevision(
   );
 }
 /** Parse the page token stored in a quick-reply select menu custom ID. */
+/** Ensure personalization plus the hidden reconciliation marker stays within Discord's message limit. */
+export function validateQuickReplyDiscordPayload(rendered: string, marker: string): void {
+  if (rendered.length + marker.length > 2000) {
+    throw new Error('Personalized quick reply exceeds Discord’s 2,000-character message limit after placeholders and the delivery marker. Shorten the reply or its placeholder values.');
+  }
+}
+
 export function parseQuickReplyPage(rawPage: string): number | null {
   if (!/^\d{1,5}$/.test(rawPage)) return null;
   const page = Number(rawPage);
@@ -675,6 +682,7 @@ export async function sendQuickReplyInTicket(args: {
     staff: staff?.displayName ?? args.actorUsername,
   });
   const marker = quickReplySendMarker(args.sendIntentId, args.guild.id, ticket.id, reply.id);
+  validateQuickReplyDiscordPayload(rendered, marker);
   const pool = getPostgresPool();
   const inserted = await pool.query<{ interaction_id: string }>(
     'INSERT INTO quick_reply_send_intents ' +
