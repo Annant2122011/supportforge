@@ -12,6 +12,7 @@ import {
   type ChatInputCommandInteraction,
   type Guild,
   type TextChannel,
+  type ThreadChannel,
 } from 'discord.js';
 
 import {
@@ -28,10 +29,33 @@ import {
 } from '../services/configService';
 
 import { executeTicketCommand } from '../interactions/ticketCommandTools';
-import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
+import { getPersistedTicket, getPersistedTicketStatus } from '../services/ticketPersistenceService';
 import { UI_THEMES, getThemeColor } from '../services/uiThemeService';
 import { buildSystemDiagnosticsEmbed, runSystemDiagnostics } from '../services/systemDiagnosticsService';
 import { getTicketRecoveryPreview } from '../services/ticketArchiveService';
+import {
+  createKnowledgeArticle,
+  createQuickReply,
+  deleteKnowledgeSynonyms,
+  getKnowledgeArticle,
+  getKnowledgeArticleRevisions,
+  getKnowledgeBaseMetrics,
+  getQuickReply,
+  getQuickReplyMetrics,
+  listKnowledgeArticles,
+  listKnowledgeSynonyms,
+  listQuickReplies,
+  recordKnowledgeArticleShare,
+  recordKnowledgeArticleView,
+  recordQuickReplyUsage,
+  saveKnowledgeSynonyms,
+  searchKnowledgeBase,
+  setKnowledgeArticleStatus,
+  setQuickReplyEnabled,
+  submitKnowledgeArticleFeedback,
+  updateKnowledgeArticle,
+  updateQuickReply,
+} from '../services/knowledgeBaseService';
 import {
   deleteSupportSlaPolicy,
   evaluateTicketSla,
@@ -824,6 +848,119 @@ export const data =
             .setName('summary')
             .setDescription('Show privacy-aware customer satisfaction results (admin only)')
             .addIntegerOption((option) => option.setName('days').setDescription('Reporting window in days').setRequired(false).setMinValue(1).setMaxValue(366)),
+        ),
+    )
+
+    // ─────────────────────────────────────────────
+    // PERSISTENT KNOWLEDGE BASE
+    // ─────────────────────────────────────────────
+
+    .addSubcommandGroup((group) =>
+      group
+        .setName('knowledge')
+        .setDescription('Search, publish and measure the server knowledge base')
+        .addSubcommand((subcommand) =>
+          subcommand.setName('create').setDescription('Create a draft knowledge article')
+            .addStringOption((option) => option.setName('title').setDescription('Article title').setRequired(true).setMaxLength(180))
+            .addStringOption((option) => option.setName('body').setDescription('Article text; use a link for longer external documentation').setRequired(true).setMaxLength(4000))
+            .addStringOption((option) => option.setName('category').setDescription('Category name').setRequired(false).setMaxLength(80))
+            .addStringOption((option) => option.setName('tags').setDescription('Comma-separated search tags').setRequired(false).setMaxLength(500))
+            .addStringOption((option) => option.setName('visibility').setDescription('Who can search this article').setRequired(false).addChoices({name:'Public',value:'public'},{name:'Staff only',value:'staff'})),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('edit').setDescription('Edit an article; a published article returns to draft for review')
+            .addStringOption((option) => option.setName('article-id').setDescription('Article ID from the list').setRequired(true).setMaxLength(36))
+            .addStringOption((option) => option.setName('title').setDescription('Updated title').setRequired(false).setMaxLength(180))
+            .addStringOption((option) => option.setName('body').setDescription('Updated article text').setRequired(false).setMaxLength(4000))
+            .addStringOption((option) => option.setName('category').setDescription('Updated category').setRequired(false).setMaxLength(80))
+            .addStringOption((option) => option.setName('tags').setDescription('Replace tags using commas').setRequired(false).setMaxLength(500))
+            .addStringOption((option) => option.setName('visibility').setDescription('Who can search this article').setRequired(false).addChoices({name:'Public',value:'public'},{name:'Staff only',value:'staff'})),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('publish').setDescription('Publish a draft article')
+            .addStringOption((option) => option.setName('article-id').setDescription('Article ID').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('archive').setDescription('Archive an article without deleting its revision history')
+            .addStringOption((option) => option.setName('article-id').setDescription('Article ID').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('list').setDescription('List published articles, or all article states for administrators')
+            .addStringOption((option) => option.setName('status').setDescription('Article state').setRequired(false).addChoices({name:'Published',value:'published'},{name:'Drafts',value:'draft'},{name:'Archived',value:'archived'},{name:'All states',value:'all'})),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('search').setDescription('Search published articles using full-text, tags and typo-tolerant suggestions')
+            .addStringOption((option) => option.setName('query').setDescription('What do you need help with?').setRequired(true).setMinLength(2).setMaxLength(120)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('show').setDescription('Open a published article by ID or slug')
+            .addStringOption((option) => option.setName('article').setDescription('Article ID or slug').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('share').setDescription('Share a published article in a ticket channel')
+            .addStringOption((option) => option.setName('article').setDescription('Article ID or slug').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('history').setDescription('View immutable article revision history (administrators)')
+            .addStringOption((option) => option.setName('article-id').setDescription('Article ID').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('synonyms').setDescription('Manage search synonyms')
+            .addStringOption((option) => option.setName('action').setDescription('List, set or delete a synonym entry').setRequired(true).addChoices({name:'List',value:'list'},{name:'Set',value:'set'},{name:'Delete',value:'delete'}))
+            .addStringOption((option) => option.setName('term').setDescription('Canonical term').setRequired(false).setMaxLength(60))
+            .addStringOption((option) => option.setName('synonyms').setDescription('Comma-separated alternatives; required for Set').setRequired(false).setMaxLength(500)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('feedback').setDescription('Rate whether a published article helped')
+            .addStringOption((option) => option.setName('article-id').setDescription('Article ID').setRequired(true).setMaxLength(36))
+            .addBooleanOption((option) => option.setName('helpful').setDescription('Did this article solve your problem?').setRequired(true))
+            .addStringOption((option) => option.setName('comment').setDescription('Optional improvement suggestion').setRequired(false).setMaxLength(500)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('metrics').setDescription('View privacy-aware article usage aggregates (administrators)')
+            .addIntegerOption((option) => option.setName('days').setDescription('Window in days').setRequired(false).setMinValue(1).setMaxValue(366)),
+        ),
+    )
+
+    // ─────────────────────────────────────────────
+    // STAFF QUICK REPLIES
+    // ─────────────────────────────────────────────
+
+    .addSubcommandGroup((group) =>
+      group
+        .setName('quick-reply')
+        .setDescription('Manage and use reusable, permission-scoped staff replies')
+        .addSubcommand((subcommand) =>
+          subcommand.setName('create').setDescription('Create a reusable staff reply (administrators)')
+            .addStringOption((option) => option.setName('name').setDescription('Unique name').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('content').setDescription('Reply text; allowed placeholders: {user}, {ticket_number}, {department}, {channel}, {guild}').setRequired(true).setMaxLength(1900))
+            .addStringOption((option) => option.setName('department-id').setDescription('Limit to a department; omit for all departments').setRequired(false).setMaxLength(80))
+            .addStringOption((option) => option.setName('tags').setDescription('Comma-separated categories').setRequired(false).setMaxLength(500)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('edit').setDescription('Update a reply and create a new revision')
+            .addStringOption((option) => option.setName('id').setDescription('Quick reply ID').setRequired(true).setMaxLength(36))
+            .addStringOption((option) => option.setName('name').setDescription('Updated name').setRequired(false).setMaxLength(80))
+            .addStringOption((option) => option.setName('content').setDescription('Updated text').setRequired(false).setMaxLength(1900))
+            .addStringOption((option) => option.setName('department-id').setDescription('Department ID or * for all').setRequired(false).setMaxLength(80))
+            .addStringOption((option) => option.setName('tags').setDescription('Replace tags using commas').setRequired(false).setMaxLength(500))
+            .addBooleanOption((option) => option.setName('enabled').setDescription('Whether staff can use it').setRequired(false)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('archive').setDescription('Disable a reply while preserving its usage history')
+            .addStringOption((option) => option.setName('id').setDescription('Quick reply ID').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('list').setDescription('List replies available to your department')
+            .addStringOption((option) => option.setName('department-id').setDescription('Optional department filter').setRequired(false).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('use').setDescription('Send a saved reply into the current managed ticket')
+            .addStringOption((option) => option.setName('id').setDescription('Quick reply ID from the list').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('metrics').setDescription('View aggregate quick reply usage (administrators)')
+            .addIntegerOption((option) => option.setName('days').setDescription('Window in days').setRequired(false).setMinValue(1).setMaxValue(366)),
         ),
     )
 
