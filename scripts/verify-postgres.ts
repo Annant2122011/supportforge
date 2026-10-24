@@ -17,6 +17,14 @@ async function main(): Promise<void> {
     'support_sla_policies',
     'support_csat_responses',
     'support_sla_alerts',
+    'knowledge_base_articles',
+    'knowledge_base_article_revisions',
+    'knowledge_base_synonyms',
+    'knowledge_base_usage',
+    'knowledge_base_feedback',
+    'quick_reply_templates',
+    'quick_reply_usage',
+    'quick_reply_template_revisions',
   ];
 
   for (const table of requiredTables) {
@@ -38,6 +46,12 @@ async function main(): Promise<void> {
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_sla_policies'),
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_csat_responses'),
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_sla_alerts'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM knowledge_base_articles'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM knowledge_base_article_revisions'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM knowledge_base_synonyms'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM knowledge_base_feedback'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM quick_reply_templates'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM quick_reply_template_revisions'),
   ]);
 
   const orphanEvents = await pool.query<{ count: string }>(
@@ -70,6 +84,12 @@ async function main(): Promise<void> {
   console.log(`SLA policies: ${counts[4].rows[0]?.count ?? '0'}`);
   console.log(`CSAT responses: ${counts[5].rows[0]?.count ?? '0'}`);
   console.log(`SLA alert records: ${counts[6].rows[0]?.count ?? '0'}`);
+  console.log(`Knowledge articles: ${counts[7].rows[0]?.count ?? '0'}`);
+  console.log(`Knowledge revisions: ${counts[8].rows[0]?.count ?? '0'}`);
+  console.log(`Knowledge synonyms: ${counts[9].rows[0]?.count ?? '0'}`);
+  console.log(`Knowledge feedback: ${counts[10].rows[0]?.count ?? '0'}`);
+  console.log(`Quick replies: ${counts[11].rows[0]?.count ?? '0'}`);
+  console.log(`Quick reply revisions: ${counts[12].rows[0]?.count ?? '0'}`);
   console.log(`Orphan events: ${orphanEvents.rows[0]?.count ?? '0'}`);
   console.log(`Orphan outbox records: ${orphanOutbox.rows[0]?.count ?? '0'}`);
   console.log(`Stale processing records: ${invalidProcessing.rows[0]?.count ?? '0'}`);
