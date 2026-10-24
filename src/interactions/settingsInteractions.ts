@@ -1410,15 +1410,15 @@ async function showDepartmentPicker(
   if (pageCount > 1) {
     components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId('sf:settings:departments:manage:page:' + (safePage - 1))
-        .setLabel(translate(locale, 'quickReply.picker.previous'))
+        .setLabel(translate(locale, 'settings.common.previous'))
         .setEmoji('⬅️').setStyle(ButtonStyle.Secondary).setDisabled(safePage === 0),
       new ButtonBuilder().setCustomId('sf:settings:departments:manage:page:' + safePage)
-        .setLabel(translate(locale, 'quickReply.list.page', {
-          page: safePage + 1, pages: pageCount, total: departments.length,
+        .setLabel(translate(locale, 'settings.common.page', {
+          page: safePage + 1, pages: pageCount,
         }).slice(0, 80))
         .setEmoji('📄').setStyle(ButtonStyle.Secondary).setDisabled(true),
       new ButtonBuilder().setCustomId('sf:settings:departments:manage:page:' + (safePage + 1))
-        .setLabel(translate(locale, 'quickReply.picker.next'))
+        .setLabel(translate(locale, 'settings.common.next'))
         .setEmoji('➡️').setStyle(ButtonStyle.Secondary).setDisabled(safePage >= pageCount - 1),
     ));
   }
@@ -1463,7 +1463,7 @@ async function showDepartmentManager(interaction: SettingsViewInteraction, depar
       new ButtonBuilder().setCustomId('sf:settings:department:edit:' + department.id)
         .setLabel(translate(locale, 'settings.departments.actions.edit')).setEmoji('✏️').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('sf:settings:tag:add:' + department.id)
-        .setLabel(translate(locale, 'settings.tags.actions.edit').replace('Edit Tag', translate(locale, 'settings.departments.actions.add')))
+        .setLabel(translate(locale, 'settings.tags.actions.add'))
         .setEmoji('➕').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('sf:settings:tag:manage:' + department.id)
         .setLabel(translate(locale, 'settings.tags.title')).setEmoji('🏷️')
@@ -1526,7 +1526,7 @@ async function showTagManager(
         .setLabel(translate(locale, 'quickReply.picker.previous')).setEmoji('⬅️')
         .setStyle(ButtonStyle.Secondary).setDisabled(safePage === 0),
       new ButtonBuilder().setCustomId('sf:settings:tag:manage-page:' + department.id + ':' + safePage)
-        .setLabel(translate(locale, 'quickReply.list.page', { page: safePage + 1, pages: pageCount, total: tags.length }).slice(0, 80))
+        .setLabel(translate(locale, 'settings.common.page', { page: safePage + 1, pages: pageCount }).slice(0, 80))
         .setEmoji('📄').setStyle(ButtonStyle.Secondary).setDisabled(true),
       new ButtonBuilder().setCustomId('sf:settings:tag:manage-page:' + department.id + ':' + (safePage + 1))
         .setLabel(translate(locale, 'quickReply.picker.next')).setEmoji('➡️')
