@@ -98,8 +98,15 @@ These changes require CI on the latest exact PR head. The older passing CI run b
 **Completion policy:** All implementation, CI, test-guild and database restore evidence must be reported separately. Do not mark the programme complete merely because all feature files exist.
 
 
-## Latest combined Stage 4 CI — 2026-10-23
+## Historical combined Stage 4 CI — 2026-10-23
 
 The current Stage 4 PR head `106b25a399d13a1012b093131b1c7719bd25529d` passed [ResolvX CI #2249](https://github.com/Annant2122011/supportforge/actions/runs/40007820017): TypeScript build passed, **196/196 tests passed**, zero skipped, and disposable PostgreSQL verification passed. The database verification checks the Stage 3 and Stage 4 tables and performs insert/update smoke tests against the Knowledge Base search-vector trigger inside a rolled-back transaction. Synthetic rows are not retained.
 
 This is combined-code CI evidence only. Test-guild role/command acceptance and an isolated non-production Neon backup/restore drill remain unrun. The Knowledge Base/quick-reply commands now check the staff role configured for the current ticket’s department before sharing or sending into that ticket.
+
+
+## Prior Stage 4 feature-branch CI — 2026-10-24
+
+The Stage 4 feature head `e23f1d1292d0026b85fc5df56d87ac48da53c100` passed [ResolvX CI #2465](https://github.com/Annant2122011/supportforge/actions/runs/40055278428): build passed, **215/215 tests passed**, zero skipped, and disposable PostgreSQL verification passed. This run validates that feature head only; it predates the current reconciliation with Stage 3 PR #34, so it is not the final combined-stack result.
+
+The integration audit found a migration-number collision: Stage 3 requires migration 13 for the durable recovery segment ledger, while the older Stage 4 branch used migration 13 for Knowledge Base/productivity tables. The combined branch is being corrected to use Stage 3 migration 13 and Stage 4 migrations 14–17, bring forward Stage 3's durable replay implementation, and add the corresponding PostgreSQL verifier and integration test. The final combined-head CI run is the next acceptance gate.
