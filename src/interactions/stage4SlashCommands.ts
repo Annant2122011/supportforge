@@ -1,0 +1,883 @@
+import { ChannelType, EmbedBuilder, MessageFlags, type ChatInputCommandInteraction, type Message, type TextChannel, type ThreadChannel } from 'discord.js';
+
+import { getGuildConfig } from '../services/configService';
+import { getThemeColor } from '../services/uiThemeService';
+import { getPersistedTicket, getPersistedTicketById } from '../services/ticketPersistenceService';
+import { getField } from '../services/ticketStateService';
+import { logSettingsEvent, logTicketEvent } from '../services/auditLogService';
+import {
+  createKnowledgeArticle,
+  getKnowledgeArticle,
+  recordKnowledgeArticleShare,
+  getKnowledgeBaseMetrics,
+  listKnowledgeArticles,
+  listKnowledgeArticleRevisions,
+  recordKnowledgeArticleFeedback,
+  restoreKnowledgeArticleRevision,
+  searchKnowledgeBase,
+  setKnowledgeArticleStatus,
+  setKnowledgeSynonyms,
+  listKnowledgeSynonyms,
+  deleteKnowledgeSynonyms,
+  updateKnowledgeArticle,
+  type KnowledgeArticleInput,
+} from '../services/knowledgeBaseService';
+import {
+  deleteQuickReply,
+  getQuickReply,
+  listQuickReplies,
+  listQuickReplyRevisions,
+  renderQuickReply,
+  restoreQuickReplyRevision,
+  saveQuickReply,
+} from '../services/quickReplyService';
+import { linkRelatedTickets, listRelatedTickets, unlinkRelatedTickets } from '../services/relatedTicketService';
+import {
+  executeWorkflowTemplateForTicket,
+  listWorkflowExecutionRunsForTicket,
+  resolveWorkflowExecutionStep,
+  resumeWorkflowExecutionForTicket,
+  type WorkflowExecutionSummary,
+} from '../services/workflowExecutionService';
+
+import {
+  deleteWorkflowTemplate,
+  listWorkflowTemplates,
+  listWorkflowTemplateRevisions,
+  previewWorkflowTemplateById,
+  restoreWorkflowTemplateRevision,
+  saveWorkflowTemplate,
+  setWorkflowTemplateEnabled,
+} from '../services/workflowTemplateService';
+
+interface Access {
+  isAdmin: boolean;
+  isStaff: boolean;
+  roleIds: string[];
+}
+
+function accessFor(interaction: ChatInputCommandInteraction, departmentRoleIds: string[]): Access {
+  const member = interaction.member;
+  const roleIds = !member ? [] : Array.isArray(member.roles) ? member.roles : member.roles.cache.map((role) => role.id);
+  const isAdmin = Boolean(
+    interaction.memberPermissions?.has('Administrator') ||
+    interaction.memberPermissions?.has('ManageGuild'),
+  );
+  return { isAdmin, isStaff: isAdmin || roleIds.some((id) => departmentRoleIds.includes(id)), roleIds };
+}
+
+function commaList(value: string | null, field: string, max = 20): string[] {
+  if (!value?.trim()) return [];
+  const items = [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))];
+  if (items.length > max) throw new Error(field + ' accepts at most ' + max + ' values.');
+  return items;
+}
+
+function requireTextChannel(interaction: ChatInputCommandInteraction): TextChannel | ThreadChannel {
+  const channel = interaction.channel;
+  if (!channel || !channel.isTextBased() || !('send' in channel)) {
+    throw new Error('This command requires a server text channel or ticket thread.');
+  }
+  return channel as TextChannel | ThreadChannel;
+}
+
+function activeTicketStatus(status: string): boolean {
+  return ['open', 'claimed', 'pending', 'reopened'].includes(status);
+}
+
+function canHandleTicketForStaff(
+  access: Access,
+  ticket: NonNullable<Awaited<ReturnType<typeof getPersistedTicket>>>,
+  config: Awaited<ReturnType<typeof getGuildConfig>>,
+): boolean {
+  if (access.isAdmin) return true;
+  if (!ticket.departmentId) return false;
+  const department = config.departments[ticket.departmentId];
+  return Boolean(department?.staffRoleId && access.roleIds.includes(department.staffRoleId));
+}
+
+async function prepare(interaction: ChatInputCommandInteraction): Promise<{ access: Access; config: Awaited<ReturnType<typeof getGuildConfig>> }> {
+  if (!interaction.guildId) throw new Error('This command must be used inside a server.');
+  const config = await getGuildConfig(interaction.guildId);
+  const staffRoles = Object.values(config.departments)
+    .map((department) => department.staffRoleId)
+    .filter((id): id is string => Boolean(id));
+  return { access: accessFor(interaction, staffRoles), config };
+}
+
+async function requireTicketInCurrentChannel(interaction: ChatInputCommandInteraction, requireActive = true) {
+  const ticket = await getPersistedTicket(interaction.channelId);
+  if (!ticket || ticket.guildId !== interaction.guildId || ticket.deletedAt) {
+    throw new Error('Use this command inside an active managed ticket channel or private ticket thread.');
+  }
+  if (requireActive && !activeTicketStatus(ticket.status)) throw new Error('This operation is available only while the ticket is active.');
+  return ticket;
+}
+
+function accessDenied(action: string): Error {
+  return new Error('You need ' + action + ' to use this command.');
+}
+
+
+async function findArchivedTranscriptMessage(
+  guild: NonNullable<ChatInputCommandInteraction['guild']>,
+  archiveChannel: TextChannel,
+  ticket: NonNullable<Awaited<ReturnType<typeof getPersistedTicket>>>,
+): Promise<{ message: Message | null; searchedMessages: number }> {
+  // First try the durable pointer projected onto the current ticket channel.
+  const ticketChannel = guild.channels.cache.get(ticket.channelId) ??
+    await guild.channels.fetch(ticket.channelId).catch(() => null);
+  if (ticketChannel?.type === ChannelType.GuildText) {
+    const transcriptId = getField(ticketChannel.topic ?? '', 'transcript_id');
+    if (transcriptId) {
+      const direct = await archiveChannel.messages.fetch(transcriptId).catch(() => null);
+      if (direct) return { message: direct, searchedMessages: 0 };
+    }
+  }
+
+  if (!ticket.ticketNumber) return { message: null, searchedMessages: 0 };
+  const expectedHeader = '📄 Transcript for ticket **#' + ticket.ticketNumber + '**';
+  let before: string | undefined;
+  let searchedMessages = 0;
+
+  // Bounded scan prevents an unbounded Discord-history walk in very large archives.
+  for (let pageIndex = 0; pageIndex < 10; pageIndex += 1) {
+    let page;
+    try {
+      page = await archiveChannel.messages.fetch({ limit: 100, ...(before ? { before } : {}) });
+    } catch {
+      throw new Error('The bot cannot read transcript archive history. Check View Channel and Read Message History permissions on the configured transcript channel.');
+    }
+    if (page.size === 0) break;
+    searchedMessages += page.size;
+    const match = page.find((message) => message.content === expectedHeader);
+    if (match) return { message: match, searchedMessages };
+
+    const oldest = Array.from(page.values()).reduce((current, candidate) =>
+      BigInt(candidate.id) < BigInt(current.id) ? candidate : current,
+    );
+    if (page.size < 100) break;
+    before = oldest.id;
+  }
+  return { message: null, searchedMessages };
+}
+
+
+function workflowRunDescription(run: WorkflowExecutionSummary): string {
+  const lines = [
+    '**Run ID:** `' + run.id + '`',
+    '**Template:** ' + run.templateName + ' • `' + run.templateId + '` v' + run.templateVersion,
+    '**Status:** ' + run.status,
+    '**Requested by:** <@' + run.requestedBy + '>',
+  ];
+  if (run.status === 'not_matched') {
+    lines.push('Conditions did not match the current ticket snapshot. No actions were executed.');
+  }
+  if (run.steps.length) {
+    lines.push('', '**Steps**');
+    for (const step of run.steps) {
+      lines.push(
+        (step.index + 1) + '. `' + step.actionType + '` • **' + step.status + '**' +
+        (step.attempts ? ' • attempts ' + step.attempts : '') +
+        (step.errorCode ? ' • error code: `' + step.errorCode + '`' : '') +
+        (step.destinationMessageId ? ' • message ID: ' + step.destinationMessageId : ''),
+      );
+    }
+  }
+  if (run.status === 'needs_review') {
+    lines.push('', 'A send may have succeeded without its ledger update. Check the ticket history manually before using `workflow resolve-step`. The retry option explicitly acknowledges possible duplicate delivery.');
+  }
+  if (run.status === 'failed') {
+    lines.push('', 'No later steps were run. Resume only after reviewing the recorded failed step.');
+  }
+  return lines.join('\n').slice(0, 3900);
+}
+
+async function auditWorkflowRun(
+  interaction: ChatInputCommandInteraction,
+  config: Awaited<ReturnType<typeof getGuildConfig>>,
+  ticket: NonNullable<Awaited<ReturnType<typeof getPersistedTicket>>>,
+  run: WorkflowExecutionSummary,
+  event: string,
+): Promise<void> {
+  if (!interaction.guild || !config.supportCategoryId) return;
+  await logTicketEvent(interaction.guild, config.supportCategoryId, {
+    ticketNumber: ticket.ticketNumber ?? ticket.id.slice(0, 8),
+    ticketChannelId: ticket.channelId,
+    event,
+    actorId: interaction.user.id,
+    actor: interaction.user.tag,
+    actorName: interaction.user.tag,
+    category: 'ticket',
+    detail: 'Workflow run ' + run.id + '; template=' + run.templateId + ' v' + run.templateVersion +
+      '; status=' + run.status + '; completed steps=' + run.steps.filter((step) => step.status === 'completed').length +
+      '/' + run.steps.length + '. No customer message body was copied into this audit entry.',
+  }).catch(() => undefined);
+}
+
+export async function handleStage4SlashCommand(interaction: ChatInputCommandInteraction): Promise<boolean> {
+  const group = interaction.options.getSubcommandGroup(false);
+  if (!['knowledge', 'quick-reply', 'related', 'workflow', 'transcripts'].includes(group ?? '')) return false;
+  const subcommand = interaction.options.getSubcommand();
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  try {
+    const { access, config } = await prepare(interaction);
+    const guildId = interaction.guildId!;
+    const actorId = interaction.user.id;
+
+    if (group === 'transcripts') {
+      if (subcommand !== 'find') throw new Error('Unsupported transcript archive action.');
+      const reference = interaction.options.getString('ticket-id', true).trim();
+      let ticket = await getPersistedTicketById(reference);
+      if (!ticket) ticket = await getPersistedTicket(reference);
+      if (!ticket || ticket.guildId !== guildId) {
+        throw new Error('No ticket record with that ID or channel ID exists in this server.');
+      }
+      if (!access.isAdmin && !canHandleTicketForStaff(access, ticket, config)) {
+        throw accessDenied('the staff role configured for this ticket department or Manage Server/Administrator');
+      }
+      const guild = interaction.guild;
+      if (!guild) throw new Error('Transcript archive lookup must be used inside a server.');
+      if (!config.transcriptChannelId) {
+        throw new Error('This server has no configured transcript archive channel.');
+      }
+      const archive = guild.channels.cache.get(config.transcriptChannelId) ??
+        await guild.channels.fetch(config.transcriptChannelId).catch(() => null);
+      if (!archive || archive.type !== ChannelType.GuildText) {
+        throw new Error('The configured transcript archive channel is missing or is not a standard text channel.');
+      }
+      const located = await findArchivedTranscriptMessage(guild, archive, ticket);
+      const message = located.message;
+      if (!message) {
+        await interaction.editReply(
+          'No archived transcript was found for ticket ' + (ticket.ticketNumber ? '#' + ticket.ticketNumber : ticket.id) +
+          '. The archive search checked up to ' + located.searchedMessages + ' recent transcript messages. Older records may require a manual archive-channel search.',
+        );
+        return true;
+      }
+
+      const attachments = [...message.attachments.values()];
+      const transcriptFile = attachments.find((attachment) => /\\.html?($|\\?)/i.test(attachment.name ?? attachment.url)) ?? attachments[0];
+      const uploadedAt = Math.floor(message.createdTimestamp / 1000);
+      const attachmentLine = transcriptFile
+        ? '[Open transcript file](' + transcriptFile.url + ') · ' + transcriptFile.name +
+          ' · ' + Math.max(1, Math.round(transcriptFile.size / 1024)) + ' KB'
+        : 'The archive message exists, but no downloadable attachment is currently attached.';
+      const status = ticket.deletedAt
+        ? 'Ticket channel deleted; historical ticket record retained'
+        : 'Ticket status: ' + ticket.status;
+      const description = [
+        '**Ticket:** ' + (ticket.ticketNumber ? '#' + ticket.ticketNumber : ticket.id),
+        '**Status:** ' + status,
+        '**Archived:** <t:' + uploadedAt + ':F> (<t:' + uploadedAt + ':R>)',
+        '**Archive message:** [Open archived message](' + message.url + ')',
+        '**Transcript:** ' + attachmentLine,
+        '',
+        '**Retention status:** This lookup does not delete or modify the transcript. Expiry is not recorded per transcript message; ticket-channel retention alone does not prove that the archive attachment has expired.',
+        '',
+        'Only archive metadata and the file reference are shown here. The transcript contents are not copied into the ephemeral response.',
+      ].join('\\n');
+      await interaction.editReply({
+        embeds: [new EmbedBuilder()
+          .setColor(getThemeColor(config.theme))
+          .setTitle('📄 Transcript Archive Lookup')
+          .setDescription(description.slice(0, 3900))
+          .setFooter({ text: 'Staff-only lookup · ticket ID ' + ticket.id + ' · searched ' + located.searchedMessages + ' archive message(s)' })],
+      });
+      return true;
+    }
+
+    if (group === 'knowledge') {
+      if (['create','update','publish','archive','revisions','restore-revision','synonyms-set','synonyms-delete','metrics'].includes(subcommand) && !access.isAdmin) {
+        throw accessDenied('Manage Server or Administrator permission');
+      }
+
+      if (subcommand === 'create') {
+        const input: KnowledgeArticleInput = {
+          title: interaction.options.getString('title', true),
+          body: interaction.options.getString('body', true),
+          summary: interaction.options.getString('summary') ?? '',
+          category: interaction.options.getString('category') ?? 'General',
+          tags: commaList(interaction.options.getString('tags'), 'tags', 12),
+          visibility: (interaction.options.getString('visibility') ?? 'public') as 'public' | 'staff',
+          allowedRoleIds: commaList(interaction.options.getString('role-ids'), 'role IDs', 20),
+        };
+        const article = await createKnowledgeArticle(guildId, actorId, input);
+        if (config.supportCategoryId) {
+          await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
+            action: 'KNOWLEDGE_ARTICLE_CREATED',
+            actorId,
+            actorName: interaction.user.tag,
+            detail: 'Created Knowledge Base draft ' + article.id + ', revision ' + article.revision + '.',
+          });
+        }
+        await interaction.editReply('Created draft article "' + article.title + '". Article ID: ' + article.id + '. Revision: ' + article.revision + '. Publish it after review with /supportforge knowledge publish.');
+        return true;
+      }
+
+      if (subcommand === 'list') {
+        const articles = await listKnowledgeArticles(guildId, access, 25);
+        const body = articles.length
+          ? articles.map((article) =>
+              '**' + article.title + '** (' + article.status + ', r' + article.revision + ')\nID: ' + article.id +
+              '\nCategory: ' + article.category + ' • ' + article.visibility + '\n' + (article.summary || 'No summary'),
+            ).join('\n\n')
+          : 'No Knowledge Base articles are available to you.';
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setTitle('📚 Knowledge Base Articles').setDescription(body.slice(0, 4000))
+            .setFooter({ text: 'Only articles you are authorized to see are listed. Use the article ID with /supportforge knowledge view.' })],
+        });
+        return true;
+      }
+
+      if (subcommand === 'view') {
+        const articleId = interaction.options.getString('article-id', true).trim();
+        const page = interaction.options.getInteger('page') ?? 1;
+        const article = await getKnowledgeArticle(guildId, articleId, access, true, actorId);
+        if (!article) throw new Error('Article not found or you do not have permission to view it.');
+        const pageSize = 3300;
+        const pageCount = Math.max(1, Math.ceil(article.body.length / pageSize));
+        if (page > pageCount) throw new Error('Article has ' + pageCount + ' page(s).');
+        const excerpt = article.body.slice((page - 1) * pageSize, page * pageSize);
+        await interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setTitle(article.title)
+            .setDescription((article.summary ? article.summary + '\n\n' : '') + excerpt)
+            .addFields(
+              { name: 'Category', value: article.category, inline: true },
+              { name: 'Tags', value: article.tags.join(', ') || 'None', inline: true },
+              { name: 'Revision', value: String(article.revision), inline: true },
+            )
+            .setFooter({ text: 'Article ID ' + article.id + ' • Page ' + page + '/' + pageCount + ' • Updated ' + article.updatedAt })],
+        });
+        return true;
+      }
+
+      if (subcommand === 'update') {
+        const changes: Partial<KnowledgeArticleInput> = {};
+        const title = interaction.options.getString('title');
+        const summary = interaction.options.getString('summary');
+        const body = interaction.options.getString('body');
+        const category = interaction.options.getString('category');
+        const tags = interaction.options.getString('tags');
+        const visibility = interaction.options.getString('visibility');
+        const roles = interaction.options.getString('role-ids');
+        if (title !== null) changes.title = title;
+        if (summary !== null) changes.summary = summary;
+        if (body !== null) changes.body = body;
+        if (category !== null) changes.category = category;
+        if (tags !== null) changes.tags = commaList(tags, 'tags', 12);
+        if (visibility !== null) changes.visibility = visibility as 'public' | 'staff';
+        if (roles !== null) changes.allowedRoleIds = commaList(roles, 'role IDs', 20);
+        if (!Object.keys(changes).length) throw new Error('Provide at least one article field to update.');
+        const article = await updateKnowledgeArticle(
+          guildId, interaction.options.getString('article-id', true).trim(),
+          interaction.options.getInteger('revision', true), actorId, changes,
+        );
+        if (config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
+          action: 'KNOWLEDGE_ARTICLE_UPDATED', actorId, actorName: interaction.user.tag,
+          detail: 'Updated Knowledge Base article ' + article.id + ' to revision ' + article.revision + '; changed fields=' + Object.keys(changes).join(',') + '.',
+        });
+        await interaction.editReply('Updated article "' + article.title + '" to revision ' + article.revision + '. The previous revision remains in history.');
+        return true;
+      }
+
+      if (subcommand === 'publish' || subcommand === 'archive') {
+        if (subcommand === 'archive' && !interaction.options.getBoolean('confirm', true)) {
+          throw new Error('Archiving was not confirmed. No change was made.');
+        }
+        const article = await setKnowledgeArticleStatus(
+          guildId,
+          interaction.options.getString('article-id', true).trim(),
+          interaction.options.getInteger('revision', true),
+          actorId,
+          subcommand === 'publish' ? 'published' : 'archived',
+        );
+        if (config.supportCategoryId) {
+          await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
+            action: subcommand === 'publish' ? 'KNOWLEDGE_ARTICLE_PUBLISHED' : 'KNOWLEDGE_ARTICLE_ARCHIVED',
+            actorId,
+            actorName: interaction.user.tag,
+            detail: (subcommand === 'publish' ? 'Published ' : 'Archived ') + article.id + ' at revision ' + article.revision + '.',
+          });
+        }
+        await interaction.editReply('Article "' + article.title + '" is now ' + article.status + ' at revision ' + article.revision + '.');
+        return true;
+      }
+
+      if (subcommand === 'search') {
+        const results = await searchKnowledgeBase(guildId, interaction.options.getString('query', true), access, actorId);
+        if (!results.length) {
+          await interaction.editReply('No confident Knowledge Base match was found. This does not block ordinary human support; continue with a ticket if needed.');
+          return true;
+        }
+        const body = results.map((result, index) =>
+          '**' + (index + 1) + '. ' + result.title + '** • ' + result.confidence.toUpperCase() + ' confidence • score ' + result.score +
+          '\nID: ' + result.id + '\n' + (result.summary || 'No summary') + '\nCategory: ' + result.category,
+        ).join('\n\n');
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setTitle('🔎 Knowledge Base Search').setDescription(body.slice(0, 4000))
+            .setFooter({ text: 'Deterministic PostgreSQL search and typo-tolerant fallback • suggestions never replace human support' })],
+        });
+        return true;
+      }
+
+      if (subcommand === 'share') {
+        if (!access.isStaff) throw accessDenied('a configured department staff role');
+        const ticket = await requireTicketInCurrentChannel(interaction);
+        if (!canHandleTicketForStaff(access, ticket, config)) {
+          throw accessDenied('the staff role configured for this ticket department');
+        }
+        const article = await getKnowledgeArticle(guildId, interaction.options.getString('article-id', true).trim(), access);
+        if (!article || article.status !== 'published') throw new Error('Published article not found or you do not have permission to share it.');
+        const shareBody = article.body.slice(0, 2600);
+        const truncated = article.body.length > shareBody.length;
+        await requireTextChannel(interaction).send({
+          embeds: [new EmbedBuilder().setTitle('📚 Suggested article: ' + article.title)
+            .setDescription(
+              (article.summary ? article.summary + '\n\n' : '') +
+              '**Category:** ' + article.category + '\n' +
+              '**Tags:** ' + (article.tags.join(', ') || 'none') + '\n\n' +
+              shareBody + (truncated ? '\n\n… Open /supportforge knowledge view with article ID ' + article.id + ' for the full article.' : '') +
+              '\n\n_This is a suggested resource, not a replacement for human support. The ticket remains open for follow-up._',
+            )
+            .setFooter({ text: 'Knowledge Base article ' + article.id + ' • revision ' + article.revision })],
+          allowedMentions: { parse: [] },
+        });
+        await recordKnowledgeArticleShare(guildId, article.id, access, actorId);
+        if (config.supportCategoryId) {
+          await logTicketEvent(interaction.guild!, config.supportCategoryId, {
+            ticketNumber: ticket.ticketNumber ?? ticket.id,
+            ticketChannelId: ticket.channelId,
+            event: 'KNOWLEDGE_ARTICLE_SHARED',
+            actorId,
+            actor: interaction.user.tag,
+            actorName: interaction.user.tag,
+            detail: 'Shared published Knowledge Base article ' + article.id + ' revision ' + article.revision + '.',
+          });
+        }
+        await interaction.editReply('Shared "' + article.title + '" in the current ticket. The message has no automatic user mentions.');
+        return true;
+      }
+
+      if (subcommand === 'revisions') {
+        const articleId = interaction.options.getString('article-id', true).trim();
+        const revisions = await listKnowledgeArticleRevisions(guildId, articleId, access);
+        await interaction.editReply(revisions.length
+          ? revisions.map((item) => 'r' + item.revision + ' • ' + item.status + ' • ' + item.createdAt + '\n' + item.title + ' • editor ' + item.changedBy).join('\n\n').slice(0, 4000)
+          : 'No revision records were found.');
+        return true;
+      }
+
+      if (subcommand === 'restore-revision') {
+        const article = await restoreKnowledgeArticleRevision(
+          guildId,
+          interaction.options.getString('article-id', true).trim(),
+          interaction.options.getInteger('target-revision', true),
+          interaction.options.getInteger('current-revision', true),
+          actorId,
+        );
+        if (config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
+          action: 'KNOWLEDGE_ARTICLE_REVISION_RESTORED', actorId, actorName: interaction.user.tag,
+          detail: 'Restored historical article content for ' + article.id + ' into new revision ' + article.revision + '.',
+        });
+        await interaction.editReply('Restored historical content into a new revision. Article "' + article.title + '" is now revision ' + article.revision + '; previous history was not overwritten.');
+        return true;
+      }
+
+      if (subcommand === 'rate') {
+        await recordKnowledgeArticleFeedback(
+          guildId,
+          interaction.options.getString('article-id', true).trim(),
+          actorId,
+          access,
+          interaction.options.getBoolean('helpful', true),
+        );
+        await interaction.editReply('Thank you. Your article feedback has been saved. Duplicate votes are blocked.');
+        return true;
+      }
+
+      if (subcommand === 'synonyms-set') {
+        await setKnowledgeSynonyms(
+          guildId,
+          actorId,
+          interaction.options.getString('term', true),
+          commaList(interaction.options.getString('synonyms', true), 'synonyms', 20),
+        );
+        if (config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
+          action: 'KNOWLEDGE_SYNONYMS_UPDATED', actorId, actorName: interaction.user.tag,
+          detail: 'Updated deterministic Knowledge Base synonyms for a canonical term.',
+        });
+        await interaction.editReply('Saved synonym mapping. Search logs retain usage counts, not raw customer queries.');
+        return true;
+      }
+
+      if (subcommand === 'synonyms-list') {
+        const synonyms = await listKnowledgeSynonyms(guildId);
+        await interaction.editReply(synonyms.length
+          ? synonyms.map((item) => '**' + item.term + '** → ' + (item.synonyms.join(', ') || 'no alternatives')).join('\n').slice(0, 4000)
+          : 'No synonyms have been configured.');
+        return true;
+      }
+
+      if (subcommand === 'synonyms-delete') {
+        const deleted = await deleteKnowledgeSynonyms(guildId, interaction.options.getString('term', true));
+        if (deleted && config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
+          action: 'KNOWLEDGE_SYNONYMS_DELETED', actorId, actorName: interaction.user.tag,
+          detail: 'Deleted deterministic Knowledge Base synonym mapping.',
+        });
+        await interaction.editReply(deleted ? 'Removed that synonym mapping.' : 'No matching synonym mapping was found.');
+        return true;
+      }
+
+      if (subcommand === 'metrics') {
+        const days = interaction.options.getInteger('days') ?? 30;
+        const metrics = await getKnowledgeBaseMetrics(guildId, days);
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setTitle('📊 Knowledge Base Metrics')
+            .setDescription(
+              'Window: ' + days + ' days\nPublished articles: ' + metrics.publishedArticles +
+              '\nDraft articles: ' + metrics.draftArticles + '\nArchived articles: ' + metrics.archivedArticles +
+              '\nSearch-result appearances: ' + metrics.searchResultEvents + '\nViews: ' + metrics.articleViews +
+              '\nShares: ' + metrics.articleShares + '\nHelpful votes: ' + metrics.helpfulVotes +
+              '\nUnhelpful votes: ' + metrics.unhelpfulVotes,
+            )
+            .setFooter({ text: 'Only per-server aggregate usage is displayed. Raw search queries are not stored.' })],
+        });
+        return true;
+      }
+    }
+
+    if (group === 'quick-reply') {
+      const needsStaff = ['list','show','send'].includes(subcommand);
+      // Administrators can inspect the library even when the guild has not
+      // configured a staff role. Sending still requires staff membership and
+      // the active ticket's department authorization below.
+      if (needsStaff && !access.isStaff && !(access.isAdmin && ['list','show'].includes(subcommand))) {
+        throw accessDenied('a configured department staff role (administrators may list/show replies)');
+      }
+      if (subcommand === 'list') {
+        const replies = await listQuickReplies(guildId, { isAdmin: access.isAdmin, roleIds: access.roleIds }, interaction.options.getString('category') ?? undefined);
+        await interaction.editReply(replies.length
+          ? replies.map((reply) => '**' + reply.name + '** • ' + reply.category + ' • ' + reply.id + ' • v' + reply.version + '\nTags: ' + (reply.tags.join(', ') || 'none')).join('\n\n').slice(0, 4000)
+          : 'No quick replies are available to you.');
+        return true;
+      }
+      if (subcommand === 'history') {
+        if (!access.isAdmin) throw accessDenied('Manage Server or Administrator permission');
+        const replyId = interaction.options.getString('name-or-id', true).trim();
+        const revisions = await listQuickReplyRevisions(guildId, replyId);
+        const description = revisions.length
+          ? revisions.map((item) =>
+              '**v' + item.version + '** • ' + item.operation + ' • ' + (item.enabled ? 'enabled' : 'disabled') +
+              '\n' + item.name + ' • editor ' + item.changedBy + ' • ' + item.createdAt,
+            ).join('\n\n').slice(0, 3800)
+          : 'No revision history is recorded for this quick reply.';
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setTitle('Quick Reply Revision History').setDescription(description)
+            .setFooter({ text: 'History is retained in PostgreSQL; deleted replies remain listed here.' })],
+        });
+        return true;
+      }
+      if (subcommand === 'restore-revision') {
+        if (!access.isAdmin) throw accessDenied('Manage Server or Administrator permission');
+        const reply = await restoreQuickReplyRevision(
+          guildId,
+          actorId,
+          interaction.options.getString('name-or-id', true),
+          interaction.options.getInteger('revision', true),
+          interaction.options.getInteger('expected-version', true),
+        );
+        if (config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
+          action: 'QUICK_REPLY_REVISION_RESTORED',
+          actorId,
+          actorName: interaction.user.tag,
+          detail: 'Restored retained quick reply content into new version ' + reply.version + '.',
+        });
+        await interaction.editReply('Restored the selected historical content as quick reply version ' + reply.version + '. Prior versions remain unchanged.');
+        return true;
+      }
+      if (subcommand === 'show') {
+        const reply = await getQuickReply(guildId, interaction.options.getString('name-or-id', true), { isAdmin: access.isAdmin, roleIds: access.roleIds });
+        if (!reply) throw new Error('Quick reply not found or unavailable to your roles.');
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setTitle(reply.name).setDescription(reply.body)
+            .addFields({ name: 'Category', value: reply.category, inline: true },{ name:'Tags',value:reply.tags.join(', ')||'none',inline:true })
+            .setFooter({ text: 'Supported placeholders: {user}, {username}, {ticket_id}, {ticket_number}, {department}, {priority}, {staff}' })],
+        });
+        return true;
+      }
+      if (subcommand === 'save') {
+        if (!access.isAdmin) throw accessDenied('Manage Server or Administrator permission');
+        const reply = await saveQuickReply(guildId, actorId, {
+          name: interaction.options.getString('name', true),
+          body: interaction.options.getString('body', true),
+          category: interaction.options.getString('category') ?? 'General',
+          tags: commaList(interaction.options.getString('tags'), 'tags', 12),
+          allowedRoleIds: commaList(interaction.options.getString('role-ids'), 'role IDs', 20),
+          enabled: interaction.options.getBoolean('enabled') ?? undefined,
+        }, interaction.options.getInteger('expected-version') ?? undefined);
+        if (config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
+          action: 'QUICK_REPLY_SAVED', actorId, actorName: interaction.user.tag,
+          detail: 'Saved quick reply ' + reply.id + ' version ' + reply.version + '; role restrictions count=' + reply.allowedRoleIds.length + '.',
+        });
+        await interaction.editReply('Saved quick reply "' + reply.name + '" at version ' + reply.version + '.');
+        return true;
+      }
+      if (subcommand === 'delete') {
+        if (!access.isAdmin) throw accessDenied('Manage Server or Administrator permission');
+        if (!interaction.options.getBoolean('confirm', true)) throw new Error('Delete was not confirmed. No quick reply was removed.');
+        const quickReplyId = interaction.options.getString('name-or-id', true);
+        const expectedVersion = interaction.options.getInteger('expected-version', true);
+        const deleted = await deleteQuickReply(guildId, quickReplyId, expectedVersion, actorId);
+        if (deleted && config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
+          action: 'QUICK_REPLY_DELETED', actorId, actorName: interaction.user.tag,
+          detail: 'Deleted quick reply identified by ' + quickReplyId.slice(0, 80) + '.',
+        });
+        await interaction.editReply(deleted ? 'Quick reply deleted.' : 'No matching quick reply was found.');
+        return true;
+      }
+      if (subcommand === 'send') {
+        const ticket = await requireTicketInCurrentChannel(interaction);
+        if (!canHandleTicketForStaff(access, ticket, config)) {
+          throw accessDenied('the staff role configured for this ticket department');
+        }
+        const reply = await getQuickReply(guildId, interaction.options.getString('name-or-id', true), { isAdmin: access.isAdmin, roleIds: access.roleIds });
+        if (!reply) throw new Error('Quick reply not found or unavailable to your roles.');
+        const department = ticket.departmentId ? config.departments[ticket.departmentId] : undefined;
+        const rendered = renderQuickReply(reply, {
+          user: ticket.ownerId ? '<@' + ticket.ownerId + '>' : 'customer',
+          username: interaction.user.username,
+          ticketId: ticket.id,
+          ticketNumber: ticket.ticketNumber ?? '',
+          department: department?.name ?? ticket.departmentId ?? '',
+          priority: ticket.priority ?? 'normal',
+          staff: interaction.user.username,
+        });
+        await requireTextChannel(interaction).send({ content: rendered, allowedMentions: { parse: [] } });
+        if (config.supportCategoryId) await logTicketEvent(interaction.guild!, config.supportCategoryId, {
+          ticketNumber: ticket.ticketNumber ?? ticket.id,
+          ticketChannelId: ticket.channelId,
+          event: 'QUICK_REPLY_SENT',
+          actorId,
+          actor: interaction.user.tag,
+          actorName: interaction.user.tag,
+          detail: 'Sent quick reply ' + reply.id + ' version ' + reply.version + '.',
+        });
+        await interaction.editReply('Sent quick reply "' + reply.name + '". User/role mentions were suppressed.');
+        return true;
+      }
+    }
+
+    if (group === 'related') {
+      // Related links expose metadata about two tickets. Keep every operation
+      // administrator-only until both-ticket department authorization is
+      // implemented and tested, rather than granting it to staff in any dept.
+      if (!access.isAdmin) throw accessDenied('Manage Server or Administrator permission');
+      const ticket = await requireTicketInCurrentChannel(interaction, false);
+      if (subcommand === 'link') {
+        const other = interaction.options.getString('other-ticket-id', true).trim();
+        await linkRelatedTickets(guildId, ticket.id, other, actorId);
+        if (config.supportCategoryId) await logTicketEvent(interaction.guild!, config.supportCategoryId, {
+          ticketNumber: ticket.ticketNumber ?? ticket.id, ticketChannelId: ticket.channelId,
+          event: 'RELATED_TICKET_LINKED', actorId, actor: interaction.user.tag, actorName: interaction.user.tag,
+          detail: 'Linked another same-server ticket to ' + ticket.id + '.',
+        });
+        await interaction.editReply('Related-ticket link saved. Both tickets remain unchanged; no ticket was merged.');
+        return true;
+      }
+      if (subcommand === 'list') {
+        const related = await listRelatedTickets(guildId, ticket.id);
+        await interaction.editReply(related.length
+          ? related.map((item) => '**Ticket ' + (item.ticketNumber ?? item.ticketId.slice(0, 8)) + '** • <#' + item.channelId + '> • ' + item.status + ' • ' + (item.priority ?? 'normal') + '\nID: ' + item.ticketId).join('\n\n').slice(0, 4000)
+          : 'No related tickets are linked to this ticket.');
+        return true;
+      }
+      if (subcommand === 'unlink') {
+        if (!interaction.options.getBoolean('confirm', true)) throw new Error('Unlink was not confirmed. No relationship was removed.');
+        const otherTicketId = interaction.options.getString('other-ticket-id', true).trim();
+        const removed = await unlinkRelatedTickets(guildId, ticket.id, otherTicketId);
+        if (removed && config.supportCategoryId) await logTicketEvent(interaction.guild!, config.supportCategoryId, {
+          ticketNumber: ticket.ticketNumber ?? ticket.id, ticketChannelId: ticket.channelId,
+          event: 'RELATED_TICKET_UNLINKED', actorId, actor: interaction.user.tag, actorName: interaction.user.tag,
+          detail: 'Removed one same-server related-ticket link from ' + ticket.id + '.',
+        });
+        await interaction.editReply(removed ? 'Related-ticket link removed. Both tickets and their history remain unchanged.' : 'No matching related-ticket link was found.');
+        return true;
+      }
+    }
+
+    if (group === 'workflow') {
+      if (!access.isAdmin) throw accessDenied('Manage Server or Administrator permission');
+      if (subcommand === 'runs') {
+        const ticket = await requireTicketInCurrentChannel(interaction, false);
+        const runs = await listWorkflowExecutionRunsForTicket(guildId, ticket.id, 10);
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setTitle('Workflow Runs • Ticket #' + (ticket.ticketNumber ?? ticket.id.slice(0, 8)))
+            .setDescription(runs.length ? runs.map((run) => workflowRunDescription(run)).join('\n\n').slice(0, 3900) : 'No workflow runs are recorded for this ticket.')
+            .setFooter({ text: 'Manual admin-triggered runs only. No background workflow triggers are enabled.' })],
+        });
+        return true;
+      }
+      if (subcommand === 'execute') {
+        const ticket = await requireTicketInCurrentChannel(interaction, true);
+        const run = await executeWorkflowTemplateForTicket({
+          guildId,
+          channel: requireTextChannel(interaction),
+          actorId,
+          actorName: interaction.user.tag,
+          interactionId: interaction.id,
+          templateId: interaction.options.getString('template-id', true).trim(),
+          expectedVersion: interaction.options.getInteger('version', true),
+          confirmation: interaction.options.getString('confirmation', true).trim(),
+        });
+        await auditWorkflowRun(interaction, config, ticket, run, 'WORKFLOW_RUN_STARTED');
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setTitle('Manual Workflow Run').setDescription(workflowRunDescription(run))
+            .setFooter({ text: 'Every action is recorded. Automatic triggers and arbitrary code execution are disabled.' })],
+        });
+        return true;
+      }
+      if (subcommand === 'resume') {
+        const ticket = await requireTicketInCurrentChannel(interaction, true);
+        const run = await resumeWorkflowExecutionForTicket({
+          guildId,
+          channel: requireTextChannel(interaction),
+          actorId,
+          actorName: interaction.user.tag,
+          runId: interaction.options.getString('run-id', true).trim(),
+          confirmation: interaction.options.getString('confirmation', true).trim(),
+        });
+        await auditWorkflowRun(interaction, config, ticket, run, 'WORKFLOW_RUN_RESUMED');
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setTitle('Workflow Run Recovery').setDescription(workflowRunDescription(run))
+            .setFooter({ text: 'Completed steps are skipped; ambiguous sends require safe reconciliation or explicit review.' })],
+        });
+        return true;
+      }
+      if (subcommand === 'resolve-step') {
+        const ticket = await requireTicketInCurrentChannel(interaction, true);
+        const run = await resolveWorkflowExecutionStep({
+          guildId,
+          channel: requireTextChannel(interaction),
+          actorId,
+          runId: interaction.options.getString('run-id', true).trim(),
+          stepIndex: interaction.options.getInteger('step', true),
+          decision: interaction.options.getString('decision', true) as 'complete' | 'retry',
+          confirmation: interaction.options.getString('confirmation', true).trim(),
+        });
+        await auditWorkflowRun(interaction, config, ticket, run, 'WORKFLOW_STEP_MANUALLY_RESOLVED');
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setTitle('Workflow Step Review').setDescription(workflowRunDescription(run))
+            .setFooter({ text: 'Retry may duplicate delivery if the original send was not visible in channel history.' })],
+        });
+        return true;
+      }
+      if (subcommand === 'list') {
+        const templates = await listWorkflowTemplates(guildId);
+        await interaction.editReply(templates.length
+          ? templates.map((item) => '**' + item.name + '** • ' + item.id + ' • v' + item.version + ' • ' + (item.enabled ? 'manual execution enabled' : 'disabled') +
+              '\nConditions: ' + item.definition.conditions.length + ' • actions: ' + item.definition.actions.length).join('\n\n').slice(0, 4000)
+          : 'No workflow templates exist.');
+        return true;
+      }
+      if (subcommand === 'history') {
+        const templateId = interaction.options.getString('template-id', true).trim();
+        const revisions = await listWorkflowTemplateRevisions(guildId, templateId);
+        const description = revisions.length
+          ? revisions.map((item) =>
+              '**v' + item.version + '** • ' + item.operation + ' • ' +
+              (item.enabled ? 'catalogue enabled' : 'disabled') + (item.deleted ? ' • deleted' : '') +
+              '\n' + item.name + ' • editor ' + item.changedBy + ' • ' + item.createdAt,
+            ).join('\n\n').slice(0, 3800)
+          : 'No revision history is recorded for this workflow template.';
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setTitle('Workflow Template Revision History').setDescription(description)
+            .setFooter({ text: 'Templates execute only on explicit admin command; no automatic triggers run.' })],
+        });
+        return true;
+      }
+      if (subcommand === 'save') {
+        let definition: unknown;
+        try { definition = JSON.parse(interaction.options.getString('definition-json', true)); }
+        catch { throw new Error('Definition must be valid JSON. Example: {"conditions":[{"field":"priority","equals":"urgent"}],"actions":[{"type":"assign_department","value":"billing"}]}'); }
+        const item = await saveWorkflowTemplate(
+          guildId,
+          actorId,
+          interaction.options.getString('name', true),
+          definition,
+          interaction.options.getInteger('expected-version') ?? undefined,
+        );
+        if (config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
+          action: 'WORKFLOW_TEMPLATE_SAVED', actorId, actorName: interaction.user.tag,
+          detail: 'Saved validated workflow template ' + item.id + ' version ' + item.version + '; manual execution requires enablement and explicit confirmation.',
+        });
+        await interaction.editReply('Saved validated workflow template "' + item.name + '" v' + item.version + '. It remains disabled; no ticket action was run. Enable it for explicit admin-only manual execution.');
+        return true;
+      }
+      if (subcommand === 'restore-revision') {
+        const templateId = interaction.options.getString('template-id', true).trim();
+        const saved = await restoreWorkflowTemplateRevision(
+          guildId,
+          templateId,
+          interaction.options.getInteger('revision', true),
+          interaction.options.getInteger('expected-version', true),
+          actorId,
+        );
+        if (config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
+          action: 'WORKFLOW_TEMPLATE_REVISION_RESTORED',
+          actorId,
+          actorName: interaction.user.tag,
+          detail: 'Restored retained workflow definition for template ' + saved.id + ' into version ' + saved.version + '; left disabled for review.',
+        });
+        await interaction.editReply('Restored the selected workflow revision as version ' + saved.version + '. It is disabled and non-executable until reviewed.');
+        return true;
+      }
+      if (subcommand === 'preview') {
+        const preview = await previewWorkflowTemplateById(guildId, interaction.options.getString('template-id', true).trim());
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setTitle('Workflow template safety preview')
+            .setDescription('Executable: **no**\nConditions: ' + preview.conditionCount + '\nActions: ' + preview.actionCount + '\n\n' + preview.warnings.map((warning) => '• ' + warning).join('\n').slice(0, 3500))],
+        });
+        return true;
+      }
+      if (subcommand === 'enable') {
+        const item = await setWorkflowTemplateEnabled(
+          guildId,
+          interaction.options.getString('template-id', true).trim(),
+          interaction.options.getInteger('version', true),
+          interaction.options.getBoolean('enabled', true),
+          actorId,
+        );
+        if (config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
+          action: 'WORKFLOW_TEMPLATE_CATALOGUE_TOGGLE', actorId, actorName: interaction.user.tag,
+          detail: 'Set workflow template ' + item.id + ' manualExecutionEnabled=' + item.enabled + ' at version ' + item.version + '. Automatic triggers remain disabled.',
+        });
+        await interaction.editReply('Manual workflow execution is now ' + (item.enabled ? 'enabled' : 'disabled') + ' for template version ' + item.version + '. Execute still requires an explicit confirmation phrase; no automatic triggers are enabled.');
+        return true;
+      }
+      if (subcommand === 'delete') {
+        if (!interaction.options.getBoolean('confirm', true)) throw new Error('Delete was not confirmed. No workflow template was removed.');
+        const templateId = interaction.options.getString('template-id', true).trim();
+        const removed = await deleteWorkflowTemplate(
+          guildId,
+          templateId,
+          interaction.options.getInteger('version', true),
+          actorId,
+        );
+        if (removed && config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
+          action: 'WORKFLOW_TEMPLATE_DELETED', actorId, actorName: interaction.user.tag,
+          detail: 'Deleted safe workflow template catalogue entry ' + templateId + '.',
+        });
+        await interaction.editReply(removed ? 'Workflow template deleted.' : 'No template matched that ID and version. Refresh before retrying.');
+        return true;
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Stage 4 command failed safely. Please retry later.';
+    await interaction.editReply(message.slice(0, 1900)).catch(() => undefined);
+    return true;
+  }
+  return true;
+}

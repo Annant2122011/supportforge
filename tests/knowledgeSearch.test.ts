@@ -1,0 +1,60 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import {
+  normalizeKnowledgeText,
+  scoreKnowledgeCandidate,
+  shouldOfferKnowledgeResult,
+} from '../src/core/domain/knowledgeSearch';
+
+test('knowledge search normalization is Unicode-aware and stable', () => {
+  assert.equal(normalizeKnowledgeText('  REFUNDS—Policy!! '), 'refunds policy');
+  assert.equal(normalizeKnowledgeText('HINDI भुगतान'), 'hindi भुगतान');
+});
+
+test('exact title and tags outrank weaker title/summary similarity', () => {
+  const exact = scoreKnowledgeCandidate('refund policy', {
+    title: 'Refund Policy',
+    summary: 'How refunds work',
+    category: 'Billing',
+    tags: ['refund', 'money'],
+  });
+  const weaker = scoreKnowledgeCandidate('refund policy', {
+    title: 'Account questions',
+    summary: 'Refunds may be available under some circumstances',
+    category: 'General',
+    tags: ['account'],
+  });
+  assert.equal(exact.score, 1);
+  assert.ok(exact.score > weaker.score);
+  assert.equal(exact.confidence, 'high');
+});
+
+test('typo-tolerant fallback returns ranked medium-confidence candidates without hiding low confidence', () => {
+  const result = scoreKnowledgeCandidate('refud policy', {
+    title: 'Refund Policy',
+    summary: 'Eligibility and processing times',
+    category: 'Billing',
+    tags: ['refunds'],
+  });
+  assert.ok(result.score > 0.38);
+  assert.equal(shouldOfferKnowledgeResult(result), true);
+  const unrelated = scoreKnowledgeCandidate('space elevator', {
+    title: 'Refund Policy',
+    summary: 'Billing account help',
+    category: 'Billing',
+    tags: ['payments'],
+  });
+  assert.equal(shouldOfferKnowledgeResult(unrelated), false);
+});
+
+test('empty query does not create false-positive matches', () => {
+  const score = scoreKnowledgeCandidate('   ', {
+    title: 'Help',
+    summary: 'Support article',
+    category: 'General',
+    tags: ['help'],
+  });
+  assert.equal(score.score, 0);
+  assert.equal(shouldOfferKnowledgeResult(score), false);
+});

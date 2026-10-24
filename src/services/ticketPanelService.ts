@@ -140,6 +140,16 @@ export function buildTicketPanelComponents(
     );
   }
 
+  if (['open', 'claimed', 'pending', 'reopened'].includes(status)) {
+    lifecycle.addComponents(
+      new ButtonBuilder()
+        .setCustomId('ticket:stage4:tools')
+        .setLabel('Support Tools')
+        .setEmoji('🧰')
+        .setStyle(ButtonStyle.Primary),
+    );
+  }
+
   const tools = new ActionRowBuilder<ButtonBuilder>();
   if (status !== 'archived') {
     if (status === 'closed') {

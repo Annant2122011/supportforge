@@ -41,6 +41,8 @@ import { assertTicketStatusTransition } from '../core/domain/ticketLifecycle';
 import { projectDurableTicketTopic } from '../services/ticketTopicProjectionService';
 import { buildTicketVisibilityPlan } from '../core/domain/ticketPermissionPlan';
 import { classifyTicketRoutingComponent } from '../core/domain/ticketInteractionRouting';
+import { handleStage4TicketToolsInteraction } from './stage4TicketToolsInteractions';
+import { isStage4TicketToolsCustomId } from '../core/domain/stage4TicketTools';
 
 import { generateTranscript } from '../services/transcriptService';
 
@@ -6426,6 +6428,14 @@ export async function handleTicketInteraction(
     | ModalSubmitInteraction,
 ): Promise<void> {
   try {
+    if (
+      (interaction.isButton() || interaction.isStringSelectMenu() || interaction.isModalSubmit()) &&
+      isStage4TicketToolsCustomId(interaction.customId)
+    ) {
+      await handleStage4TicketToolsInteraction(interaction);
+      return;
+    }
+
     if (interaction.customId.startsWith('ticket:thread:')) {
       if (interaction.isButton()) {
         const handled = await handlePrivateThreadAuxButton(interaction);
