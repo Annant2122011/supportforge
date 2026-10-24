@@ -941,6 +941,10 @@ export const data =
             .addStringOption((option) => option.setName('query').setDescription('Search terms, 2–200 characters').setRequired(true).setMaxLength(200)),
         )
         .addSubcommand((subcommand) =>
+          subcommand.setName('suggest').setDescription('Find relevant articles and optionally share one in this ticket (staff only)')
+            .addStringOption((option) => option.setName('query').setDescription('Customer question or issue, 2–200 characters').setRequired(true).setMaxLength(200)),
+        )
+        .addSubcommand((subcommand) =>
           subcommand.setName('share').setDescription('Share a permitted article summary in the current ticket (staff only)')
             .addStringOption((option) => option.setName('article-id').setDescription('Published article ID').setRequired(true).setMaxLength(36)),
         )
