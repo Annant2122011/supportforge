@@ -404,7 +404,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           category: interaction.options.getString('category') ?? 'General',
           tags: commaList(interaction.options.getString('tags'), 'tags', 12),
           allowedRoleIds: commaList(interaction.options.getString('role-ids'), 'role IDs', 20),
-        });
+        }, interaction.options.getInteger('expected-version') ?? undefined);
         if (config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
           action: 'QUICK_REPLY_SAVED', actorId, actorName: interaction.user.tag,
           detail: 'Saved quick reply ' + reply.id + ' version ' + reply.version + '; role restrictions count=' + reply.allowedRoleIds.length + '.',
@@ -508,7 +508,13 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         let definition: unknown;
         try { definition = JSON.parse(interaction.options.getString('definition-json', true)); }
         catch { throw new Error('Definition must be valid JSON. Example: {"conditions":[{"field":"priority","equals":"urgent"}],"actions":[{"type":"assign_department","value":"billing"}]}'); }
-        const item = await saveWorkflowTemplate(guildId, actorId, interaction.options.getString('name', true), definition);
+        const item = await saveWorkflowTemplate(
+          guildId,
+          actorId,
+          interaction.options.getString('name', true),
+          definition,
+          interaction.options.getInteger('expected-version') ?? undefined,
+        );
         if (config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
           action: 'WORKFLOW_TEMPLATE_SAVED', actorId, actorName: interaction.user.tag,
           detail: 'Saved validated workflow template ' + item.id + ' version ' + item.version + '; execution remains disabled.',
