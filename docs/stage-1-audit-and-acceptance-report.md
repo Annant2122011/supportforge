@@ -5,6 +5,8 @@
 **Pull request:** [#31, Stage 1 configuration integrity, localization and acceptance](https://github.com/Annant2122011/supportforge/pull/31)  
 **Current status:** The updated source and command-limit regression test passed CI on the cleanup base: TypeScript build succeeded, 138/138 tests passed with zero skips, and disposable PostgreSQL verification succeeded. Live Discord acceptance and an isolated Neon restore drill remain blocked pending access to a non-production environment.
 
+The testable scope, integration order and release-stop conditions are also maintained in [the Stage 1/2 Exit Contract](stage-1-2-exit-contract.md). Stage 1 remains blocked from production acceptance until environment-dependent gates have evidence.
+
 ## Evidence summary
 
 | Area | Result | Evidence / limit |
