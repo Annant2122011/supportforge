@@ -81,7 +81,6 @@ test('quick reply saves require an expected version and reject stale concurrent 
     assert.equal(restoredAfterDelete.version, 7);
     assert.equal(restoredAfterDelete.body, 'Second version');
     assert.equal(restoredAfterDelete.enabled, false);
-    assert.equal((await listWorkflowTemplateRevisions(guildId, created.id))[0]?.operation, 'restored');
     assert.equal((await getQuickReply(guildId, created.id, { isAdmin: true, roleIds: [] }))?.version, 7);
     assert.equal((await listQuickReplyRevisions(guildId, created.id))[0]?.operation, 'restored');
 
