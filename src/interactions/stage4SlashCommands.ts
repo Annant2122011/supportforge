@@ -296,7 +296,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         }
 
         const description = results.map((result, index) =>
-          translate(settings.locale, 'knowledge.command.suggestionLine', { index: index + 1, title: result.title, confidence: translate(settings.locale, result.confidence === 'high' ? 'knowledge.command.confidenceHigh' : result.confidence === 'medium' ? 'knowledge.command.confidenceMedium' : 'knowledge.command.confidenceLow'), score: result.score, summary: result.summary || translate(settings.locale, 'knowledge.command.noSummary'), category: result.category }) +
+          translate(settings.locale, 'knowledge.command.suggestionLine', { index: index + 1, title: result.title, confidence: translate(settings.locale, result.confidence === 'high' ? 'knowledge.command.confidenceHigh' : result.confidence === 'medium' ? 'knowledge.command.confidenceMedium' : 'knowledge.command.confidenceLow'), score: result.score, summary: result.summary || translate(settings.locale, 'knowledge.command.noSummary'), category: translate(settings.locale, 'knowledge.command.categoryLine', { category: result.category }) }) +
           (result.tags.length ? '\n' + translate(settings.locale, 'knowledge.command.tagsLine', { tags: result.tags.join(', ') }) : ''),
         ).join('\n\n').slice(0, 3600);
         const shareable = results.filter((result) => isKnowledgeShareableConfidence(result.confidence)).slice(0, 5);
@@ -325,7 +325,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           return true;
         }
         const body = results.map((result, index) =>
-          translate(settings.locale, 'knowledge.command.searchResultLine', { index: index + 1, title: result.title, confidence: translate(settings.locale, result.confidence === 'high' ? 'knowledge.command.confidenceHigh' : result.confidence === 'medium' ? 'knowledge.command.confidenceMedium' : 'knowledge.command.confidenceLow'), score: result.score, id: result.id, summary: result.summary || translate(settings.locale, 'knowledge.command.noSummary'), category: result.category }),
+          translate(settings.locale, 'knowledge.command.searchResultLine', { index: index + 1, title: result.title, confidence: translate(settings.locale, result.confidence === 'high' ? 'knowledge.command.confidenceHigh' : result.confidence === 'medium' ? 'knowledge.command.confidenceMedium' : 'knowledge.command.confidenceLow'), score: result.score, id: result.id, summary: result.summary || translate(settings.locale, 'knowledge.command.noSummary'), category: translate(settings.locale, 'knowledge.command.categoryLine', { category: result.category }) }),
         ).join('\n\n');
         await interaction.editReply({
           embeds: [new EmbedBuilder().setTitle('🔎 ' + translate(settings.locale, 'knowledge.command.searchTitle')).setDescription(body.slice(0, 4000))
