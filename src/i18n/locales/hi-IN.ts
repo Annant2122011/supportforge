@@ -707,6 +707,7 @@ const hiIN: Record<TranslationKey, string> = {
   'settings.diagnostics.restoredDescription': "**पुनर्स्थापित:** `{restored}`\n**पहले का चेकपॉइंट:** `{checkpoint}`\n\nचेकपॉइंट में मौजूद फ़ॉर्मों की सर्वर/उन्नत सेटिंग्स, सहायता-समय नीतियाँ और वर्तमान स्कीमा नए अपरिवर्तनीय संस्करणों से पुनर्स्थापित हुए। मौजूदा सबमिशन, पुराने फ़ॉर्म संस्करण और बाद में बनाए गए फ़ॉर्म हटाए नहीं गए।{refreshFailures}",
   'settings.diagnostics.refreshFailures': "\n\n⚠️ इनका रीफ़्रेश विफल हुआ: {failures}। अनुमति जाँचने के बाद Settings Refresh कार्रवाई का उपयोग करें।",
   'settings.diagnostics.restoreFailed': "कॉन्फ़िगरेशन पुनर्स्थापना पूरी नहीं हुई। लॉग जाँचें और आंशिक विफलता होने पर सहेजे गए पूर्व-पुनर्स्थापना चेकपॉइंट का उपयोग करें।",
+  'settings.recovery.modalOpenFailed': "सेटिंग्स फ़ॉर्म नहीं खुल सका। कृपया फिर प्रयास करें।",
 };
 
 export default hiIN;
