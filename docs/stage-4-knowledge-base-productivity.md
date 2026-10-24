@@ -31,9 +31,12 @@
 
 ### Workflow templates
 
-- Versioned catalog of JSON templates with strict allowlisted condition fields/actions, bounded array counts and configured-ID validation. Updating an existing template requires its current version; stale writes are rejected, and changed templates are returned to disabled catalogue state for review.
-- Unknown keys, arbitrary JavaScript/SQL and lifecycle bypass actions are rejected.
-- Template preview states that templates are **not executable**. Catalogue enablement is only metadata; no automatic ticket execution is implemented until a separate execution plan reuses domain services, authorization, lifecycle guards, durable audit and outbox.
+- Versioned catalog of JSON templates with strict allowlisted conditions/actions, bounded array counts and configured-ID validation. Updates require the current version and return to disabled state for review; revision history is durable and soft-deleted definitions remain inspectable.
+- /supportforge workflow execute performs **manual, administrator-only execution on the current active ticket**, requiring an enabled current version and the exact RUN <template-id> v<version> confirmation. It evaluates the saved conditions against the current ticket snapshot before creating any action steps.
+- The durable PostgreSQL execution ledger records each run and step, the actor, template-version snapshot, attempts, result metadata and safe error codes. A ticket-scoped PostgreSQL advisory lock prevents two bot processes from starting or resuming competing runs for the same ticket.
+- Allowed actions use existing metadata/outbox services for priority, department and tag changes. Cross-department tag changes are blocked. Quick replies suppress mentions and include a stable recovery marker.
+- /supportforge workflow runs, resume, and resolve-step provide an explicit recovery route. Completed steps are skipped; database updates are reconciled against current ticket state; ambiguous sends scan channel history for the marker. If history is unavailable or does not cover the send window, the run stops for admin review instead of automatically resending. Choosing retry requires a typed confirmation that acknowledges possible duplicate delivery.
+- Unknown keys, arbitrary JavaScript/SQL, unsupported actions and lifecycle bypass actions are rejected. **Automatic/background workflow triggers remain disabled**; an admin must explicitly execute each run.
 
 ## 2026-10-24 refinement increment
 
@@ -63,6 +66,15 @@ These changes require CI on the latest exact PR head. The older passing CI run b
 - PR chain remains #33 (main baseline cleanup) → #31 (Stage 1) → #32 (Stage 2) → #34 (Stage 3) → Stage 4 PR.
 - Test-guild acceptance, actual command registration in a non-production guild and a successful restore into a new isolated Neon database remain blocked/not run. No stage may be marked production-accepted until these are executed and evidence is recorded.
 
+## Manual workflow execution safety contract
+
+- A workflow must be enabled and the exact current version must be named in the confirmation phrase. Conditions are evaluated against the current durable ticket state.
+- The service rejects non-active tickets, cross-server definitions, missing configured departments/tags/replies, and unsupported actions.
+- Each run and step is durably ledgered before the action is attempted. The ticket-scoped advisory lock prevents concurrent execution from separate bot processes.
+- Run history records no quick-reply body or customer message content in its operational event. Message delivery is identified with a stable marker and the resulting Discord message ID when known.
+- A crash after an external send but before ledger update triggers marker reconciliation. If the bot cannot read enough history to prove absence/presence, it must stop for manual review. The operator can explicitly mark the send completed or acknowledge possible duplication before retry.
+- Automated/background execution is deliberately disabled until a separate trigger/replay policy is reviewed.
+
 ## Release readiness checklist
 
 - [ ] The ordered PR chain is reviewed and merged without bypassing CI.
@@ -71,12 +83,13 @@ These changes require CI on the latest exact PR head. The older passing CI run b
 - [ ] A backup is generated from a non-production Neon source; manifest checksum is verified; restore into a freshly created empty non-production target completes; schema migration level, table counts, ticket/event/outbox integrity and an application-level smoke test are recorded.
 - [ ] A failed restore drill is repeated only after inspecting the isolated target; never switch the restore script to drop/clean populated targets.
 - [ ] Audit logs are checked for correct actors and absence of user-written body/comment content in operational telemetry.
+- [ ] Workflow execution covers condition mismatch, stale template version, concurrent run lock, step retry after database mutation, marker reconciliation after send success, incomplete-history manual review, and explicit duplicate-risk acknowledgement.
 - [ ] Stage H2 remaining Settings pages, panel previews and selected report translations are either finished or explicitly retained as an accepted release limitation.
 - [ ] Large-guild tests cover more than one SLA sweep batch, concurrent policy edits, backup size limits, high message counts and role changes during article/reply access.
 
 ## Known limits retained intentionally
 
-1. Workflow templates are validated and stored but do not execute actions.
+1. Workflow templates run only through explicit administrator confirmation on the current ticket; there are no automatic/background triggers. Ambiguous quick-reply delivery can require human resolution, and a manually confirmed retry can duplicate a message if channel history was incomplete.
 2. SLA scan has a bounded batch per guild; large-guild throughput/restart rotation needs verified load tests before promising an alert deadline.
 3. Recovery message segment markers reduce duplicate replay after partial failure, but cross-system exactly-once delivery cannot be guaranteed when Discord accepts a send and the bot cannot read recent history again.
 4. The backup/restore scripts are guarded utilities, not automatic production rollback. Actual Neon backup/restore acceptance must be run against a disposable non-production target.
