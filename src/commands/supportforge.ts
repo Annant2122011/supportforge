@@ -987,12 +987,13 @@ export const data =
             .addStringOption((option) => option.setName('name-or-id').setDescription('Name or ID').setRequired(true).setMaxLength(80)),
         )
         .addSubcommand((subcommand) =>
-          subcommand.setName('save').setDescription('Create or update a quick reply (admin only)')
+          subcommand.setName('save').setDescription('Create a quick reply, or update one using its current version (admin only)')
             .addStringOption((option) => option.setName('name').setDescription('Name shown to staff').setRequired(true).setMaxLength(80))
             .addStringOption((option) => option.setName('body').setDescription('Response text; max 1,800 characters').setRequired(true).setMaxLength(1800))
             .addStringOption((option) => option.setName('category').setDescription('Category').setRequired(false).setMaxLength(80))
             .addStringOption((option) => option.setName('tags').setDescription('Comma-separated tags').setRequired(false).setMaxLength(400))
-            .addStringOption((option) => option.setName('role-ids').setDescription('Optional comma-separated roles allowed to use it').setRequired(false).setMaxLength(420)),
+            .addStringOption((option) => option.setName('role-ids').setDescription('Optional comma-separated roles allowed to use it').setRequired(false).setMaxLength(420))
+            .addIntegerOption((option) => option.setName('expected-version').setDescription('Required to update an existing quick reply; current v# from quick-reply list').setRequired(false).setMinValue(1)),
         )
         .addSubcommand((subcommand) =>
           subcommand.setName('delete').setDescription('Delete a quick reply (admin only)')
@@ -1025,9 +1026,10 @@ export const data =
         .setDescription('Store and validate safe workflow templates; execution is not enabled')
         .addSubcommand((subcommand) => subcommand.setName('list').setDescription('List workflow templates (admin only)'))
         .addSubcommand((subcommand) =>
-          subcommand.setName('save').setDescription('Save a validated workflow template (admin only)')
+          subcommand.setName('save').setDescription('Create a template, or update one using its current version (admin only)')
             .addStringOption((option) => option.setName('name').setDescription('Template name').setRequired(true).setMaxLength(80))
-            .addStringOption((option) => option.setName('definition-json').setDescription('JSON with conditions and allowlisted actions').setRequired(true).setMaxLength(4000)),
+            .addStringOption((option) => option.setName('definition-json').setDescription('JSON with conditions and allowlisted actions').setRequired(true).setMaxLength(4000))
+            .addIntegerOption((option) => option.setName('expected-version').setDescription('Required to update an existing template; current v# from workflow list').setRequired(false).setMinValue(1)),
         )
         .addSubcommand((subcommand) =>
           subcommand.setName('preview').setDescription('Preview safety warnings for a stored template (admin only)')
