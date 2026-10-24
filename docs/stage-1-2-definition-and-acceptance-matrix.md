@@ -74,7 +74,7 @@
 - PR #33 (baseline cleanup), #31 (Stage 1), #32 (Stage 2), #34 (Stage 3), and #39 (consolidated Stage 4) are the intended ordered review chain. PR #36 is an older alternate Stage 4 candidate and is not the current consolidation target. All remain open drafts; do not merge them out of order.
 - PR #33's recorded CI passed on its cleanup head. PR #31 CI #2052 passed 138/138 tests; PR #32 CI #2065 passed 172/172 tests. These are the recorded commit-level results, not live acceptance.
 - Stage 3's recovery/restore/SLA and durable replay-segment ledger passed [CI #2396](https://github.com/Annant2122011/supportforge/actions/runs/40054056156) on head `d5245a8dcefc213a74c6469e56234357350ecc6c`: build passed, 194/194 tests, zero skipped, disposable PostgreSQL passed.
-- Earlier Stage 4 heads have recorded passing CI, but those runs do not certify the consolidated branch because it includes Stage 3 migration 13 and sequences the Stage 4 schema changes as migrations 14–17. CI must pass on PR #39's exact head before this increment is considered automated-verified.
+- The consolidated Stage 4 exact head `dd740bd0b6721a13c41705468dd78607a4b91af2` passed [CI #2574](https://github.com/Annant2122011/supportforge/actions/runs/40094178966): build passed, 212/212 tests passed, zero skipped, and disposable PostgreSQL verification passed. This is automated verification only, not live test-guild or Neon restore acceptance.
 - Stage 1/2 still have partial Stage H2 Settings/panel-preview/report translation coverage. Live Discord acceptance and an isolated non-production Neon backup/restore drill remain not run. Therefore neither Stage 1 nor Stage 2 is production-accepted.
 
 ### Stage 3/4 refinements included on the feature stack
