@@ -24,17 +24,20 @@
 - `npm run db:backup` uses the authoritative unpooled PostgreSQL connection, custom-format `pg_dump`, `pg_restore --list`, SHA-256, and an atomic manifest.
 - `npm run db:restore` requires an explicit non-production confirmation and target label, validates the archive/manifest checksum and size, refuses the source host/database, requires an empty target, and restores in one transaction without `--clean` or dropping populated objects.
 - Restore then runs application migrations and checks the expected migration level plus ticket-event referential integrity.
+- A second target guard compares the destination against the bot's currently configured `DATABASE_URL` and `DATABASE_URL_UNPOOLED` before any process-local environment switch. Malformed configured URLs fail closed; credentials are never printed.
 - Utilities and guard validations are implemented. No authorized isolated Neon backup/restore drill has been performed, so operational recoverability remains **unverified**.
 
 ### 4. Ticket metrics, SLA and CSAT
 - Persistent SLA policies support guild-wide and department/priority-specific scope, first-response and resolution targets, a warning ratio, and pause-while-pending behaviour.
 - Resolution timing starts a new cycle after reopen. Alert records are de-duplicated by ticket/policy/target/severity/policy version/lifecycle cycle. Large-guild scans rotate a bounded cursor; SLA policies are deactivated rather than physically deleted so alert history remains.
-- The supervised SLA worker reports through Stage 2's operational task telemetry.
+- The supervised SLA worker reports through Stage 2's operational task telemetry. A sweep with per-ticket evaluation failures is recorded as failed rather than falsely healthy, while processing continues for other guilds and durable successful alerts remain deduplicated.
 - `/supportforge diagnostics sla-list`, `sla-set`, `sla-delete`, `sla-check`, and `metrics` expose administration and ticket/aggregate reporting. The optional `/supportforge feedback rate` flow and aggregate `feedback summary` use per-ticket/user duplicate-vote protection.
 - Automated calculations and schema tests are present. Live timing, load, permissions and alert delivery in a real Discord test guild remain unverified.
 
 ### Recovery segment ledger — current increment
 
+- Added an isolated-restore guard preventing a restore from targeting either active database URL.
+- Corrected SLA worker telemetry so partial ticket failures cannot appear as a successful sweep.
 - Added PostgreSQL migration 13 for durable per-segment send intent and reconciliation.
 - Expanded `db:verify` to require the new ledger table.
 - Added a PostgreSQL integration test for pending/completed segment state and stored Discord message identity, plus pure marker tests covering determinism and extraction.
