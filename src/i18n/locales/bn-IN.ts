@@ -1024,6 +1024,8 @@ const bnIN: Record<TranslationKey, string> = {
   'forms.settings.error.unknown': "অজানা ত্রুটি।",
   'forms.settings.embed.author': "ResolvX • ফর্ম ও টেমপ্লেট",
   'forms.settings.embed.continue': "চালিয়ে যেতে নিচের নিয়ন্ত্রণগুলি ব্যবহার করুন।",
+  'forms.settings.detail.statusActive': "সক্রিয়",
+  'forms.settings.detail.statusInactive': "নিষ্ক্রিয়",
 };
 
 export default bnIN;
