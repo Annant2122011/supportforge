@@ -556,6 +556,7 @@ const hiIN: Record<TranslationKey, string> = {
   'settings.reports.action.edit': "संपादित करें",
   'settings.reports.action.remove': "हटाएँ",
   'settings.reports.error.thresholdsInvalid': "सीमाएँ 0 से 100000 तक पूर्णांक होनी चाहिए। चैनल प्रतिबंध चालू होने पर चैनल देना आवश्यक है।",
+  'settings.customPanel.generic.chooseAction': "नीचे कोई कार्रवाई चुनें।",
 };
 
 export default hiIN;
