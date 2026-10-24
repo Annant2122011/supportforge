@@ -192,14 +192,20 @@ export async function searchQuickRepliesPage(
   access: QuickReplyAccess,
   filters: QuickReplySearchFilters = {},
 ): Promise<QuickReplySearchPage> {
-  const query = filters.query ? normalizeName(filters.query) : null;
-  const category = filters.category ? normalizeName(filters.category) : null;
-  const tag = filters.tag ? normalizeName(filters.tag) : null;
+  const normalizedQuery = filters.query ? normalizeName(filters.query) : '';
+  const normalizedCategory = filters.category ? normalizeName(filters.category) : '';
+  const normalizedTag = filters.tag ? normalizeName(filters.tag) : '';
+  const query = normalizedQuery || null;
+  const category = normalizedCategory || null;
+  const tag = normalizedTag || null;
   if (query && query.length > 80) throw new Error('Quick-reply search text must be 80 characters or fewer.');
   if (category && category.length > 80) throw new Error('Quick-reply categories must be 80 characters or fewer.');
   if (tag && tag.length > 32) throw new Error('Quick-reply tags must be 32 characters or fewer.');
 
-  const pageSize = Math.max(1, Math.min(25, Math.floor(filters.pageSize ?? 25)));
+  const rawPageSize = filters.pageSize !== undefined && Number.isFinite(filters.pageSize)
+    ? Math.floor(filters.pageSize)
+    : 25;
+  const pageSize = Math.max(1, Math.min(25, rawPageSize));
   const pageCountMax = 100000;
   const requestedPage = Number.isInteger(filters.page) ? Math.floor(filters.page!) : 0;
   if (requestedPage < 0 || requestedPage >= pageCountMax) throw new Error('Quick-reply page is outside the supported range.');
