@@ -1,7 +1,8 @@
-import { EmbedBuilder, MessageFlags, type ChatInputCommandInteraction, type TextChannel, type ThreadChannel } from 'discord.js';
+import { ChannelType, EmbedBuilder, MessageFlags, type ChatInputCommandInteraction, type Message, type TextChannel, type ThreadChannel } from 'discord.js';
 
 import { getGuildConfig } from '../services/configService';
-import { getPersistedTicket } from '../services/ticketPersistenceService';
+import { getPersistedTicket, getPersistedTicketById } from '../services/ticketPersistenceService';
+import { getField } from '../services/ticketStateService';
 import { logSettingsEvent, logTicketEvent } from '../services/auditLogService';
 import {
   createKnowledgeArticle,
@@ -116,6 +117,51 @@ function accessDenied(action: string): Error {
   return new Error('You need ' + action + ' to use this command.');
 }
 
+
+async function findArchivedTranscriptMessage(
+  guild: NonNullable<ChatInputCommandInteraction['guild']>,
+  archiveChannel: TextChannel,
+  ticket: NonNullable<Awaited<ReturnType<typeof getPersistedTicket>>>,
+): Promise<{ message: Message | null; searchedMessages: number }> {
+  // First try the durable pointer projected onto the current ticket channel.
+  const ticketChannel = guild.channels.cache.get(ticket.channelId) ??
+    await guild.channels.fetch(ticket.channelId).catch(() => null);
+  if (ticketChannel?.type === ChannelType.GuildText) {
+    const transcriptId = getField(ticketChannel.topic ?? '', 'transcript_id');
+    if (transcriptId) {
+      const direct = await archiveChannel.messages.fetch(transcriptId).catch(() => null);
+      if (direct) return { message: direct, searchedMessages: 0 };
+    }
+  }
+
+  if (!ticket.ticketNumber) return { message: null, searchedMessages: 0 };
+  const expectedHeader = '📄 Transcript for ticket **#' + ticket.ticketNumber + '**';
+  let before: string | undefined;
+  let searchedMessages = 0;
+
+  // Bounded scan prevents an unbounded Discord-history walk in very large archives.
+  for (let pageIndex = 0; pageIndex < 10; pageIndex += 1) {
+    let page;
+    try {
+      page = await archiveChannel.messages.fetch({ limit: 100, ...(before ? { before } : {}) });
+    } catch {
+      throw new Error('The bot cannot read transcript archive history. Check View Channel and Read Message History permissions on the configured transcript channel.');
+    }
+    if (page.size === 0) break;
+    searchedMessages += page.size;
+    const match = page.find((message) => message.content === expectedHeader);
+    if (match) return { message: match, searchedMessages };
+
+    const oldest = Array.from(page.values()).reduce((current, candidate) =>
+      BigInt(candidate.id) < BigInt(current.id) ? candidate : current,
+    );
+    if (page.size < 100) break;
+    before = oldest.id;
+  }
+  return { message: null, searchedMessages };
+}
+
+
 function workflowRunDescription(run: WorkflowExecutionSummary): string {
   const lines = [
     '**Run ID:** `' + run.id + '`',
@@ -170,7 +216,7 @@ async function auditWorkflowRun(
 
 export async function handleStage4SlashCommand(interaction: ChatInputCommandInteraction): Promise<boolean> {
   const group = interaction.options.getSubcommandGroup(false);
-  if (!['knowledge', 'quick-reply', 'related', 'workflow'].includes(group ?? '')) return false;
+  if (!['knowledge', 'quick-reply', 'related', 'workflow', 'transcripts'].includes(group ?? '')) return false;
   const subcommand = interaction.options.getSubcommand();
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -178,6 +224,68 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
     const { access, config } = await prepare(interaction);
     const guildId = interaction.guildId!;
     const actorId = interaction.user.id;
+
+    if (group === 'transcripts') {
+      if (subcommand !== 'find') throw new Error('Unsupported transcript archive action.');
+      const reference = interaction.options.getString('ticket-id', true).trim();
+      let ticket = await getPersistedTicketById(reference);
+      if (!ticket) ticket = await getPersistedTicket(reference);
+      if (!ticket || ticket.guildId !== guildId) {
+        throw new Error('No ticket record with that ID or channel ID exists in this server.');
+      }
+      if (!access.isAdmin && !canHandleTicketForStaff(access, ticket, config)) {
+        throw accessDenied('the staff role configured for this ticket department or Manage Server/Administrator');
+      }
+      const guild = interaction.guild;
+      if (!guild) throw new Error('Transcript archive lookup must be used inside a server.');
+      if (!config.transcriptChannelId) {
+        throw new Error('This server has no configured transcript archive channel.');
+      }
+      const archive = guild.channels.cache.get(config.transcriptChannelId) ??
+        await guild.channels.fetch(config.transcriptChannelId).catch(() => null);
+      if (!archive || archive.type !== ChannelType.GuildText) {
+        throw new Error('The configured transcript archive channel is missing or is not a standard text channel.');
+      }
+      const located = await findArchivedTranscriptMessage(guild, archive, ticket);
+      const message = located.message;
+      if (!message) {
+        await interaction.editReply(
+          'No archived transcript was found for ticket ' + (ticket.ticketNumber ? '#' + ticket.ticketNumber : ticket.id) +
+          '. The archive search checked up to ' + located.searchedMessages + ' recent transcript messages. Older records may require a manual archive-channel search.',
+        );
+        return true;
+      }
+
+      const attachments = [...message.attachments.values()];
+      const transcriptFile = attachments.find((attachment) => /\\.html?($|\\?)/i.test(attachment.name ?? attachment.url)) ?? attachments[0];
+      const uploadedAt = Math.floor(message.createdTimestamp / 1000);
+      const attachmentLine = transcriptFile
+        ? '[Open transcript file](' + transcriptFile.url + ') · ' + transcriptFile.name +
+          ' · ' + Math.max(1, Math.round(transcriptFile.size / 1024)) + ' KB'
+        : 'The archive message exists, but no downloadable attachment is currently attached.';
+      const status = ticket.deletedAt
+        ? 'Ticket channel deleted; historical ticket record retained'
+        : 'Ticket status: ' + ticket.status;
+      const description = [
+        '**Ticket:** ' + (ticket.ticketNumber ? '#' + ticket.ticketNumber : ticket.id),
+        '**Status:** ' + status,
+        '**Archived:** <t:' + uploadedAt + ':F> (<t:' + uploadedAt + ':R>)',
+        '**Archive message:** [Open archived message](' + message.url + ')',
+        '**Transcript:** ' + attachmentLine,
+        '',
+        '**Retention status:** This lookup does not delete or modify the transcript. Expiry is not recorded per transcript message; ticket-channel retention alone does not prove that the archive attachment has expired.',
+        '',
+        'Only archive metadata and the file reference are shown here. The transcript contents are not copied into the ephemeral response.',
+      ].join('\\n');
+      await interaction.editReply({
+        embeds: [new EmbedBuilder()
+          .setColor(getThemeColor(config.theme))
+          .setTitle('📄 Transcript Archive Lookup')
+          .setDescription(description.slice(0, 3900))
+          .setFooter({ text: 'Staff-only lookup · ticket ID ' + ticket.id + ' · searched ' + located.searchedMessages + ' archive message(s)' })],
+      });
+      return true;
+    }
 
     if (group === 'knowledge') {
       if (['create','update','publish','archive','revisions','restore-revision','synonyms-set','synonyms-delete','metrics'].includes(subcommand) && !access.isAdmin) {
