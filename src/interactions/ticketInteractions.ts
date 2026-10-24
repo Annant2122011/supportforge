@@ -5257,7 +5257,7 @@ async function renderQuickReplySelector(
     description: (reply.category + ' • ' + (reply.tags.join(', ') || 'no tags')).slice(0, 100),
   }));
   const menu = new StringSelectMenuBuilder()
-    .setCustomId('ticket:quick-reply:select')
+    .setCustomId('ticket:quick-reply:select:' + sessionId + ':' + resultPage.page)
     .setPlaceholder(translate(locale, 'quickReply.picker.placeholder').slice(0, 150))
     .setMinValues(1)
     .setMaxValues(1)
@@ -5401,9 +5401,30 @@ async function handleQuickReplyClear(
 async function handleQuickReplySelection(interaction: StringSelectMenuInteraction): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
   try {
+    const [sessionId = '', rawPage = ''] = interaction.customId
+      .slice('ticket:quick-reply:select:'.length)
+      .split(':');
+    const session = getQuickReplyPickerSession(sessionId, interaction);
+    const page = Number(rawPage);
+    if (!session || !/^\\d{1,5}$/.test(rawPage) || !Number.isInteger(page) || page < 0 || page > 99999) {
+      const settings = await getAdvancedSettings(interaction.guildId!);
+      await interaction.editReply(translate(settings.locale, 'quickReply.picker.invalidSession'));
+      return;
+    }
     const context = await getQuickReplyTicketContext(interaction);
     const quickReplyId = interaction.values[0];
     if (!quickReplyId) throw new Error('Choose one quick reply from the current list.');
+    const currentPage = await searchQuickRepliesPage(interaction.guildId!, context.access, {
+      ...session.filters,
+      page,
+      pageSize: 25,
+      enabledOnly: true,
+    });
+    if (!currentPage.replies.some((reply) => reply.id === quickReplyId)) {
+      const settings = await getAdvancedSettings(interaction.guildId!);
+      await interaction.editReply(translate(settings.locale, 'quickReply.picker.invalidSession'));
+      return;
+    }
     const reply = await sendQuickReplyInTicket({
       guild: context.guild,
       channel: context.channel,
@@ -6957,7 +6978,7 @@ export async function handleTicketInteraction(
     }
 
     if (interaction.isStringSelectMenu()) {
-      if (interaction.customId === 'ticket:quick-reply:select') {
+      if (interaction.customId.startsWith('ticket:quick-reply:select:')) {
         await handleQuickReplySelection(interaction);
         return;
       }
