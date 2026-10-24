@@ -702,6 +702,74 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+  {
+    id: 14,
+    name: 'preserve_quick_reply_and_workflow_template_revisions',
+    up: async (db) => {
+      await db.query(`
+        ALTER TABLE quick_replies ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+        ALTER TABLE workflow_templates ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
+        ALTER TABLE quick_replies DROP CONSTRAINT IF EXISTS quick_replies_guild_id_normalized_name_key;
+        ALTER TABLE workflow_templates DROP CONSTRAINT IF EXISTS workflow_templates_guild_id_name_key;
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_quick_replies_active_name
+          ON quick_replies (guild_id,normalized_name) WHERE deleted_at IS NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_templates_active_name
+          ON workflow_templates (guild_id,LOWER(name)) WHERE deleted_at IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_workflow_templates_guild_active
+          ON workflow_templates (guild_id,updated_at DESC) WHERE deleted_at IS NULL;
+
+        CREATE TABLE IF NOT EXISTS quick_reply_revisions (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          quick_reply_id TEXT NOT NULL REFERENCES quick_replies(id) ON DELETE RESTRICT,
+          version INTEGER NOT NULL CHECK (version > 0),
+          name TEXT NOT NULL,
+          body TEXT NOT NULL,
+          category TEXT NOT NULL,
+          tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          allowed_role_ids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          enabled BOOLEAN NOT NULL,
+          operation TEXT NOT NULL CHECK (operation IN ('created','updated','deleted','baseline')),
+          changed_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (quick_reply_id,version)
+        );
+        CREATE INDEX IF NOT EXISTS idx_quick_reply_revisions_history
+          ON quick_reply_revisions (guild_id,quick_reply_id,version DESC);
+
+        CREATE TABLE IF NOT EXISTS workflow_template_revisions (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          template_id TEXT NOT NULL REFERENCES workflow_templates(id) ON DELETE RESTRICT,
+          version INTEGER NOT NULL CHECK (version > 0),
+          name TEXT NOT NULL,
+          definition JSONB NOT NULL,
+          enabled BOOLEAN NOT NULL,
+          deleted BOOLEAN NOT NULL DEFAULT FALSE,
+          operation TEXT NOT NULL CHECK (operation IN ('created','updated','enabled','disabled','deleted','baseline')),
+          changed_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (template_id,version)
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflow_template_revisions_history
+          ON workflow_template_revisions (guild_id,template_id,version DESC);
+
+        INSERT INTO quick_reply_revisions
+          (id,guild_id,quick_reply_id,version,name,body,category,tags,allowed_role_ids,enabled,operation,changed_by,created_at)
+        SELECT md5('quick-reply:' || id || ':' || version),guild_id,id,version,name,body,category,tags,allowed_role_ids,enabled,'baseline',updated_by,updated_at
+        FROM quick_replies
+        ON CONFLICT (quick_reply_id,version) DO NOTHING;
+
+        INSERT INTO workflow_template_revisions
+          (id,guild_id,template_id,version,name,definition,enabled,deleted,operation,changed_by,created_at)
+        SELECT md5('workflow-template:' || id || ':' || version),guild_id,id,version,name,definition,enabled,FALSE,'baseline',updated_by,updated_at
+        FROM workflow_templates
+        ON CONFLICT (template_id,version) DO NOTHING;
+      `);
+    },
+  },
 ];
 
 /** Latest migration identifier required by this application version. */
