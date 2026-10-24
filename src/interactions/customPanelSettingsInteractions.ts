@@ -679,28 +679,28 @@ async function showFormTagPicker(
 async function showPanelAccess(interaction: PanelSettingsInteraction, panelId: string, buttonId?: string): Promise<void> {
   const panel = await getCustomPanel(interaction.guild!.id, panelId);
   if (!panel) throw new Error('Panel not found.');
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   const button = buttonId ? panel.buttons.find((candidate) => candidate.id === buttonId) : undefined;
-  if (buttonId && !button) throw new Error('Button not found.');
+  if (buttonId && !button) throw new Error(translate(settings.locale, 'settings.customPanel.error.buttonMissing'));
   const roleIds = button ? button.allowedRoleIds : panel.allowedRoleIds;
-  const current = roleIds.length ? roleIds.map((id) => '<@&' + id + '>').join(', ') : 'Everyone';
+  const current = roleIds.length ? roleIds.map((id) => '<@&' + id + '>').join(', ') : translate(settings.locale, 'settings.customPanel.detail.everyone');
   const customId = button
     ? PREFIX + 'role-select-button:' + panelId + ':' + button.id
     : PREFIX + 'role-select-panel:' + panelId;
   const roleMenu = new RoleSelectMenuBuilder()
     .setCustomId(customId)
-    .setPlaceholder('Select allowed roles (empty selection clears restrictions)')
+    .setPlaceholder(translate(settings.locale, 'settings.customPanel.roles.choosePlaceholder'))
     .setMinValues(0)
     .setMaxValues(25);
   await render(
     interaction,
-    button ? 'Button Access Rules' : 'Panel Access Rules',
-    '**Current allowed roles:** ' + current +
-      '\nChoose roles below. Selection replaces the current allowed-role list. An empty selection permits everyone at this level. Panel and button rules are combined: when both are restricted, the member must satisfy both.',
+    translate(settings.locale, button ? 'settings.customPanel.roles.buttonTitle' : 'settings.customPanel.roles.panelTitle'),
+    '**' + translate(settings.locale, 'settings.customPanel.roles.current') + ':** ' + current + '\n' + translate(settings.locale, 'settings.customPanel.roles.description'),
     [
       roleSelectRow(roleMenu),
       row(
-        makeButton(PREFIX + 'access-clear:' + panelId + (button ? ':' + button.id : ''), 'Allow Everyone', ButtonStyle.Secondary, '🌐'),
-        makeButton(button ? PREFIX + 'button:' + panelId + ':' + button.id : PREFIX + 'detail:' + panelId, button ? 'Button Details' : 'Panel Details', ButtonStyle.Secondary, '↩️'),
+        makeButton(PREFIX + 'access-clear:' + panelId + (button ? ':' + button.id : ''), translate(settings.locale, 'settings.customPanel.roles.allowEveryone'), ButtonStyle.Secondary, '🌐'),
+        makeButton(button ? PREFIX + 'button:' + panelId + ':' + button.id : PREFIX + 'detail:' + panelId, translate(settings.locale, button ? 'settings.customPanel.button.details' : 'settings.customPanel.detail.titleSuffix'), ButtonStyle.Secondary, '↩️'),
       ),
     ],
   );
