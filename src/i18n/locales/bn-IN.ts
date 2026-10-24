@@ -48,6 +48,7 @@ const bnIN: Record<TranslationKey, string> = {
   'settings.tags.subcategoryOf': "{department}-এর উপবিভাগ",
   'settings.tags.selectToManage': "সম্পাদনা বা সরানোর জন্য একটি ট্যাগ বেছে নিন।",
   'settings.tags.range': "মোট {total}টির মধ্যে {start}–{end}টি ট্যাগ দেখানো হচ্ছে।",
+  'settings.tags.detail': "**{tag}** ট্যাগটি **{department}** বিভাগের অন্তর্গত। ট্যাগ শুধু উপবিভাগ; এগুলি Discord বিভাগ তৈরি করে না।",
   'settings.tags.actions.edit': "ট্যাগ সম্পাদনা",
   'settings.tags.actions.remove': "ট্যাগ সরান",
   'settings.tags.actions.backToDepartment': "বিভাগে ফিরে যান",
