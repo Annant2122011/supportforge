@@ -1039,6 +1039,13 @@ const hiIN: Record<TranslationKey, string> = {
   'ticket.report.error.targetNotParticipant': "लक्षित उपयोगकर्ता इस टिकट का प्रतिभागी होना चाहिए।",
   'ticket.report.error.selfReport': "आप अपनी रिपोर्ट स्वयं नहीं कर सकते।",
   'panelBuilder.authorSuffix': "ResolvX सहायता",
+  'settings.reports.command.enabled': "सुरक्षा रिपोर्ट अब **सक्रिय** हैं।",
+  'settings.reports.command.disabled': "सुरक्षा रिपोर्ट अब **निष्क्रिय** हैं।",
+  'settings.reports.command.categoryListTitle': "रिपोर्ट श्रेणियाँ",
+  'settings.reports.command.pageOutOfRange': "पृष्ठ {page} मौजूद नहीं है। इस परिणाम में {pages} पृष्ठ हैं।",
+  'settings.reports.command.subcategoryAdded': "रिपोर्ट उपश्रेणी **{name}** जोड़ी गई (ID: {id})।",
+  'settings.reports.command.subcategoryRenamed': "रिपोर्ट उपश्रेणी का नाम बदलकर **{name}** कर दिया गया।",
+  'settings.reports.command.subcategoryRemoved': "रिपोर्ट उपश्रेणी **{name}** हटाई गई।",
 };
 
 export default hiIN;
