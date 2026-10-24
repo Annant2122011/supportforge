@@ -43,7 +43,6 @@ import {
   getKnowledgeBaseMetrics,
   getQuickReply,
   getQuickReplyMetrics,
-  listKnowledgeArticles,
   listKnowledgeArticlesPage,
   listKnowledgeSynonyms,
   listQuickReplies,
@@ -2262,6 +2261,10 @@ export async function execute(
           if (!ticket || ticket.guildId !== guild.id || ticket.deletedAt || !['open','claimed','pending','reopened'].includes(ticket.status)) {
             throw new Error('Share an article from an active managed ticket channel or private ticket thread.');
           }
+          const shareStaffDepartments = await accessibleStaffDepartments(interaction);
+          if (!admin && !shareStaffDepartments.includes(ticket.departmentId ?? '')) {
+            throw new Error('You are not a member of this ticket department’s configured staff roles.');
+          }
           const channel = guild.channels.cache.get(interaction.channelId) ?? await guild.channels.fetch(interaction.channelId);
           if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.PrivateThread)) {
             throw new Error('The current channel is not a supported ticket text channel or private thread.');
@@ -2357,11 +2360,15 @@ export async function execute(
         }
 
         if (action === 'create') {
+          const requestedDepartment = interaction.options.getString('department-id') ?? '*';
+          if (requestedDepartment !== '*' && !config.departments[requestedDepartment]) {
+            throw new Error('Quick reply department ID was not found in this server.');
+          }
           const template = await createQuickReply({
             guildId: guild.id,
             name: interaction.options.getString('name', true),
             content: interaction.options.getString('content', true),
-            departmentId: interaction.options.getString('department-id') ?? '*',
+            departmentId: requestedDepartment,
             tags: parseCommaSeparatedTags(interaction.options.getString('tags')) ?? [],
             actorId: interaction.user.id,
           });
@@ -2375,6 +2382,9 @@ export async function execute(
           const name = interaction.options.getString('name');
           const content = interaction.options.getString('content');
           const departmentId = interaction.options.getString('department-id');
+          if (departmentId !== null && departmentId !== '*' && !config.departments[departmentId]) {
+            throw new Error('Quick reply department ID was not found in this server.');
+          }
           const tags = parseCommaSeparatedTags(interaction.options.getString('tags'));
           const enabled = interaction.options.getBoolean('enabled');
           if (name === null && content === null && departmentId === null && tags === undefined && enabled === null) {
@@ -2406,7 +2416,7 @@ export async function execute(
         if (action === 'list') {
           const requestedDepartment = interaction.options.getString('department-id')?.trim();
           const allowed = admin ? Object.keys(config.departments) : departmentIds;
-          if (requestedDepartment && !admin && !allowed.includes(requestedDepartment)) throw new Error('You cannot list replies outside your assigned department.');
+          if (requestedDepartment && requestedDepartment !== '*' && !admin && !allowed.includes(requestedDepartment)) throw new Error('You cannot list replies outside your assigned department.');
           if (requestedDepartment && admin && requestedDepartment !== '*' && !config.departments[requestedDepartment]) throw new Error('Department ID was not found in this server.');
           const departmentFilter = requestedDepartment ?? (admin ? '*' : undefined);
           const results = await listQuickReplies(guild.id, {
