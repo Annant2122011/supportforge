@@ -213,6 +213,20 @@ async function insertArticleRevision(
   );
 }
 
+async function insertQuickReplyRevision(
+  client: PoolClient,
+  template: QuickReplyTemplate,
+  changedBy: string,
+): Promise<void> {
+  await client.query(
+    'INSERT INTO quick_reply_template_revisions ' +
+      '(quick_reply_id,guild_id,revision,name,content,department_id,tags,enabled,changed_by,created_at) ' +
+      'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())',
+    [template.id, template.guildId, template.revision, template.name, template.content,
+      template.departmentId, template.tags, template.enabled, changedBy],
+  );
+}
+
 export async function createKnowledgeArticle(args: {
   guildId: string;
   title: string;
@@ -553,12 +567,17 @@ export async function createQuickReply(args: {
   validateQuickReplyTemplate(content);
   const departmentId = args.departmentId?.trim() || '*';
   if (departmentId !== '*' && departmentId.length > 80) throw new Error('Department ID is invalid.');
-  const result = await getPostgresPool().query<QuickReplyRow>(
-    'INSERT INTO quick_reply_templates (id,guild_id,name,content,department_id,tags,enabled,revision,created_by,updated_by,created_at,updated_at) ' +
-      'VALUES ($1,$2,$3,$4,$5,$6,TRUE,1,$7,$7,NOW(),NOW()) RETURNING ' + QUICK_REPLY_COLUMNS,
-    [randomUUID(), args.guildId, name, content, departmentId, normalizeKnowledgeTags(args.tags ?? []), args.actorId],
-  );
-  return quickReplyFromRow(result.rows[0]);
+  const tags = normalizeKnowledgeTags(args.tags ?? []);
+  return inTransaction(async (client) => {
+    const result = await client.query<QuickReplyRow>(
+      'INSERT INTO quick_reply_templates (id,guild_id,name,content,department_id,tags,enabled,revision,created_by,updated_by,created_at,updated_at) ' +
+        'VALUES ($1,$2,$3,$4,$5,$6,TRUE,1,$7,$7,NOW(),NOW()) RETURNING ' + QUICK_REPLY_COLUMNS,
+      [randomUUID(), args.guildId, name, content, departmentId, tags, args.actorId],
+    );
+    const template = quickReplyFromRow(result.rows[0]);
+    await insertQuickReplyRevision(client, template, args.actorId);
+    return template;
+  });
 }
 
 export async function listQuickReplies(
@@ -612,7 +631,9 @@ export async function updateQuickReply(args: {
       'UPDATE quick_reply_templates SET name=$3,content=$4,department_id=$5,tags=$6,enabled=$7,revision=revision+1,updated_by=$8,updated_at=NOW() WHERE guild_id=$1 AND id=$2 RETURNING ' + QUICK_REPLY_COLUMNS,
       [args.guildId, args.id, name, content, departmentId, tags, enabled, args.actorId],
     );
-    return quickReplyFromRow(result.rows[0]);
+    const template = quickReplyFromRow(result.rows[0]);
+    if (template.revision !== current.revision) await insertQuickReplyRevision(client, template, args.actorId);
+    return template;
   });
 }
 
@@ -622,12 +643,22 @@ export async function setQuickReplyEnabled(
   enabled: boolean,
   actorId: string,
 ): Promise<QuickReplyTemplate> {
-  const result = await getPostgresPool().query<QuickReplyRow>(
-    'UPDATE quick_reply_templates SET enabled=$3,revision=revision+1,updated_by=$4,updated_at=NOW() WHERE guild_id=$1 AND id=$2 RETURNING ' + QUICK_REPLY_COLUMNS,
-    [guildId, id, enabled, actorId],
-  );
-  if (!result.rows[0]) throw new Error('Quick reply was not found in this server.');
-  return quickReplyFromRow(result.rows[0]);
+  return inTransaction(async (client) => {
+    const currentResult = await client.query<QuickReplyRow>(
+      'SELECT ' + QUICK_REPLY_COLUMNS + ' FROM quick_reply_templates WHERE guild_id=$1 AND id=$2 FOR UPDATE',
+      [guildId, id],
+    );
+    if (!currentResult.rows[0]) throw new Error('Quick reply was not found in this server.');
+    const current = quickReplyFromRow(currentResult.rows[0]);
+    if (current.enabled === enabled) return current;
+    const result = await client.query<QuickReplyRow>(
+      'UPDATE quick_reply_templates SET enabled=$3,revision=revision+1,updated_by=$4,updated_at=NOW() WHERE guild_id=$1 AND id=$2 RETURNING ' + QUICK_REPLY_COLUMNS,
+      [guildId, id, enabled, actorId],
+    );
+    const template = quickReplyFromRow(result.rows[0]);
+    await insertQuickReplyRevision(client, template, actorId);
+    return template;
+  });
 }
 
 export async function recordQuickReplyUsage(guildId: string, quickReplyId: string, actorId: string): Promise<void> {
