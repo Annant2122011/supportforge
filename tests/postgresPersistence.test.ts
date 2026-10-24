@@ -10,6 +10,8 @@ import {
   getPostgresPool,
 } from '../src/core/persistence/postgresDatabase';
 import { migratePostgres } from '../src/core/persistence/migrationRunner';
+import { getPersistedTicket } from '../src/services/ticketPersistenceService';
+import { executeWorkflowTemplateForTicket, listWorkflowExecutionRunsForTicket } from '../src/services/workflowExecutionService';
 import { PostgresEventRepository } from '../src/repositories/postgresEventRepository';
 import { PostgresJsonDocumentRepository, importLegacyJsonDocuments } from '../src/repositories/jsonDocumentRepository';
 import { PostgresTicketRepository } from '../src/repositories/postgresTicketRepository';
@@ -638,6 +640,91 @@ test(
     } finally {
       await pool.query('DELETE FROM workflow_template_revisions WHERE guild_id=$1', [guildId]);
       await pool.query('DELETE FROM workflow_templates WHERE guild_id=$1', [guildId]);
+    }
+  },
+);
+
+
+test(
+  'manual workflow execution is confirmed, ledgered, and idempotent for a repeated interaction',
+  { skip: !postgresIntegrationEnabled },
+  async () => {
+    await migratePostgres();
+    const pool = getPostgresPool();
+    const tickets = new PostgresTicketRepository(pool);
+    const guildId = 'postgres-workflow-run-' + randomUUID();
+    const actorId = 'postgres-workflow-admin';
+    const ticketId = 'ticket-' + randomUUID();
+    const channelId = 'channel-' + randomUUID();
+    const interactionId = 'interaction-' + randomUUID();
+    const now = new Date().toISOString();
+    const record: TicketRepositoryRecord = {
+      id: ticketId,
+      guildId,
+      channelId,
+      ticketNumber: '71',
+      status: 'open',
+      departmentId: null,
+      tagId: null,
+      ownerId: 'workflow-test-owner',
+      priority: 'normal',
+      claimedByIds: [],
+      participantIds: ['workflow-test-owner'],
+      metadata: {},
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+      deletionReason: null,
+    };
+
+    try {
+      await tickets.create(record, { id: actorId, attribution: 'actorKnown', confidence: 'high' });
+      const template = await saveWorkflowTemplate(guildId, actorId, 'Set high priority', {
+        conditions: [{ field: 'priority', equals: 'normal' }],
+        actions: [{ type: 'set_priority', value: 'high' }],
+      });
+      const enabled = await setWorkflowTemplateEnabled(guildId, template.id, template.version, true, actorId);
+      assert.equal(enabled.enabled, true);
+      assert.equal(enabled.version, 2);
+
+      const baseInput = {
+        guildId,
+        channel: { id: channelId } as never,
+        actorId,
+        actorName: 'Workflow Test Admin',
+        interactionId,
+        templateId: template.id,
+        expectedVersion: enabled.version,
+      };
+      await assert.rejects(
+        executeWorkflowTemplateForTicket({ ...baseInput, confirmation: 'RUN ' + template.id + ' v1' }),
+        /Type exactly: RUN/,
+      );
+
+      const run = await executeWorkflowTemplateForTicket({
+        ...baseInput,
+        confirmation: 'RUN ' + template.id + ' v' + enabled.version,
+      });
+      assert.equal(run.status, 'completed');
+      assert.equal(run.steps.length, 1);
+      assert.equal(run.steps[0]?.status, 'completed');
+      assert.equal((await getPersistedTicket(channelId))?.priority, 'high');
+
+      const duplicateInteraction = await executeWorkflowTemplateForTicket({
+        ...baseInput,
+        confirmation: 'RUN ' + template.id + ' v' + enabled.version,
+      });
+      assert.equal(duplicateInteraction.id, run.id);
+      assert.equal((await listWorkflowExecutionRunsForTicket(guildId, ticketId)).length, 1);
+    } finally {
+      await pool.query('DELETE FROM workflow_execution_steps WHERE guild_id=$1', [guildId]);
+      await pool.query('DELETE FROM workflow_execution_runs WHERE guild_id=$1', [guildId]);
+      await pool.query('DELETE FROM workflow_template_revisions WHERE guild_id=$1', [guildId]);
+      await pool.query('DELETE FROM workflow_templates WHERE guild_id=$1', [guildId]);
+      await pool.query('DELETE FROM ticket_events WHERE guild_id=$1', [guildId]);
+      await pool.query('DELETE FROM outbox_events WHERE guild_id=$1', [guildId]);
+      await pool.query('DELETE FROM tickets WHERE guild_id=$1', [guildId]);
+      await pool.query('DELETE FROM app_documents WHERE POSITION($1 IN document_key)>0', [guildId]);
     }
   },
 );
