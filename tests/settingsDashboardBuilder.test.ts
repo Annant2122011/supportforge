@@ -146,3 +146,35 @@ test('Settings layout migration groups the untouched legacy default but preserve
   assert.equal(migratedCustom.length, SETTINGS_DASHBOARD_BUTTON_KEYS.length);
   assert.equal(new Set(migratedCustom).size, SETTINGS_DASHBOARD_BUTTON_KEYS.length);
 });
+
+
+test('Settings dashboard localizes built-in copy while preserving per-server custom text', () => {
+  const defaultDescription = 'Configure your server' + String.fromCharCode(0x2019) +
+    's ticket system, support panels and retention policies.';
+  const partial = {
+    locale: 'hi-IN',
+    settingsDashboard: {
+      title: '⚙️ ResolvX Settings',
+      description: defaultDescription,
+      footer: 'Settings for this server',
+    },
+    priorityRoles: {},
+    retention: { closedDays: 0, archiveDays: 7 },
+    statusCategories: { claimedCategoryId: null, pendingCategoryId: null },
+    panelActivity: { enabled: true, visualLineBudget: 18, messageBudget: 12, minimumMessagesBeforeMove: 6 },
+    ticketDefaults: { priority: 'normal', maxClaimedModerators: 2 },
+    inactivity: { enabled: true, idleHours: 72, graceHours: 24, generation: 1 },
+    ticketWorkspace: { mode: 'private-threads' },
+    appearance: { panelTitle: 'Support center', panelDescription: 'Open a support ticket.', panelFooter: 'ResolveX' },
+  } as unknown as AdvancedGuildSettings;
+
+  const embed = buildSettingsDashboardEmbed(partial, 3, 8, 'midnight').toJSON();
+  assert.ok(embed.title?.includes('सेटिंग्स'));
+  assert.ok(embed.description?.includes('अपने सर्वर'));
+  assert.equal(embed.description?.includes('Configure your server'), false);
+  assert.ok(embed.fields?.some((field) =>
+    field.name === '⏳ निष्क्रियता स्वचालन' &&
+    field.value.includes('चालू') &&
+    field.value.includes('72'),
+  ));
+});
