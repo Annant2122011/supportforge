@@ -333,10 +333,10 @@ async function showHome(interaction: PanelSettingsInteraction, page = 0): Promis
 
 async function showPanel(interaction: PanelSettingsInteraction, panelId: string): Promise<void> {
   const guild = interaction.guild!;
+  const settings = await getAdvancedSettings(guild.id);
   const panel = await getCustomPanel(guild.id, panelId);
   if (!panel) throw new Error(translate(settings.locale, 'settings.customPanel.error.notFound'));
   const config = await getGuildConfig(guild.id);
-  const settings = await getAdvancedSettings(guild.id);
   const roleNames = panel.allowedRoleIds.map((id) => config.departments ? '<@&' + id + '>' : id);
   const lines = panel.buttons.length
     ? panel.buttons.map((item, index) =>
@@ -712,10 +712,10 @@ async function showPublishChannelPicker(
   page = 0,
 ): Promise<void> {
   await prepare(interaction);
-  const panel = await getCustomPanel(interaction.guild!.id, panelId);
-  if (!panel) throw new Error('Panel not found.');
-  if (!panel.buttons.length) throw new Error(translate(settings.locale, 'settings.customPanel.error.mustAddButton'));
   const settings = await getAdvancedSettings(interaction.guild!.id);
+  const panel = await getCustomPanel(interaction.guild!.id, panelId);
+  if (!panel) throw new Error(translate(settings.locale, 'settings.customPanel.error.notFound'));
+  if (!panel.buttons.length) throw new Error(translate(settings.locale, 'settings.customPanel.error.mustAddButton'));
   const channels = [...(await interaction.guild!.channels.fetch()).values()]
     .filter((channel): channel is import('discord.js').TextChannel =>
       Boolean(channel && channel.type === 0 && channel.viewable && channel.permissionsFor(interaction.guild!.members.me!)?.has(['ViewChannel', 'SendMessages', 'EmbedLinks'])),
@@ -1290,6 +1290,9 @@ export async function handleCustomPanelSettingsInteraction(
     }
     return false;
   } catch (error) {
+    const locale = await getAdvancedSettings(guild.id)
+      .then((settings) => settings.locale)
+      .catch(() => 'en-US');
     const message = error instanceof Error ? error.message : translate(locale, 'settings.customPanel.error.unknown');
     const theme = await getGuildTheme(guild.id).catch(() => ({ label: 'Midnight Indigo', color: 0x5865f2 }));
     const embed = new EmbedBuilder().setColor(theme.color).setTitle(translate(locale, 'settings.customPanel.error.genericTitle')).setDescription(message.slice(0, 4096));
