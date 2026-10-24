@@ -686,7 +686,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         const preview = await previewWorkflowTemplateById(guildId, interaction.options.getString('template-id', true).trim());
         await interaction.editReply({
           embeds: [new EmbedBuilder().setTitle('Workflow template safety preview')
-            .setDescription('Manual execution supported: **' + (preview.executable ? 'yes' : 'no') + '**\\nAutomatic execution: **no**\\nConditions: ' + preview.conditionCount + '\\nActions: ' + preview.actionCount + '\\n\\n' + preview.warnings.map((warning) => '• ' + warning).join('\\n').slice(0, 3400))],
+            .setDescription('Manual execution supported: **' + (preview.executable ? 'yes' : 'no') + '**\nAutomatic execution: **no**\nConditions: ' + preview.conditionCount + '\nActions: ' + preview.actionCount + '\n\n' + preview.warnings.map((warning) => '• ' + warning).join('\n').slice(0, 3400))],
         });
         return true;
       }
