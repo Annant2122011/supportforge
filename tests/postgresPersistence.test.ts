@@ -519,6 +519,87 @@ test(
   },
 );
 
+
+test(
+  'PostgreSQL durable recovery segment ledger preserves intent and completed Discord message identity',
+  { skip: !postgresIntegrationEnabled },
+  async () => {
+    await migratePostgres();
+    const pool = getPostgresPool();
+    await pool.query('TRUNCATE TABLE tickets CASCADE');
+    const record: TicketRepositoryRecord = {
+      id: 'postgres-replay-segment-ticket',
+      guildId: 'postgres-replay-segment-guild',
+      channelId: 'postgres-replay-segment-channel',
+      ticketNumber: '79',
+      status: 'open',
+      departmentId: 'billing',
+      tagId: 'refund',
+      ownerId: 'postgres-replay-segment-owner',
+      priority: 'normal',
+      claimedByIds: [],
+      participantIds: ['postgres-replay-segment-owner'],
+      metadata: {},
+      createdAt: '2026-10-18T12:00:00.000Z',
+      updatedAt: '2026-10-18T12:00:00.000Z',
+      deletedAt: null,
+      deletionReason: null,
+    };
+    await new PostgresTicketRepository(pool).create(record);
+    await pool.query(
+      'INSERT INTO ticket_recovery_events (id,ticket_id,guild_id,original_channel_id,source,status,intent,actor_id,actor_name,actor_attribution,confirmation_stage,metadata) ' +
+        'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)',
+      [
+        'postgres-replay-segment-event',
+        record.id,
+        record.guildId,
+        record.channelId,
+        'discord_native',
+        'restoring',
+        'unknown',
+        'unknown',
+        'Test actor',
+        'actorUnknown',
+        0,
+        JSON.stringify({ channelIdAtDeletion: record.channelId }),
+      ],
+    );
+
+    const key = ['postgres-replay-segment-event', 'original-message-1', 'content:0'];
+    await pool.query(
+      'INSERT INTO ticket_recovery_replay_segments ' +
+        '(recovery_event_id,original_message_id,segment_key,status,attempts,attempt_started_at) ' +
+        "VALUES ($1,$2,$3,'pending',1,NOW()) ON CONFLICT DO NOTHING",
+      key,
+    );
+    await pool.query(
+      'INSERT INTO ticket_recovery_replay_segments ' +
+        '(recovery_event_id,original_message_id,segment_key,status,attempts,attempt_started_at) ' +
+        "VALUES ($1,$2,$3,'pending',1,NOW()) ON CONFLICT DO NOTHING",
+      key,
+    );
+    const pending = await pool.query(
+      'SELECT status,attempts,discord_message_id FROM ticket_recovery_replay_segments WHERE recovery_event_id=$1 AND original_message_id=$2 AND segment_key=$3',
+      key,
+    );
+    assert.equal(pending.rows.length, 1);
+    assert.equal(pending.rows[0].status, 'pending');
+    assert.equal(Number(pending.rows[0].attempts), 1);
+    assert.equal(pending.rows[0].discord_message_id, null);
+
+    await pool.query(
+      "UPDATE ticket_recovery_replay_segments SET status='completed',discord_message_id=$4,updated_at=NOW() WHERE recovery_event_id=$1 AND original_message_id=$2 AND segment_key=$3",
+      [...key, 'discord-message-recovered-1'],
+    );
+    const complete = await pool.query(
+      'SELECT status,discord_message_id FROM ticket_recovery_replay_segments WHERE recovery_event_id=$1 AND original_message_id=$2 AND segment_key=$3',
+      key,
+    );
+    assert.equal(complete.rows[0].status, 'completed');
+    assert.equal(complete.rows[0].discord_message_id, 'discord-message-recovered-1');
+  },
+);
+
 test.after(async () => {
   if (!postgresIntegrationEnabled) return;
 
