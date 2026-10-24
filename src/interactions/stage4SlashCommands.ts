@@ -556,6 +556,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           guild: interaction.guild!,
           channel,
           quickReplyId: interaction.options.getString('name-or-id', true),
+          sendIntentId: interaction.id,
           actorId,
           actorName: interaction.user.tag,
           actorUsername: interaction.user.username,
@@ -563,7 +564,11 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           roleIds: access.roleIds,
         });
         const settings = await getAdvancedSettings(guildId);
-        await interaction.editReply(translate(settings.locale, 'quickReply.picker.sent', { name: reply.name }));
+        await interaction.editReply(translate(
+          settings.locale,
+          reply.status === 'uncertain' ? 'quickReply.picker.uncertain' : 'quickReply.picker.sent',
+          { name: reply.reply.name },
+        ));
         return true;
       }
     }
