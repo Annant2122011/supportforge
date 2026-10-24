@@ -1,6 +1,6 @@
 import type { TranslationKey } from './en-US';
 
-const hiIN: Partial<Record<TranslationKey, string>> = {
+const hiIN: Record<TranslationKey, string> = {
   'common.ok': 'ठीक है',
   'common.cancel': 'रद्द करें',
   'common.back': 'वापस',
