@@ -19,6 +19,7 @@ import {
 import { ensureChannelPurposeMessage } from './channelPurposeService';
 import { logSystemEvent } from './auditLogService';
 import { setChannelTopic } from './discordChannelService';
+import { translate, type TranslationKey } from '../i18n/translationService';
 
 const SETTINGS_TOPIC_PREFIX = 'supportforge:settings';
 const SETTINGS_TITLE = '⚙️ ResolvX Settings';
@@ -71,6 +72,32 @@ const SETTINGS_DASHBOARD_BUTTONS: Record<SettingsDashboardButtonKey, {
   'ticket-workspace': { customId: 'sf:settings:ticket-workspace', label: 'Ticket Workspace', style: ButtonStyle.Primary, emoji: '🧵' },
 };
 
+const SETTINGS_LABEL_KEYS: Record<SettingsDashboardButtonKey, TranslationKey> = {
+  panel: 'settings.nav.panel',
+  defaults: 'settings.nav.defaults',
+  tags: 'settings.nav.tags',
+  usecases: 'settings.nav.usecases',
+  reports: 'settings.nav.reports',
+  retention: 'settings.nav.retention',
+  inactivity: 'settings.nav.inactivity',
+  language: 'settings.nav.language',
+  appearance: 'settings.nav.appearance',
+  storage: 'settings.nav.storage',
+  rules: 'settings.nav.rules',
+  repair: 'settings.nav.repair',
+  team: 'settings.nav.team',
+  manual: 'settings.nav.manual',
+  forms: 'settings.nav.forms',
+  refresh: 'settings.nav.refresh',
+  reset: 'settings.nav.reset',
+  theme: 'settings.nav.theme',
+  premium: 'settings.nav.premium',
+  panels: 'settings.nav.panels',
+  'dashboard-builder': 'settings.nav.dashboardBuilder',
+  'support-hours': 'settings.nav.supportHours',
+  'ticket-workspace': 'settings.nav.ticketWorkspace',
+};
+
 /** Per-server order is customizable, but every built-in control remains available. */
 export function buildSettingsDashboardComponents(
   settings?: Awaited<ReturnType<typeof getAdvancedSettings>>,
@@ -89,7 +116,7 @@ export function buildSettingsDashboardComponents(
   const buttons = order.map((key) => {
     const item = SETTINGS_DASHBOARD_BUTTONS[key];
     const customization = settings?.settingsDashboard?.buttonCustomizations?.[key];
-    const label = customization?.label ?? item.label;
+    const label = customization?.label ?? translate(settings?.locale, SETTINGS_LABEL_KEYS[key]);
     const emoji = customization ? customization.emoji ?? undefined : item.emoji;
     // Semantic styles are intentionally not editable: delete stays destructive,
     // and navigation/recovery actions retain the built-in safe styling.
@@ -280,11 +307,18 @@ export function buildSettingsDashboardEmbed(
     : 'Not configured';
 
   return new EmbedBuilder()
-    .setTitle(settings.settingsDashboard.title || SETTINGS_TITLE)
+    .setTitle(
+      settings.settingsDashboard.title === SETTINGS_TITLE
+        ? '⚙️ ' + translate(settings.locale, 'settings.title')
+        : settings.settingsDashboard.title || SETTINGS_TITLE,
+    )
     .setColor(getThemeColor(theme))
     .setDescription(
-      ((settings.settingsDashboard.description || 'Configure your server ticket system, support panels and retention policies.') +
-        '\n\nButton-driven configuration • actions are audited. Use **Refresh** to re-read the latest saved configuration.').slice(0, 3900),
+      ((
+        settings.settingsDashboard.description === 'Configure your server ticket system, support panels and retention policies.'
+          ? translate(settings.locale, 'settings.dashboard.description')
+          : settings.settingsDashboard.description || translate(settings.locale, 'settings.dashboard.description')
+      ) + '\n\n' + translate(settings.locale, 'settings.dashboard.help')).slice(0, 3900),
     )
     .addFields(
       {
