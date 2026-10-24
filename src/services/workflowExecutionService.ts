@@ -9,6 +9,7 @@ import { evaluateWorkflowConditions, validateWorkflowTemplateDefinition, type Wo
 import type { EventActor } from '../core/events/domainEvents';
 import type { TicketPriority } from './advancedSettingsService';
 import { getGuildConfig } from './configService';
+import { logTicketEvent } from './auditLogService';
 import { getPersistedTicket, updatePersistedTicketMetadata, type PersistedTicket } from './ticketPersistenceService';
 import { getQuickReply, renderQuickReply } from './quickReplyService';
 import { getWorkflowTemplateById } from './workflowTemplateService';
@@ -398,18 +399,37 @@ async function resumeRunUnlocked(
       }
     }
 
-    const completed=await finishRun(guild.id,run.id,'completed',{ stepCount:definition.actions.length, completedBy:actorId });
-    const config=await getGuildConfig(guild.id).catch(()=>null);
-    if(config?.supportCategoryId) {
-      await logTicketEvent(guild,config.supportCategoryId,{
-        ticketNumber: (await getPersistedTicket(channel.id))?.ticketNumber ?? run.ticket_id,
-        ticketChannelId:channel.id,
-        event:'WORKFLOW_MANUALLY_EXECUTED',
-        actorId,
-        actor: (await guild.members.fetch(actorId).catch(()=>null))?.user.tag ?? actorId,
-        actorName: actorId,
-        detail:'Ran workflow template '+run.template_id+' version '+run.template_version+'; completed '+definition.actions.length+' allowlisted step(s).',
+    const completed = await finishRun(guild.id, run.id, 'completed', {
+      stepCount: definition.actions.length,
+      completedBy: actorId,
+    });
+    try {
+      const config = await getGuildConfig(guild.id);
+      if (config.supportCategoryId) {
+        const ticket = await getPersistedTicket(channel.id);
+        const actor = await guild.members.fetch(actorId).catch(() => null);
+        await logTicketEvent(guild, config.supportCategoryId, {
+          ticketNumber: ticket?.ticketNumber ?? run.ticket_id,
+          ticketChannelId: channel.id,
+          event: 'WORKFLOW_MANUALLY_EXECUTED',
+          actorId,
+          actor: actor?.user.tag ?? actorId,
+          actorName: actorId,
+          detail: 'Ran workflow template ' + run.template_id + ' version ' + run.template_version +
+            '; completed ' + definition.actions.length + ' allowlisted step(s).',
+        });
+      }
+    } catch {
+      // The PostgreSQL run/step ledger is authoritative. A failed channel notification
+      // must not turn actions that already completed into a retryable failed run.
+      console.warn('[workflow-execution] Workflow completed but audit-channel notification failed.', {
+        guildId: guild.id,
+        runId: run.id,
       });
+      await pool.query(
+        "UPDATE workflow_execution_runs SET result = result || $3::jsonb, updated_at=NOW() WHERE guild_id=$1 AND id=$2 AND status='completed'",
+        [guild.id, run.id, JSON.stringify({ auditChannelNotificationFailed: true })],
+      ).catch(() => undefined);
     }
     return readDetails(completed);
   } catch (error) {
