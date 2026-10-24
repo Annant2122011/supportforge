@@ -94,22 +94,51 @@ export function shouldOfferKnowledgeResult(score: KnowledgeSearchScore): boolean
 }
 
 
-/** Expand only complete canonical terms or phrases configured for this server. */
+/** Expand into independent search alternatives; never turn synonyms into a giant AND query. */
+export function expandKnowledgeQueries(
+  query: string,
+  mappings: readonly { normalizedTerm: string; synonyms: readonly string[] }[],
+  maximumVariants = 25,
+): string[] {
+  const normalizedQuery = normalizeKnowledgeText(query);
+  if (!normalizedQuery) return [];
+  const variants = new Set<string>([normalizedQuery]);
+  const boundedMaximum = Math.max(1, Math.min(50, Math.floor(maximumVariants)));
+  const paddedQuery = ' ' + normalizedQuery + ' ';
+
+  for (const mapping of mappings) {
+    if (variants.size >= boundedMaximum) break;
+    const term = normalizeKnowledgeText(mapping.normalizedTerm);
+    if (!term || !paddedQuery.includes(' ' + term + ' ')) continue;
+
+    for (const synonymInput of mapping.synonyms) {
+      const synonym = normalizeKnowledgeText(synonymInput);
+      if (!synonym || synonym === term) continue;
+      const next = (' ' + normalizedQuery + ' ').split(' ' + term + ' ').join(' ' + synonym + ' ').trim();
+      if (next && next !== normalizedQuery) variants.add(next);
+      if (variants.size >= boundedMaximum) break;
+    }
+  }
+  return [...variants];
+}
+
+/** Postgres websearch_to_tsquery interprets each variant as its own OR branch. */
+export function buildKnowledgeSearchExpression(variants: readonly string[]): string {
+  return variants
+    .map((variant) => normalizeKnowledgeText(variant))
+    .filter(Boolean)
+    .slice(0, 50)
+    .map((variant) => '(' + variant + ')')
+    .join(' OR ')
+    .slice(0, 1000);
+}
+
+/** Kept as a convenience for callers that need a safe search expression. */
 export function expandKnowledgeQuery(
   query: string,
   mappings: readonly { normalizedTerm: string; synonyms: readonly string[] }[],
 ): string {
-  const normalizedQuery = normalizeKnowledgeText(query);
-  if (!normalizedQuery) return '';
-  const queryTokens = new Set(normalizedQuery.split(' ').filter(Boolean));
-  const paddedQuery = ' ' + normalizedQuery + ' ';
-  const matchedSynonyms = mappings
-    .filter((mapping) => {
-      const term = normalizeKnowledgeText(mapping.normalizedTerm);
-      return Boolean(term) && (queryTokens.has(term) || paddedQuery.includes(' ' + term + ' '));
-    })
-    .flatMap((mapping) => mapping.synonyms.map((synonym) => normalizeKnowledgeText(synonym)).filter(Boolean));
-  return [...new Set([query.trim(), ...matchedSynonyms].filter(Boolean))].join(' ').slice(0, 500);
+  return buildKnowledgeSearchExpression(expandKnowledgeQueries(query, mappings));
 }
 
 export function isKnowledgeShareableConfidence(confidence: KnowledgeConfidence): boolean {
