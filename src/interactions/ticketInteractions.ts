@@ -6567,7 +6567,8 @@ export async function handleTicketInteraction(
         return;
       }
 
-      const excerpt = article.body.slice(0, 2600);
+      const summary = article.summary.slice(0, 500);
+      const excerpt = article.body.slice(0, 2200);
       const truncated = article.body.length > excerpt.length;
       const targetChannel = interaction.channel;
       if (!targetChannel || !('send' in targetChannel)) {
@@ -6575,19 +6576,25 @@ export async function handleTicketInteraction(
         return;
       }
       const shareChannel = targetChannel as TextChannel | ThreadChannel;
+      const shareDescription = [
+        summary,
+        '**Category:** ' + article.category,
+        '**Tags:** ' + (article.tags.join(', ') || 'none'),
+        excerpt,
+        ...(truncated ? ['Open /supportforge knowledge view with article ID ' + article.id + ' for the full article.'] : []),
+        '_This is a suggested resource, not a replacement for human support. The ticket remains open for follow-up._',
+      ].filter(Boolean).join('\n\n').slice(0, 3900);
       await shareChannel.send({
         embeds: [new EmbedBuilder().setTitle('📚 Suggested article: ' + article.title)
-          .setDescription(
-            (article.summary ? article.summary + '\n\n' : '') +
-            '**Category:** ' + article.category + '\n' +
-            '**Tags:** ' + (article.tags.join(', ') || 'none') + '\n\n' +
-            excerpt + (truncated ? '\n\nOpen /supportforge knowledge view with article ID ' + article.id + ' for the full article.' : '') +
-            '\n\n_This is a suggested resource, not a replacement for human support. The ticket remains open for follow-up._',
-          )
+          .setDescription(shareDescription)
           .setFooter({ text: 'Knowledge Base article ' + article.id + ' • revision ' + article.revision })],
         allowedMentions: { parse: [] },
       });
-      await recordKnowledgeArticleShare(interaction.guildId, article.id, access, interaction.user.id);
+      try {
+        await recordKnowledgeArticleShare(interaction.guildId, article.id, access, interaction.user.id);
+      } catch {
+        console.warn('Knowledge Base article was shared, but its usage metric could not be recorded.');
+      }
       if (config.supportCategoryId) {
         try {
         await logTicketEvent(interaction.guild, config.supportCategoryId, {
