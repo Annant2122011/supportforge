@@ -6,6 +6,7 @@ import type { Guild, TextChannel, ThreadChannel } from 'discord.js';
 import { getGuildConfig } from './configService';
 import { getPersistedTicket } from './ticketPersistenceService';
 import { logTicketEvent } from './auditLogService';
+import { extractQuickReplySendMarkers, quickReplySendMarker } from '../core/domain/quickReplySendMarkers';
 
 export interface QuickReply {
   id: string;
@@ -72,6 +73,41 @@ export interface QuickReplyRevision {
   enabled: boolean;
   changedBy: string;
   createdAt: string;
+}
+
+export interface QuickReplySearchFilters {
+  query?: string;
+  category?: string;
+  tag?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface QuickReplySearchPage {
+  replies: QuickReply[];
+  total: number;
+  page: number;
+  pageSize: number;
+  pageCount: number;
+}
+
+export interface QuickReplyUsageMetric {
+  quickReplyId: string;
+  name: string;
+  category: string;
+  sentCount: number;
+  lastSentAt: string | null;
+}
+
+export interface QuickReplyUsageSummary {
+  days: number;
+  totalSends: number;
+  replies: QuickReplyUsageMetric[];
+}
+
+export interface QuickReplySendResult {
+  reply: QuickReply;
+  status: 'sent' | 'already-sent' | 'uncertain';
 }
 
 async function insertQuickReplyRevision(
@@ -147,6 +183,85 @@ export async function listQuickReplies(guildId: string, access: QuickReplyAccess
   return result.rows.map(fromRow)
     .filter((reply) => canUse(reply, access))
     .filter((reply) => quickReplyHasTag(reply.tags, tag));
+}
+
+
+export async function searchQuickRepliesPage(
+  guildId: string,
+  access: QuickReplyAccess,
+  filters: QuickReplySearchFilters = {},
+): Promise<QuickReplySearchPage> {
+  const query = filters.query ? normalizeName(filters.query) : null;
+  const category = filters.category ? normalizeName(filters.category) : null;
+  const tag = filters.tag ? normalizeName(filters.tag) : null;
+  if (query && query.length > 80) throw new Error('Quick-reply search text must be 80 characters or fewer.');
+  if (category && category.length > 80) throw new Error('Quick-reply categories must be 80 characters or fewer.');
+  if (tag && tag.length > 32) throw new Error('Quick-reply tags must be 32 characters or fewer.');
+
+  const pageSize = Math.max(1, Math.min(25, Math.floor(filters.pageSize ?? 25)));
+  const pageCountMax = 100000;
+  const requestedPage = Number.isInteger(filters.page) ? Math.floor(filters.page!) : 0;
+  if (requestedPage < 0 || requestedPage >= pageCountMax) throw new Error('Quick-reply page is outside the supported range.');
+
+  const whereSql =
+    'guild_id=$1 AND deleted_at IS NULL ' +
+    'AND ($2::boolean OR (enabled=TRUE AND (cardinality(allowed_role_ids)=0 OR allowed_role_ids && $3::text[]))) ' +
+    'AND ($4::text IS NULL OR LOWER(category)=LOWER($4)) ' +
+    "AND ($5::text IS NULL OR EXISTS (SELECT 1 FROM unnest(tags) AS candidate_tag(tag) WHERE LOWER(regexp_replace(btrim(tag),'[[:space:]]+',' ','g'))=LOWER($5))) " +
+    "AND ($6::text IS NULL OR POSITION(LOWER($6) IN LOWER(name))>0 OR POSITION(LOWER($6) IN LOWER(category))>0 OR " +
+    "EXISTS (SELECT 1 FROM unnest(tags) AS search_tag(tag) WHERE POSITION(LOWER($6) IN LOWER(tag))>0))";
+  const parameters = [guildId, access.isAdmin, access.roleIds, category, tag, query];
+  const pool = getPostgresPool();
+  const countResult = await pool.query<{ total: string }>(
+    'SELECT COUNT(*)::text AS total FROM quick_replies WHERE ' + whereSql,
+    parameters,
+  );
+  const total = Number(countResult.rows[0]?.total ?? 0);
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(requestedPage, pageCount - 1);
+  const repliesResult = await pool.query<QuickReplyRow>(
+    'SELECT ' + COLUMNS + ' FROM quick_replies WHERE ' + whereSql +
+      ' ORDER BY LOWER(category),LOWER(name),id LIMIT $7 OFFSET $8',
+    [...parameters, pageSize, page * pageSize],
+  );
+  return { replies: repliesResult.rows.map(fromRow), total, page, pageSize, pageCount };
+}
+
+export async function getQuickReplyUsageMetrics(guildId: string, days: number): Promise<QuickReplyUsageSummary> {
+  if (!Number.isInteger(days) || days < 1 || days > 366) {
+    throw new Error('Quick-reply metrics window must be from 1 to 366 days.');
+  }
+  const pool = getPostgresPool();
+  const [totals, perReply] = await Promise.all([
+    pool.query<{ total: string }>(
+      "SELECT COUNT(*)::text AS total FROM quick_reply_usage_events WHERE guild_id=$1 AND created_at >= NOW() - ($2::int * INTERVAL '1 day')",
+      [guildId, days],
+    ),
+    pool.query<{
+      quick_reply_id: string;
+      name: string;
+      category: string;
+      sent_count: string;
+      last_sent_at: Date | string | null;
+    }>(
+      "SELECT q.id AS quick_reply_id,q.name,q.category,COUNT(*)::text AS sent_count,MAX(u.created_at) AS last_sent_at " +
+        "FROM quick_reply_usage_events u JOIN quick_replies q ON q.id=u.quick_reply_id " +
+        "WHERE u.guild_id=$1 AND u.created_at >= NOW() - ($2::int * INTERVAL '1 day') " +
+        "GROUP BY q.id,q.name,q.category ORDER BY COUNT(*) DESC,MAX(u.created_at) DESC,LOWER(q.name) LIMIT 50",
+      [guildId, days],
+    ),
+  ]);
+  return {
+    days,
+    totalSends: Number(totals.rows[0]?.total ?? 0),
+    replies: perReply.rows.map((row) => ({
+      quickReplyId: row.quick_reply_id,
+      name: row.name,
+      category: row.category,
+      sentCount: Number(row.sent_count),
+      lastSentAt: row.last_sent_at ? iso(row.last_sent_at) : null,
+    })),
+  };
 }
 
 export async function getQuickReply(guildId: string, idOrName: string, access: QuickReplyAccess): Promise<QuickReply|null> {
