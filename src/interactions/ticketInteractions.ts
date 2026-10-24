@@ -5299,8 +5299,10 @@ async function showQuickReplySelector(
   existingSessionId?: string,
 ): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
+  let locale = 'en-US';
   try {
     const settings = await getAdvancedSettings(interaction.guildId!);
+    locale = settings.locale;
     let sessionId = existingSessionId;
     let session = existingSessionId
       ? getQuickReplyPickerSession(existingSessionId, interaction)
@@ -5321,7 +5323,7 @@ async function showQuickReplySelector(
     }
     await renderQuickReplySelector(interaction, context, sessionId, requestedPage);
   } catch (error) {
-    await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : translate(settings.locale, 'quickReply.picker.filterUnavailable'));
+    await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : translate(locale, 'quickReply.picker.filterUnavailable'));
   }
 }
 
