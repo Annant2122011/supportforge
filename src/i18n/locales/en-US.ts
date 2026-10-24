@@ -554,6 +554,7 @@ const enUS = {
   'settings.reports.action.edit': "Edit",
   'settings.reports.action.remove': "Remove",
   'settings.reports.error.thresholdsInvalid': "Thresholds must be whole numbers from 0 to 100000. A channel must be supplied when channel restriction is enabled.",
+  'settings.customPanel.generic.chooseAction': "Choose an action below.",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
