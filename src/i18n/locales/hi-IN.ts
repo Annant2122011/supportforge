@@ -752,6 +752,7 @@ const hiIN: Record<TranslationKey, string> = {
   'settings.recovery.replayed': "पहले से दोबारा चलाए गए संदेश रिकॉर्ड: **{count}**",
   'settings.recovery.snapshotStatus': "आर्काइव स्नैपशॉट: **{status}**",
   'settings.recovery.historyStatus': "ऐतिहासिक संदेश स्कैन: **{status}**",
+  'settings.recovery.restoreEligibility': "पुनर्स्थापना पात्रता",
 };
 
 export default hiIN;
