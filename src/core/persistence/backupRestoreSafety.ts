@@ -29,7 +29,7 @@ function parsePostgresDatabaseIdentity(value: string): PostgresDatabaseIdentity 
   if (parsed.protocol !== 'postgres:' && parsed.protocol !== 'postgresql:') {
     throw new Error('A configured database URL is not PostgreSQL. Restore was not started.');
   }
-  const database = decodeURIComponent(parsed.pathname.replace(/^\\/+/, '')).trim();
+  const database = decodeURIComponent(parsed.pathname.replace(/^\/+/, '')).trim();
   if (!parsed.hostname || !database) {
     throw new Error('A configured PostgreSQL URL is missing its host or database name. Restore was not started.');
   }
