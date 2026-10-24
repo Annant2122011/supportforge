@@ -1046,8 +1046,9 @@ export async function handleCustomPanelSettingsInteraction(
       const panel = await getCustomPanel(guild.id, panelId);
       const button = panel?.buttons.find((candidate) => candidate.id === buttonId);
       if (!button) throw new Error('Button not found.');
-      await render(interaction, 'Confirm Button Removal', 'Remove **' + button.label + '** from the draft? The currently published panel will continue to show the old button until you publish the updated draft.', [
-        row(makeButton(PREFIX + 'delete-button-confirm:' + panelId + ':' + buttonId, 'Confirm Remove', ButtonStyle.Danger, '🗑️'), makeButton(PREFIX + 'button:' + panelId + ':' + buttonId, 'Cancel', ButtonStyle.Secondary, '↩️')),
+      const settings = await getAdvancedSettings(guild.id);
+      await render(interaction, translate(settings.locale, 'settings.customPanel.buttonRemoval.title'), translate(settings.locale, 'settings.customPanel.buttonRemoval.description', { label: button.label }), [
+        row(makeButton(PREFIX + 'delete-button-confirm:' + panelId + ':' + buttonId, translate(settings.locale, 'settings.customPanel.buttonRemoval.confirm'), ButtonStyle.Danger, '🗑️'), makeButton(PREFIX + 'button:' + panelId + ':' + buttonId, translate(settings.locale, 'common.cancel'), ButtonStyle.Secondary, '↩️')),
       ]);
       return true;
     }
@@ -1080,9 +1081,10 @@ export async function handleCustomPanelSettingsInteraction(
       if (!targetChannelId) throw new Error('Choose a channel first.');
       const panel = await getCustomPanel(guild.id, panelId);
       if (!panel) throw new Error('Panel not found.');
-      if (panel.buttons.length < 1) throw new Error('Add at least one button before publishing a panel.');
+      if (panel.buttons.length < 1) throw new Error(translate((await getAdvancedSettings(guild.id)).locale, 'settings.customPanel.error.mustAddButton'));
+      const settings = await getAdvancedSettings(guild.id);
       const target = await guild.channels.fetch(targetChannelId);
-      if (target?.type !== 0) throw new Error('Publish target must be a standard text channel.');
+      if (target?.type !== 0) throw new Error(translate(settings.locale, 'settings.customPanel.error.invalidChannel'));
       const theme = await getGuildTheme(guild.id);
       const payload = {
         embeds: [buildCustomPanelEmbed(panel, guild.name, theme.color)],
@@ -1119,12 +1121,12 @@ export async function handleCustomPanelSettingsInteraction(
             if (oldMessage) await oldMessage.delete();
           }
         } catch {
-          cleanupWarning = '\n\n⚠️ The old message could not be removed. Delete it manually to prevent duplicate entry points.';
+          cleanupWarning = '\n\n⚠️ ' + translate(settings.locale, 'settings.customPanel.panelPublished.cleanupWarning');
         }
       }
       await audit(interaction, 'CUSTOM_PANEL_PUBLISHED', 'Published panel "' + updated.name + '" (' + updated.id + ') to channel ' + target.id + ' with ' + updated.buttons.length + ' button(s).');
-      await render(interaction, 'Panel Published', '**' + updated.name + '** is now live in <#' + target.id + '>.\n\nIts buttons use the normal validated ticket pipeline, including pinned forms, confirmation prompts and role checks. Existing tickets are not affected.' + cleanupWarning, [
-        row(makeButton(PREFIX + 'detail:' + panelId, 'Panel Details', ButtonStyle.Primary, '🎛️'), makeButton(PREFIX + 'home', 'Panel List', ButtonStyle.Secondary, '📋')),
+      await render(interaction, translate(settings.locale, 'settings.customPanel.panelPublished.title'), translate(settings.locale, 'settings.customPanel.panelPublished.description', { name: updated.name, channel: '<#' + target.id + '>', cleanupWarning }), [
+        row(makeButton(PREFIX + 'detail:' + panelId, translate(settings.locale, 'settings.customPanel.button.details'), ButtonStyle.Primary, '🎛️'), makeButton(PREFIX + 'home', translate(settings.locale, 'settings.customPanel.detail.list'), ButtonStyle.Secondary, '📋')),
       ]);
       return true;
     }
@@ -1132,8 +1134,9 @@ export async function handleCustomPanelSettingsInteraction(
       const panelId = id.slice((PREFIX + 'delete:').length);
       const panel = await getCustomPanel(guild.id, panelId);
       if (!panel) throw new Error('Panel not found.');
-      await render(interaction, 'Confirm Panel Deletion', 'Delete **' + panel.name + '** (' + panel.id + ')? This removes only the saved panel and its known published message. Tickets created from it are preserved.', [
-        row(makeButton(PREFIX + 'delete-confirm:' + panel.id, 'Confirm Delete', ButtonStyle.Danger, '🗑️'), makeButton(PREFIX + 'detail:' + panel.id, 'Cancel', ButtonStyle.Secondary, '↩️')),
+      const settings = await getAdvancedSettings(guild.id);
+      await render(interaction, translate(settings.locale, 'settings.customPanel.panelDeletion.title'), translate(settings.locale, 'settings.customPanel.panelDeletion.description', { name: panel.name, id: panel.id }), [
+        row(makeButton(PREFIX + 'delete-confirm:' + panel.id, translate(settings.locale, 'settings.customPanel.panelDeletion.confirm'), ButtonStyle.Danger, '🗑️'), makeButton(PREFIX + 'detail:' + panel.id, translate(settings.locale, 'common.cancel'), ButtonStyle.Secondary, '↩️')),
       ]);
       return true;
     }
@@ -1141,6 +1144,7 @@ export async function handleCustomPanelSettingsInteraction(
       const panelId = id.slice((PREFIX + 'delete-confirm:').length);
       const panel = await getCustomPanel(guild.id, panelId);
       if (!panel) throw new Error('Panel not found.');
+      const settings = await getAdvancedSettings(guild.id);
 
       // Remove the durable definition first. If Neon rejects the delete, the
       // public message remains functional. Once the definition is gone, any
@@ -1162,13 +1166,13 @@ export async function handleCustomPanelSettingsInteraction(
             if (publishedMessage) await publishedMessage.delete();
           }
         } catch (error) {
-          cleanupWarning = '\\n\\n⚠️ The panel definition is deleted and its buttons are no longer functional, but the old Discord message could not be removed. Delete that message manually.';
+          cleanupWarning = '\\n\\n⚠️ ' + translate(settings.locale, 'settings.customPanel.panelDeleted.cleanupWarning');
           console.warn('Custom panel definition deleted but Discord message cleanup failed:', error);
         }
       }
       await audit(interaction, 'CUSTOM_PANEL_DELETED', 'Deleted panel "' + deleted.name + '" (' + deleted.id + '); existing tickets were preserved.' + (cleanupWarning ? ' Discord message cleanup needs manual review.' : ''));
-      await render(interaction, 'Panel Deleted', 'The saved panel definition has been removed. Tickets created from it remain untouched.' + cleanupWarning, [
-        row(makeButton(PREFIX + 'home', 'Back to Custom Panels', ButtonStyle.Primary, '📋'), makeButton('sf:settings:home', 'Settings', ButtonStyle.Secondary, '↩️')),
+      await render(interaction, translate(settings.locale, 'settings.customPanel.panelDeleted.title'), translate(settings.locale, 'settings.customPanel.panelDeleted.description', { cleanupWarning }), [
+        row(makeButton(PREFIX + 'home', translate(settings.locale, 'settings.customPanel.detail.list'), ButtonStyle.Primary, '📋'), makeButton('sf:settings:home', translate(settings.locale, 'settings.customPanel.home.backSettings'), ButtonStyle.Secondary, '↩️')),
       ]);
       return true;
     }
@@ -1181,8 +1185,9 @@ export async function handleCustomPanelSettingsInteraction(
         buttons: [],
       });
       await audit(interaction, 'CUSTOM_PANEL_CREATED', 'Created draft panel "' + panel.name + '" (' + panel.id + ').');
-      await render(interaction, 'Panel Draft Created', '**' + panel.name + '** was saved to Neon.\nPanel ID: `' + panel.id + '`\n\nNext, add one or more department/form buttons, preview the draft and publish it when ready.', [
-        row(makeButton(PREFIX + 'buttons:' + panel.id, 'Build Buttons', ButtonStyle.Primary, '🧩'), makeButton(PREFIX + 'detail:' + panel.id, 'Panel Details', ButtonStyle.Secondary, '🎛️')),
+      const settings = await getAdvancedSettings(guild.id);
+      await render(interaction, translate(settings.locale, 'settings.customPanel.panelCreated.title'), translate(settings.locale, 'settings.customPanel.panelCreated.description', { name: panel.name, id: panel.id }), [
+        row(makeButton(PREFIX + 'buttons:' + panel.id, translate(settings.locale, 'settings.customPanel.detail.manageButtons'), ButtonStyle.Primary, '🧩'), makeButton(PREFIX + 'detail:' + panel.id, translate(settings.locale, 'settings.customPanel.button.details'), ButtonStyle.Secondary, '🎛️')),
       ]);
       return true;
     }
@@ -1195,8 +1200,9 @@ export async function handleCustomPanelSettingsInteraction(
         description: interaction.fields.getTextInputValue('description'),
       });
       await audit(interaction, 'CUSTOM_PANEL_UPDATED', 'Updated draft panel "' + updated.name + '" (' + updated.id + ').');
-      await render(interaction, 'Panel Draft Updated', '**' + updated.name + '** has been saved. The published message remains unchanged until you publish again.', [
-        row(makeButton(PREFIX + 'preview:' + updated.id, 'Preview Draft', ButtonStyle.Primary, '👁️'), makeButton(PREFIX + 'detail:' + updated.id, 'Panel Details', ButtonStyle.Secondary, '🎛️')),
+      const settings = await getAdvancedSettings(guild.id);
+      await render(interaction, translate(settings.locale, 'settings.customPanel.panelUpdated.title'), translate(settings.locale, 'settings.customPanel.panelUpdated.description', { name: updated.name }), [
+        row(makeButton(PREFIX + 'preview:' + updated.id, translate(settings.locale, 'settings.customPanel.detail.preview'), ButtonStyle.Primary, '👁️'), makeButton(PREFIX + 'detail:' + updated.id, translate(settings.locale, 'settings.customPanel.button.details'), ButtonStyle.Secondary, '🎛️')),
       ]);
       return true;
     }
@@ -1218,8 +1224,9 @@ export async function handleCustomPanelSettingsInteraction(
         bannerUrl: nullable('banner-url'),
       });
       await audit(interaction, 'CUSTOM_PANEL_BRANDING_UPDATED', 'Updated branding for panel "' + updated.name + '" (' + updated.id + ').');
-      await render(interaction, 'Panel Branding Updated', 'Saved branding for **' + updated.name + '**. The public message stays unchanged until you publish the panel again.', [
-        row(makeButton(PREFIX + 'preview:' + updated.id, 'Preview Draft', ButtonStyle.Primary, '👁️'), makeButton(PREFIX + 'detail:' + updated.id, 'Panel Details', ButtonStyle.Secondary, '🎛️')),
+      const settings = await getAdvancedSettings(guild.id);
+      await render(interaction, translate(settings.locale, 'settings.customPanel.brandingUpdated.title'), translate(settings.locale, 'settings.customPanel.brandingUpdated.description', { name: updated.name }), [
+        row(makeButton(PREFIX + 'preview:' + updated.id, translate(settings.locale, 'settings.customPanel.detail.preview'), ButtonStyle.Primary, '👁️'), makeButton(PREFIX + 'detail:' + updated.id, translate(settings.locale, 'settings.customPanel.button.details'), ButtonStyle.Secondary, '🎛️')),
       ]);
       return true;
     }
