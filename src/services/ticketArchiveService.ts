@@ -987,10 +987,7 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
   const botId = channel.client.user?.id;
   // Recover markers from recent history before sending anything. Stop after a failed item so these remain searchable.
   const recentMessages = await channel.messages.fetch({ limit: 100 });
-  const seenMarkers = new Set<string>();
-  for (const message of recentMessages.values()) {
-    for (const marker of recoveryMarkersInMessage(message)) seenMarkers.add(marker);
-  }
+  const seenMarkers = recoveryMarkerMessageMap(recentMessages.values());
   let cursorCreatedAt: string | null = null;
   let cursorMessageId: string | null = null;
 
@@ -1073,7 +1070,7 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
           value: componentCount + ' control(s) were present. Historical controls are not reactivated during replay; the live ticket panel has been rebuilt with current safe actions.',
         });
       }
-      await sendRecoverySegment(channel, { embeds: [header], allowedMentions: { parse: [] } }, recoverySegmentMarker(recoveryEventId, archived.message_id, 'header'), seenMarkers);
+      await sendRecoverySegment(channel, { embeds: [header], allowedMentions: { parse: [] } }, recoveryEventId, archived.message_id, 'header', seenMarkers);
 
       const content = archived.content ?? '';
       if (content) {
@@ -1085,14 +1082,14 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
           await sendRecoverySegment(channel, {
             content: prefix + chunks[part] + marker,
             allowedMentions: { parse: [] },
-          }, marker, seenMarkers);
+          }, recoveryEventId, archived.message_id, 'content:' + part, seenMarkers);
         }
       } else if (archivedEmbeds.length === 0 && archivedComponents.length === 0) {
         const marker = recoverySegmentMarker(recoveryEventId, archived.message_id, 'empty-content');
         await sendRecoverySegment(channel, {
           content: attribution + '\n[The original message contained no text content.]' + marker,
           allowedMentions: { parse: [] },
-        }, marker, seenMarkers);
+        }, recoveryEventId, archived.message_id, 'empty-content', seenMarkers);
       }
 
       // Embeds are replayed separately so recovery attribution cannot push an
@@ -1106,7 +1103,7 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
           content: attribution + (originalEmbeds.length > 5 ? ' • archived embed ' + (index + 1) + '-' + Math.min(index + 5, originalEmbeds.length) + '/' + originalEmbeds.length : ' • original embed') + marker,
           embeds: originalEmbeds.slice(index, index + 5),
           allowedMentions: { parse: [] },
-        }, marker, seenMarkers);
+        }, recoveryEventId, archived.message_id, 'embeds:' + index, seenMarkers);
       }
 
       const attachmentRows = await pool.query<AttachmentArchiveRow>(
@@ -1122,9 +1119,10 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
               content: attribution + '\n📎 Recovered attachment: ' + attachment.original_filename + marker,
               files: [new AttachmentBuilder(attachment.archived_bytes, { name: safeFilename(attachment.original_filename) })],
               allowedMentions: { parse: [] },
-            }, marker, seenMarkers);
+            }, recoveryEventId, archived.message_id, 'attachment:' + attachment.attachment_id, seenMarkers);
           } catch (error) {
-            unavailable.push(attachment.original_filename + ' (upload failed: ' + (error instanceof Error ? error.message : 'unknown error') + ')');
+            if (isPostgresOrNetworkError(error)) throw error;
+            unavailable.push(attachment.original_filename + ' (upload failed: ' + (error instanceof Error ? error.name : 'unknown error') + ')');
           }
         } else {
           unavailable.push(attachment.original_filename + (attachment.archive_error ? ' (' + attachment.archive_error + ')' : ' (file bytes were not archived)'));
@@ -1132,12 +1130,14 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
       }
       if (unavailable.length) {
         const unavailableParts = chunkText(unavailable.join('\n'), 1500);
-        for (const part of unavailableParts) {
-          const marker = recoverySegmentMarker(recoveryEventId, archived.message_id, 'unavailable-attachments:' + unavailableParts.indexOf(part));
+        for (let partIndex = 0; partIndex < unavailableParts.length; partIndex += 1) {
+          const part = unavailableParts[partIndex]!;
+          const segmentKey = 'unavailable-attachments:' + partIndex;
+          const marker = recoverySegmentMarker(recoveryEventId, archived.message_id, segmentKey);
           await sendRecoverySegment(channel, {
             content: attribution + '\nAttachments that could not be restored:\n' + part + marker,
             allowedMentions: { parse: [] },
-          }, marker, seenMarkers);
+          }, recoveryEventId, archived.message_id, segmentKey, seenMarkers);
         }
       }
       await pool.query(
