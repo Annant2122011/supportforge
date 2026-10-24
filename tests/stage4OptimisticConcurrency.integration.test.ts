@@ -4,8 +4,8 @@ import test from 'node:test';
 
 import { closePostgresDatabase, getPostgresPool } from '../src/core/persistence/postgresDatabase';
 import { migratePostgres } from '../src/core/persistence/migrationRunner';
-import { deleteQuickReply, saveQuickReply, getQuickReply, restoreQuickReplyRevision } from '../src/services/quickReplyService';
-import { deleteWorkflowTemplate, saveWorkflowTemplate, listWorkflowTemplates, restoreWorkflowTemplateRevision } from '../src/services/workflowTemplateService';
+import { deleteQuickReply, saveQuickReply, getQuickReply, listQuickReplyRevisions, restoreQuickReplyRevision } from '../src/services/quickReplyService';
+import { deleteWorkflowTemplate, saveWorkflowTemplate, listWorkflowTemplates, listWorkflowTemplateRevisions, restoreWorkflowTemplateRevision } from '../src/services/workflowTemplateService';
 
 const hasPostgres =
   process.env.SUPPORTFORGE_POSTGRES_TEST === '1' &&
@@ -81,7 +81,9 @@ test('quick reply saves require an expected version and reject stale concurrent 
     assert.equal(restoredAfterDelete.version, 7);
     assert.equal(restoredAfterDelete.body, 'Second version');
     assert.equal(restoredAfterDelete.enabled, false);
+    assert.equal((await listWorkflowTemplateRevisions(guildId, created.id))[0]?.operation, 'restored');
     assert.equal((await getQuickReply(guildId, created.id, { isAdmin: true, roleIds: [] }))?.version, 7);
+    assert.equal((await listQuickReplyRevisions(guildId, created.id))[0]?.operation, 'restored');
 
     await assert.rejects(
       restoreQuickReplyRevision(guildId, actorId, created.id, 1, 6),
