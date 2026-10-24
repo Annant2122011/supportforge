@@ -1,6 +1,8 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, type ChatInputCommandInteraction, type TextChannel, type ThreadChannel } from 'discord.js';
 
 import { getGuildConfig } from '../services/configService';
+import { getAdvancedSettings } from '../services/advancedSettingsService';
+import { translate } from '../i18n/translationService';
 import { isKnowledgeShareableConfidence } from '../core/domain/knowledgeSearch';
 import { getPersistedTicket } from '../services/ticketPersistenceService';
 import { logSettingsEvent, logTicketEvent } from '../services/auditLogService';
@@ -560,7 +562,8 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           isAdmin: access.isAdmin,
           roleIds: access.roleIds,
         });
-        await interaction.editReply('Sent quick reply "' + reply.name + '". Automatic mentions are disabled; the ticket remains open.');
+        const settings = await getAdvancedSettings(guildId);
+        await interaction.editReply(translate(settings.locale, 'quickReply.picker.sent', { name: reply.name }));
         return true;
       }
     }
