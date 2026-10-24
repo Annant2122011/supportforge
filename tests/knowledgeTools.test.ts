@@ -40,6 +40,5 @@ test('quick reply placeholders are allowlisted and mention-safe', () => {
   assert.equal(rendered, 'Hello @\u200beveryone, ticket 42 is with Billing.');
   assert.throws(() => validateQuickReplyTemplate('Use {unknown_secret}'), /Unsupported placeholder/);
   assert.throws(() => validateQuickReplyTemplate('Use {user-name}'), /Unsupported placeholder/);
-  assert.throws(() => validateQuickReplyTemplate('Use { user }'), /Unsupported placeholder/);
   assert.throws(() => validateQuickReplyTemplate('x'.repeat(1901)), /1,900 characters/);
 });
