@@ -704,30 +704,30 @@ async function showSettingsDashboardBuilder(
   const orderText = order.map((key, index) => (index + 1) + '. ' + (effectiveSettingsLayoutEmoji(settings, key) ? effectiveSettingsLayoutEmoji(settings, key) + ' ' : '') + effectiveSettingsLayoutLabel(settings, key)).join('\n');
   const chooser = new StringSelectMenuBuilder()
     .setCustomId(SETTINGS_LAYOUT_PREFIX + ':reorder-select')
-    .setPlaceholder('Choose a control to move up or down')
+    .setPlaceholder(translate(settings.locale, 'settings.layout.chooseControl'))
     .addOptions(order.map((key) => ({
       label: effectiveSettingsLayoutLabel(settings, key).slice(0, 100),
       value: key,
-      description: 'Current position ' + (order.indexOf(key) + 1) + ' of ' + order.length,
+      description: translate(settings.locale, 'settings.layout.currentPosition', { position: order.indexOf(key) + 1, total: order.length }),
       default: key === order[0],
     })));
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🧰 Settings Dashboard Builder')
+      .setTitle('🧰 ' + translate(settings.locale, 'settings.layout.title'))
       .setDescription(
         (notice ? notice + '\n\n' : '') +
-        'Customize the **Settings channel itself** for this server. Change its heading, description, footer, control order, per-control labels and emojis. Edits save immediately; Preview shows the saved layout with disabled controls. This changes only the Settings dashboard, not the public ticket panel.\n\n' +
+        translate(settings.locale, 'settings.layout.description') + '\n\n' +
         '**Title:** ' + settings.settingsDashboard.title + '\n' +
-        '**Description:** ' + (settings.settingsDashboard.description || 'No description') + '\n' +
+        '**Description:** ' + (settings.settingsDashboard.description || translate(settings.locale, 'settings.layout.noDescription')) + '\n' +
         '**Footer:** ' + settings.settingsDashboard.footer + '\n\n' +
-        '**Control order**\n' + orderText +
-        '\n\nSafety rule: all built-in controls remain available. Reordering cannot hide repair, refresh or Delete Everything.',
+        '**' + translate(settings.locale, 'settings.layout.controlOrder') + '**\n' + orderText +
+        '\n\n' + translate(settings.locale, 'settings.layout.safetyRule'),
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':edit').setLabel('Edit Branding').setEmoji('🎨').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':preview').setLabel('Preview').setEmoji('👁️').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':reset-order').setLabel('Reset Layout').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':edit').setLabel(translate(settings.locale, 'settings.layout.editBranding')).setEmoji('🎨').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':preview').setLabel(translate(settings.locale, 'settings.layout.preview')).setEmoji('👁️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':reset-order').setLabel(translate(settings.locale, 'settings.layout.reset')).setEmoji('↩️').setStyle(ButtonStyle.Secondary),
       backButton(),
     ),
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(chooser),
@@ -741,23 +741,23 @@ async function showSettingsDashboardOrder(
   const settings = await getAdvancedSettings(interaction.guild!.id);
   const order = settingsButtonOrder(settings);
   const index = order.indexOf(key);
-  if (index < 0) throw new Error('That Settings control no longer exists.');
+  if (index < 0) throw new Error(translate(settings.locale, 'settings.layout.missingControl'));
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('Reorder Settings Control')
+      .setTitle(translate(settings.locale, 'settings.layout.reorderTitle'))
       .setDescription(
-        '**Selected:** ' + (effectiveSettingsLayoutEmoji(settings, key) ? effectiveSettingsLayoutEmoji(settings, key) + ' ' : '') + effectiveSettingsLayoutLabel(settings, key) + '\n' +
-        '**Current position:** ' + (index + 1) + ' of ' + order.length + '\n' +
-        '**Emoji:** ' + (effectiveSettingsLayoutEmoji(settings, key) || 'None') + '\n\n' +
-        'Moving this item changes the order of buttons on the persistent Settings dashboard for this server. It does not remove or disable the selected feature.',
+        '**' + translate(settings.locale, 'settings.layout.selected') + ':** ' + (effectiveSettingsLayoutEmoji(settings, key) ? effectiveSettingsLayoutEmoji(settings, key) + ' ' : '') + effectiveSettingsLayoutLabel(settings, key) + '\n' +
+        '**' + translate(settings.locale, 'settings.layout.currentPositionLabel') + ':** ' + (index + 1) + ' of ' + order.length + '\n' +
+        '**' + translate(settings.locale, 'settings.layout.emoji') + ':** ' + (effectiveSettingsLayoutEmoji(settings, key) || translate(settings.locale, 'settings.layout.none')) + '\n\n' +
+        translate(settings.locale, 'settings.layout.reorderDescription'),
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':up:' + key).setLabel('Move Up').setEmoji('⬆️').setStyle(ButtonStyle.Secondary).setDisabled(index === 0),
-      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':down:' + key).setLabel('Move Down').setEmoji('⬇️').setStyle(ButtonStyle.Secondary).setDisabled(index === order.length - 1),
-      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':customize:' + key).setLabel('Customize Label / Emoji').setEmoji('✏️').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':preview').setLabel('Preview').setEmoji('👁️').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel('Layout Builder').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':up:' + key).setLabel(translate(settings.locale, 'settings.layout.moveUp')).setEmoji('⬆️').setStyle(ButtonStyle.Secondary).setDisabled(index === 0),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':down:' + key).setLabel(translate(settings.locale, 'settings.layout.moveDown')).setEmoji('⬇️').setStyle(ButtonStyle.Secondary).setDisabled(index === order.length - 1),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':customize:' + key).setLabel(translate(settings.locale, 'settings.layout.customize')).setEmoji('✏️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':preview').setLabel(translate(settings.locale, 'settings.layout.preview')).setEmoji('👁️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel(translate(settings.locale, 'settings.layout.home')).setEmoji('↩️').setStyle(ButtonStyle.Secondary),
     ),
   ]);
 }
