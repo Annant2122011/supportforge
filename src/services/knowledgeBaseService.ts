@@ -483,9 +483,10 @@ export async function deleteKnowledgeSynonyms(guildId: string, term: string): Pr
 
 async function getKnowledgeSynonymExpansions(guildId: string, tokens: string[]): Promise<string[]> {
   if (!tokens.length) return [];
+  const terms = Array.from(new Set([tokens.join(' '), ...tokens]));
   const result = await getPostgresPool().query<QueryResultRow & { normalized_term: string; synonyms: string[] }>(
     'SELECT normalized_term,synonyms FROM knowledge_base_synonyms WHERE guild_id=$1 AND normalized_term=ANY($2::text[])',
-    [guildId, tokens],
+    [guildId, terms],
   );
   return result.rows.flatMap((row) => Array.isArray(row.synonyms) ? row.synonyms : []);
 }
