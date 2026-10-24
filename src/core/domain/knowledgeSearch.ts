@@ -5,6 +5,8 @@ export interface KnowledgeSearchCandidate {
   summary: string;
   category: string;
   tags: readonly string[];
+  /** Pre-normalized body tokens let the fallback search long articles without re-tokenizing for every synonym. */
+  bodyTokens?: ReadonlySet<string>;
 }
 
 export interface KnowledgeSearchScore {
@@ -82,8 +84,15 @@ export function scoreKnowledgeCandidate(
   const categoryScore = tokenCoverage(queryTokens, normalizedCategory);
   const summaryScore = tokenCoverage(queryTokens, normalizedSummary);
 
-  let score = (titleScore * 0.58) + (tagScore * 0.21) + (categoryScore * 0.13) + (summaryScore * 0.08);
+  let score = (titleScore * 0.50) + (tagScore * 0.18) + (categoryScore * 0.10) + (summaryScore * 0.08);
   if (normalizedTags === normalizedQuery || normalizedCategory === normalizedQuery) score = Math.max(score, 0.88);
+  // Body search uses exact Unicode token coverage. It catches terms buried in long
+  // articles and non-English content without making fuzzy matching expensive over
+  // thousands of body tokens for every synonym variant.
+  const bodyCoverage = candidate.bodyTokens && queryTokens.length
+    ? queryTokens.filter((token) => candidate.bodyTokens!.has(token)).length / queryTokens.length
+    : 0;
+  score = Math.max(score, bodyCoverage * 0.56);
   score = Math.max(0, Math.min(1, Number(score.toFixed(4))));
   const confidence: KnowledgeConfidence = score >= 0.72 ? 'high' : score >= 0.48 ? 'medium' : 'low';
   return { score, confidence };
