@@ -380,7 +380,12 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
 
     if (group === 'quick-reply') {
       const needsStaff = ['list','show','send'].includes(subcommand);
-      if (needsStaff && !access.isStaff) throw accessDenied('a configured department staff role');
+      // Administrators can inspect the library even when the guild has not
+      // configured a staff role. Sending still requires staff membership and
+      // the active ticket's department authorization below.
+      if (needsStaff && !access.isStaff && !(access.isAdmin && ['list','show'].includes(subcommand))) {
+        throw accessDenied('a configured department staff role (administrators may list/show replies)');
+      }
       if (subcommand === 'list') {
         const replies = await listQuickReplies(guildId, { isAdmin: access.isAdmin, roleIds: access.roleIds }, interaction.options.getString('category') ?? undefined);
         await interaction.editReply(replies.length
