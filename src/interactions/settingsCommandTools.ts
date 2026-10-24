@@ -557,7 +557,7 @@ export async function handleSettingsSlashCommand(
         await refreshSettingsChannel(guild);
         audit('REPORT_INTAKE_CHANGED', 'Report intake ' + (enabled ? 'enabled' : 'disabled') + '.');
       }
-      await interaction.editReply('Safety reports are **' + (enabled ? 'Enabled' : 'Disabled') + '**.');
+      await interaction.editReply(translate(current.locale, enabled ? 'settings.reports.command.enabled' : 'settings.reports.command.disabled'));
       return;
     }
 
@@ -569,14 +569,14 @@ export async function handleSettingsSlashCommand(
         ? settings.reports.categories[requestedCategoryId]
         : undefined;
       if (requestedCategoryId && !selected) {
-        throw new Error('Report category not found. Run /supportforge settings report-categories without a category ID to list valid IDs.');
+        throw new Error(translate(settings.locale, 'settings.reports.error.categoryMissing') + ' Run /supportforge settings report-categories without a category ID to list valid IDs.');
       }
       const lines = (selected ? [selected] : categories).map((category) => {
         const subs = Object.values(category.subcategories);
         return category.emoji + ' **' + category.name + '** · ID: ' + category.id + '\n' +
-          (subs.length ? subs.map((sub) => '  • ' + sub.name + ' · ID: ' + sub.id).join('\n') : '  No subcategories configured.');
+          (subs.length ? subs.map((sub) => '  • ' + sub.name + ' · ID: ' + sub.id).join('\n') : '  ' + translate(settings.locale, 'settings.reports.value.noSubcategories'));
       });
-      const content = lines.join('\n\n') || 'No report categories are configured.';
+      const content = lines.join('\n\n') || translate(settings.locale, 'settings.reports.value.noCategories');
       const chunks: string[] = [];
       for (const line of content.split('\n')) {
         const current = chunks[chunks.length - 1];
@@ -585,8 +585,8 @@ export async function handleSettingsSlashCommand(
         else chunks.push(line);
       }
       const requestedPage = interaction.options.getInteger('page') ?? 1;
-      if (requestedPage > chunks.length) throw new Error('Page ' + requestedPage + ' does not exist. This result has ' + chunks.length + ' page(s).');
-      await interaction.editReply('**Report Categories' + (selected ? ' · ' + selected.name : '') + ' · Page ' + requestedPage + ' / ' + chunks.length + '**\n\n' + chunks[requestedPage - 1]);
+      if (!Number.isInteger(requestedPage) || requestedPage < 1 || requestedPage > chunks.length) throw new Error(translate(settings.locale, 'settings.reports.command.pageOutOfRange', { page: requestedPage, pages: chunks.length }));
+      await interaction.editReply('**' + translate(settings.locale, 'settings.reports.command.categoryListTitle') + (selected ? ' · ' + selected.name : '') + ' · ' + translate(settings.locale, 'settings.reports.selector.page', { page: requestedPage, pages: chunks.length }) + '**\n\n' + chunks[requestedPage - 1]);
       return;
     }
 
@@ -824,37 +824,37 @@ export async function handleSettingsSlashCommand(
       const categoryId = interaction.options.getString('category-id', true).trim();
       const settings = await getAdvancedSettings(guild.id);
       const category = settings.reports.categories[categoryId];
-      if (!category) throw new Error('Report category not found. Use Settings report controls to inspect configured categories.');
+      if (!category) throw new Error(translate(settings.locale, 'settings.reports.error.categoryMissing') + ' Use Settings report controls to inspect configured categories.');
       if (action === 'report-subcategory-add') {
         const name = interaction.options.getString('name', true).trim().replace(/\s+/g, ' ');
         const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);
-        if (!id) throw new Error('Subcategory name must contain letters or numbers.');
-        if (category.subcategories[id]) throw new Error('A report subcategory with that name already exists.');
+        if (!id) throw new Error(translate(settings.locale, 'settings.reports.error.subcategoryInvalid'));
+        if (category.subcategories[id]) throw new Error(translate(settings.locale, 'settings.reports.error.subcategoryExists'));
         const now = new Date().toISOString();
         await updateAdvancedSettings(guild.id, (current) => {
           const item = current.reports.categories[categoryId];
           if (item) item.subcategories[id] = { id, name, createdAt: now, updatedAt: now };
         });
         audit('REPORT_SUBCATEGORY_ADDED', 'Added ' + name + ' to report category ' + categoryId + '.');
-        await interaction.editReply('Added report subcategory **' + name + '** (' + id + ').');
+        await interaction.editReply(translate(settings.locale, 'settings.reports.command.subcategoryAdded', { name, id }));
       } else {
         const subId = interaction.options.getString('subcategory-id', true).trim();
         const sub = category.subcategories[subId];
-        if (!sub) throw new Error('Report subcategory not found.');
+        if (!sub) throw new Error(translate(settings.locale, 'settings.reports.error.subcategoryMissing'));
         if (action === 'report-subcategory-edit') {
           const name = interaction.options.getString('name', true).trim().replace(/\s+/g, ' ');
-          if (!name) throw new Error('Subcategory name cannot be empty.');
+          if (!name) throw new Error(translate(settings.locale, 'settings.reports.error.subcategoryEmpty'));
           await updateAdvancedSettings(guild.id, (current) => {
             const item = current.reports.categories[categoryId]?.subcategories[subId];
             if (item) { item.name = name; item.updatedAt = new Date().toISOString(); }
           });
           audit('REPORT_SUBCATEGORY_EDITED', 'Renamed subcategory ' + subId + ' to ' + name + '.');
-          await interaction.editReply('Renamed report subcategory to **' + name + '**.');
+          await interaction.editReply(translate(settings.locale, 'settings.reports.command.subcategoryRenamed', { name }));
         } else {
-          if (Object.keys(category.subcategories).length <= 1) throw new Error('Each report category must retain at least one subcategory.');
+          if (Object.keys(category.subcategories).length <= 1) throw new Error(translate(settings.locale, 'settings.reports.error.keepOneSubcategory'));
           await updateAdvancedSettings(guild.id, (current) => { const item = current.reports.categories[categoryId]; if (item) delete item.subcategories[subId]; });
           audit('REPORT_SUBCATEGORY_REMOVED', 'Removed subcategory ' + subId + ' from ' + categoryId + '.');
-          await interaction.editReply('Removed report subcategory **' + sub.name + '**.');
+          await interaction.editReply(translate(settings.locale, 'settings.reports.command.subcategoryRemoved', { name: sub.name }));
         }
       }
       await refreshSettingsChannel(guild);
