@@ -5299,20 +5299,19 @@ async function showQuickReplySelector(
   existingSessionId?: string,
 ): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
+  const settings = await getAdvancedSettings(interaction.guildId!);
   try {
     let sessionId = existingSessionId;
     let session = existingSessionId
       ? getQuickReplyPickerSession(existingSessionId, interaction)
       : null;
     if (existingSessionId && !session) {
-      const settings = await getAdvancedSettings(interaction.guildId!);
       await interaction.editReply(translate(settings.locale, 'quickReply.picker.invalidSession'));
       return;
     }
 
     const context = await getQuickReplyTicketContext(interaction);
     if (!sessionId) {
-      const settings = await getAdvancedSettings(interaction.guildId!);
       sessionId = createQuickReplyPickerSession(interaction, settings.locale);
       session = quickReplyPickerSessions.get(sessionId)!;
     }
@@ -5322,7 +5321,7 @@ async function showQuickReplySelector(
     }
     await renderQuickReplySelector(interaction, context, sessionId, requestedPage);
   } catch (error) {
-    await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : 'Quick replies are temporarily unavailable.');
+    await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : translate(settings.locale, 'quickReply.picker.filterUnavailable'));
   }
 }
 
@@ -5379,7 +5378,7 @@ async function handleQuickReplyFilterModal(interaction: ModalSubmitInteraction):
     };
     await renderQuickReplySelector(interaction, context, sessionId, 0);
   } catch (error) {
-    await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : translate(settings.locale, 'quickReply.picker.filterUnavailable'));
+    await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : translate(session.locale, 'quickReply.picker.filterUnavailable'));
   }
 }
 
@@ -5401,7 +5400,9 @@ async function handleQuickReplyClear(
 
 async function handleQuickReplySelection(interaction: StringSelectMenuInteraction): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
+  let locale = 'en-US';
   try {
+    locale = (await getAdvancedSettings(interaction.guildId!)).locale;
     const [sessionId = '', rawPage = ''] = interaction.customId
       .slice('ticket:quick-reply:select:'.length)
       .split(':');
@@ -5414,7 +5415,7 @@ async function handleQuickReplySelection(interaction: StringSelectMenuInteractio
     }
     const context = await getQuickReplyTicketContext(interaction);
     const quickReplyId = interaction.values[0];
-    if (!quickReplyId) throw new Error(translate(settings.locale, 'quickReply.picker.selectionRequired'));
+    if (!quickReplyId) throw new Error(translate(locale, 'quickReply.picker.selectionRequired'));
     const currentPage = await searchQuickRepliesPage(interaction.guildId!, context.access, {
       ...session.filters,
       page,
@@ -5444,7 +5445,7 @@ async function handleQuickReplySelection(interaction: StringSelectMenuInteractio
       { name: reply.reply.name },
     ));
   } catch (error) {
-    await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : translate(settings.locale, 'quickReply.picker.sendFailed'));
+    await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : translate(locale, 'quickReply.picker.sendFailed'));
   }
 }
 
