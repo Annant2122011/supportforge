@@ -901,6 +901,10 @@ const bnIN: Record<TranslationKey, string> = {
   'ticket.report.review.flagButton': "লঙ্ঘন ফ্ল্যাগ করুন",
   'ticket.report.review.recordOnlyButton': "শুধু নথিভুক্ত করুন",
   'ticket.report.command.categoryMissing': "রিপোর্টের বিভাগ/উপবিভাগ পাওয়া যায়নি। Settings → Reports-এ দেখানো কনফিগার করা নাম বা ID লিখুন।",
+  'panelBuilder.fallback.description': "সাপোর্টের অনুরোধ শুরু করতে নিচের একটি বিকল্প বেছে নিন।",
+  'panelBuilder.fallback.footer': "ResolvX • গ্রাহক সহায়তা",
+  'panelBuilder.preview.label': "প্রিভিউ",
+  'panelBuilder.preview.description': "এটি শুধু ড্রাফটের প্রিভিউ। নিয়ন্ত্রণগুলি নিষ্ক্রিয় এবং প্রকাশিত প্যানেলে কোনো পরিবর্তন হয়নি।",
 };
 
 export default bnIN;
