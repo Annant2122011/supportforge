@@ -1055,27 +1055,30 @@ async function showTicketWorkspaceSettings(
   const privateThreads = settings.ticketWorkspace.mode === 'private-threads';
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🧵 Ticket Workspace')
+      .setTitle('🧵 ' + translate(settings.locale, 'settings.nav.ticketWorkspace'))
       .setDescription(
         (notice ? notice + '\n\n' : '') +
-        '**Current mode:** ' + (privateThreads ? 'Private threads' : 'Dedicated text channels') + '\n\n' +
-        (privateThreads
-          ? 'Each new ticket is a private thread under its department workspace. Only the ticket owner, the department staff with access to that workspace, administrators, and the bot can read the conversation. The parent is read-only to normal members; other customers cannot see this thread. Department staff roles must be configured for staff access.'
-          : 'Each new ticket is a private text channel, using the existing permission-overwrite model.') +
-        '\n\n**Scope:** This setting affects new tickets only. Existing tickets keep their current resource type. The parent workspace for a private-thread department is created lazily when its next ticket is opened.' +
-        '\n\nPrivate threads require the bot to have Manage Threads, Create Private Threads, View Channel and Send Messages in Threads. If setup fails, ticket creation is stopped rather than falling back to a less-private channel.',
+        '**' + translate(settings.locale, 'settings.ticketWorkspace.label.currentMode') + ':** ' +
+        translate(settings.locale, privateThreads
+          ? 'settings.value.privateThreads'
+          : 'settings.value.privateTextChannels') + '\n\n' +
+        translate(settings.locale, privateThreads
+          ? 'settings.ticketWorkspace.description.privateThreads'
+          : 'settings.ticketWorkspace.description.textChannels') + '\n\n' +
+        translate(settings.locale, 'settings.ticketWorkspace.scope.newOnly') +
+        (privateThreads ? '\n\n' + translate(settings.locale, 'settings.ticketWorkspace.requirements') : ''),
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId('sf:settings:ticket-workspace:set:text-channels')
-        .setLabel('Use Text Channels')
+        .setLabel(translate(settings.locale, 'settings.ticketWorkspace.action.useTextChannels'))
         .setEmoji('📁')
         .setStyle(privateThreads ? ButtonStyle.Secondary : ButtonStyle.Success)
         .setDisabled(!privateThreads),
       new ButtonBuilder()
         .setCustomId('sf:settings:ticket-workspace:set:private-threads')
-        .setLabel('Use Private Threads')
+        .setLabel(translate(settings.locale, 'settings.ticketWorkspace.action.usePrivateThreads'))
         .setEmoji('🧵')
         .setStyle(privateThreads ? ButtonStyle.Success : ButtonStyle.Secondary)
         .setDisabled(privateThreads),
@@ -1783,22 +1786,52 @@ async function showStorage(interaction: ButtonInteraction): Promise<void> {
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🗄️ Storage & Categories')
-      .setDescription(
-        'Closed tickets and Archive tickets are the only status-storage categories created by default. ' +
-        'Claimed tickets and Pending tickets can be added here when extra segregation is useful.',
-      )
+      .setTitle('🗄️ ' + translate(settings.locale, 'settings.storage.title'))
+      .setDescription(translate(settings.locale, 'settings.storage.description'))
       .addFields(
-        { name: 'Closed tickets', value: settings.closedCategoryId ? (interaction.guild!.channels.cache.get(settings.closedCategoryId)?.name ?? 'Configured category') : 'Not provisioned', inline: true },
-        { name: 'Archive tickets', value: settings.archiveCategoryId ? (interaction.guild!.channels.cache.get(settings.archiveCategoryId)?.name ?? 'Configured category') : 'Not provisioned', inline: true },
-        { name: 'Claimed tickets', value: claimed?.name ?? 'Not added', inline: true },
-        { name: 'Pending tickets', value: pending?.name ?? 'Not added', inline: true },
+        {
+          name: translate(settings.locale, 'settings.storage.field.closed'),
+          value: settings.closedCategoryId
+            ? (interaction.guild!.channels.cache.get(settings.closedCategoryId)?.name ?? translate(settings.locale, 'settings.storage.value.configuredCategory'))
+            : translate(settings.locale, 'settings.storage.value.notProvisioned'),
+          inline: true,
+        },
+        {
+          name: translate(settings.locale, 'settings.storage.field.archive'),
+          value: settings.archiveCategoryId
+            ? (interaction.guild!.channels.cache.get(settings.archiveCategoryId)?.name ?? translate(settings.locale, 'settings.storage.value.configuredCategory'))
+            : translate(settings.locale, 'settings.storage.value.notProvisioned'),
+          inline: true,
+        },
+        {
+          name: translate(settings.locale, 'settings.storage.field.claimed'),
+          value: claimed?.name ?? translate(settings.locale, 'settings.storage.value.notAdded'),
+          inline: true,
+        },
+        {
+          name: translate(settings.locale, 'settings.storage.field.pending'),
+          value: pending?.name ?? translate(settings.locale, 'settings.storage.value.notAdded'),
+          inline: true,
+        },
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:storage:add:claimed').setLabel(claimed ? 'Claimed Added' : 'Add Claimed tickets').setEmoji('🙋').setStyle(ButtonStyle.Secondary).setDisabled(Boolean(claimed)),
-      new ButtonBuilder().setCustomId('sf:settings:storage:add:pending').setLabel(pending ? 'Pending Added' : 'Add Pending tickets').setEmoji('⏳').setStyle(ButtonStyle.Secondary).setDisabled(Boolean(pending)),
-      new ButtonBuilder().setCustomId('sf:settings:storage:repair').setLabel('Storage Repair').setEmoji('🗄️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('sf:settings:storage:add:claimed')
+        .setLabel(translate(settings.locale, claimed
+          ? 'settings.storage.action.claimedAdded'
+          : 'settings.storage.action.addClaimed'))
+        .setEmoji('🙋').setStyle(ButtonStyle.Secondary).setDisabled(Boolean(claimed)),
+      new ButtonBuilder()
+        .setCustomId('sf:settings:storage:add:pending')
+        .setLabel(translate(settings.locale, pending
+          ? 'settings.storage.action.pendingAdded'
+          : 'settings.storage.action.addPending'))
+        .setEmoji('⏳').setStyle(ButtonStyle.Secondary).setDisabled(Boolean(pending)),
+      new ButtonBuilder()
+        .setCustomId('sf:settings:storage:repair')
+        .setLabel(translate(settings.locale, 'settings.storage.action.repair'))
+        .setEmoji('🗄️').setStyle(ButtonStyle.Primary),
       backButton(),
     ),
   ]);
