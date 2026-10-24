@@ -5,6 +5,8 @@
 **Stack:** PR #34 → Stage 2 PR #32 → Stage 1 PR #31 → baseline cleanup PR #33  
 **Production persistence:** Neon PostgreSQL. The scripts use explicit connection variables; no production database operation or Discord deployment is implied by these source changes.
 
+**Stage 4 follow-on:** [Knowledge Base, related tickets, quick replies and safe workflows](stage-4-knowledge-base-productivity.md) are consolidated in Stage 4 PR #39, which is stacked on this Stage 3 branch.
+
 ## Implemented source scope
 
 ### 1. Recovery Vault and transparent recovery previews
@@ -47,7 +49,7 @@
 
 ### Latest exact-head evidence
 
-- Stage 3: [CI #2389](https://github.com/Annant2122011/supportforge/actions/runs/40053953590) for `f16b73dac24e5885875d632db959f9f0e012c071`, build passed, **194/194 tests**, zero skipped, disposable PostgreSQL verification passed.
+- Stage 3: [CI #2396](https://github.com/Annant2122011/supportforge/actions/runs/40054056156) for `d5245a8dcefc213a74c6469e56234357350ecc6c`, build passed, **194/194 tests**, zero skipped, disposable PostgreSQL verification passed.
 
 | Acceptance gate | Result |
 |---|---|
