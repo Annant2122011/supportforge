@@ -92,3 +92,26 @@ export function scoreKnowledgeCandidate(
 export function shouldOfferKnowledgeResult(score: KnowledgeSearchScore): boolean {
   return score.score >= 0.38;
 }
+
+
+/** Expand only complete canonical terms or phrases configured for this server. */
+export function expandKnowledgeQuery(
+  query: string,
+  mappings: readonly { normalizedTerm: string; synonyms: readonly string[] }[],
+): string {
+  const normalizedQuery = normalizeKnowledgeText(query);
+  if (!normalizedQuery) return '';
+  const queryTokens = new Set(normalizedQuery.split(' ').filter(Boolean));
+  const paddedQuery = ' ' + normalizedQuery + ' ';
+  const matchedSynonyms = mappings
+    .filter((mapping) => {
+      const term = normalizeKnowledgeText(mapping.normalizedTerm);
+      return Boolean(term) && (queryTokens.has(term) || paddedQuery.includes(' ' + term + ' '));
+    })
+    .flatMap((mapping) => mapping.synonyms.map((synonym) => normalizeKnowledgeText(synonym)).filter(Boolean));
+  return [...new Set([query.trim(), ...matchedSynonyms].filter(Boolean))].join(' ').slice(0, 500);
+}
+
+export function isKnowledgeShareableConfidence(confidence: KnowledgeConfidence): boolean {
+  return confidence === 'high' || confidence === 'medium';
+}
