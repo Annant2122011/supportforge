@@ -820,6 +820,12 @@ const enUS = {
   'settings.appearance.emptyFields': "Panel appearance fields cannot be empty.",
   'settings.appearance.savedTitle': "Appearance Updated",
   'settings.appearance.savedDescription': "Panel title, description, and footer were saved and the support panel was refreshed.",
+  'settings.dashboard.brandingSaved': "Settings dashboard branding saved and refreshed for this server.",
+  'settings.dashboard.modal.buttonLabel': "Button label (type default to reset)",
+  'settings.dashboard.modal.emoji': "Emoji (type none to remove)",
+  'settings.dashboard.modal.description': "Dashboard description",
+  'settings.dashboard.modal.footer': "Dashboard footer",
+  'settings.dashboard.modal.title': "Dashboard title",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
