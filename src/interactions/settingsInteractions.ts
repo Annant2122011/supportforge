@@ -1879,27 +1879,6 @@ async function openModal(
 }
 
 
-async function openModal(
-  interaction: ButtonInteraction,
-  customId: string,
-  title: string,
-  inputs: TextInputBuilder[],
-): Promise<void> {
-  try {
-    const modal = new ModalBuilder().setCustomId(customId).setTitle(title);
-    for (const input of inputs) {
-      modal.addComponents(
-        new ActionRowBuilder<TextInputBuilder>().addComponents(input),
-      );
-    }
-    await interaction.showModal(modal);
-  } catch (error) {
-    console.error('❌ Failed to open ResolvX settings form:', error);
-    await reject(interaction, '❌ The settings form could not be opened. Please try again.');
-  }
-}
-
-
 type TicketRecoveryInteraction = ButtonInteraction | StringSelectMenuInteraction;
 const RECOVERY_PAGE_SIZE = 20;
 
@@ -3919,8 +3898,18 @@ export async function handleSettingsInteraction(
         settings.ticketDefaults.priority = priority;
       });
       await refreshSettingsChannel(guild);
+      const locale = (await getAdvancedSettings(guild.id)).locale;
+      const priorityKey = ({
+        low: 'priority.low',
+        normal: 'priority.normal',
+        high: 'priority.high',
+        urgent: 'priority.urgent',
+        critical: 'priority.critical',
+      } as const)[priority];
       await interaction.editReply({
-        embeds: [new EmbedBuilder().setTitle('✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.defaults.title')).setDescription(translate((await getAdvancedSettings(guild.id)).locale, 'settings.defaults.saved', { priority: translate((await getAdvancedSettings(guild.id)).locale, 'priority.' + priority) }))],
+        embeds: [new EmbedBuilder()
+          .setTitle('✅ ' + translate(locale, 'settings.defaults.title'))
+          .setDescription(translate(locale, 'settings.defaults.saved', { priority: translate(locale, priorityKey) }))],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
       await auditSettingsAction(guild, interaction, 'TICKET_DEFAULTS_CHANGED', 'Default ticket priority changed to ' + priority + '.');
