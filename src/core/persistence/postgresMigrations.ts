@@ -658,6 +658,22 @@ const MIGRATIONS: readonly PostgresMigration[] = [
           ON quick_reply_usage (guild_id, used_at DESC);
         CREATE INDEX IF NOT EXISTS idx_quick_reply_usage_template_time
           ON quick_reply_usage (quick_reply_id, used_at DESC);
+
+        CREATE TABLE IF NOT EXISTS quick_reply_template_revisions (
+          quick_reply_id TEXT NOT NULL REFERENCES quick_reply_templates(id) ON DELETE CASCADE,
+          guild_id TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK (revision > 0),
+          name TEXT NOT NULL,
+          content TEXT NOT NULL,
+          department_id TEXT NOT NULL,
+          tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          enabled BOOLEAN NOT NULL,
+          changed_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (quick_reply_id, revision)
+        );
+        CREATE INDEX IF NOT EXISTS idx_quick_reply_revisions_guild
+          ON quick_reply_template_revisions (guild_id, quick_reply_id, revision DESC);
       `);
     },
   },
