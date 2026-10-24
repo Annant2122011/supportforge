@@ -866,11 +866,15 @@ async function showSupportHoursSettings(
 ): Promise<void> {
   const guild = interaction.guild!;
   const config = await getGuildConfig(guild.id);
+  const settings = await getAdvancedSettings(guild.id);
+  const locale = settings.locale;
   const scope = { scopeType, scopeId: scopeType === 'guild' ? null : scopeId };
   if (scope.scopeType !== 'guild' && !scope.scopeId) {
-    await renderSettingsView(interaction, [new EmbedBuilder().setTitle('🕒 Support Hours').setDescription('Choose a valid department or ticket panel to configure its override.')], [
-      new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()),
-    ]);
+    await renderSettingsView(interaction, [
+      new EmbedBuilder()
+        .setTitle('🕒 ' + translate(locale, 'settings.supportHours.title'))
+        .setDescription(translate(locale, 'settings.supportHours.invalidScope')),
+    ], [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())]);
     return;
   }
 
@@ -884,50 +888,92 @@ async function showSupportHoursSettings(
   const schedule = effectivePolicy
     ? formatSupportHoursWeeklySchedule(effectivePolicy.weeklySchedule)
     : SUPPORT_HOURS_DAYS.map((day) => day + '=closed').join('\n');
+
   const status = !effectivePolicy
-    ? 'Not configured · new ticket creation is unrestricted'
+    ? translate(locale, 'settings.supportHours.unrestricted')
     : !decision.policyEnabled
-      ? 'Enforcement disabled'
+      ? translate(locale, 'settings.supportHours.enforcementDisabled')
       : decision.isOpen
-        ? 'OPEN'
+        ? translate(locale, 'settings.supportHours.open')
         : decision.ticketCreationAllowed
-          ? 'CLOSED · new tickets allowed with notice'
-          : 'CLOSED · new ticket creation restricted';
+          ? translate(locale, 'settings.supportHours.closedAllow')
+          : translate(locale, 'settings.supportHours.closedRestrict');
+
   const scopeLabel = scope.scopeType === 'guild'
-    ? 'Server default'
+    ? translate(locale, 'settings.supportHours.scope.server')
     : scope.scopeType === 'department'
-      ? 'Department · ' + (config.departments[scope.scopeId!]?.name ?? scope.scopeId)
-      : 'Ticket panel · ' + scope.scopeId;
+      ? translate(locale, 'settings.supportHours.scope.department', {
+          name: config.departments[scope.scopeId!]?.name ?? scope.scopeId!,
+        })
+      : translate(locale, 'settings.supportHours.scope.panel', { id: scope.scopeId! });
+
   const inheritance = localPolicy
-    ? 'An override is saved for this scope.'
+    ? translate(locale, 'settings.supportHours.overrideSaved')
     : effectivePolicy
-      ? 'No override is saved here; this scope inherits the ' + effectivePolicy.scopeType + ' schedule. Editing will create an override.'
-      : 'No schedule is configured for this scope.';
+      ? translate(locale, 'settings.supportHours.inherits', { scope: effectivePolicy.scopeType })
+      : translate(locale, 'settings.supportHours.noSchedule');
+
+  const policyVersion = localPolicy?.version !== undefined
+    ? String(localPolicy.version)
+    : effectivePolicy
+      ? translate(locale, 'settings.supportHours.inheritedVersion', { version: effectivePolicy.version })
+      : translate(locale, 'settings.supportHours.notSaved');
+
+  const outsideHoursValue = effectivePolicy?.outsideHoursBehavior === 'allow'
+    ? translate(locale, 'settings.supportHours.action.allow')
+    : effectivePolicy
+      ? translate(locale, 'settings.supportHours.action.restrict')
+      : (effectivePolicy?.outsideHoursBehavior ?? 'restrict');
 
   const embed = new EmbedBuilder()
-    .setTitle('🕒 Support Hours & Time Zone')
+    .setTitle('🕒 ' + translate(locale, 'settings.supportHours.title'))
     .setDescription(
       (notice ? notice + '\n\n' : '') +
-      '**Scope:** ' + scopeLabel + '\n' + inheritance + '\n\n' +
-      '**Status:** ' + status + '\n' +
-      '**Time zone:** ' + (effectivePolicy?.timezone ?? 'Not configured') + '\n' +
-      '**Outside hours:** ' + (effectivePolicy?.outsideHoursBehavior ?? 'restrict') + '\n' +
-      '**Policy version:** ' + (localPolicy?.version !== undefined ? String(localPolicy.version) : effectivePolicy ? String(effectivePolicy.version) + ' (inherited)' : 'Not saved') + '\n\n' +
-      '**Weekly schedule**\n' + schedule +
-      (decision.nextOpeningAt ? '\n\n**Next opening:** ' + formatSupportHoursInstant(decision.nextOpeningAt, decision.timezone) : '') +
-      '\n\nUse 24-hour local times. Daylight-saving transitions are handled by the shared schedule service.',
+      '**' + translate(locale, 'settings.supportHours.label.scope') + ':** ' + scopeLabel + '\n' +
+      inheritance + '\n\n' +
+      '**' + translate(locale, 'settings.supportHours.label.status') + ':** ' + status + '\n' +
+      '**' + translate(locale, 'settings.supportHours.label.timezone') + ':** ' +
+      (effectivePolicy?.timezone ?? translate(locale, 'settings.supportHours.notConfiguredTimezone')) + '\n' +
+      '**' + translate(locale, 'settings.supportHours.label.outsideHours') + ':** ' + outsideHoursValue + '\n' +
+      '**' + translate(locale, 'settings.supportHours.label.version') + ':** ' + policyVersion + '\n\n' +
+      '**' + translate(locale, 'settings.supportHours.label.weeklySchedule') + '**\n' + schedule +
+      (decision.nextOpeningAt
+        ? '\n\n**' + translate(locale, 'settings.supportHours.nextOpening') + ':** ' +
+          formatSupportHoursInstant(decision.nextOpeningAt, decision.timezone)
+        : '') +
+      '\n\n' + translate(locale, 'settings.supportHours.timeHint'),
     );
 
   const hasIntervals = Boolean(effectivePolicy && SUPPORT_HOURS_DAYS.some((day) => effectivePolicy.weeklySchedule[day].length > 0));
   const currentBehavior = effectivePolicy?.outsideHoursBehavior ?? 'restrict';
   const rows: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>> = [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(supportHoursScopedActionId('edit', scope)).setLabel('Edit Weekly Schedule').setEmoji('🗓️').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(supportHoursScopedActionId('toggle', scope)).setLabel(decision.policyEnabled ? 'Disable Enforcement' : 'Enable Enforcement').setEmoji(decision.policyEnabled ? '⏸️' : '▶️').setStyle(decision.policyEnabled ? ButtonStyle.Danger : ButtonStyle.Success).setDisabled(!decision.policyEnabled && !hasIntervals),
-      new ButtonBuilder().setCustomId(supportHoursScopedActionId('behavior', scope)).setLabel(currentBehavior === 'allow' ? 'Restrict After Hours' : 'Allow After Hours').setEmoji('🚦').setStyle(ButtonStyle.Secondary).setDisabled(!effectivePolicy),
+      new ButtonBuilder()
+        .setCustomId(supportHoursScopedActionId('edit', scope))
+        .setLabel(translate(locale, 'settings.supportHours.action.editSchedule'))
+        .setEmoji('🗓️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(supportHoursScopedActionId('toggle', scope))
+        .setLabel(translate(locale, decision.policyEnabled
+          ? 'settings.supportHours.action.disable'
+          : 'settings.supportHours.action.enable'))
+        .setEmoji(decision.policyEnabled ? '⏸️' : '▶️')
+        .setStyle(decision.policyEnabled ? ButtonStyle.Danger : ButtonStyle.Success)
+        .setDisabled(!decision.policyEnabled && !hasIntervals),
+      new ButtonBuilder()
+        .setCustomId(supportHoursScopedActionId('behavior', scope))
+        .setLabel(translate(locale, currentBehavior === 'allow'
+          ? 'settings.supportHours.action.restrict'
+          : 'settings.supportHours.action.allow'))
+        .setEmoji('🚦').setStyle(ButtonStyle.Secondary).setDisabled(!effectivePolicy),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(supportHoursScopedActionId('clear', scope)).setLabel(scope.scopeType === 'guild' ? 'Clear Server Default' : 'Clear Override').setEmoji('🧹').setStyle(ButtonStyle.Secondary).setDisabled(!localPolicy),
+      new ButtonBuilder()
+        .setCustomId(supportHoursScopedActionId('clear', scope))
+        .setLabel(translate(locale, scope.scopeType === 'guild'
+          ? 'settings.supportHours.action.clearServer'
+          : 'settings.supportHours.action.clearOverride'))
+        .setEmoji('🧹').setStyle(ButtonStyle.Secondary).setDisabled(!localPolicy),
       backButton(),
     ),
   ];
@@ -942,7 +988,10 @@ async function showSupportHoursSettings(
   if (departments.length) {
     const menu = new StringSelectMenuBuilder()
       .setCustomId('sf:settings:support-hours:scope:department')
-      .setPlaceholder('Choose a department override · page ' + (departmentPage + 1) + '/' + departmentPageCount)
+      .setPlaceholder(translate(locale, 'settings.supportHours.chooseDepartment', {
+        page: departmentPage + 1,
+        pages: departmentPageCount,
+      }).slice(0, 150))
       .addOptions(departments.slice(departmentPage * 25, departmentPage * 25 + 25).map(([id, department]) => ({
         label: String(department.name || id).slice(0, 100),
         value: id,
@@ -953,7 +1002,10 @@ async function showSupportHoursSettings(
   if (panels.length) {
     const menu = new StringSelectMenuBuilder()
       .setCustomId('sf:settings:support-hours:scope:panel')
-      .setPlaceholder('Choose a ticket-panel override · page ' + (panelPage + 1) + '/' + panelPageCount)
+      .setPlaceholder(translate(locale, 'settings.supportHours.choosePanel', {
+        page: panelPage + 1,
+        pages: panelPageCount,
+      }).slice(0, 150))
       .addOptions(panels.slice(panelPage * 25, panelPage * 25 + 25).map((id) => ({
         label: ('Panel ' + id).slice(0, 100),
         value: id,
@@ -964,16 +1016,24 @@ async function showSupportHoursSettings(
 
   const pageButtons: ButtonBuilder[] = [];
   if (departmentPage > 0) {
-    pageButtons.push(new ButtonBuilder().setCustomId('sf:settings:support-hours:page:' + (departmentPage - 1) + ':' + panelPage + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-')).setLabel('Previous Departments').setStyle(ButtonStyle.Secondary));
+    pageButtons.push(new ButtonBuilder()
+      .setCustomId('sf:settings:support-hours:page:' + (departmentPage - 1) + ':' + panelPage + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-'))
+      .setLabel(translate(locale, 'settings.supportHours.previousDepartments')).setStyle(ButtonStyle.Secondary));
   }
   if (departmentPage + 1 < departmentPageCount) {
-    pageButtons.push(new ButtonBuilder().setCustomId('sf:settings:support-hours:page:' + (departmentPage + 1) + ':' + panelPage + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-')).setLabel('Next Departments').setStyle(ButtonStyle.Secondary));
+    pageButtons.push(new ButtonBuilder()
+      .setCustomId('sf:settings:support-hours:page:' + (departmentPage + 1) + ':' + panelPage + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-'))
+      .setLabel(translate(locale, 'settings.supportHours.nextDepartments')).setStyle(ButtonStyle.Secondary));
   }
   if (panelPage > 0) {
-    pageButtons.push(new ButtonBuilder().setCustomId('sf:settings:support-hours:page:' + departmentPage + ':' + (panelPage - 1) + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-')).setLabel('Previous Panels').setStyle(ButtonStyle.Secondary));
+    pageButtons.push(new ButtonBuilder()
+      .setCustomId('sf:settings:support-hours:page:' + departmentPage + ':' + (panelPage - 1) + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-'))
+      .setLabel(translate(locale, 'settings.supportHours.previousPanels')).setStyle(ButtonStyle.Secondary));
   }
   if (panelPage + 1 < panelPageCount) {
-    pageButtons.push(new ButtonBuilder().setCustomId('sf:settings:support-hours:page:' + departmentPage + ':' + (panelPage + 1) + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-')).setLabel('Next Panels').setStyle(ButtonStyle.Secondary));
+    pageButtons.push(new ButtonBuilder()
+      .setCustomId('sf:settings:support-hours:page:' + departmentPage + ':' + (panelPage + 1) + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-'))
+      .setLabel(translate(locale, 'settings.supportHours.nextPanels')).setStyle(ButtonStyle.Secondary));
   }
   if (pageButtons.length) rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(pageButtons));
 
