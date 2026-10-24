@@ -5,15 +5,20 @@ import type { QueryResultRow } from 'pg';
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
 import { withPostgresAdvisoryLock } from '../core/persistence/operationLock';
 import { recoverySegmentMarker, extractRecoverySegmentMarkers } from '../core/domain/recoveryReplayMarkers';
-import { evaluateWorkflowConditions, validateWorkflowTemplateDefinition, type WorkflowAction } from '../core/domain/workflowSafety';
+import { evaluateWorkflowConditions, validateWorkflowTemplateDefinition, type WorkflowAction, type WorkflowTemplateDefinition } from '../core/domain/workflowSafety';
 import type { EventActor } from '../core/events/domainEvents';
 import type { TicketPriority } from './advancedSettingsService';
 import { getGuildConfig } from './configService';
 import { logTicketEvent } from './auditLogService';
-import { getPersistedTicket, updatePersistedTicketMetadata, type PersistedTicket } from './ticketPersistenceService';
+import { getPersistedTicket, transitionPersistedTicket, updatePersistedTicketMetadata, type PersistedTicket } from './ticketPersistenceService';
 import { getQuickReply, renderQuickReply } from './quickReplyService';
 import { getWorkflowTemplateById } from './workflowTemplateService';
 import { getThemeColor } from './uiThemeService';
+import { projectDurableTicketTopic } from './ticketTopicProjectionService';
+import { setChannelTopic } from './discordChannelService';
+import { getTicketChannelName, queueTicketChannelRename, refreshTicketPanel } from './ticketPanelService';
+import { refreshPrivateThreadPanel } from './privateThreadTicketService';
+
 
 type WorkflowRunStatus = 'running' | 'completed' | 'failed' | 'needs_review' | 'not_matched';
 type WorkflowStepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'needs_review';
@@ -201,6 +206,53 @@ async function finishRun(
   return updated.rows[0];
 }
 
+function assertWorkflowActionsExecutable(definition: WorkflowTemplateDefinition): void {
+  if (definition.actions.some((action) => action.type === 'assign_department')) {
+    throw new Error(
+      'This manual workflow cannot reassign departments yet because department changes must synchronize Discord category and role permissions. ' +
+      'Use the existing /supportforge ticket department command for that action, or remove assign_department from this template.',
+    );
+  }
+}
+
+async function refreshTicketProjection(channel: TextChannel | ThreadChannel): Promise<void> {
+  const ticket = await getPersistedTicket(channel.id);
+  if (!ticket || ticket.guildId !== channel.guild.id || ticket.deletedAt) {
+    throw new Error('The ticket is no longer available for workflow projection refresh.');
+  }
+
+  const isTextChannel = 'setTopic' in channel;
+  const textChannel = isTextChannel ? channel as TextChannel : null;
+  const storedTopic = typeof ticket.metadata.ticketTopic === 'string' ? ticket.metadata.ticketTopic : '';
+  const topic = projectDurableTicketTopic(textChannel?.topic ?? storedTopic, ticket);
+
+  if (textChannel) {
+    await setChannelTopic(
+      textChannel.id,
+      topic,
+      'Reconcile ticket state after an audited manual workflow action',
+    );
+    if (ticket.ticketNumber) {
+      const expectedName = getTicketChannelName(
+        ticket.ticketNumber,
+        ticket.status,
+        ticket.priority ?? 'normal',
+      );
+      if (textChannel.name !== expectedName) {
+        await queueTicketChannelRename(
+          textChannel,
+          expectedName,
+          'Reconcile ticket priority after an audited manual workflow action',
+        );
+      }
+    }
+    await refreshTicketPanel(textChannel, topic);
+    return;
+  }
+
+  await refreshPrivateThreadPanel(channel as ThreadChannel, ticket, topic);
+}
+
 function channelMatchesMarker(value: string, marker: string): boolean {
   return extractRecoverySegmentMarkers([value]).includes(marker);
 }
@@ -259,38 +311,52 @@ async function executeAction(
   }
 
   if (action.type === 'assign_department') {
-    const departmentEntry = Object.entries(config.departments).find(([key, department]) => key === action.value || department.id === action.value);
-    if (!departmentEntry) throw new Error('Workflow department no longer exists. The remaining steps were not run.');
-    const [departmentKey, department] = departmentEntry;
-    if (current.departmentId === departmentKey && current.metadata.staffRoleId === department.staffRoleId) return;
-    await updatePersistedTicketMetadata(
-      current.channelId,
-      {
-        departmentId: departmentKey,
-        tagId: null,
-        metadata: { ...current.metadata, staffRoleId: department.staffRoleId, workflowLastAssignedBy: actorId },
-      },
-      ACTOR(actorId),
+    // Never change durable routing metadata without the existing Discord ACL/category
+    // reconciliation path. This action is deliberately blocked by preflight as well.
+    throw new Error(
+      'Department reassignment is not available in the manual workflow executor yet. ' +
+      'Use /supportforge ticket department so Discord permissions and category placement stay synchronized.',
     );
-    return;
   }
 
   if (action.type === 'set_priority') {
-    if (current.priority === action.value) return;
-    await updatePersistedTicketMetadata(current.channelId, { priority: action.value as TicketPriority }, ACTOR(actorId));
+    if (current.priority !== action.value) {
+      const now = new Date().toISOString();
+      await transitionPersistedTicket(
+        current.channelId,
+        current.status,
+        {
+          priority: action.value as TicketPriority,
+          metadata: { lastActivityAt: now, lastStaffActivityAt: now },
+        },
+        ACTOR(actorId),
+        now,
+      );
+    }
+    await refreshTicketProjection(channel);
     return;
   }
 
   if (action.type === 'add_tag') {
     const departmentEntry = Object.entries(config.departments).find(([key, department]) => key === (current.departmentId ?? '') || department.id === (current.departmentId ?? ''));
     const tag = departmentEntry
-      ? Object.values(departmentEntry[1].tags).find((candidate) => candidate.id === action.value || candidate.id === action.value)
+      ? Object.values(departmentEntry[1].tags).find((candidate) => candidate.id === action.value)
       : undefined;
-    if (!tag || tag.id !== action.value) {
+    if (!tag) {
       throw new Error('Workflow tag is not configured for the ticket department. The remaining steps were not run.');
     }
-    if (current.tagId === tag.id) return;
-    await updatePersistedTicketMetadata(current.channelId, { tagId: tag.id }, ACTOR(actorId));
+    if (current.tagId !== tag.id) {
+      const now = new Date().toISOString();
+      await updatePersistedTicketMetadata(
+        current.channelId,
+        {
+          tagId: tag.id,
+          metadata: { lastActivityAt: now, lastStaffActivityAt: now },
+        },
+        ACTOR(actorId),
+      );
+    }
+    await refreshTicketProjection(channel);
     return;
   }
 
@@ -353,8 +419,9 @@ async function resumeRunUnlocked(
     throw new Error('This workflow run belongs to a different server or ticket channel.');
   }
   if (['completed','not_matched'].includes(run.status)) return readDetails(run);
-  await ensureSteps(run);
   const definition = validateWorkflowTemplateDefinition(run.definition);
+  assertWorkflowActionsExecutable(definition);
+  await ensureSteps(run);
   const pool = getPostgresPool();
   try {
     for (let index=0; index<definition.actions.length; index+=1) {
@@ -476,6 +543,7 @@ export async function runWorkflowForTicket(args:{
       const template=await getWorkflowTemplateById(guild.id,args.templateId);
       if(!template||!template.enabled) throw new Error('Workflow template was not found or is disabled. Enable it and verify its current revision first.');
       const definition=validateWorkflowTemplateDefinition(template.definition);
+      assertWorkflowActionsExecutable(definition);
       const evaluated=evaluateWorkflowConditions(definition,{status:ticket.status,priority:ticket.priority,departmentId:ticket.departmentId});
       run=await ensureRun(guild.id,ticket,template.id,template.name,template.version,args.actorId,args.interactionId,definition,evaluated);
       if(!evaluated.matches) {
@@ -512,8 +580,9 @@ export async function resumeWorkflowRun(args:{
       throw new Error('Only failed, needs-review or interrupted workflow runs can be resumed.');
     }
     const ticket=await getPersistedTicket(args.channel.id);
-    if(!ticket||ticket.deletedAt||!['open','claimed','pending','reopened'].includes(ticket.status)) {
-      throw new Error('Workflow resume requires an active managed ticket channel.');
+    if(!ticket||ticket.guildId!==args.guild.id||ticket.id!==args.ticketId||ticket.channelId!==args.channel.id||
+       ticket.deletedAt||!['open','claimed','pending','reopened'].includes(ticket.status)) {
+      throw new Error('Workflow resume requires the same active managed ticket in this server.');
     }
     return resumeRunUnlocked(args.guild,args.channel,run,args.actorId);
   });
