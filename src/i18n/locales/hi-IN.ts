@@ -1024,6 +1024,8 @@ const hiIN: Record<TranslationKey, string> = {
   'forms.settings.error.unknown': "अज्ञात त्रुटि।",
   'forms.settings.embed.author': "ResolvX • फ़ॉर्म और टेम्पलेट",
   'forms.settings.embed.continue': "जारी रखने के लिए नीचे दिए गए नियंत्रण इस्तेमाल करें।",
+  'forms.settings.detail.statusActive': "सक्रिय",
+  'forms.settings.detail.statusInactive': "निष्क्रिय",
 };
 
 export default hiIN;
