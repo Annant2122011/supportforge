@@ -7,7 +7,7 @@
 
 ## Goals and non-goals
 
-Stage H introduces a consistent translation layer for bot-generated copy without coupling business logic to dictionaries. Translation must be deterministic, type-safe, and safe when a locale catalog is incomplete or persisted data contains an unknown locale. It must not translate user-provided ticket titles, custom labels, tags, message history, IDs, role names, channel names, code, URLs, error codes, or audit/event identifiers.
+Stage H introduces a consistent translation layer for bot-generated copy without coupling business logic to dictionaries. Translation must be deterministic and type-safe; all supported catalogs are complete, and unknown persisted locale values are normalized safely. It must not translate user-provided ticket titles, custom labels, tags, message history, IDs, role names, channel names, code, URLs, error codes, or audit/event identifiers.
 
 The canonical source language is English (United States). Part 1 provides the translation engine, a small high-value catalog, starter Hindi (India) and Bengali (India) catalogs, locale persistence primitives, interpolation and Intl formatting. Part 1 intentionally does not rewrite every existing string or add the administrator controls for changing the server locale; these are Part 2.
 
@@ -26,7 +26,7 @@ The canonical source language is English (United States). Part 1 provides the tr
 
 ### H2 — Locale controls and end-to-end coverage (active increment)
 
-1. Add Settings-dashboard and slash-command locale controls with identical capability, authorization, validation, audit and fallback behavior.
+1. Add Settings-dashboard and slash-command locale controls with identical capability, authorization, validation, audit and invalid-locale normalization behavior.
 2. Localize high-traffic user surfaces incrementally: ticket intake/created, ticket lifecycle buttons and outcomes, common validation errors, forms, support-hours notices, settings dashboard, panel previews, and selected reports.
 3. Pass locale explicitly at the use-case boundary rather than reading global locale inside low-level domain/repository code.
 4. Define locale precedence as explicit user preference for a direct response (if supported) → per-guild setting → en-US. Avoid storing personal-language preferences until their lifecycle and privacy behavior are specified.
@@ -75,4 +75,4 @@ The guild setting is a simple supported-locale tag and defaults to en-US. Existi
 - [x] Ticket intake/creation, support-hours restriction, lifecycle outcomes/announcements, close confirmation, priority confirmation, and common expired/invalid form responses use the selected guild locale.
 - [x] Equivalent button and slash-command lifecycle confirmations reuse the same localized status/priority vocabulary.
 - [x] Automated tests cover catalog completeness for every supported locale, command/button capability parity, localized status/priority/form copy and safe interpolation.
-- [ ] Finish detailed Settings subpages, public-panel previews and selected report surfaces; then complete non-production Discord guild acceptance for each supported locale. The Settings dashboard defaults and built-in navigation labels are now localized; custom per-server labels remain unchanged.
+- [ ] Finish detailed Settings subpages and the actual public ticket-panel preview, and extend localization through report content/rule details. The Settings dashboard, panel-automation page, appearance/theme pages, safety/report page and Settings-dashboard preview note now localize built-in copy; custom labels, category names and user-authored copy remain unchanged. Then complete non-production Discord guild acceptance for each supported locale.
