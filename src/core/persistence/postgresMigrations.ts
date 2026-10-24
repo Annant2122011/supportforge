@@ -542,7 +542,7 @@ const MIGRATIONS: readonly PostgresMigration[] = [
     },
   },
   {
-    id: 13,
+    id: 14,
     name: 'add_knowledge_base_and_quick_reply_productivity',
     up: async (db) => {
       await db.query(`
