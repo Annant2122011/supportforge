@@ -1072,7 +1072,7 @@ export const data =
             .addStringOption((option) => option.setName('template-id').setDescription('Template ID').setRequired(true).setMaxLength(36)),
         )
         .addSubcommand((subcommand) =>
-          subcommand.setName('enable').setDescription('Enable a validated template for future rollout (does not execute it)')
+          subcommand.setName('enable').setDescription('Enable or disable explicit admin-only manual execution; no automatic trigger')
             .addStringOption((option) => option.setName('template-id').setDescription('Template ID').setRequired(true).setMaxLength(36))
             .addIntegerOption((option) => option.setName('version').setDescription('Current version from workflow list').setRequired(true).setMinValue(1))
             .addBooleanOption((option) => option.setName('enabled').setDescription('Allow/disallow explicit admin-only manual runs; no automatic triggers').setRequired(true)),
