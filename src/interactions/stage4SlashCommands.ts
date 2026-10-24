@@ -132,7 +132,7 @@ function formatWorkflowRun(details: WorkflowExecutionDetails): string {
     'Ticket ID: ' + run.ticketId,
     'Steps: ' + run.stepCount,
     steps.length ? steps.join('\n') : 'No workflow steps were recorded.',
-  ].join('\n').slice(0, 3900);
+  ].join('\n').slice(0, 1900);
 }
 
 function formatWorkflowRunList(
@@ -143,7 +143,7 @@ function formatWorkflowRunList(
     run.status + ' • ' + run.id + '\n' +
     safeWorkflowText(run.templateName) + ' v' + run.templateVersion + ' • ' +
     run.stepCount + ' steps • started ' + run.startedAt,
-  ).join('\n\n').slice(0, 3900);
+  ).join('\n\n').slice(0, 1900);
 }
 
 export async function handleStage4SlashCommand(interaction: ChatInputCommandInteraction): Promise<boolean> {
