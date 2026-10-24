@@ -36,7 +36,7 @@ import {
   type TicketPriority,
 } from '../services/advancedSettingsService';
 import { LOCALE_OPTIONS, getLocaleLabel, isSupportedLocale } from '../i18n/localeRegistry';
-import { translate } from '../i18n/translationService';
+import { translate, type TranslationKey } from '../i18n/translationService';
 import { buildSystemDiagnosticsEmbed, diagnosticsPageCount, runSystemDiagnostics } from '../services/systemDiagnosticsService';
 import {
   assertCurrentConfigurationFingerprint,
