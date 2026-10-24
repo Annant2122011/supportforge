@@ -49,12 +49,12 @@
 - Stage 1: [CI #2052](https://github.com/Annant2122011/supportforge/actions/runs/39972706424), build passed, 138/138 tests, zero skipped, disposable PostgreSQL verification passed.
 - Stage 2: [CI #2065](https://github.com/Annant2122011/supportforge/actions/runs/39974451567), build passed, 172/172 tests, zero skipped, disposable PostgreSQL verification passed.
 - Stage 3 before the newest lock test: [CI #2254](https://github.com/Annant2122011/supportforge/actions/runs/40008064111), build passed, 186/186 tests, zero skipped, disposable PostgreSQL verification passed.
-- The lock utility adds an environment-gated PostgreSQL integration test. CI must pass on the resulting exact Stage 3 head before this increment can be called verified.
+- Latest Stage 3 head `f16b73dac24e5885875d632db959f9f0e012c071` passed [CI #2389](https://github.com/Annant2122011/supportforge/actions/runs/40053953590): build passed, **194/194 tests passed**, zero skipped, and disposable PostgreSQL verification passed, including the recovery segment ledger.
 
 | Acceptance gate | Result |
 |---|---|
-| Source and tests for recovery preview, replay markers, backup/restore safeguards, SLA and CSAT | Implemented in source; latest lock increment awaits its CI result |
-| Build/test against disposable PostgreSQL | Prior Stage 3 head passed; rerun required after the current increment |
+| Source and tests for recovery preview, replay markers, backup/restore safeguards, SLA, CSAT and durable segment ledger | Implemented; latest CI passed on head f16b73d |
+| Build/test against disposable PostgreSQL | **PASS**: CI #2389, 194 tests, zero skipped; DB schema/integrity verification passed |
 | Live Discord deletion/recovery/permissions/429/restart scenarios | **Blocked / not run** |
 | Isolated Neon backup and restore, including checksum/schema/row-count/application smoke test | **Blocked / not run** |
 | Real SLA alert timing and large-guild throughput | **Blocked / not run** |
