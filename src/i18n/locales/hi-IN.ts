@@ -533,6 +533,11 @@ const hiIN: Record<TranslationKey, string> = {
   'settings.customPanel.error.mustAddButton': "पैनल प्रकाशित करने से पहले कम-से-कम एक बटन जोड़ें।",
   'settings.customPanel.error.invalidChannel': "प्रकाशन लक्ष्य सामान्य टेक्स्ट चैनल होना चाहिए।",
   'settings.customPanel.error.unsupportedTarget': "समर्थित बटन लक्ष्य चुनें।",
+  'settings.customPanel.roles.panelTitle': "पैनल पहुँच नियम",
+  'settings.customPanel.roles.buttonTitle': "बटन पहुँच नियम",
+  'settings.customPanel.roles.current': "वर्तमान अनुमत भूमिकाएँ",
+  'settings.customPanel.roles.description': "नीचे भूमिकाएँ चुनें। चयन मौजूदा अनुमत भूमिका सूची को बदल देगा। खाली चयन इस स्तर पर सभी को अनुमति देता है। पैनल और बटन नियम संयुक्त हैं: दोनों प्रतिबंधित हों तो सदस्य को दोनों पूरे करने होंगे।",
+  'settings.customPanel.roles.allowEveryone': "सभी को अनुमति दें",
 };
 
 export default hiIN;
