@@ -5160,7 +5160,7 @@ function quickReplyPickerFilterSummary(
   filters: QuickReplyPickerFilters,
 ): string {
   const fields: string[] = [];
-  if (filters.query) fields.push(translate(locale, 'settings.panel.value.minimumMessages', { count: filters.query }));
+  if (filters.query) fields.push(translate(locale, 'quickReply.picker.filterQueryLabel') + ': ' + filters.query);
   if (filters.category) fields.push(translate(locale, 'quickReply.picker.filterCategoryLabel') + ': ' + filters.category);
   if (filters.tag) fields.push(translate(locale, 'quickReply.picker.filterTagLabel') + ': ' + filters.tag);
   return fields.join(' • ');
@@ -6778,16 +6778,48 @@ export async function handleTicketInteraction(
     | ModalSubmitInteraction,
 ): Promise<void> {
   try {
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket:quick-reply:filter-modal:')) {
+      await handleQuickReplyFilterModal(interaction);
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('ticket:quick-reply:filter:')) {
+      await showQuickReplyFilterModal(
+        interaction,
+        interaction.customId.slice('ticket:quick-reply:filter:'.length),
+      );
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('ticket:quick-reply:clear:')) {
+      await handleQuickReplyClear(
+        interaction,
+        interaction.customId.slice('ticket:quick-reply:clear:'.length),
+      );
+      return;
+    }
+
     if (interaction.isButton() && interaction.customId.startsWith('ticket:quick-reply:page:')) {
-      const rawPage = interaction.customId.slice('ticket:quick-reply:page:'.length);
+      const [sessionId = '', rawPage = ''] = interaction.customId
+        .slice('ticket:quick-reply:page:'.length)
+        .split(':');
       const page = Number(rawPage);
-      if (!/^\d{1,5}$/.test(rawPage) || !Number.isInteger(page) || page < 0 || page > 99999) {
+      if (!/^[A-Za-z0-9_-]{12}$/.test(sessionId) || !/^\d{1,5}$/.test(rawPage) ||
+          !Number.isInteger(page) || page < 0 || page > 99999) {
         if (await safeDeferReply(interaction)) {
-          await interaction.editReply(translate((await getAdvancedSettings(interaction.guildId!)).locale, 'quickReply.picker.invalidPage'));
+          const settings = await getAdvancedSettings(interaction.guildId!);
+          await interaction.editReply(translate(settings.locale, 'quickReply.picker.invalidPage'));
         }
         return;
       }
-      await showQuickReplySelector(interaction, page);
+      if (!getQuickReplyPickerSession(sessionId, interaction)) {
+        if (await safeDeferReply(interaction)) {
+          const settings = await getAdvancedSettings(interaction.guildId!);
+          await interaction.editReply(translate(settings.locale, 'quickReply.picker.invalidSession'));
+        }
+        return;
+      }
+      await showQuickReplySelector(interaction, page, sessionId);
       return;
     }
 
