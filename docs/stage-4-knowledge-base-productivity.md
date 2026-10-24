@@ -105,3 +105,64 @@ This implementation is carried by the consolidated Stage 4 review on top of the 
 - [ResolvX CI #2574](https://github.com/Annant2122011/supportforge/actions/runs/40094178966) passed: TypeScript build passed, **212/212 tests passed**, zero skipped, and disposable PostgreSQL verification passed.
 - The current increment adds admin-confirmed `workflow execute`, `workflow resume` and `workflow runs` slash commands; execution is manual only. Department reassignment is intentionally blocked until category and Discord role-permission reconciliation can be safely reused.
 - The pull request remains open and unmerged. Live non-production Discord acceptance, actual command registration/permission testing in a test guild, and an isolated non-production Neon backup/restore drill remain **not run**. No deployment or production acceptance is claimed.
+
+
+## Stage I — Second increment: contextual Knowledge Base suggestions
+
+The underlying article store/search is the first increment. The missing ticket integration is now implemented in this candidate:
+
+- `/supportforge knowledge suggest <query>` is available only in an active managed ticket and requires the staff role configured for that ticket's department (or server management permission).
+- The response is ephemeral and tenant-scoped. It lists the deterministic PostgreSQL/typo-tolerant search results, but only medium/high confidence results receive direct-share buttons. A low-confidence/no-result result does not block ordinary human support.
+- Clicking Share revalidates the original channel ID, guild, active ticket status, the actor's current department staff role, article publication state, visibility and article role restrictions. It never trusts the old search result as authorization.
+- Sharing posts a clearly labelled excerpt to the same ticket, suppresses automatic mentions, leaves the ticket open, records article-share usage and writes an audit event. A failure to write the audit-channel notification does not misreport a successful share.
+- Search synonym expansion now matches complete canonical terms and multi-word phrases, not only individual tokens. The pure tests cover phrase matches, substring collisions and confidence-gated share eligibility.
+- No AI or model provider is used. Semantic/RAG retrieval remains outside Stage I and is not implied by this deterministic implementation.
+
+## Stage J — Quick Replies architecture
+
+### Target architecture
+
+```text
+Ticket panel button ─┐
+                     ├─> Interaction adapter
+/supportforge quick-reply send ┘
+                             │
+                             v
+                 Active-ticket + guild guard
+                 Department staff + role gate
+                             │
+                             v
+                   Quick Reply service
+           Load enabled current reply by guild ID
+           Resolve allowlisted placeholders only
+           Re-check version/access at send time
+                             │
+                             v
+                 Discord delivery boundary
+              allowedMentions.parse = []
+                             │
+                             v
+               Durable PostgreSQL revision
+               + ticket audit event / telemetry
+```
+
+### Contracts and invariants
+
+1. **One authoritative store:** Neon PostgreSQL remains the production source of truth. `quick_replies` stores the current row; `quick_reply_revisions` preserves immutable create/update/delete/restore snapshots. Do not introduce a live JSON or SQLite store.
+2. **One sender:** slash and button entry points use `sendQuickReplyInTicket`. The sender rechecks same-guild/current-channel identity, active ticket state, the ticket department's configured staff role, reply enablement and any extra allowed-role restrictions.
+3. **Safe rendering:** only `{user}`, `{username}`, `{ticket_id}`, `{ticket_number}`, `{department}`, `{priority}` and `{staff}` are valid. Missing values resolve to empty strings or a harmless customer/support label; no templates execute code. Discord automatic mention parsing remains disabled.
+4. **Concurrency and history:** create versus update is explicit; updates/deletes require the current version; stale edits fail instead of overwriting another administrator's work; restoration creates a new version and never rewrites history.
+5. **Thin entry points:** `/supportforge quick-reply send`, the standard ticket-panel button and the private-thread ticket-panel button all delegate to the shared sender. The UI selector must filter disabled replies and revalidate at selection time.
+6. **Observability:** sends record the reply ID/version and actor in ticket audit history. User-written response bodies are not copied into operational telemetry.
+
+### Implementation progress
+
+**Part 1 is underway in this branch:** a Quick Reply button opens a staff/role-filtered select menu in both standard ticket channels and private threads. Selecting an item and using `/supportforge quick-reply send` both call the shared delivery service. CI is required on the exact new source head before this increment is marked automated-verified.
+
+**Part 2 remains:** add scalable search/category/tag filtering and pagination beyond Discord's 25-option select limit, privacy-safe per-reply usage metrics, and a durable send-intent/reconciliation ledger for ambiguous Discord send outcomes. Do not retry an uncertain send blindly; an accepted Discord message and a PostgreSQL transaction cannot be made atomic.
+
+## Re-audit status and remaining release gates
+
+- The previous consolidated source head passed CI #2574 (212/212 tests, zero skips, disposable PostgreSQL verification). This new Stage I/Stage J increment changes source and therefore needs a fresh exact-head CI run.
+- Stage 1/2 still record incomplete Stage H2 translation coverage for selected Settings screens, panel previews and reports. That remains a release limitation until those screens have been covered and tested in a supported locale; historical CI does not prove live locale acceptance.
+- Discord test-guild acceptance and a backup/restore drill into an isolated non-production Neon database remain not run. No production merge, deploy or 100% production acceptance is claimed.
