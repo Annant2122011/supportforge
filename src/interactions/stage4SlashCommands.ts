@@ -26,6 +26,7 @@ import {
   listQuickReplies,
   listQuickReplyRevisions,
   renderQuickReply,
+  restoreQuickReplyRevision,
   saveQuickReply,
 } from '../services/quickReplyService';
 import { linkRelatedTickets, listRelatedTickets, unlinkRelatedTickets } from '../services/relatedTicketService';
@@ -407,6 +408,24 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           embeds: [new EmbedBuilder().setTitle('Quick Reply Revision History').setDescription(description)
             .setFooter({ text: 'History is retained in PostgreSQL; deleted replies remain listed here.' })],
         });
+        return true;
+      }
+      if (subcommand === 'restore-revision') {
+        if (!access.isAdmin) throw accessDenied('Manage Server or Administrator permission');
+        const reply = await restoreQuickReplyRevision(
+          guildId,
+          actorId,
+          interaction.options.getString('name-or-id', true),
+          interaction.options.getInteger('revision', true),
+          interaction.options.getInteger('expected-version', true),
+        );
+        if (config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
+          action: 'QUICK_REPLY_REVISION_RESTORED',
+          actorId,
+          actorName: interaction.user.tag,
+          detail: 'Restored retained quick reply content into new version ' + reply.version + '.',
+        });
+        await interaction.editReply('Restored the selected historical content as quick reply version ' + reply.version + '. Prior versions remain unchanged.');
         return true;
       }
       if (subcommand === 'show') {
