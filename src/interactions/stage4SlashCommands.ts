@@ -470,7 +470,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         throw accessDenied('a configured department staff role (administrators may list/show replies)');
       }
       if (subcommand === 'list') {
-        const replies = await listQuickReplies(guildId, { isAdmin: access.isAdmin, roleIds: access.roleIds }, interaction.options.getString('category') ?? undefined);
+        const replies = await listQuickReplies(guildId, { isAdmin: access.isAdmin, roleIds: access.roleIds }, interaction.options.getString('category') ?? undefined, interaction.options.getString('tag') ?? undefined);
         await interaction.editReply(replies.length
           ? replies.map((reply) => '**' + reply.name + '** • ' + reply.category + ' • ' + reply.id + ' • v' + reply.version + '\nTags: ' + (reply.tags.join(', ') || 'none')).join('\n\n').slice(0, 4000)
           : 'No quick replies are available to you.');
