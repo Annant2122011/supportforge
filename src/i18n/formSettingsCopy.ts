@@ -93,6 +93,9 @@ const COPY_KEYS: Record<string, TranslationKey> = {
 };
 
 export function localizeFormSettingsText(locale: string, value: string): string {
+  const boldOnly = value.match(/^\\*\\*(.{1,240}?)\\*\\*$/);
+  if (boldOnly && COPY_KEYS[boldOnly[1]]) return '**' + translate(locale, COPY_KEYS[boldOnly[1]]) + '**';
+
   const exact = COPY_KEYS[value];
   if (exact) return translate(locale, exact);
 
