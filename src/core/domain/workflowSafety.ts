@@ -122,13 +122,16 @@ export function previewWorkflowTemplate(definition: WorkflowTemplateDefinition):
   warnings: string[];
 } {
   return {
+    // "executable" means automatic/event-driven execution. Manual admin execution
+    // is intentionally separate and requires current-version confirmation.
     executable: false,
     conditionCount: definition.conditions.length,
     actionCount: definition.actions.length,
     warnings: [
-      'This template is stored and validated only; it cannot run until a separate authorized execution plan exists.',
-      'Execution must use existing domain services, lifecycle transition guards, role checks and durable audit/outbox.',
-      'Send actions must suppress unsolicited mentions and must not evaluate raw code or SQL.',
+      'Automatic or background triggers are disabled. An enabled template can run only when an administrator explicitly executes it on the current active ticket with the exact version confirmation.',
+      'Manual runs use the allowlisted domain actions, evaluate the saved conditions against the current ticket snapshot, and persist every step in the workflow execution ledger.',
+      'A send whose delivery cannot be reconciled stops for human review. Retrying requires explicit confirmation and may duplicate a message if history is incomplete.',
+      'Send actions suppress unsolicited mentions; templates never evaluate arbitrary code or SQL.',
     ],
   };
 }
