@@ -18,7 +18,7 @@
 
 ### Quick replies
 
-- Persistent, versioned replies with category, tags and optional role restrictions.
+- Persistent, versioned replies with category, tags and optional role restrictions. Updating an existing reply requires its current version; concurrent/stale edits are rejected instead of silently overwriting newer content. Editing preserves enabled/disabled state unless the admin explicitly changes it.
 - The placeholder allowlist is limited to `{user}`, `{username}`, `{ticket_id}`, `{ticket_number}`, `{department}`, `{priority}` and `{staff}`. Unknown placeholders are rejected.
 - Sending is restricted to configured staff within an active managed ticket. Discord mention parsing is disabled, and sent replies are audited.
 - Deletes require explicit confirmation; save/delete actions are admin-only.
@@ -31,9 +31,17 @@
 
 ### Workflow templates
 
-- Versioned catalog of JSON templates with strict allowlisted condition fields/actions, bounded array counts and configured-ID validation.
+- Versioned catalog of JSON templates with strict allowlisted condition fields/actions, bounded array counts and configured-ID validation. Updating an existing template requires its current version; stale writes are rejected, and changed templates are returned to disabled catalogue state for review.
 - Unknown keys, arbitrary JavaScript/SQL and lifecycle bypass actions are rejected.
 - Template preview states that templates are **not executable**. Catalogue enablement is only metadata; no automatic ticket execution is implemented until a separate execution plan reuses domain services, authorization, lifecycle guards, durable audit and outbox.
+
+## 2026-10-24 refinement increment
+
+- Added PostgreSQL advisory locking around restoration of the same guild/ticket/deletion path, preventing concurrent bot processes from creating competing replacement channels.
+- Extracted deterministic recovery segment markers into a pure helper and added coverage for stable identity, distinct segments, and marker extraction. These markers reduce replay duplication but do not promise cross-system exactly-once delivery.
+- Added guarded saves for quick replies and workflow templates. Create is distinct from update; an update must supply the current `expected-version` shown in the list. Two concurrent updates with the same version cannot both succeed.
+- Added disposable-PostgreSQL integration tests for concurrent quick-reply edits, disabled-state preservation, stale workflow writes, Knowledge Base publication/revision safety, public/staff/role access, hidden search results and duplicate article ratings.
+- These additions require the new PR-head CI run to complete before they are marked verified.
 
 ## Stage 1 and Stage 2 acceptance truth
 
