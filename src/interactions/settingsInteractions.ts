@@ -1925,11 +1925,11 @@ function recoveryButton(id: string, label: string, style: ButtonStyle = ButtonSt
   return result;
 }
 
-function recoverySelect(candidates: TicketRecoveryCandidate[], source: 'discord_native' | 'ticket_button'): ActionRowBuilder<StringSelectMenuBuilder> | null {
+function recoverySelect(candidates: TicketRecoveryCandidate[], source: 'discord_native' | 'ticket_button', locale: string): ActionRowBuilder<StringSelectMenuBuilder> | null {
   if (!candidates.length) return null;
   const menu = new StringSelectMenuBuilder()
     .setCustomId(source === 'discord_native' ? 'sf:settings:recovery:channels:pick' : 'sf:settings:recovery:review:pick')
-    .setPlaceholder(source === 'discord_native' ? 'Choose a channel to restore' : 'Choose a deletion to review')
+    .setPlaceholder(translate(locale, source === 'discord_native' ? 'settings.recovery.chooseChannel' : 'settings.recovery.chooseDeletion'))
     .addOptions(candidates.slice(0, 25).map((item) => ({
       label: ('Ticket #' + item.ticketNumber).slice(0, 100),
       value: item.ticketId,
@@ -1956,7 +1956,7 @@ async function showRecoveryCandidates(
   const candidates = all.slice((page - 1) * RECOVERY_PAGE_SIZE, page * RECOVERY_PAGE_SIZE);
   const native = source === 'discord_native';
   const rows: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>> = [];
-  const select = recoverySelect(candidates, source);
+  const select = recoverySelect(candidates, source, (await getAdvancedSettings(guild.id)).locale);
   if (select) rows.push(select);
   if (pages > 1) {
     rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
