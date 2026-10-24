@@ -40,7 +40,11 @@ function parsePostgresDatabaseIdentity(value: string): PostgresDatabaseIdentity 
   };
 }
 
-/** Fail closed if a restore target is also configured as the bot's active database. */
+/**
+ * Fail closed if a restore target is also configured as the bot's active DB.
+ * The caller must pass the existing DATABASE_URL values before switching them
+ * to the restore target. Credentials are never included in thrown errors.
+ */
 export function assertRestoreTargetDistinctFromConfiguredDatabase(
   targetUrl: string,
   configuredDatabaseUrls: readonly (string | undefined)[],
@@ -49,7 +53,11 @@ export function assertRestoreTargetDistinctFromConfiguredDatabase(
   for (const configuredUrl of configuredDatabaseUrls) {
     if (configuredUrl === undefined || !configuredUrl.trim()) continue;
     const configured = parsePostgresDatabaseIdentity(configuredUrl);
-    if (target.host === configured.host && target.port === configured.port && target.database === configured.database) {
+    if (
+      target.host === configured.host &&
+      target.port === configured.port &&
+      target.database === configured.database
+    ) {
       throw new Error('Restore target matches a database configured for the running bot. Restore was not started.');
     }
   }
