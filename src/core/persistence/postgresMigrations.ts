@@ -693,6 +693,39 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+  {
+    id: 15,
+    name: 'add_guild_scoped_related_ticket_links',
+    up: async (db) => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS related_ticket_links (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          ticket_a_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+          ticket_b_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+          note TEXT NOT NULL DEFAULT '' CHECK (length(note) <= 300),
+          status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','removed')),
+          created_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          removed_by TEXT,
+          removed_at TIMESTAMPTZ,
+          CHECK (ticket_a_id < ticket_b_id),
+          CHECK (
+            (status='active' AND removed_by IS NULL AND removed_at IS NULL) OR
+            (status='removed' AND removed_by IS NOT NULL AND removed_at IS NOT NULL)
+          )
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_related_ticket_active_pair
+          ON related_ticket_links (guild_id, ticket_a_id, ticket_b_id)
+          WHERE status='active';
+        CREATE INDEX IF NOT EXISTS idx_related_ticket_a_time
+          ON related_ticket_links (guild_id, ticket_a_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_related_ticket_b_time
+          ON related_ticket_links (guild_id, ticket_b_id, created_at DESC);
+      `);
+    },
+  },
 ];
 
 /** Latest migration identifier required by this application version. */
