@@ -292,19 +292,27 @@ export function buildSettingsDashboardEmbed(
 
   const closed =
     settings.retention.closedDays === 0
-      ? 'No timer (365-day maximum)'
-      : settings.retention.closedDays + ' days';
+      ? translate(settings.locale, 'settings.value.noTimer')
+      : translate(settings.locale, 'settings.value.days', { count: settings.retention.closedDays });
   const archive =
     settings.retention.archiveDays === 0
-      ? 'No timer (365-day maximum)'
-      : settings.retention.archiveDays + ' days';
+      ? translate(settings.locale, 'settings.value.noTimer')
+      : translate(settings.locale, 'settings.value.days', { count: settings.retention.archiveDays });
 
   const claimed = settings.statusCategories.claimedCategoryId
-    ? 'Configured'
-    : 'Not configured';
+    ? translate(settings.locale, 'settings.value.configured')
+    : translate(settings.locale, 'settings.value.notConfigured');
   const pending = settings.statusCategories.pendingCategoryId
-    ? 'Configured'
-    : 'Not configured';
+    ? translate(settings.locale, 'settings.value.configured')
+    : translate(settings.locale, 'settings.value.notConfigured');
+  const priorityLabels: Record<'low' | 'normal' | 'high' | 'urgent' | 'critical', TranslationKey> = {
+    low: 'priority.low',
+    normal: 'priority.normal',
+    high: 'priority.high',
+    urgent: 'priority.urgent',
+    critical: 'priority.critical',
+  };
+  const priorityLabel = translate(settings.locale, priorityLabels[settings.ticketDefaults.priority]);
 
   return new EmbedBuilder()
     .setTitle(
@@ -322,100 +330,94 @@ export function buildSettingsDashboardEmbed(
     )
     .addFields(
       {
-        name: '🎛️ Panel',
-        value:
-          (settings.panelActivity.enabled ? 'Enabled' : 'Disabled') +
-          ' • ' +
-          settings.panelActivity.visualLineBudget +
-          ' lines • ' +
-          settings.panelActivity.messageBudget +
-          ' message cap',
+        name: '🎛️ ' + translate(settings.locale, 'settings.dashboard.field.panel'),
+        value: (settings.panelActivity.enabled ? '🟢 ' + translate(settings.locale, 'common.enabled') : '⚪ ' + translate(settings.locale, 'common.disabled')) +
+          '\n' + translate(settings.locale, 'settings.value.panelBudget', {
+            lines: settings.panelActivity.visualLineBudget,
+            cap: settings.panelActivity.messageBudget,
+          }),
         inline: true,
       },
       {
-        name: '🎟️ Ticket defaults',
-        value: 'Priority: **' + settings.ticketDefaults.priority + '**',
+        name: '🎟️ ' + translate(settings.locale, 'settings.dashboard.field.ticketDefaults'),
+        value: translate(settings.locale, 'settings.value.priority', { priority: priorityLabel }),
         inline: true,
       },
       {
-        name: '🏷️ Routing tags',
-        value: '**' + tagCount + '** configured',
+        name: '🏷️ ' + translate(settings.locale, 'settings.dashboard.field.routingTags'),
+        value: translate(settings.locale, 'settings.value.countConfigured', { count: tagCount }),
         inline: true,
       },
       {
-        name: '📂 Departments',
-        value: '**' + departmentCount + '** configured',
+        name: '📂 ' + translate(settings.locale, 'settings.dashboard.field.departments'),
+        value: translate(settings.locale, 'settings.value.countConfigured', { count: departmentCount }),
         inline: true,
       },
       {
-        name: '🎨 Priority rules',
-        value: '**' + priorityRoleCount + '** role(s) explicitly created',
+        name: '🎨 ' + translate(settings.locale, 'settings.dashboard.field.priorityRules'),
+        value: translate(settings.locale, 'settings.value.createdRoles', { count: priorityRoleCount }),
         inline: true,
       },
       {
-        name: '🧹 Retention',
-        value: 'Closed: **' + closed + '** • Archive: **' + archive + '**',
+        name: '🧹 ' + translate(settings.locale, 'settings.dashboard.field.retention'),
+        value: translate(settings.locale, 'settings.value.retention', { closed, archive }),
         inline: true,
       },
       {
-        name: '⏳ Inactivity automation',
-        value: (settings.inactivity.enabled ? '🟢 Enabled' : '⚪ Disabled') +
-          '\nWarn after: **' + settings.inactivity.idleHours + ' h**' +
-          '\nGrace period: **' + settings.inactivity.graceHours + ' h**',
+        name: '⏳ ' + translate(settings.locale, 'settings.dashboard.field.inactivity'),
+        value: (settings.inactivity.enabled ? '🟢 ' + translate(settings.locale, 'common.enabled') : '⚪ ' + translate(settings.locale, 'common.disabled')) +
+          '\n' + translate(settings.locale, 'settings.value.inactivity', {
+            idle: settings.inactivity.idleHours,
+            grace: settings.inactivity.graceHours,
+          }),
         inline: true,
       },
       {
-        name: '🧵 Ticket workspace',
-        value: settings.ticketWorkspace.mode === 'private-threads'
-          ? 'Private threads'
-          : 'Private text channels',
+        name: '🧵 ' + translate(settings.locale, 'settings.dashboard.field.ticketWorkspace'),
+        value: translate(settings.locale, settings.ticketWorkspace.mode === 'private-threads'
+          ? 'settings.value.privateThreads'
+          : 'settings.value.privateTextChannels'),
         inline: true,
       },
       {
-        name: '🎨 Appearance',
-        value: 'Panel title: **' + settings.appearance.panelTitle.slice(0, 80) + '**',
+        name: '🎨 ' + translate(settings.locale, 'settings.dashboard.field.appearance'),
+        value: translate(settings.locale, 'settings.value.panelTitle', {
+          title: settings.appearance.panelTitle.slice(0, 80),
+        }),
         inline: true,
       },
       {
-        name: '🌈 Server theme',
+        name: '🌈 ' + translate(settings.locale, 'settings.dashboard.field.serverTheme'),
         value: '**' + themeInfo.label + '**\n' + themeInfo.description,
         inline: true,
       },
       {
-        name: '📋 Configuration snapshot',
-        value:
-          '**Panel**: Automatic repositioning – ' +
-          (settings.panelActivity.enabled ? 'Enabled' : 'Disabled') +
-          '; Visual budget – ' +
-          settings.panelActivity.visualLineBudget +
-          ' lines; Message safety cap – ' +
-          settings.panelActivity.messageBudget +
-          '\n' +
-          '**Ticket defaults**: Default priority – ' +
-          settings.ticketDefaults.priority +
-          '\n' +
-          '**Priority roles**: Explicitly created roles – ' +
-          priorityRoleCount +
-          '\n' +
-          '**Routing tags**: Configured routing tags – ' +
-          tagCount +
-          (tagCount ? '' : ' (none)') +
-          '\n' +
-          '**Retention**: Closed – ' +
-          closed +
-          '; Archived – ' +
-          archive +
-          '\n' +
-          '**Inactivity automation**: ' +
-          (settings.inactivity.enabled ? 'Enabled' : 'Disabled') +
-          '; warn after ' + settings.inactivity.idleHours + ' hours; grace ' + settings.inactivity.graceHours + ' hours' +
-          '\n' +
-          '**Ticket workspace**: ' + settings.ticketWorkspace.mode +
-          '\n' +
-          '**Optional status categories**: Claimed tickets – ' +
-          claimed +
-          '; Pending tickets – ' +
-          pending,
+        name: '📋 ' + translate(settings.locale, 'settings.dashboard.field.configurationSnapshot'),
+        value: [
+          translate(settings.locale, 'settings.value.snapshot.panel', {
+            status: translate(settings.locale, settings.panelActivity.enabled ? 'common.enabled' : 'common.disabled'),
+            lines: settings.panelActivity.visualLineBudget,
+            cap: settings.panelActivity.messageBudget,
+          }),
+          translate(settings.locale, 'settings.value.snapshot.defaults', { priority: priorityLabel }),
+          translate(settings.locale, 'settings.value.snapshot.priorityRoles', { count: priorityRoleCount }),
+          translate(settings.locale, 'settings.value.snapshot.tags', {
+            count: tagCount,
+            suffix: tagCount ? '' : translate(settings.locale, 'settings.value.noneSuffix'),
+          }),
+          translate(settings.locale, 'settings.value.snapshot.retention', { closed, archive }),
+          translate(settings.locale, 'settings.value.snapshot.inactivity', {
+            status: translate(settings.locale, settings.inactivity.enabled ? 'common.enabled' : 'common.disabled'),
+            idle: settings.inactivity.idleHours,
+            grace: settings.inactivity.graceHours,
+          }),
+          translate(settings.locale, 'settings.value.snapshot.workspace', {
+            workspace: translate(settings.locale, settings.ticketWorkspace.mode === 'private-threads'
+              ? 'settings.value.privateThreads'
+              : 'settings.value.privateTextChannels'),
+          }),
+          translate(settings.locale, 'settings.value.snapshot.statusCategories', { claimed, pending }),
+        ].join('\n').slice(0, 3900),
         inline: false,
       },
     )
