@@ -138,6 +138,34 @@ export function localizeFormSettingsText(locale: string, value: string): string 
   const templateFields = value.match(/^Fields: \*\*(\d+)\*\*$/);
   if (templateFields) return translate(locale, 'forms.settings.template.fieldCount', { count: templateFields[1] });
 
+  const formListItem = value.match(/^• \*\*(.*?)\*\* · (.+) · v(\d+) · \*\*(ACTIVE|inactive)\*\* · department (.+) · tag (.+) · (\d+) field\(s\)$/);
+  if (formListItem) {
+    const status = formListItem[4] === 'ACTIVE'
+      ? translate(locale, 'forms.settings.detail.statusActive')
+      : translate(locale, 'forms.settings.detail.statusInactive');
+    return translate(locale, 'forms.settings.list.item', {
+      name: formListItem[1], id: formListItem[2], version: formListItem[3],
+      status, department: formListItem[5], tag: formListItem[6], count: formListItem[7],
+    });
+  }
+
+  const formField = value.match(/^(\d+)\. \*\*(.*?)\*\* · (.+) · (.+) · (required|optional) · step (\d+)$/);
+  if (formField) return translate(locale, 'forms.settings.detail.field', {
+    index: formField[1], label: formField[2], id: formField[3], type: formField[4],
+    status: translate(locale, formField[5] === 'required' ? 'forms.settings.detail.required' : 'forms.settings.detail.optional'),
+    step: formField[6],
+  });
+
+  const templateListItem = value.match(/^• \*\*(.*?)\*\* · (.+) · (\d+) field\(s\)$/);
+  if (templateListItem) return translate(locale, 'forms.settings.templates.item', {
+    name: templateListItem[1], id: templateListItem[2], count: templateListItem[3],
+  });
+
+  const templateField = value.match(/^(\d+)\. \*\*(.*?)\*\* · (.+) · (.+)$/);
+  if (templateField) return translate(locale, 'forms.settings.template.field', {
+    index: templateField[1], label: templateField[2], id: templateField[3], type: templateField[4],
+  });
+
   const genericPage = value.match(/^Page (\d+) \/ (\d+)$/);
   if (genericPage) return translate(locale, 'forms.settings.pageIndicator', { page: genericPage[1], pages: genericPage[2] });
 
