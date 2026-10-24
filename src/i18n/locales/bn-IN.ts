@@ -442,6 +442,8 @@ const bnIN: Record<TranslationKey, string> = {
   'settings.customPanel.error.buttonNotFound': "বোতাম পাওয়া যায়নি।",
   'settings.customPanel.error.genericTitle': "কাস্টম প্যানেলের কাজ ব্যর্থ হয়েছে",
   'settings.customPanel.action.cancel': "বাতিল করুন",
+  'settings.customPanel.status.published': "প্রকাশিত",
+  'settings.customPanel.status.draft': "ড্রাফ্ট",
 };
 
 export default bnIN;
