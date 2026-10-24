@@ -457,8 +457,11 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
     }
 
     if (group === 'related') {
+      // Related links expose metadata about two tickets. Keep every operation
+      // administrator-only until both-ticket department authorization is
+      // implemented and tested, rather than granting it to staff in any dept.
+      if (!access.isAdmin) throw accessDenied('Manage Server or Administrator permission');
       const ticket = await requireTicketInCurrentChannel(interaction, false);
-      if (!access.isStaff) throw accessDenied('a configured department staff role');
       if (subcommand === 'link') {
         const other = interaction.options.getString('other-ticket-id', true).trim();
         await linkRelatedTickets(guildId, ticket.id, other, actorId);
