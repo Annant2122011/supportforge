@@ -3229,7 +3229,7 @@ export async function handleSettingsInteraction(
       const departmentId = id.slice('sf:settings:department:remove:'.length);
       const config = await getGuildConfig(guild.id); const d = config.departments[departmentId];
       if (!d) { await reject(interaction, '❌ Department not found.'); return true; }
-      if (Object.keys(config.departments).length <= 1) { await reject(interaction, '❌ At least one department must remain.'); return true; }
+      if (Object.keys(config.departments).length <= 1) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.keepOne')); return true; }
       const active: string[] = [];
       for (const channel of guild.channels.cache.values()) {
         if (
@@ -3250,10 +3250,7 @@ export async function handleSettingsInteraction(
       }
 
       if (active.length) {
-        await reject(
-          interaction,
-          '❌ Cannot remove this department while it has active tickets. Reassign them first.',
-        );
+        await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.activeTickets'));
         return true;
       }
       await updateGuildConfig(guild.id, (current) => {
@@ -4000,10 +3997,10 @@ export async function handleSettingsInteraction(
       const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
       const config = await getGuildConfig(guild.id);
       const department = config.departments[departmentId];
-      if (!department) { await reject(interaction, '❌ Department not found.'); return true; }
-      if (!name) { await reject(interaction, '❌ Tag name cannot be empty.'); return true; }
+      if (!department) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.notFound')); return true; }
+      if (!name) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.nameRequired')); return true; }
       if (Object.values(department.tags ?? {}).some((tag) => tag.name.toLowerCase() === name.toLowerCase())) {
-        await reject(interaction, '❌ A tag with that name already exists in this department.'); return true;
+        await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.duplicate')); return true;
       }
       const tagId = newTagId();
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -4016,7 +4013,7 @@ export async function handleSettingsInteraction(
       });
       await syncPanel(guild); await refreshSettingsChannel(guild);
       await interaction.editReply({
-        embeds: [new EmbedBuilder().setTitle('✅ Tag Added').setDescription('**' + name + '** is now a subcategory of **' + department.name + '**. No Discord category was created.')],
+        embeds: [new EmbedBuilder().setTitle('✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.addedTitle')).setDescription(translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.addedDescription', { name, department: department.name }))],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
       await auditSettingsAction(guild, interaction, 'TAG_ADDED', 'Added tag ' + name + ' under department ' + department.name + '.');
@@ -4028,15 +4025,15 @@ export async function handleSettingsInteraction(
       const departmentId = parts[4] ?? ''; const tagId = parts[5] ?? '';
       const config = await getGuildConfig(guild.id);
       const department = config.departments[departmentId]; const tag = department?.tags?.[tagId];
-      if (!department || !tag) { await reject(interaction, '❌ Tag not found.'); return true; }
+      if (!department || !tag) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.notFound')); return true; }
       const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
-      if (!name) { await reject(interaction, '❌ Tag name cannot be empty.'); return true; }
-      if (Object.values(department.tags).some((item) => item.id !== tagId && item.name.toLowerCase() === name.toLowerCase())) { await reject(interaction, '❌ Another tag in this department already uses that name.'); return true; }
+      if (!name) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.nameRequired')); return true; }
+      if (Object.values(department.tags).some((item) => item.id !== tagId && item.name.toLowerCase() === name.toLowerCase())) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.duplicate')); return true; }
       const oldName = tag.name;
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       await updateGuildConfig(guild.id, (current) => { const item = current.departments[departmentId]?.tags?.[tagId]; if (item) item.name = name; });
       await syncPanel(guild); await refreshSettingsChannel(guild);
-      await interaction.editReply({ embeds: [new EmbedBuilder().setTitle('✅ Tag Updated').setDescription('Renamed **' + oldName + '** to **' + name + '**.')], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())] });
+      await interaction.editReply({ embeds: [new EmbedBuilder().setTitle('✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.updatedTitle')).setDescription(translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.updatedDescription', { oldName, name }))], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())] });
       await auditSettingsAction(guild, interaction, 'TAG_CHANGED', 'Renamed tag ' + oldName + ' to ' + name + ' under department ' + department.name + '.');
       return true;
     }
@@ -4047,11 +4044,11 @@ export async function handleSettingsInteraction(
       const staffMention = rawStaff.match(/^<@&(\d+)>$/);
       const staffRoleId = staffMention?.[1] ?? (/^\d{15,25}$/.test(rawStaff) ? rawStaff : null);
       const config = await getGuildConfig(guild.id);
-      if (!name) { await reject(interaction, '❌ Department name cannot be empty.'); return true; }
-      if (Object.values(config.departments).some((d) => d.name.toLowerCase() === name.toLowerCase())) { await reject(interaction, '❌ A department with that name already exists.'); return true; }
+      if (!name) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.nameRequired')); return true; }
+      if (Object.values(config.departments).some((d) => d.name.toLowerCase() === name.toLowerCase())) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.nameDuplicate')); return true; }
       if (staffRoleId) {
         const role = guild.roles.cache.get(staffRoleId);
-        if (!role || role.managed || role.id === guild.roles.everyone.id) { await reject(interaction, '❌ The supplied staff role is invalid.'); return true; }
+        if (!role || role.managed || role.id === guild.roles.everyone.id) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.staffInvalid')); return true; }
       }
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const id = newDepartmentId(); const tagId = newTagId(); const now = new Date().toISOString();
@@ -4062,8 +4059,8 @@ export async function handleSettingsInteraction(
       await interaction.editReply({
         embeds: [
           new EmbedBuilder()
-            .setTitle('✅ Department Added')
-            .setDescription('**' + name + '** was added. Its Discord category will be created when the first ticket is opened in this department.'),
+            .setTitle('✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.addedTitle'))
+            .setDescription(translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.addedDescription', { name })),
         ],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
@@ -4078,12 +4075,12 @@ export async function handleSettingsInteraction(
       const staffMention = rawStaff.match(/^<@&(\d+)>$/);
       const staffRoleId = staffMention?.[1] ?? (/^\d{15,25}$/.test(rawStaff) ? rawStaff : null);
       const config = await getGuildConfig(guild.id); const department = config.departments[departmentId];
-      if (!department) { await reject(interaction, '❌ Department not found.'); return true; }
-      if (!name) { await reject(interaction, '❌ Department name cannot be empty.'); return true; }
-      if (Object.values(config.departments).some((d) => d.id !== departmentId && d.name.toLowerCase() === name.toLowerCase())) { await reject(interaction, '❌ Another department already uses that name.'); return true; }
+      if (!department) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.notFound')); return true; }
+      if (!name) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.nameRequired')); return true; }
+      if (Object.values(config.departments).some((d) => d.id !== departmentId && d.name.toLowerCase() === name.toLowerCase())) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.nameDuplicate')); return true; }
       if (staffRoleId) {
         const role = guild.roles.cache.get(staffRoleId);
-        if (!role || role.managed || role.id === guild.roles.everyone.id) { await reject(interaction, '❌ The supplied staff role is invalid.'); return true; }
+        if (!role || role.managed || role.id === guild.roles.everyone.id) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.staffInvalid')); return true; }
       }
       const oldName = department.name;
       const oldStaffRoleId = department.staffRoleId;
@@ -4115,7 +4112,7 @@ export async function handleSettingsInteraction(
       await interaction.editReply({
         embeds: [
           new EmbedBuilder()
-            .setTitle('✅ Department Updated')
+            .setTitle('✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.updatedTitle'))
             .setDescription(
               'Renamed **' + oldName + '** to **' + name +
               '**. Its category, tags, and existing ticket staff access were updated.',
