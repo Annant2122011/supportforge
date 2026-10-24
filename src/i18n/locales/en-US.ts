@@ -21,6 +21,7 @@ const enUS = {
   'quickReply.picker.next': "Next",
   'quickReply.picker.invalidPage': "This quick-reply page control is invalid. Reopen Quick Reply from the ticket panel.",
   'quickReply.picker.sent': "Sent quick reply “{name}”. Automatic mentions are disabled; the ticket remains open.",
+  'quickReply.picker.uncertain': "Delivery could not be confirmed safely. No automatic resend was attempted. Check this ticket’s recent messages before trying again.",
   'settings.manual.title': "Staff Manual",
   'settings.manual.description': "A newcomer-friendly guide to ResolvX. Choose a concise overview or the full instructions. Each manual is delivered privately to the requesting staff member.",
   'settings.manual.field.quick': "Quick Overview",
