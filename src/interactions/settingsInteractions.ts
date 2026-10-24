@@ -2839,7 +2839,7 @@ export async function handleSettingsInteraction(
     if (id.startsWith('sf:settings:ticket-workspace:set:')) {
       const mode = id.slice('sf:settings:ticket-workspace:set:'.length);
       if (mode !== 'text-channels' && mode !== 'private-threads') {
-        await reject(interaction, 'That ticket workspace mode is not supported.');
+        await reject(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.workspace.unsupportedMode'));
         return true;
       }
       const previous = (await getAdvancedSettings(guild.id)).ticketWorkspace.mode;
@@ -2875,7 +2875,7 @@ export async function handleSettingsInteraction(
           ? Boolean(scopeId && config.customPanels[scopeId])
           : false;
       if (!scopeType || !scopeId || !exists) {
-        await reject(interaction, 'That department or ticket panel no longer exists. Refresh the Support Hours view and choose an existing entry.');
+        await reject(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.supportHours.invalidScope'));
         return true;
       }
       await showSupportHoursSettings(interaction, '', scopeType, scopeId);
@@ -2888,7 +2888,7 @@ export async function handleSettingsInteraction(
       const panelPage = Number(parts[5]);
       const scope = parseSupportHoursSettingsScope(parts, 6);
       if (!Number.isInteger(departmentPage) || departmentPage < 0 || !Number.isInteger(panelPage) || panelPage < 0) {
-        await reject(interaction, 'That Support Hours page control has expired. Reopen Support Hours and try again.');
+        await reject(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.supportHours.expiredPage'));
         return true;
       }
       await showSupportHoursSettings(interaction, '', scope.scopeType, scope.scopeId, departmentPage, panelPage);
@@ -2903,20 +2903,20 @@ export async function handleSettingsInteraction(
       const policy = local ?? resolveEffectiveSupportHoursPolicy(policies, context);
       const timezone = new TextInputBuilder()
         .setCustomId('timezone')
-        .setLabel('IANA time zone (e.g. Asia/Kolkata)')
+        .setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.supportHours.label.timezone'))
         .setStyle(TextInputStyle.Short)
         .setRequired(true)
         .setMaxLength(100)
         .setValue((policy?.timezone ?? 'UTC').slice(0, 100));
       const schedule = new TextInputBuilder()
         .setCustomId('schedule')
-        .setLabel('All seven weekdays: day=intervals')
+        .setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.supportHours.label.weeklySchedule'))
         .setStyle(TextInputStyle.Paragraph)
-        .setPlaceholder('monday=09:00-17:00\ntuesday=09:00-17:00\n...\nsunday=closed')
+        .setPlaceholder(translate((await getAdvancedSettings(guild.id)).locale, 'settings.supportHours.schedulePlaceholder'))
         .setRequired(true)
         .setMaxLength(4000)
         .setValue((policy ? formatSupportHoursWeeklySchedule(policy.weeklySchedule) : SUPPORT_HOURS_DAYS.map((day) => day + '=closed').join('\n')).slice(0, 4000));
-      await openModal(interaction, 'sf:settings:modal:support-hours:' + scope.scopeType + ':' + (scope.scopeId ?? '-'), 'Edit Support Hours', [timezone, schedule]);
+      await openModal(interaction, 'sf:settings:modal:support-hours:' + scope.scopeType + ':' + (scope.scopeId ?? '-'), translate((await getAdvancedSettings(guild.id)).locale, 'settings.supportHours.action.editSchedule'), [timezone, schedule]);
       return true;
     }
 
@@ -2931,7 +2931,7 @@ export async function handleSettingsInteraction(
       const base = current ?? effective ?? createDefaultSupportHoursPolicy(scope.scopeType, scope.scopeId);
       const hasIntervals = SUPPORT_HOURS_DAYS.some((day) => base.weeklySchedule[day].length > 0);
       if (enabling && !hasIntervals) {
-        await showSupportHoursSettings(interaction, 'Add at least one opening interval before enabling enforcement.', scope.scopeType, scope.scopeId);
+        await showSupportHoursSettings(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.supportHours.addIntervalFirst'), scope.scopeType, scope.scopeId);
         return true;
       }
       await interaction.deferUpdate();
@@ -2955,7 +2955,7 @@ export async function handleSettingsInteraction(
       const effective = resolveEffectiveSupportHoursPolicy(policies, supportHoursContext(scope));
       const base = current ?? effective;
       if (!base) {
-        await reject(interaction, 'Edit and save a weekly schedule first.');
+        await reject(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.supportHours.noSchedule'));
         return true;
       }
       await interaction.deferUpdate();
@@ -3006,10 +3006,10 @@ export async function handleSettingsInteraction(
     }
 
     if (id === 'sf:settings:panel:thresholds') {
-      await openModal(interaction, 'sf:settings:modal:panel', 'Panel Thresholds', [
-        new TextInputBuilder().setCustomId('visual').setLabel('Visual line budget (6-40)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String((await getAdvancedSettings(guild.id)).panelActivity.visualLineBudget)),
-        new TextInputBuilder().setCustomId('messages').setLabel('Message safety cap (5-30)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String((await getAdvancedSettings(guild.id)).panelActivity.messageBudget)),
-        new TextInputBuilder().setCustomId('minimum').setLabel('Minimum messages (3-20)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String((await getAdvancedSettings(guild.id)).panelActivity.minimumMessagesBeforeMove)),
+      await openModal(interaction, 'sf:settings:modal:panel', translate((await getAdvancedSettings(guild.id)).locale, 'settings.panel.modalTitle'), [
+        new TextInputBuilder().setCustomId('visual').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.panel.modal.visualLines')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String((await getAdvancedSettings(guild.id)).panelActivity.visualLineBudget)),
+        new TextInputBuilder().setCustomId('messages').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.panel.modal.messageCap')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String((await getAdvancedSettings(guild.id)).panelActivity.messageBudget)),
+        new TextInputBuilder().setCustomId('minimum').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.panel.modal.minimumMessages')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String((await getAdvancedSettings(guild.id)).panelActivity.minimumMessagesBeforeMove)),
       ]);
       return true;
     }
@@ -3021,8 +3021,8 @@ export async function handleSettingsInteraction(
 
     if (id === 'sf:settings:team:edit') {
       const settings = await getAdvancedSettings(guild.id);
-      await openModal(interaction, 'sf:settings:modal:team', 'Team & Voice', [
-        new TextInputBuilder().setCustomId('maxModerators').setLabel('Maximum simultaneous moderators (1-3)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.ticketDefaults.maxClaimedModerators)),
+      await openModal(interaction, 'sf:settings:modal:team', translate(settings.locale, 'settings.team.editTitle'), [
+        new TextInputBuilder().setCustomId('maxModerators').setLabel(translate(settings.locale, 'settings.team.modal.moderators')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.ticketDefaults.maxClaimedModerators)),
       ]);
       return true;
     }
@@ -3120,8 +3120,8 @@ export async function handleSettingsInteraction(
     }
 
     if (id === 'sf:settings:defaults:edit') {
-      await openModal(interaction, 'sf:settings:modal:defaults', 'Ticket Defaults', [
-        new TextInputBuilder().setCustomId('priority').setLabel('Default priority').setPlaceholder('low, normal, high, urgent, critical').setStyle(TextInputStyle.Short).setRequired(true),
+      await openModal(interaction, 'sf:settings:modal:defaults', translate((await getAdvancedSettings(guild.id)).locale, 'settings.defaults.editTitle'), [
+        new TextInputBuilder().setCustomId('priority').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.defaults.field.priority')).setPlaceholder(translate((await getAdvancedSettings(guild.id)).locale, 'settings.defaults.priorityPlaceholder')).setStyle(TextInputStyle.Short).setRequired(true),
       ]);
       return true;
     }
@@ -3913,7 +3913,7 @@ export async function handleSettingsInteraction(
     if (interaction.customId === 'sf:settings:modal:defaults') {
       const priority = interaction.fields.getTextInputValue('priority').trim().toLowerCase() as TicketPriority;
       if (!['low', 'normal', 'high', 'urgent', 'critical'].includes(priority)) {
-        await reject(interaction, '❌ Priority must be low, normal, high, urgent, or critical.');
+        await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.defaults.priorityInvalid'));
         return true;
       }
 
@@ -3923,7 +3923,7 @@ export async function handleSettingsInteraction(
       });
       await refreshSettingsChannel(guild);
       await interaction.editReply({
-        embeds: [new EmbedBuilder().setTitle('✅ Ticket Defaults Updated').setDescription('Default priority is now **' + priority + '**.')],
+        embeds: [new EmbedBuilder().setTitle('✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.defaults.title')).setDescription(translate((await getAdvancedSettings(guild.id)).locale, 'settings.defaults.saved', { priority: translate((await getAdvancedSettings(guild.id)).locale, 'priority.' + priority) }))],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
       await auditSettingsAction(guild, interaction, 'TICKET_DEFAULTS_CHANGED', 'Default ticket priority changed to ' + priority + '.');
@@ -4250,7 +4250,7 @@ export async function handleSettingsInteraction(
         !Number.isInteger(closed) || closed < 0 || closed > 365 ||
         !Number.isInteger(archive) || archive < 0 || archive > 365
       ) {
-        await reject(interaction, '❌ Retention values must be whole numbers from 0 to 365.');
+        await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.retention.invalid'));
         return true;
       }
 
@@ -4265,7 +4265,7 @@ export async function handleSettingsInteraction(
       });
       await refreshSettingsChannel(guild);
       await interaction.editReply({
-        embeds: [new EmbedBuilder().setTitle('✅ Retention Updated').setDescription('Closed: **' + (closed === 0 ? 'No timer (365-day maximum)' : closed + ' days') + '** • Archive: **' + (archive === 0 ? 'No timer (365-day maximum)' : archive + ' days') + '**.')],
+        embeds: [new EmbedBuilder().setTitle('✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.retention.updatedTitle')).setDescription(translate((await getAdvancedSettings(guild.id)).locale, 'settings.retention.updatedDescription', { closed: closed === 0 ? translate((await getAdvancedSettings(guild.id)).locale, 'settings.value.noTimer') : translate((await getAdvancedSettings(guild.id)).locale, 'settings.value.days', { days: closed }), archive: archive === 0 ? translate((await getAdvancedSettings(guild.id)).locale, 'settings.value.noTimer') : translate((await getAdvancedSettings(guild.id)).locale, 'settings.value.days', { days: archive }) }))],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
       await auditSettingsAction(guild, interaction, 'RETENTION_CHANGED', 'Closed retention=' + closed + ' days; archive retention=' + archive + ' days.');
