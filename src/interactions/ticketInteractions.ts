@@ -65,7 +65,7 @@ import type { TranslationKey } from '../i18n/locales/en-US';
 import { ensureDepartmentCategory } from '../services/departmentCategoryService';
 import { endTicketVoiceMode, startTicketVoiceMode, syncTicketVoiceParticipants } from '../services/voiceModeService';
 import { getUserFlagCount, isTicketCreationRestricted, recordReport } from '../services/reportService';
-import { searchQuickRepliesPage, sendQuickReplyInTicket } from '../services/quickReplyService';
+import { parseQuickReplyPage, searchQuickRepliesPage, sendQuickReplyInTicket } from '../services/quickReplyService';
 import { getKnowledgeArticle, recordKnowledgeArticleShare } from '../services/knowledgeBaseService';
 
 import {
@@ -5405,8 +5405,8 @@ async function handleQuickReplySelection(interaction: StringSelectMenuInteractio
       .slice('ticket:quick-reply:select:'.length)
       .split(':');
     const session = getQuickReplyPickerSession(sessionId, interaction);
-    const page = Number(rawPage);
-    if (!session || !/^\\d{1,5}$/.test(rawPage) || !Number.isInteger(page) || page < 0 || page > 99999) {
+    const page = parseQuickReplyPage(rawPage);
+    if (!session || page === null) {
       const settings = await getAdvancedSettings(interaction.guildId!);
       await interaction.editReply(translate(settings.locale, 'quickReply.picker.invalidSession'));
       return;
