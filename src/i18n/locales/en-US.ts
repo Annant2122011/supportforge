@@ -538,6 +538,8 @@ const enUS = {
   'settings.customPanel.roles.allowEveryone': "Allow Everyone",
   'settings.customPanel.form.tagPickerDescription': "This form applies to all tags. Select the tag whose tickets should open this exact form.",
   'settings.customPanel.error.noChannels': "No accessible text channels were found where QueryFixr can view, send messages and embeds.",
+  'settings.customPanel.panelPublished.cleanupWarning': "The old message could not be removed. Delete it manually to prevent duplicate entry points.",
+  'settings.customPanel.panelDeleted.cleanupWarning': "The panel definition is deleted and its buttons are no longer functional, but the old Discord message could not be removed. Delete that message manually.",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
