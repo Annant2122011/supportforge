@@ -23,6 +23,7 @@ const hiIN: Record<TranslationKey, string> = {
   'quickReply.picker.next': "अगला",
   'quickReply.picker.invalidPage': "यह त्वरित-उत्तर पृष्ठ नियंत्रण मान्य नहीं है। टिकट पैनल से Quick Reply फिर खोलें।",
   'quickReply.picker.sent': "त्वरित उत्तर “{name}” भेज दिया गया। स्वतः उल्लेख बंद हैं; टिकट खुला रहेगा।",
+  'quickReply.picker.uncertain': "सुरक्षित रूप से यह पुष्टि नहीं हो सकी कि उत्तर भेजा गया या नहीं। दोबारा अपने-आप नहीं भेजा गया। पुनः प्रयास से पहले इस टिकट के हाल के संदेश जाँचें।",
   'settings.manual.title': "स्टाफ़ मार्गदर्शिका",
   'settings.manual.description': "नए सदस्यों के लिए ResolvX की सरल मार्गदर्शिका। संक्षिप्त परिचय या विस्तृत निर्देश चुनें। मार्गदर्शिका केवल अनुरोध करने वाले स्टाफ सदस्य को निजी रूप से भेजी जाती है।",
   'settings.manual.field.quick': "संक्षिप्त परिचय",
