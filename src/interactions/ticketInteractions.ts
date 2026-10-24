@@ -5122,10 +5122,10 @@ async function showQuickReplySelector(interaction: ButtonInteraction): Promise<v
   if (!(await safeDeferReply(interaction))) return;
   try {
     const context = await getQuickReplyTicketContext(interaction);
-    const replies = await listQuickReplies(
+    const replies = (await listQuickReplies(
       interaction.guildId!,
       context.access,
-    );
+    )).filter((reply) => reply.enabled);
     if (!replies.length) {
       await interaction.editReply('No enabled quick replies are available to your role. An administrator can configure them with /supportforge quick-reply save.');
       return;
