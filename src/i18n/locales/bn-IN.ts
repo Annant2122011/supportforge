@@ -708,6 +708,14 @@ const bnIN: Record<TranslationKey, string> = {
   'settings.diagnostics.refreshFailures': "\n\n⚠️ রিফ্রেশ ব্যর্থ: {failures}। অনুমতি যাচাইয়ের পরে Settings Refresh ব্যবহার করুন।",
   'settings.diagnostics.restoreFailed': "কনফিগারেশন পুনরুদ্ধার সম্পূর্ণ হয়নি। লগ দেখুন এবং আংশিক ব্যর্থতা হলে সংরক্ষিত পূর্ব-পুনরুদ্ধার চেকপয়েন্ট ব্যবহার করুন।",
   'settings.recovery.modalOpenFailed': "সেটিংস ফর্ম খোলা যায়নি। আবার চেষ্টা করুন।",
+  'settings.recovery.nativeIntro': "শুধু মূল Discord মুছে ফেলার রেকর্ড। এগুলি টিকিট-বোতামের ভুলবশত মুছে ফেলার পর্যালোচনায় আসে না।",
+  'settings.recovery.noNative': "পুনরুদ্ধারের জন্য কোনো মূল Discord চ্যানেল মুছে ফেলার রেকর্ড উপলভ্য নেই।",
+  'settings.recovery.ticketIntro': "শুধু টিকিট-বোতামের মাধ্যমে মুছে ফেলার রেকর্ড। প্রশ্নের উত্তর দিতে বা ভুলবশত মুছে ফেলা হিসেবে চিহ্নিত টিকিট পুনরুদ্ধার করতে একটি রেকর্ড বেছে নিন।",
+  'settings.recovery.noTicket': "পর্যালোচনা বা ভুলবশত মুছে ফেলা টিকিট পুনরুদ্ধারের জন্য কোনো টিকিট-বোতামের রেকর্ড অপেক্ষা করছে না।",
+  'settings.recovery.nothingThisPage': "এই পৃষ্ঠায় দেখানোর মতো কিছু নেই।",
+  'settings.recovery.page': "পৃষ্ঠা {page} / {pages}",
+  'settings.recovery.ticketLine': "• **টিকিট #{number}** • {messages}টি সংরক্ষিত বার্তা • মূল চ্যানেল ID: {channelId}",
+  'settings.recovery.accidentalReady': " • **ভুলবশত মুছে ফেলা হিসেবে চিহ্নিত, পুনরুদ্ধারের জন্য প্রস্তুত**",
 };
 
 export default bnIN;
