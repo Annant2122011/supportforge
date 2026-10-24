@@ -4820,7 +4820,7 @@ A consolidated source review is tracked in [docs/stage-a-to-g-reverification.md]
 
 - Stages A–G have substantial code and automated coverage on the current stacked feature branches, but their pull requests are not yet integrated into `main`.
 - The Settings dashboard has been regrouped around the ticket workflow. Only an untouched legacy default layout is automatically migrated; customized per-server ordering is preserved.
-- F-032 Inactivity Auto-Close is **BUILT / PARTIAL**, not production-accepted. Core warning/grace/transcript/compare-and-close behavior exists; exemption configuration UI and live-guild acceptance remain incomplete.
+- F-032 Inactivity Auto-Close is **BUILT / PARTIAL**, not production-accepted. Core warning/grace/transcript/compare-and-close behavior and role/department exemption controls exist; test-guild acceptance and failure-injection remain. The activity-history scan cap is a deliberate fail-safe: auto-close pauses if the saved activity anchor cannot be verified safely.
 - Message activity writes use metadata-only persistence to avoid re-applying an earlier lifecycle status from an asynchronous message handler.
 - The inactivity close path rechecks the latest policy generation and recent human activity around transcript work and before the final PostgreSQL compare-and-close transaction.
 - Final second-round CI passed on [review run #1197](https://github.com/Annant2122011/supportforge/actions/runs/39399683798): TypeScript build passed, **117 tests passed / 0 failed**, and PostgreSQL verification passed.
