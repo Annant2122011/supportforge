@@ -895,6 +895,17 @@ export const data =
 
     .addSubcommandGroup((group) =>
       group
+        .setName('transcripts')
+        .setDescription('Find archived ticket transcript files without opening transcript content')
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('find')
+            .setDescription('Locate a transcript by durable ticket ID or ticket channel ID (staff/admin only)')
+            .addStringOption((option) => option.setName('ticket-id').setDescription('Ticket ID or channel ID').setRequired(true).setMaxLength(36)),
+        ),
+    )
+    .addSubcommandGroup((group) =>
+      group
         .setName('knowledge')
         .setDescription('Manage and search the deterministic, no-AI Knowledge Base')
         .addSubcommand((subcommand) =>
