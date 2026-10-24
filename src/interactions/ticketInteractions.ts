@@ -6470,20 +6470,27 @@ export async function handleTicketInteraction(
 
       const excerpt = article.body.slice(0, 2600);
       const truncated = article.body.length > excerpt.length;
-      await interaction.channel?.send({
+      const targetChannel = interaction.channel;
+      if (!targetChannel || !('send' in targetChannel)) {
+        await interaction.editReply('This ticket channel is not available for sharing. No article was posted.');
+        return;
+      }
+      const shareChannel = targetChannel as TextChannel | ThreadChannel;
+      await shareChannel.send({
         embeds: [new EmbedBuilder().setTitle('📚 Suggested article: ' + article.title)
           .setDescription(
-            (article.summary ? article.summary + '\\n\\n' : '') +
-            '**Category:** ' + article.category + '\\n' +
-            '**Tags:** ' + (article.tags.join(', ') || 'none') + '\\n\\n' +
-            excerpt + (truncated ? '\\n\\nOpen /supportforge knowledge view with article ID ' + article.id + ' for the full article.' : '') +
-            '\\n\\n_This is a suggested resource, not a replacement for human support. The ticket remains open for follow-up._',
+            (article.summary ? article.summary + '\n\n' : '') +
+            '**Category:** ' + article.category + '\n' +
+            '**Tags:** ' + (article.tags.join(', ') || 'none') + '\n\n' +
+            excerpt + (truncated ? '\n\nOpen /supportforge knowledge view with article ID ' + article.id + ' for the full article.' : '') +
+            '\n\n_This is a suggested resource, not a replacement for human support. The ticket remains open for follow-up._',
           )
           .setFooter({ text: 'Knowledge Base article ' + article.id + ' • revision ' + article.revision })],
         allowedMentions: { parse: [] },
       });
       await recordKnowledgeArticleShare(interaction.guildId, article.id, access, interaction.user.id);
       if (config.supportCategoryId) {
+        try {
         await logTicketEvent(interaction.guild, config.supportCategoryId, {
           ticketNumber: ticket.ticketNumber ?? ticket.id,
           ticketChannelId: ticket.channelId,
@@ -6493,6 +6500,9 @@ export async function handleTicketInteraction(
           actorName: interaction.user.tag,
           detail: 'Shared published Knowledge Base article ' + article.id + ' revision ' + article.revision + ' via a ticket suggestion control.',
         });
+        } catch {
+          console.warn('Knowledge Base article was shared, but its ticket audit notification failed.');
+        }
       }
       await interaction.editReply('Shared "' + article.title + '" in this ticket. Automatic mentions are disabled; the ticket remains open.');
       return;
