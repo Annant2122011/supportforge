@@ -1,6 +1,7 @@
 import { ChannelType, EmbedBuilder, MessageFlags, type ChatInputCommandInteraction, type Message, type TextChannel, type ThreadChannel } from 'discord.js';
 
 import { getGuildConfig } from '../services/configService';
+import { getThemeColor } from '../services/uiThemeService';
 import { getPersistedTicket, getPersistedTicketById } from '../services/ticketPersistenceService';
 import { getField } from '../services/ticketStateService';
 import { logSettingsEvent, logTicketEvent } from '../services/auditLogService';
