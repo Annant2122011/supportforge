@@ -789,6 +789,68 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+
+  {
+    id: 16,
+    name: 'add_audited_manual_workflow_execution_ledger',
+    up: async (db) => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS workflow_execution_runs (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          ticket_id TEXT NOT NULL,
+          channel_id TEXT NOT NULL,
+          template_id TEXT NOT NULL REFERENCES workflow_templates(id) ON DELETE RESTRICT,
+          template_version INTEGER NOT NULL CHECK (template_version > 0),
+          template_name TEXT NOT NULL,
+          requested_by TEXT NOT NULL,
+          interaction_id TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('running','completed','failed','needs_review','not_matched')),
+          definition JSONB NOT NULL,
+          condition_evaluation JSONB NOT NULL DEFAULT '{}'::JSONB,
+          current_step_index INTEGER,
+          result JSONB NOT NULL DEFAULT '{}'::JSONB,
+          started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          finished_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (guild_id,interaction_id),
+          FOREIGN KEY (guild_id,ticket_id) REFERENCES tickets(guild_id,id) ON DELETE RESTRICT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_workflow_execution_runs_ticket_time
+          ON workflow_execution_runs (guild_id,ticket_id,created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_workflow_execution_runs_status
+          ON workflow_execution_runs (guild_id,status,updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS workflow_execution_steps (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          run_id TEXT NOT NULL REFERENCES workflow_execution_runs(id) ON DELETE RESTRICT,
+          step_index INTEGER NOT NULL CHECK (step_index >= 0),
+          action_type TEXT NOT NULL CHECK (action_type IN ('assign_department','set_priority','add_tag','send_quick_reply')),
+          action_value TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('pending','running','completed','failed','needs_review')),
+          attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+          marker TEXT,
+          destination_message_id TEXT,
+          result JSONB NOT NULL DEFAULT '{}'::JSONB,
+          error_code TEXT,
+          started_at TIMESTAMPTZ,
+          completed_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (run_id,step_index),
+          UNIQUE (marker)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_workflow_execution_steps_run
+          ON workflow_execution_steps (run_id,step_index);
+        CREATE INDEX IF NOT EXISTS idx_workflow_execution_steps_recovery
+          ON workflow_execution_steps (guild_id,status,updated_at DESC);
+      `);
+    },
+  },
 ];
 
  /** Latest migration identifier required by this application version. */
