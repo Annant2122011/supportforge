@@ -630,6 +630,8 @@ const hiIN: Record<TranslationKey, string> = {
   'quickReply.command.operationDeleted': "हटाया गया",
   'quickReply.command.operationBaseline': "मूल रिकॉर्ड",
   'quickReply.command.operationRestored': "पुनर्स्थापित",
+  'knowledge.command.suggestionLine': "**{index}. {title}** • विश्वास: {confidence} • स्कोर {score}\n{summary}\n{category}",
+  'knowledge.command.searchResultLine': "**{index}. {title}** • विश्वास: {confidence} • स्कोर {score}\nID: {id}\n{summary}\n{category}",
 };
 
 export default hiIN;
