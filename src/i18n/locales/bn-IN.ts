@@ -533,6 +533,11 @@ const bnIN: Record<TranslationKey, string> = {
   'settings.customPanel.error.mustAddButton': "প্যানেল প্রকাশ করার আগে অন্তত একটি বোতাম যোগ করুন।",
   'settings.customPanel.error.invalidChannel': "প্রকাশনার লক্ষ্য একটি সাধারণ টেক্সট চ্যানেল হতে হবে।",
   'settings.customPanel.error.unsupportedTarget': "সমর্থিত বোতামের লক্ষ্য বেছে নিন।",
+  'settings.customPanel.roles.panelTitle': "প্যানেল অ্যাক্সেসের নিয়ম",
+  'settings.customPanel.roles.buttonTitle': "বোতামের অ্যাক্সেসের নিয়ম",
+  'settings.customPanel.roles.current': "বর্তমানে অনুমোদিত ভূমিকা",
+  'settings.customPanel.roles.description': "নিচে ভূমিকা বেছে নিন। নির্বাচন বর্তমান অনুমোদিত ভূমিকার তালিকা প্রতিস্থাপন করবে। খালি নির্বাচন এই স্তরে সবাইকে অনুমতি দেয়। প্যানেল ও বোতামের নিয়ম একত্রে প্রয়োগ হয়: দুটিই সীমাবদ্ধ হলে সদস্যকে উভয় শর্ত পূরণ করতে হবে।",
+  'settings.customPanel.roles.allowEveryone': "সকলকে অনুমতি দিন",
 };
 
 export default bnIN;
