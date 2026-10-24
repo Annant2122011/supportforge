@@ -911,7 +911,7 @@ export const data =
         .addSubcommand((subcommand) =>
           subcommand.setName('view').setDescription('View a published article or an admin-visible draft')
             .addStringOption((option) => option.setName('article-id').setDescription('Article ID from the list or search').setRequired(true).setMaxLength(36))
-            .addIntegerOption((option) => option.setName('page').setDescription('Article page, 3,500 characters each').setRequired(false).setMinValue(1).setMaxValue(6)),
+            .addIntegerOption((option) => option.setName('page').setDescription('Article page, 3,500 characters each').setRequired(false).setMinValue(1).setMaxValue(7)),
         )
         .addSubcommand((subcommand) =>
           subcommand.setName('update').setDescription('Update an article using optimistic revision control (admin only)')
@@ -997,8 +997,13 @@ export const data =
             .addIntegerOption((option) => option.setName('expected-version').setDescription('Required to update an existing quick reply; current v# from quick-reply list').setRequired(false).setMinValue(1)),
         )
         .addSubcommand((subcommand) =>
-          subcommand.setName('delete').setDescription('Delete a quick reply (admin only)')
+          subcommand.setName('history').setDescription('Show revision and deletion history for a quick reply (admin only)')
+            .addStringOption((option) => option.setName('name-or-id').setDescription('Quick reply name or ID, including deleted replies').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('delete').setDescription('Delete a quick reply using its current version (admin only)')
             .addStringOption((option) => option.setName('name-or-id').setDescription('Name or ID').setRequired(true).setMaxLength(80))
+            .addIntegerOption((option) => option.setName('expected-version').setDescription('Current version shown by quick-reply list').setRequired(true).setMinValue(1))
             .addBooleanOption((option) => option.setName('confirm').setDescription('Must be true to delete').setRequired(true)),
         )
         .addSubcommand((subcommand) =>
@@ -1043,7 +1048,11 @@ export const data =
             .addBooleanOption((option) => option.setName('enabled').setDescription('Enable/disable the template catalogue item').setRequired(true)),
         )
         .addSubcommand((subcommand) =>
-          subcommand.setName('delete').setDescription('Delete a template catalogue entry (admin only)')
+          subcommand.setName('history').setDescription('Show version and deletion history for a workflow template (admin only)')
+            .addStringOption((option) => option.setName('template-id').setDescription('Workflow template ID, including deleted templates').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('delete').setDescription('Delete a template catalogue entry using its current version (admin only)')
             .addStringOption((option) => option.setName('template-id').setDescription('Template ID').setRequired(true).setMaxLength(36))
             .addIntegerOption((option) => option.setName('version').setDescription('Current version').setRequired(true).setMinValue(1))
             .addBooleanOption((option) => option.setName('confirm').setDescription('Must be true to delete').setRequired(true)),
