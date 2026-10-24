@@ -442,6 +442,8 @@ const hiIN: Record<TranslationKey, string> = {
   'settings.customPanel.error.buttonNotFound': "बटन नहीं मिला।",
   'settings.customPanel.error.genericTitle': "कस्टम पैनल कार्रवाई विफल",
   'settings.customPanel.action.cancel': "रद्द करें",
+  'settings.customPanel.status.published': "प्रकाशित",
+  'settings.customPanel.status.draft': "ड्राफ़्ट",
 };
 
 export default hiIN;
