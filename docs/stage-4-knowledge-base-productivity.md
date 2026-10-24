@@ -48,7 +48,7 @@
 ## 2026-10-24 integrity and release-safety refinement
 
 - Quick replies now write immutable revision snapshots in the same PostgreSQL transaction as create/update/delete; delete is a version-checked soft delete. `/supportforge quick-reply history` can inspect retained versions, including deleted records.
-- Workflow templates now retain immutable snapshots for create/update/enable/disable/delete, with compare-and-swap on expected version and soft delete. `/supportforge workflow history` exposes the ledger. Catalog enablement remains non-executable metadata.
+- Workflow templates now retain immutable snapshots for create/update/enable/disable/delete, with compare-and-swap on expected version and soft delete. `/supportforge workflow history` exposes the ledger. Catalogue enablement permits explicit manual runs after review; it never schedules or triggers automatic execution.
 - The restore utility now refuses a target matching either currently configured `DATABASE_URL` or `DATABASE_URL_UNPOOLED` before changing process-local variables; malformed configured URLs fail closed. The archive-source mismatch, empty-target, checksum, explicit confirmation, migration and orphan checks remain in force.
 - The PostgreSQL verifier requires quick-reply/workflow history tables and checks for orphaned productivity revisions, in addition to the existing Knowledge Base insert/update search-vector smoke test inside a rolled-back transaction.
 - SLA task telemetry now marks a partial sweep as failed if any ticket could not be evaluated, while continuing with other guilds and preserving already persisted/idempotent alerts.
