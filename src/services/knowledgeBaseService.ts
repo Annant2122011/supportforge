@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
-import { normalizeKnowledgeText, scoreKnowledgeCandidate, shouldOfferKnowledgeResult, type KnowledgeConfidence } from '../core/domain/knowledgeSearch';
+import { expandKnowledgeQuery, normalizeKnowledgeText, scoreKnowledgeCandidate, shouldOfferKnowledgeResult, type KnowledgeConfidence } from '../core/domain/knowledgeSearch';
 
 export type KnowledgeArticleStatus = 'draft' | 'published' | 'archived';
 export type KnowledgeVisibility = 'public' | 'staff';
@@ -481,13 +481,14 @@ export async function searchKnowledgeBase(
     throw new Error('Search must be between 2 and 200 characters.');
   }
   const pool = getPostgresPool();
-  const queryTokens = normalizedQuery.split(' ').filter(Boolean);
-  const synonymResult = await pool.query<QueryResultRow & { synonyms: string[] }>(
-    'SELECT synonyms FROM knowledge_base_synonyms WHERE guild_id=$1 AND normalized_term=ANY($2::text[])',
-    [guildId,queryTokens],
+  const synonymResult = await pool.query<QueryResultRow & { normalized_term: string; synonyms: string[] }>(
+    'SELECT normalized_term,synonyms FROM knowledge_base_synonyms WHERE guild_id=$1 ORDER BY normalized_term LIMIT 100',
+    [guildId],
   );
-  const synonyms = synonymResult.rows.flatMap((row) => Array.isArray(row.synonyms) ? row.synonyms : []);
-  const expandedQuery = [query.trim(), ...synonyms].join(' ').slice(0, 500);
+  const expandedQuery = expandKnowledgeQuery(query, synonymResult.rows.map((row) => ({
+    normalizedTerm: row.normalized_term,
+    synonyms: Array.isArray(row.synonyms) ? row.synonyms : [],
+  })));
   const permissionPredicate = 'guild_id=$1 AND status=\'published\' AND ' +
     '(visibility=\'public\' OR $3::boolean OR $4::boolean) AND ' +
     '(cardinality(allowed_role_ids)=0 OR allowed_role_ids && $5::text[] OR $3::boolean)';
