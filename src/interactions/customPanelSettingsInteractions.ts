@@ -143,27 +143,27 @@ function parseStyle(value: string | undefined): SupportPanelButtonStyle {
   return style;
 }
 
-function createPanelModal(): ModalBuilder {
-  return new ModalBuilder().setCustomId(PREFIX + 'modal:create').setTitle('Create Support Panel Draft')
+function createPanelModal(locale: string): ModalBuilder {
+  return new ModalBuilder().setCustomId(PREFIX + 'modal:create').setTitle(translate(locale, 'settings.customPanel.modal.createTitle'))
     .addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId('name').setLabel('Panel name').setStyle(TextInputStyle.Short).setMaxLength(80).setRequired(true),
+        new TextInputBuilder().setCustomId('name').setLabel(translate(locale, 'settings.customPanel.modal.panelName')).setStyle(TextInputStyle.Short).setMaxLength(80).setRequired(true),
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId('title').setLabel('Display title').setStyle(TextInputStyle.Short).setMaxLength(256).setRequired(true),
+        new TextInputBuilder().setCustomId('title').setLabel(translate(locale, 'settings.customPanel.modal.displayTitle')).setStyle(TextInputStyle.Short).setMaxLength(256).setRequired(true),
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId('description').setLabel('Instructions for customers').setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setRequired(true),
+        new TextInputBuilder().setCustomId('description').setLabel(translate(locale, 'settings.customPanel.modal.customerInstructions')).setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setRequired(true),
       ),
     );
 }
 
-function updatePanelModal(panelId: string, panel: { name: string; title: string; description: string }): ModalBuilder {
-  const name = new TextInputBuilder().setCustomId('name').setLabel('Panel name').setStyle(TextInputStyle.Short).setMaxLength(80).setRequired(true).setValue(panel.name.slice(0, 80));
-  const title = new TextInputBuilder().setCustomId('title').setLabel('Display title').setStyle(TextInputStyle.Short).setMaxLength(256).setRequired(true).setValue(panel.title.slice(0, 256));
-  const description = new TextInputBuilder().setCustomId('description').setLabel('Customer instructions').setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setRequired(true);
+function updatePanelModal(locale: string, panelId: string, panel: { name: string; title: string; description: string }): ModalBuilder {
+  const name = new TextInputBuilder().setCustomId('name').setLabel(translate(locale, 'settings.customPanel.modal.panelName')).setStyle(TextInputStyle.Short).setMaxLength(80).setRequired(true).setValue(panel.name.slice(0, 80));
+  const title = new TextInputBuilder().setCustomId('title').setLabel(translate(locale, 'settings.customPanel.modal.displayTitle')).setStyle(TextInputStyle.Short).setMaxLength(256).setRequired(true).setValue(panel.title.slice(0, 256));
+  const description = new TextInputBuilder().setCustomId('description').setLabel(translate(locale, 'settings.customPanel.modal.customerDescription')).setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setRequired(true);
   if (panel.description) description.setValue(panel.description.slice(0, 4000));
-  return new ModalBuilder().setCustomId(PREFIX + 'modal:update:' + panelId).setTitle('Edit Panel Details')
+  return new ModalBuilder().setCustomId(PREFIX + 'modal:update:' + panelId).setTitle(translate(locale, 'settings.customPanel.modal.editTitle'))
     .addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(name),
       new ActionRowBuilder<TextInputBuilder>().addComponents(title),
@@ -171,7 +171,7 @@ function updatePanelModal(panelId: string, panel: { name: string; title: string;
     );
 }
 
-function appearancePanelModal(panel: {
+function appearancePanelModal(locale: string, panel: {
   id: string;
   footer: string;
   color: string | null;
@@ -179,17 +179,17 @@ function appearancePanelModal(panel: {
   thumbnailUrl: string | null;
   bannerUrl: string | null;
 }): ModalBuilder {
-  const footer = new TextInputBuilder().setCustomId('footer').setLabel('Footer (type none to clear)').setStyle(TextInputStyle.Short).setMaxLength(1000).setRequired(false);
+  const footer = new TextInputBuilder().setCustomId('footer').setLabel(translate(locale, 'settings.customPanel.modal.footer')).setStyle(TextInputStyle.Short).setMaxLength(1000).setRequired(false);
   if (panel.footer) footer.setValue(panel.footer.slice(0, 1000));
-  const color = new TextInputBuilder().setCustomId('color').setLabel('Hex color, or none for server theme').setStyle(TextInputStyle.Short).setMaxLength(7).setRequired(false).setPlaceholder('#22D3EE');
+  const color = new TextInputBuilder().setCustomId('color').setLabel(translate(locale, 'settings.customPanel.modal.color')).setStyle(TextInputStyle.Short).setMaxLength(7).setRequired(false).setPlaceholder('#22D3EE');
   if (panel.color) color.setValue('#' + panel.color);
-  const icon = new TextInputBuilder().setCustomId('icon-url').setLabel('Small icon URL (type none to clear)').setStyle(TextInputStyle.Short).setMaxLength(1000).setRequired(false);
+  const icon = new TextInputBuilder().setCustomId('icon-url').setLabel(translate(locale, 'settings.customPanel.modal.iconUrl')).setStyle(TextInputStyle.Short).setMaxLength(1000).setRequired(false);
   if (panel.iconUrl) icon.setValue(panel.iconUrl.slice(0, 1000));
-  const thumbnail = new TextInputBuilder().setCustomId('thumbnail-url').setLabel('Thumbnail URL (type none to clear)').setStyle(TextInputStyle.Short).setMaxLength(1000).setRequired(false);
+  const thumbnail = new TextInputBuilder().setCustomId('thumbnail-url').setLabel(translate(locale, 'settings.customPanel.modal.thumbnailUrl')).setStyle(TextInputStyle.Short).setMaxLength(1000).setRequired(false);
   if (panel.thumbnailUrl) thumbnail.setValue(panel.thumbnailUrl.slice(0, 1000));
-  const banner = new TextInputBuilder().setCustomId('banner-url').setLabel('Banner image URL (type none to clear)').setStyle(TextInputStyle.Short).setMaxLength(1000).setRequired(false);
+  const banner = new TextInputBuilder().setCustomId('banner-url').setLabel(translate(locale, 'settings.customPanel.modal.bannerUrl')).setStyle(TextInputStyle.Short).setMaxLength(1000).setRequired(false);
   if (panel.bannerUrl) banner.setValue(panel.bannerUrl.slice(0, 1000));
-  return new ModalBuilder().setCustomId(PREFIX + 'modal:appearance:' + panel.id).setTitle('Panel Branding')
+  return new ModalBuilder().setCustomId(PREFIX + 'modal:appearance:' + panel.id).setTitle(translate(locale, 'settings.customPanel.modal.brandingTitle'))
     .addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(footer),
       new ActionRowBuilder<TextInputBuilder>().addComponents(color),
@@ -200,6 +200,7 @@ function appearancePanelModal(panel: {
 }
 
 function addDepartmentButtonModal(
+  locale: string,
   panelId: string,
   departmentId: string,
   departmentName: string,
@@ -207,50 +208,51 @@ function addDepartmentButtonModal(
 ): ModalBuilder {
   return new ModalBuilder()
     .setCustomId(PREFIX + 'modal:add-department:' + panelId + ':' + departmentId + ':' + (tagId ?? '*'))
-    .setTitle('Add Department Button')
+    .setTitle(translate(locale, 'settings.customPanel.modal.addDepartmentButtonTitle'))
     .addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId('label').setLabel('Button label').setStyle(TextInputStyle.Short).setMaxLength(80).setRequired(true).setValue(departmentName.slice(0, 80)),
+        new TextInputBuilder().setCustomId('label').setLabel(translate(locale, 'settings.customPanel.modal.buttonLabel')).setStyle(TextInputStyle.Short).setMaxLength(80).setRequired(true).setValue(departmentName.slice(0, 80)),
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId('emoji').setLabel('Emoji (optional)').setStyle(TextInputStyle.Short).setMaxLength(100).setRequired(false).setPlaceholder('🎫'),
+        new TextInputBuilder().setCustomId('emoji').setLabel(translate(locale, 'settings.customPanel.modal.emojiOptional')).setStyle(TextInputStyle.Short).setMaxLength(100).setRequired(false).setPlaceholder('🎫'),
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId('style').setLabel('Style: primary/secondary/success/danger').setStyle(TextInputStyle.Short).setMaxLength(9).setRequired(true).setValue('primary'),
+        new TextInputBuilder().setCustomId('style').setLabel(translate(locale, 'settings.customPanel.modal.style')).setStyle(TextInputStyle.Short).setMaxLength(9).setRequired(true).setValue('primary'),
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId('confirmation').setLabel('Confirmation text (optional)').setStyle(TextInputStyle.Paragraph).setMaxLength(1000).setRequired(false),
+        new TextInputBuilder().setCustomId('confirmation').setLabel(translate(locale, 'settings.customPanel.modal.confirmationOptional')).setStyle(TextInputStyle.Paragraph).setMaxLength(1000).setRequired(false),
       ),
     );
 }
 
-function addFormButtonModal(panelId: string, formId: string, tagId: string, formName: string): ModalBuilder {
-  return new ModalBuilder().setCustomId(PREFIX + 'modal:add-form:' + panelId + ':' + formId + ':' + tagId).setTitle('Add Form Button')
+function addFormButtonModal(locale: string, panelId: string, formId: string, tagId: string, formName: string): ModalBuilder {
+  return new ModalBuilder().setCustomId(PREFIX + 'modal:add-form:' + panelId + ':' + formId + ':' + tagId).setTitle(translate(locale, 'settings.customPanel.modal.addFormButtonTitle'))
     .addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId('label').setLabel('Button label').setStyle(TextInputStyle.Short).setMaxLength(80).setRequired(true).setValue(formName.slice(0, 80)),
+        new TextInputBuilder().setCustomId('label').setLabel(translate(locale, 'settings.customPanel.modal.buttonLabel')).setStyle(TextInputStyle.Short).setMaxLength(80).setRequired(true).setValue(formName.slice(0, 80)),
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId('emoji').setLabel('Emoji (optional)').setStyle(TextInputStyle.Short).setMaxLength(100).setRequired(false).setPlaceholder('📝'),
+        new TextInputBuilder().setCustomId('emoji').setLabel(translate(locale, 'settings.customPanel.modal.emojiOptional')).setStyle(TextInputStyle.Short).setMaxLength(100).setRequired(false).setPlaceholder('📝'),
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId('style').setLabel('Style: primary/secondary/success/danger').setStyle(TextInputStyle.Short).setMaxLength(9).setRequired(true).setValue('primary'),
+        new TextInputBuilder().setCustomId('style').setLabel(translate(locale, 'settings.customPanel.modal.style')).setStyle(TextInputStyle.Short).setMaxLength(9).setRequired(true).setValue('primary'),
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId('confirmation').setLabel('Confirmation text (optional)').setStyle(TextInputStyle.Paragraph).setMaxLength(1000).setRequired(false),
+        new TextInputBuilder().setCustomId('confirmation').setLabel(translate(locale, 'settings.customPanel.modal.confirmationOptional')).setStyle(TextInputStyle.Paragraph).setMaxLength(1000).setRequired(false),
       ),
     );
 }
 
 function editButtonModal(
+  locale: string,
   panelId: string,
   button: { id: string; label: string; emoji?: string; style: SupportPanelButtonStyle; confirmationMessage: string | null },
 ): ModalBuilder {
-  const label = new TextInputBuilder().setCustomId('label').setLabel('Button label').setStyle(TextInputStyle.Short).setMaxLength(80).setRequired(true).setValue(button.label.slice(0, 80));
-  const emoji = new TextInputBuilder().setCustomId('emoji').setLabel('Emoji (type none to clear)').setStyle(TextInputStyle.Short).setMaxLength(100).setRequired(false);
+  const label = new TextInputBuilder().setCustomId('label').setLabel(translate(locale, 'settings.customPanel.modal.buttonLabel')).setStyle(TextInputStyle.Short).setMaxLength(80).setRequired(true).setValue(button.label.slice(0, 80));
+  const emoji = new TextInputBuilder().setCustomId('emoji').setLabel(translate(locale, 'settings.customPanel.modal.emojiClear')).setStyle(TextInputStyle.Short).setMaxLength(100).setRequired(false);
   if (button.emoji) emoji.setValue(button.emoji.slice(0, 100));
-  const style = new TextInputBuilder().setCustomId('style').setLabel('Style: primary/secondary/success/danger').setStyle(TextInputStyle.Short).setMaxLength(9).setRequired(true).setValue(button.style);
-  const confirmation = new TextInputBuilder().setCustomId('confirmation').setLabel('Confirmation text (none to clear)').setStyle(TextInputStyle.Paragraph).setMaxLength(1000).setRequired(false);
+  const style = new TextInputBuilder().setCustomId('style').setLabel(translate(locale, 'settings.customPanel.modal.style')).setStyle(TextInputStyle.Short).setMaxLength(9).setRequired(true).setValue(button.style);
+  const confirmation = new TextInputBuilder().setCustomId('confirmation').setLabel(translate(locale, 'settings.customPanel.modal.confirmationClear')).setStyle(TextInputStyle.Paragraph).setMaxLength(1000).setRequired(false);
   if (button.confirmationMessage) confirmation.setValue(button.confirmationMessage.slice(0, 1000));
   return new ModalBuilder().setCustomId(PREFIX + 'modal:edit-button:' + panelId + ':' + button.id).setTitle('Edit Button')
     .addComponents(
@@ -632,7 +634,7 @@ async function showFormTagPicker(
       await audit(interaction, 'CUSTOM_PANEL_BUTTON_RETARGETED', 'Changed button "' + updated.label + '" to form ' + form.id + ' version ' + form.version + '.');
       await showButtonDetail(interaction, panelId, updated.id);
     } else {
-      await interaction.showModal(addFormButtonModal(panelId, form.id, form.tagId, form.name));
+      await interaction.showModal(addFormButtonModal((await getAdvancedSettings(guild.id)).locale, panelId, form.id, form.tagId, form.name));
     }
     return;
   }
@@ -839,7 +841,7 @@ export async function handleCustomPanelSettingsInteraction(
       return true;
     }
     if (interaction.isButton() && id === PREFIX + 'create') {
-      await interaction.showModal(createPanelModal());
+      await interaction.showModal(createPanelModal((await getAdvancedSettings(guild.id)).locale));
       return true;
     }
     if (interaction.isButton() && id === PREFIX + 'home') {
@@ -902,14 +904,14 @@ export async function handleCustomPanelSettingsInteraction(
       const panelId = id.slice((PREFIX + 'update:').length);
       const panel = await getCustomPanel(guild.id, panelId);
       if (!panel) throw new Error('Panel not found.');
-      await interaction.showModal(updatePanelModal(panelId, panel));
+      await interaction.showModal(updatePanelModal((await getAdvancedSettings(guild.id)).locale, panelId, panel));
       return true;
     }
     if (interaction.isButton() && id.startsWith(PREFIX + 'appearance:')) {
       const panelId = id.slice((PREFIX + 'appearance:').length);
       const panel = await getCustomPanel(guild.id, panelId);
       if (!panel) throw new Error('Panel not found.');
-      await interaction.showModal(appearancePanelModal(panel));
+      await interaction.showModal(appearancePanelModal((await getAdvancedSettings(guild.id)).locale, panel));
       return true;
     }
     if (interaction.isButton() && id.startsWith(PREFIX + 'access:')) {
@@ -963,7 +965,7 @@ export async function handleCustomPanelSettingsInteraction(
       const department = (await getGuildConfig(guild.id)).departments[departmentId];
       if (!department) throw new Error('That department no longer exists. Refresh and try again.');
       if (tagValue !== '*' && !department.tags[tagValue]) throw new Error('That tag no longer exists. Refresh the tag picker.');
-      await interaction.showModal(addDepartmentButtonModal(panelId, department.id, department.name, tagValue === '*' ? null : tagValue));
+      await interaction.showModal(addDepartmentButtonModal((await getAdvancedSettings(guild.id)).locale, panelId, department.id, department.name, tagValue === '*' ? null : tagValue));
       return true;
     }
     if (interaction.isButton() && id.startsWith(PREFIX + 'retarget-form:')) {
@@ -995,7 +997,7 @@ export async function handleCustomPanelSettingsInteraction(
       const tagId = interaction.values[0] ?? '';
       const form = (await listTicketForms(guild.id)).find((candidate) => candidate.id === formId && candidate.active);
       if (!form) throw new Error('The selected form is no longer active.');
-      await interaction.showModal(addFormButtonModal(panelId, formId, tagId, form.name));
+      await interaction.showModal(addFormButtonModal((await getAdvancedSettings(guild.id)).locale, panelId, formId, tagId, form.name));
       return true;
     }
     if (interaction.isButton() && id.startsWith(PREFIX + 'retarget:')) {
@@ -1015,7 +1017,7 @@ export async function handleCustomPanelSettingsInteraction(
       const panel = await getCustomPanel(guild.id, panelId);
       const button = panel?.buttons.find((candidate) => candidate.id === buttonId);
       if (!button) throw new Error('Button not found.');
-      await interaction.showModal(editButtonModal(panelId, button));
+      await interaction.showModal(editButtonModal((await getAdvancedSettings(guild.id)).locale, panelId, button));
       return true;
     }
     if (interaction.isButton() && id.startsWith(PREFIX + 'move-up:')) {
