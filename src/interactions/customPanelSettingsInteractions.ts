@@ -625,9 +625,10 @@ async function showFormTagPicker(
   page = 0,
   retargetButtonId?: string,
 ): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   const config = await getGuildConfig(interaction.guild!.id);
   const form = (await listTicketForms(interaction.guild!.id)).find((candidate) => candidate.id === formId && candidate.active);
-  if (!form) throw new Error('That form was deactivated. Refresh the active form list.');
+  if (!form) throw new Error(translate(settings.locale, 'settings.customPanel.error.formInactive'));
   if (form.tagId) {
     if (retargetButtonId) {
       const updated = await retargetCustomPanelButton(interaction.guild!.id, panelId, retargetButtonId, {
@@ -641,9 +642,9 @@ async function showFormTagPicker(
     return;
   }
   const department = config.departments[form.departmentId];
-  if (!department) throw new Error('The selected form’s department no longer exists.');
+  if (!department) throw new Error(translate(settings.locale, 'settings.customPanel.form.departmentMissing'));
   const tags = Object.values(department.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
-  if (!tags.length) throw new Error('The selected form’s department has no tags. Add a tag and retry.');
+  if (!tags.length) throw new Error(translate(settings.locale, 'settings.customPanel.form.tagsMissing'));
   const pageCount = Math.max(1, Math.ceil(tags.length / PAGE_SIZE));
   const safePage = Math.min(Math.max(page, 0), pageCount - 1);
   const visible = tags.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
@@ -652,7 +653,7 @@ async function showFormTagPicker(
     : PREFIX + 'form-tag-pick:' + panelId + ':' + formId + ':' + safePage;
   const components: PanelComponents = [
     selectRow(new StringSelectMenuBuilder().setCustomId(tagSelectId)
-      .setPlaceholder('Choose the tag this form button should use')
+      .setPlaceholder(translate(settings.locale, 'settings.customPanel.form.chooseTagPlaceholder'))
       .addOptions(visible.map((tag) => ({ label: tag.name.slice(0, 100), value: tag.id })))),
   ];
   if (pageCount > 1) {
@@ -660,19 +661,19 @@ async function showFormTagPicker(
       makeButton(retargetButtonId
         ? PREFIX + 'retarget-form-tag-page:' + panelId + ':' + retargetButtonId + ':' + formId + ':' + (safePage - 1)
         : PREFIX + 'form-tag-page:' + panelId + ':' + formId + ':' + (safePage - 1),
-      'Previous', ButtonStyle.Secondary, '⬅️', safePage === 0),
+      translate(settings.locale, 'settings.customPanel.home.previous'), ButtonStyle.Secondary, '⬅️', safePage === 0),
       makeButton(retargetButtonId
         ? PREFIX + 'retarget-form-tag-page:' + panelId + ':' + retargetButtonId + ':' + formId + ':' + (safePage + 1)
         : PREFIX + 'form-tag-page:' + panelId + ':' + formId + ':' + (safePage + 1),
-      'Next', ButtonStyle.Secondary, '➡️', safePage >= pageCount - 1),
+      translate(settings.locale, 'settings.customPanel.home.next'), ButtonStyle.Secondary, '➡️', safePage >= pageCount - 1),
     ));
   }
   components.push(row(makeButton(
     retargetButtonId ? PREFIX + 'button:' + panelId + ':' + retargetButtonId : PREFIX + 'buttons:' + panelId,
-    'Cancel', ButtonStyle.Secondary, '↩️',
+    translate(settings.locale, 'common.cancel'), ButtonStyle.Secondary, '↩️',
   )));
-  await render(interaction, retargetButtonId ? 'Change Button Target • Select Form Tag' : 'Select Form Tag',
-    'This form applies to all tags. Select the tag whose tickets should open this exact form.', components);
+  await render(interaction, translate(settings.locale, 'settings.customPanel.form.chooseTagTitle'),
+    translate(settings.locale, 'settings.customPanel.tag.description'), components);
 }
 
 async function showPanelAccess(interaction: PanelSettingsInteraction, panelId: string, buttonId?: string): Promise<void> {
