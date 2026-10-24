@@ -103,6 +103,95 @@ async function validateActionReferences(guildId:string,definition:WorkflowTempla
 function findTagId(department:{tags:Record<string,{id:string}>},value:string):string|null{
   return Object.entries(department.tags).find(([key,tag])=>key===value||tag.id===value)?.[1].id??null;
 }
+
+interface WorkflowMutationSnapshot {
+  before: Record<string, string | null>;
+  target: Record<string, string | null>;
+}
+
+function currentMutationState(
+  ticket: NonNullable<Awaited<ReturnType<typeof getPersistedTicket>>>,
+  config: Awaited<ReturnType<typeof getGuildConfig>>,
+  action: WorkflowAction,
+): Record<string, string | null> {
+  const metadata = jsonObject(ticket.metadata);
+  const currentDepartment = ticket.departmentId
+    ? config.departments[ticket.departmentId] ?? Object.values(config.departments).find((department) => department.id === ticket.departmentId)
+    : undefined;
+  if (action.type === 'set_priority') return { priority: ticket.priority };
+  if (action.type === 'add_tag') return { departmentId: currentDepartment?.id ?? ticket.departmentId, tagId: ticket.tagId };
+  return {
+    departmentId: currentDepartment?.id ?? ticket.departmentId,
+    tagId: ticket.tagId,
+    staffRoleId: typeof metadata.staffRoleId === 'string' ? metadata.staffRoleId : null,
+  };
+}
+
+async function captureMutationSnapshot(
+  guildId: string,
+  channelId: string,
+  action: WorkflowAction,
+): Promise<WorkflowMutationSnapshot> {
+  const ticket = await getActiveTicket(channelId, guildId);
+  const config = await getGuildConfig(guildId);
+  const before = currentMutationState(ticket, config, action);
+
+  if (action.type === 'set_priority') {
+    return { before, target: { priority: action.value } };
+  }
+
+  if (action.type === 'add_tag') {
+    const currentDepartment = ticket.departmentId
+      ? config.departments[ticket.departmentId] ?? Object.values(config.departments).find((department) => department.id === ticket.departmentId)
+      : undefined;
+    if (!currentDepartment) throw new Error('The current ticket department no longer exists.');
+    const targetTagId = findTagId(currentDepartment, action.value);
+    if (!targetTagId) throw new Error('The workflow target tag no longer exists in the current department.');
+    return { before, target: { departmentId: currentDepartment.id, tagId: targetTagId } };
+  }
+
+  const targetDepartment = config.departments[action.value] ??
+    Object.values(config.departments).find((department) => department.id === action.value);
+  if (!targetDepartment) throw new Error('The workflow target department no longer exists.');
+  const currentDepartment = ticket.departmentId
+    ? config.departments[ticket.departmentId] ?? Object.values(config.departments).find((department) => department.id === ticket.departmentId)
+    : undefined;
+  const currentTagValid = Boolean(
+    currentDepartment?.id === targetDepartment.id &&
+    ticket.tagId &&
+    Object.values(targetDepartment.tags).some((tag) => tag.id === ticket.tagId),
+  );
+  const targetTagId = currentTagValid ? ticket.tagId! : Object.values(targetDepartment.tags)[0]?.id;
+  if (!targetTagId) throw new Error('The workflow target department has no configured tags.');
+  return {
+    before,
+    target: {
+      departmentId: targetDepartment.id,
+      tagId: targetTagId,
+      staffRoleId: targetDepartment.staffRoleId ?? 'none',
+    },
+  };
+}
+
+function parseMutationSnapshot(value: unknown): WorkflowMutationSnapshot | null {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  if (!raw || !raw.before || !raw.target ||
+      typeof raw.before !== 'object' || Array.isArray(raw.before) ||
+      typeof raw.target !== 'object' || Array.isArray(raw.target)) return null;
+  const validState = (state: unknown): state is Record<string, string | null> =>
+    Boolean(state && typeof state === 'object' && !Array.isArray(state) &&
+      Object.values(state as Record<string, unknown>).every((item) => item === null || typeof item === 'string'));
+  if (!validState(raw.before) || !validState(raw.target)) return null;
+  return { before: raw.before, target: raw.target };
+}
+
+function mutationStateMatches(
+  actual: Record<string, string | null>,
+  expected: Record<string, string | null>,
+): boolean {
+  return Object.keys(actual).length === Object.keys(expected).length &&
+    Object.keys(expected).every((key) => actual[key] === expected[key]);
+}
 async function markStep(client:PoolClient,step:StepRow,status:StepStatus,opts:{
   result?:Record<string,unknown>; destinationMessageId?:string|null; errorCode?:string|null; startAttempt?:boolean; completed?:boolean;
 }={}):Promise<void>{
@@ -244,23 +333,57 @@ async function executeSteps(client:PoolClient,guildId:string,channel:TicketChann
           return summaryWithClient(client,guildId,runId);
         }
       }else{
-        const ticket=await getActiveTicket(channel.id,guildId);
-        if((step.action_type==='set_priority'&&ticket.priority===step.action_value)||
-           (step.action_type==='assign_department'&&ticket.departmentId===step.action_value)||
-           (step.action_type==='add_tag'&&ticket.tagId===step.action_value)){
-          await markStep(client,step,'completed',{result:{recoveredByCurrentState:true},completed:true});
+        const action = definition.actions[step.step_index];
+        const persistedResult = jsonObject(step.result);
+        const snapshot = parseMutationSnapshot(persistedResult.mutationSnapshot);
+        if (!action || action.type === 'send_quick_reply' || !snapshot) {
+          await markStep(client,step,'needs_review',{
+            errorCode:'mutation_recovery_snapshot_missing',
+            result:{manualReviewRequired:true,reason:'The pre-action state was not recorded; automatic retry is unsafe.'},
+          });
+          await setRunStatus(client,runId,'needs_review',step.step_index,{stopReason:'mutation_recovery_snapshot_missing'});
+          return summaryWithClient(client,guildId,runId);
+        }
+        const ticket = await getActiveTicket(channel.id,guildId);
+        const config = await getGuildConfig(guildId);
+        const current = currentMutationState(ticket,config,action);
+        if (mutationStateMatches(current,snapshot.target)) {
+          await markStep(client,step,'completed',{result:{recoveredByTargetState:true},completed:true});
           continue;
         }
+        if (!mutationStateMatches(current,snapshot.before)) {
+          await markStep(client,step,'needs_review',{
+            errorCode:'mutation_state_diverged',
+            result:{manualReviewRequired:true,reason:'The ticket changed after this step began. No overwrite was attempted.'},
+          });
+          await setRunStatus(client,runId,'needs_review',step.step_index,{stopReason:'mutation_state_diverged'});
+          return summaryWithClient(client,guildId,runId);
+        }
+        // The ticket still matches the recorded pre-action state, so retrying this mutation is safe.
+      }
+    }
+    const action=definition.actions[step.step_index];
+    if(!action){
+      await markStep(client,step,'failed',{errorCode:'stored_action_missing',result:{manualReviewRequired:true}});
+      await setRunStatus(client,runId,'failed',step.step_index,{stopReason:'stored_action_missing'});
+      return summaryWithClient(client,guildId,runId);
+    }
+    let startResult:Record<string,unknown>={};
+    if(step.status==='pending'&&action.type!=='send_quick_reply'){
+      try{
+        startResult={mutationSnapshot:await captureMutationSnapshot(guildId,channel.id,action)};
+      }catch{
+        await markStep(client,step,'failed',{errorCode:'mutation_preflight_failed',result:{manualReviewRequired:true}});
+        await setRunStatus(client,runId,'failed',step.step_index,{stopReason:'mutation_preflight_failed'});
+        return summaryWithClient(client,guildId,runId);
       }
     }
     step=(await client.query<StepRow>(
-      "UPDATE workflow_execution_steps SET status='running',attempts=attempts+1,started_at=COALESCE(started_at,NOW()),error_code=NULL,updated_at=NOW() WHERE id=$1 RETURNING *",
-      [step.id],
+      "UPDATE workflow_execution_steps SET status='running',attempts=attempts+1,started_at=COALESCE(started_at,NOW()),error_code=NULL,result=result || $2::jsonb,updated_at=NOW() WHERE id=$1 RETURNING *",
+      [step.id,JSON.stringify(startResult)],
     )).rows[0]??step;
     await client.query('UPDATE workflow_execution_runs SET current_step_index=$2,updated_at=NOW() WHERE id=$1',[runId,step.step_index]);
     try{
-      const action=definition.actions[step.step_index];
-      if(!action)throw new Error('Stored workflow step is not present in the immutable template snapshot.');
       if(action.type==='send_quick_reply'){
         const messageId=await sendQuickReply(guildId,channel,actorName,run,step);
         await markStep(client,step,'completed',{destinationMessageId:messageId,result:{destinationMessageId:messageId},completed:true});
