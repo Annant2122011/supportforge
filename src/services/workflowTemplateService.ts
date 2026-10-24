@@ -338,6 +338,18 @@ export async function restoreWorkflowTemplateRevision(
   }
 }
 
+/** Return only an active template owned by the requested guild. */
+export async function getWorkflowTemplateById(
+  guildId: string,
+  templateId: string,
+): Promise<WorkflowTemplate | undefined> {
+  const result = await getPostgresPool().query<WorkflowRow>(
+    'SELECT ' + COLUMNS + ' FROM workflow_templates WHERE guild_id=$1 AND id=$2 AND deleted_at IS NULL LIMIT 1',
+    [guildId, templateId],
+  );
+  return result.rows[0] ? fromRow(result.rows[0]) : undefined;
+}
+
 export async function previewWorkflowTemplateById(
   guildId: string,
   templateId: string,
