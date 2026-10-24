@@ -541,6 +541,126 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+  {
+    id: 13,
+    name: 'add_knowledge_base_and_quick_reply_productivity',
+    up: async (db) => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS knowledge_base_articles (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          slug TEXT NOT NULL,
+          title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 180),
+          body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 20000),
+          category TEXT NOT NULL DEFAULT 'General' CHECK (length(category) BETWEEN 1 AND 80),
+          tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          visibility TEXT NOT NULL DEFAULT 'public' CHECK (visibility IN ('public','staff')),
+          status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','published','archived')),
+          revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+          created_by TEXT NOT NULL,
+          updated_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          published_at TIMESTAMPTZ,
+          search_vector TSVECTOR GENERATED ALWAYS AS (
+            setweight(to_tsvector('simple'::regconfig, coalesce(title, '')), 'A') ||
+            setweight(to_tsvector('simple'::regconfig, coalesce(category, '')), 'B') ||
+            setweight(to_tsvector('simple'::regconfig, coalesce(array_to_string(tags, ' '), '')), 'B') ||
+            setweight(to_tsvector('simple'::regconfig, coalesce(body, '')), 'C')
+          ) STORED
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_articles_guild_slug
+          ON knowledge_base_articles (guild_id, slug);
+        CREATE INDEX IF NOT EXISTS idx_kb_articles_guild_status_updated
+          ON knowledge_base_articles (guild_id, status, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_kb_articles_search_vector
+          ON knowledge_base_articles USING GIN (search_vector);
+
+        CREATE TABLE IF NOT EXISTS knowledge_base_article_revisions (
+          article_id TEXT NOT NULL REFERENCES knowledge_base_articles(id) ON DELETE CASCADE,
+          guild_id TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK (revision > 0),
+          slug TEXT NOT NULL,
+          title TEXT NOT NULL,
+          body TEXT NOT NULL,
+          category TEXT NOT NULL,
+          tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          visibility TEXT NOT NULL CHECK (visibility IN ('public','staff')),
+          status TEXT NOT NULL CHECK (status IN ('draft','published','archived')),
+          changed_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (article_id, revision)
+        );
+        CREATE INDEX IF NOT EXISTS idx_kb_revisions_guild_article
+          ON knowledge_base_article_revisions (guild_id, article_id, revision DESC);
+
+        CREATE TABLE IF NOT EXISTS knowledge_base_synonyms (
+          guild_id TEXT NOT NULL,
+          normalized_term TEXT NOT NULL,
+          synonyms TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          updated_by TEXT NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (guild_id, normalized_term)
+        );
+
+        CREATE TABLE IF NOT EXISTS knowledge_base_usage (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          article_id TEXT NOT NULL REFERENCES knowledge_base_articles(id) ON DELETE CASCADE,
+          action TEXT NOT NULL CHECK (action IN ('search_result','view','share')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_kb_usage_guild_action_time
+          ON knowledge_base_usage (guild_id, action, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_kb_usage_article_time
+          ON knowledge_base_usage (article_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS knowledge_base_feedback (
+          guild_id TEXT NOT NULL,
+          article_id TEXT NOT NULL REFERENCES knowledge_base_articles(id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL,
+          helpful BOOLEAN NOT NULL,
+          comment TEXT NOT NULL DEFAULT '' CHECK (length(comment) <= 500),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (guild_id, article_id, user_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_kb_feedback_guild_time
+          ON knowledge_base_feedback (guild_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS quick_reply_templates (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 80),
+          content TEXT NOT NULL CHECK (length(content) BETWEEN 1 AND 1900),
+          department_id TEXT NOT NULL DEFAULT '*',
+          tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          enabled BOOLEAN NOT NULL DEFAULT TRUE,
+          revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+          created_by TEXT NOT NULL,
+          updated_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_quick_reply_guild_name
+          ON quick_reply_templates (guild_id, lower(name));
+        CREATE INDEX IF NOT EXISTS idx_quick_reply_guild_enabled
+          ON quick_reply_templates (guild_id, enabled, department_id, lower(name));
+
+        CREATE TABLE IF NOT EXISTS quick_reply_usage (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          quick_reply_id TEXT NOT NULL REFERENCES quick_reply_templates(id) ON DELETE CASCADE,
+          actor_id TEXT NOT NULL,
+          used_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_quick_reply_usage_guild_time
+          ON quick_reply_usage (guild_id, used_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_quick_reply_usage_template_time
+          ON quick_reply_usage (quick_reply_id, used_at DESC);
+      `);
+    },
+  },
 ];
 
 /** Latest migration identifier required by this application version. */
