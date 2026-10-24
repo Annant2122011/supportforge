@@ -513,6 +513,7 @@ export async function searchKnowledgeBase(
       summary: article.summary,
       category: article.category,
       tags: article.tags,
+      bodyTokens: new Set(normalizeKnowledgeText(article.body).split(' ').filter((token) => token.length > 1)),
     };
     const score = Math.max(
       0,
