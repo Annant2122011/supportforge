@@ -5,7 +5,7 @@ import type { TextChannel } from 'discord.js';
 
 import { closePostgresDatabase, getPostgresPool } from '../src/core/persistence/postgresDatabase';
 import { migratePostgres } from '../src/core/persistence/migrationRunner';
-import { getPersistedTicket, registerTicket } from '../src/services/ticketPersistenceService';
+import { getPersistedTicket, registerTicket, updatePersistedTicketMetadata } from '../src/services/ticketPersistenceService';
 import {
   executeWorkflowTemplateForTicket,
   listWorkflowExecutionRunsForTicket,
@@ -90,6 +90,46 @@ test('manual workflow execution records durable steps, applies a guarded mutatio
     assert.equal(resumed.steps[0]?.status, 'completed');
     assert.equal((await getPersistedTicket(channelId))?.priority, 'critical');
     assert.equal((await listWorkflowExecutionRunsForTicket(guildId, run.ticketId)).length, 1);
+
+    // A separate administrator changes the ticket after a partial execution. Resume must not overwrite that intervening change.
+    const changedChannelId = 'workflow-channel-' + randomUUID();
+    const changedTicketMarker = 'workflow-ticket-' + randomUUID();
+    await createTicket(guildId, changedChannelId, changedTicketMarker);
+    const changedRun = await executeWorkflowTemplateForTicket({
+      guildId,
+      channel: testChannel(changedChannelId),
+      actorId,
+      actorName: actorId,
+      interactionId: 'workflow-interaction-' + randomUUID(),
+      templateId: template.id,
+      expectedVersion: enabled.version,
+      confirmation: 'RUN ' + template.id + ' v' + enabled.version,
+    });
+    assert.equal(changedRun.status, 'completed');
+    await pool.query(
+      "UPDATE workflow_execution_steps SET status='running',completed_at=NULL WHERE run_id=$1 AND step_index=0",
+      [changedRun.id],
+    );
+    await pool.query(
+      "UPDATE workflow_execution_runs SET status='failed',finished_at=NULL,current_step_index=0 WHERE id=$1",
+      [changedRun.id],
+    );
+    await updatePersistedTicketMetadata(
+      changedChannelId,
+      { priority: 'urgent' },
+      { id: 'another-admin', attribution: 'actorKnown', confidence: 'high' },
+    );
+    const needsReview = await resumeWorkflowExecutionForTicket({
+      guildId,
+      channel: testChannel(changedChannelId),
+      actorId,
+      actorName: actorId,
+      runId: changedRun.id,
+      confirmation: 'RESUME ' + changedRun.id,
+    });
+    assert.equal(needsReview.status, 'needs_review');
+    assert.equal(needsReview.steps[0]?.status, 'needs_review');
+    assert.equal((await getPersistedTicket(changedChannelId))?.priority, 'urgent');
   } finally {
     await cleanupGuild(guildId);
   }
