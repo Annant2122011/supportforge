@@ -536,6 +536,8 @@ const enUS = {
   'settings.customPanel.roles.current': "Current allowed roles",
   'settings.customPanel.roles.description': "Choose roles below. Selection replaces the current allowed-role list. An empty selection permits everyone at this level. Panel and button rules are combined: when both are restricted, the member must satisfy both.",
   'settings.customPanel.roles.allowEveryone': "Allow Everyone",
+  'settings.customPanel.form.tagPickerDescription': "This form applies to all tags. Select the tag whose tickets should open this exact form.",
+  'settings.customPanel.error.noChannels': "No accessible text channels were found where QueryFixr can view, send messages and embeds.",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
