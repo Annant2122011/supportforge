@@ -277,7 +277,7 @@ async function showPriorityRules(interaction: ButtonInteraction): Promise<void> 
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🎨 ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.priorityRules.title'))
+      .setTitle('🎨 ' + translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'settings.priorityRules.title'))
       .setDescription(
         'Priority roles are optional server rules. **Nothing is created automatically.** Choose a priority to create its role, or delete an existing ResolvX priority role. ResolvX will not fail the whole rule operation just because Discord refuses a role-hierarchy reorder.',
       )
@@ -293,7 +293,7 @@ async function showPriorityRules(interaction: ButtonInteraction): Promise<void> 
 
 async function createPriorityRole(interaction: ButtonInteraction, priority: TicketPriority): Promise<void> {
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
-    await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.priorityRules.adminRequired'));
+    await reject(interaction, '❌ ' + translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'settings.priorityRules.adminRequired'));
     return;
   }
 
@@ -355,7 +355,7 @@ async function createPriorityRole(interaction: ButtonInteraction, priority: Tick
     await interaction.editReply({
       embeds: [
         new EmbedBuilder()
-          .setTitle('✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.priorityRules.createdTitle'))
+          .setTitle('✅ ' + translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'settings.priorityRules.createdTitle'))
           .setDescription(
             definition.emoji +
               ' **' +
