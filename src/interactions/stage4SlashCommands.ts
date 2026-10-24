@@ -162,6 +162,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
     const actorId = interaction.user.id;
 
     if (group === 'knowledge') {
+      const settings = await getAdvancedSettings(guildId);
       if (['create','update','publish','archive','revisions','restore-revision','synonyms-set','synonyms-delete','metrics'].includes(subcommand) && !access.isAdmin) {
         throw accessDenied('Manage Server or Administrator permission');
       }
@@ -185,7 +186,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
             detail: 'Created Knowledge Base draft ' + article.id + ', revision ' + article.revision + '.',
           });
         }
-        await interaction.editReply('Created draft article "' + article.title + '". Article ID: ' + article.id + '. Revision: ' + article.revision + '. Publish it after review with /supportforge knowledge publish.');
+        await interaction.editReply(translate(settings.locale, 'knowledge.command.createdDraft', { title: article.title, id: article.id, revision: article.revision }));
         return true;
       }
 
@@ -193,13 +194,13 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         const articles = await listKnowledgeArticles(guildId, access, 25);
         const body = articles.length
           ? articles.map((article) =>
-              '**' + article.title + '** (' + article.status + ', r' + article.revision + ')\nID: ' + article.id +
-              '\nCategory: ' + article.category + ' • ' + article.visibility + '\n' + (article.summary || 'No summary'),
+              '**' + article.title + '** (' + translate(settings.locale, article.status === 'draft' ? 'knowledge.command.statusDraft' : article.status === 'published' ? 'knowledge.command.statusPublished' : 'knowledge.command.statusArchived') + ', r' + article.revision + ')\nID: ' + article.id +
+              '\n' + translate(settings.locale, 'knowledge.command.category') + ': ' + article.category + ' • ' + translate(settings.locale, article.visibility === 'staff' ? 'knowledge.command.visibilityStaff' : 'knowledge.command.visibilityPublic') + '\n' + (article.summary || translate(settings.locale, 'knowledge.command.noSummary')),
             ).join('\n\n')
-          : 'No Knowledge Base articles are available to you.';
+          : translate(settings.locale, 'knowledge.command.noArticles');
         await interaction.editReply({
-          embeds: [new EmbedBuilder().setTitle('📚 Knowledge Base Articles').setDescription(body.slice(0, 4000))
-            .setFooter({ text: 'Only articles you are authorized to see are listed. Use the article ID with /supportforge knowledge view.' })],
+          embeds: [new EmbedBuilder().setTitle('📚 ' + translate(settings.locale, 'knowledge.command.articlesTitle')).setDescription(body.slice(0, 4000))
+            .setFooter({ text: translate(settings.locale, 'knowledge.command.articlesFooter') })],
         });
         return true;
       }
@@ -208,21 +209,21 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         const articleId = interaction.options.getString('article-id', true).trim();
         const page = interaction.options.getInteger('page') ?? 1;
         const article = await getKnowledgeArticle(guildId, articleId, access, true, actorId);
-        if (!article) throw new Error('Article not found or you do not have permission to view it.');
+        if (!article) throw new Error(translate(settings.locale, 'knowledge.command.articleNotFound'));
         const pageSize = 3300;
         const pageCount = Math.max(1, Math.ceil(article.body.length / pageSize));
-        if (page > pageCount) throw new Error('Article has ' + pageCount + ' page(s).');
+        if (page < 1 || page > pageCount) throw new Error(translate(settings.locale, 'knowledge.command.pageOutOfRange', { pages: pageCount }));
         const excerpt = article.body.slice((page - 1) * pageSize, page * pageSize);
         await interaction.editReply({
           embeds: [new EmbedBuilder()
             .setTitle(article.title)
             .setDescription((article.summary ? article.summary + '\n\n' : '') + excerpt)
             .addFields(
-              { name: 'Category', value: article.category, inline: true },
-              { name: 'Tags', value: article.tags.join(', ') || 'None', inline: true },
-              { name: 'Revision', value: String(article.revision), inline: true },
+              { name: translate(settings.locale, 'knowledge.command.category'), value: article.category, inline: true },
+              { name: translate(settings.locale, 'knowledge.command.tags'), value: article.tags.join(', ') || translate(settings.locale, 'knowledge.command.noTags'), inline: true },
+              { name: translate(settings.locale, 'knowledge.command.revision'), value: String(article.revision), inline: true },
             )
-            .setFooter({ text: 'Article ID ' + article.id + ' • Page ' + page + '/' + pageCount + ' • Updated ' + article.updatedAt })],
+            .setFooter({ text: translate(settings.locale, 'knowledge.command.articleFooter', { id: article.id, page, pages: pageCount, updated: article.updatedAt }) })],
         });
         return true;
       }
@@ -243,7 +244,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         if (tags !== null) changes.tags = commaList(tags, 'tags', 12);
         if (visibility !== null) changes.visibility = visibility as 'public' | 'staff';
         if (roles !== null) changes.allowedRoleIds = commaList(roles, 'role IDs', 20);
-        if (!Object.keys(changes).length) throw new Error('Provide at least one article field to update.');
+        if (!Object.keys(changes).length) throw new Error(translate(settings.locale, 'knowledge.command.updateNoFields'));
         const article = await updateKnowledgeArticle(
           guildId, interaction.options.getString('article-id', true).trim(),
           interaction.options.getInteger('revision', true), actorId, changes,
@@ -252,13 +253,13 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           action: 'KNOWLEDGE_ARTICLE_UPDATED', actorId, actorName: interaction.user.tag,
           detail: 'Updated Knowledge Base article ' + article.id + ' to revision ' + article.revision + '; changed fields=' + Object.keys(changes).join(',') + '.',
         });
-        await interaction.editReply('Updated article "' + article.title + '" to revision ' + article.revision + '. The previous revision remains in history.');
+        await interaction.editReply(translate(settings.locale, 'knowledge.command.updated', { title: article.title, revision: article.revision }));
         return true;
       }
 
       if (subcommand === 'publish' || subcommand === 'archive') {
         if (subcommand === 'archive' && !interaction.options.getBoolean('confirm', true)) {
-          throw new Error('Archiving was not confirmed. No change was made.');
+          throw new Error(translate(settings.locale, 'knowledge.command.archiveNotConfirmed'));
         }
         const article = await setKnowledgeArticleStatus(
           guildId,
@@ -275,7 +276,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
             detail: (subcommand === 'publish' ? 'Published ' : 'Archived ') + article.id + ' at revision ' + article.revision + '.',
           });
         }
-        await interaction.editReply('Article "' + article.title + '" is now ' + article.status + ' at revision ' + article.revision + '.');
+        await interaction.editReply(translate(settings.locale, subcommand === 'publish' ? 'knowledge.command.publishedSuccess' : 'knowledge.command.archivedSuccess', { title: article.title, revision: article.revision }));
         return true;
       }
 
@@ -289,31 +290,29 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         const results = await searchKnowledgeBase(guildId, query, access, actorId);
         if (!results.length) {
           await interaction.editReply(
-            'No confident article match was found for this ticket. This does not block human support; continue helping the customer normally.',
+            translate(settings.locale, 'knowledge.command.noConfidentTicketMatch'),
           );
           return true;
         }
 
         const description = results.map((result, index) =>
-          '**' + (index + 1) + '. ' + result.title + '** • ' + result.confidence.toUpperCase() +
-          ' confidence • score ' + result.score + '\n' +
-          (result.summary || 'No summary') + '\nCategory: ' + result.category +
-          (result.tags.length ? '\nTags: ' + result.tags.join(', ') : ''),
+          translate(settings.locale, 'knowledge.command.suggestionLine', { index: index + 1, title: result.title, confidence: translate(settings.locale, result.confidence === 'high' ? 'knowledge.command.confidenceHigh' : result.confidence === 'medium' ? 'knowledge.command.confidenceMedium' : 'knowledge.command.confidenceLow'), score: result.score, summary: result.summary || translate(settings.locale, 'knowledge.command.noSummary'), category: result.category }) +
+          (result.tags.length ? '\n' + translate(settings.locale, 'knowledge.command.tagsLine', { tags: result.tags.join(', ') }) : ''),
         ).join('\n\n').slice(0, 3600);
         const shareable = results.filter((result) => isKnowledgeShareableConfidence(result.confidence)).slice(0, 5);
         const components = shareable.length
           ? [new ActionRowBuilder<ButtonBuilder>().addComponents(
               ...shareable.map((result) => new ButtonBuilder()
                 .setCustomId('sf:kb:share:' + result.id + ':' + ticket.channelId)
-                .setLabel('Share ' + (results.findIndex((item) => item.id === result.id) + 1))
+                .setLabel(translate(settings.locale, 'knowledge.command.shareButton', { number: results.findIndex((item) => item.id === result.id) + 1 }))
                 .setEmoji('📚')
                 .setStyle(ButtonStyle.Secondary)),
             )]
           : [];
         await interaction.editReply({
-          embeds: [new EmbedBuilder().setTitle('📚 Suggested Knowledge Base articles')
+          embeds: [new EmbedBuilder().setTitle('📚 ' + translate(settings.locale, 'knowledge.command.suggestionsTitle'))
             .setDescription(description)
-            .setFooter({ text: 'Share buttons are shown only for medium/high confidence. Suggestions never replace human support.' })],
+            .setFooter({ text: translate(settings.locale, 'knowledge.command.suggestionsFooter') })],
           components,
         });
         return true;
@@ -322,16 +321,15 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
       if (subcommand === 'search') {
         const results = await searchKnowledgeBase(guildId, interaction.options.getString('query', true), access, actorId);
         if (!results.length) {
-          await interaction.editReply('No confident Knowledge Base match was found. This does not block ordinary human support; continue with a ticket if needed.');
+          await interaction.editReply(translate(settings.locale, 'knowledge.command.noConfidentSearchMatch'));
           return true;
         }
         const body = results.map((result, index) =>
-          '**' + (index + 1) + '. ' + result.title + '** • ' + result.confidence.toUpperCase() + ' confidence • score ' + result.score +
-          '\nID: ' + result.id + '\n' + (result.summary || 'No summary') + '\nCategory: ' + result.category,
+          translate(settings.locale, 'knowledge.command.searchResultLine', { index: index + 1, title: result.title, confidence: translate(settings.locale, result.confidence === 'high' ? 'knowledge.command.confidenceHigh' : result.confidence === 'medium' ? 'knowledge.command.confidenceMedium' : 'knowledge.command.confidenceLow'), score: result.score, id: result.id, summary: result.summary || translate(settings.locale, 'knowledge.command.noSummary'), category: result.category }),
         ).join('\n\n');
         await interaction.editReply({
-          embeds: [new EmbedBuilder().setTitle('🔎 Knowledge Base Search').setDescription(body.slice(0, 4000))
-            .setFooter({ text: 'Deterministic PostgreSQL search and typo-tolerant fallback • suggestions never replace human support' })],
+          embeds: [new EmbedBuilder().setTitle('🔎 ' + translate(settings.locale, 'knowledge.command.searchTitle')).setDescription(body.slice(0, 4000))
+            .setFooter({ text: translate(settings.locale, 'knowledge.command.searchFooter') })],
         });
         return true;
       }
@@ -343,19 +341,19 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           throw accessDenied('the staff role configured for this ticket department');
         }
         const article = await getKnowledgeArticle(guildId, interaction.options.getString('article-id', true).trim(), access);
-        if (!article || article.status !== 'published') throw new Error('Published article not found or you do not have permission to share it.');
+        if (!article || article.status !== 'published') throw new Error(translate(settings.locale, 'knowledge.command.publishedArticleNotFound'));
         const shareBody = article.body.slice(0, 2600);
         const truncated = article.body.length > shareBody.length;
         await requireTextChannel(interaction).send({
-          embeds: [new EmbedBuilder().setTitle('📚 Suggested article: ' + article.title)
+          embeds: [new EmbedBuilder().setTitle(translate(settings.locale, 'knowledge.command.suggestedArticleTitle', { title: article.title }))
             .setDescription(
               (article.summary ? article.summary + '\n\n' : '') +
-              '**Category:** ' + article.category + '\n' +
-              '**Tags:** ' + (article.tags.join(', ') || 'none') + '\n\n' +
-              shareBody + (truncated ? '\n\n… Open /supportforge knowledge view with article ID ' + article.id + ' for the full article.' : '') +
-              '\n\n_This is a suggested resource, not a replacement for human support. The ticket remains open for follow-up._',
+              '**' + translate(settings.locale, 'knowledge.command.shareCategoryLabel') + ':** ' + article.category + '\n' +
+              '**' + translate(settings.locale, 'knowledge.command.shareTagsLabel') + ':** ' + (article.tags.join(', ') || translate(settings.locale, 'knowledge.command.shareNoTags')) + '\n\n' +
+              shareBody + (truncated ? '\n\n' + translate(settings.locale, 'knowledge.command.truncatedNotice', { id: article.id }) : '') +
+              '\n\n' + translate(settings.locale, 'knowledge.command.humanSupportNote')',
             )
-            .setFooter({ text: 'Knowledge Base article ' + article.id + ' • revision ' + article.revision })],
+            .setFooter({ text: translate(settings.locale, 'knowledge.command.shareFooter', { id: article.id, revision: article.revision }) })],
           allowedMentions: { parse: [] },
         });
         await recordKnowledgeArticleShare(guildId, article.id, access, actorId);
@@ -370,7 +368,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
             detail: 'Shared published Knowledge Base article ' + article.id + ' revision ' + article.revision + '.',
           });
         }
-        await interaction.editReply('Shared "' + article.title + '" in the current ticket. The message has no automatic user mentions.');
+        await interaction.editReply(translate(settings.locale, 'knowledge.command.shared', { title: article.title }));
         return true;
       }
 
@@ -378,8 +376,8 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         const articleId = interaction.options.getString('article-id', true).trim();
         const revisions = await listKnowledgeArticleRevisions(guildId, articleId, access);
         await interaction.editReply(revisions.length
-          ? revisions.map((item) => 'r' + item.revision + ' • ' + item.status + ' • ' + item.createdAt + '\n' + item.title + ' • editor ' + item.changedBy).join('\n\n').slice(0, 4000)
-          : 'No revision records were found.');
+          ? revisions.map((item) => translate(settings.locale, 'knowledge.command.revisionLine', { revision: item.revision, status: translate(settings.locale, item.status === 'published' ? 'knowledge.command.statusPublished' : item.status === 'archived' ? 'knowledge.command.statusArchived' : 'knowledge.command.statusDraft'), createdAt: item.createdAt, title: item.title, editor: item.changedBy })).join('\n\n').slice(0, 4000)
+          : translate(settings.locale, 'knowledge.command.noRevisions'));
         return true;
       }
 
@@ -395,7 +393,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           action: 'KNOWLEDGE_ARTICLE_REVISION_RESTORED', actorId, actorName: interaction.user.tag,
           detail: 'Restored historical article content for ' + article.id + ' into new revision ' + article.revision + '.',
         });
-        await interaction.editReply('Restored historical content into a new revision. Article "' + article.title + '" is now revision ' + article.revision + '; previous history was not overwritten.');
+        await interaction.editReply(translate(settings.locale, 'knowledge.command.restoreSuccess', { title: article.title, revision: article.revision }));
         return true;
       }
 
@@ -407,7 +405,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           access,
           interaction.options.getBoolean('helpful', true),
         );
-        await interaction.editReply('Thank you. Your article feedback has been saved. Duplicate votes are blocked.');
+        await interaction.editReply(translate(settings.locale, 'knowledge.command.feedbackSaved'));
         return true;
       }
 
@@ -422,15 +420,15 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           action: 'KNOWLEDGE_SYNONYMS_UPDATED', actorId, actorName: interaction.user.tag,
           detail: 'Updated deterministic Knowledge Base synonyms for a canonical term.',
         });
-        await interaction.editReply('Saved synonym mapping. Search logs retain usage counts, not raw customer queries.');
+        await interaction.editReply(translate(settings.locale, 'knowledge.command.synonymsSaved'));
         return true;
       }
 
       if (subcommand === 'synonyms-list') {
         const synonyms = await listKnowledgeSynonyms(guildId);
         await interaction.editReply(synonyms.length
-          ? synonyms.map((item) => '**' + item.term + '** → ' + (item.synonyms.join(', ') || 'no alternatives')).join('\n').slice(0, 4000)
-          : 'No synonyms have been configured.');
+          ? synonyms.map((item) => '**' + item.term + '** → ' + (item.synonyms.join(', ') || translate(settings.locale, 'knowledge.command.synonymsNoAlternatives'))).join('\n').slice(0, 4000)
+          : translate(settings.locale, 'knowledge.command.synonymsNone'));
         return true;
       }
 
@@ -440,7 +438,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           action: 'KNOWLEDGE_SYNONYMS_DELETED', actorId, actorName: interaction.user.tag,
           detail: 'Deleted deterministic Knowledge Base synonym mapping.',
         });
-        await interaction.editReply(deleted ? 'Removed that synonym mapping.' : 'No matching synonym mapping was found.');
+        await interaction.editReply(translate(settings.locale, deleted ? 'knowledge.command.synonymsRemoved' : 'knowledge.command.synonymNotFound'));
         return true;
       }
 
@@ -448,15 +446,9 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         const days = interaction.options.getInteger('days') ?? 30;
         const metrics = await getKnowledgeBaseMetrics(guildId, days);
         await interaction.editReply({
-          embeds: [new EmbedBuilder().setTitle('📊 Knowledge Base Metrics')
-            .setDescription(
-              'Window: ' + days + ' days\nPublished articles: ' + metrics.publishedArticles +
-              '\nDraft articles: ' + metrics.draftArticles + '\nArchived articles: ' + metrics.archivedArticles +
-              '\nSearch-result appearances: ' + metrics.searchResultEvents + '\nViews: ' + metrics.articleViews +
-              '\nShares: ' + metrics.articleShares + '\nHelpful votes: ' + metrics.helpfulVotes +
-              '\nUnhelpful votes: ' + metrics.unhelpfulVotes,
-            )
-            .setFooter({ text: 'Only per-server aggregate usage is displayed. Raw search queries are not stored.' })],
+          embeds: [new EmbedBuilder().setTitle('📊 ' + translate(settings.locale, 'knowledge.command.metricsTitle'))
+            .setDescription(translate(settings.locale, 'knowledge.command.metricsDescription', { days, published: metrics.publishedArticles, drafts: metrics.draftArticles, archived: metrics.archivedArticles, searches: metrics.searchResultEvents, views: metrics.articleViews, shares: metrics.articleShares, helpful: metrics.helpfulVotes, unhelpful: metrics.unhelpfulVotes }))
+            .setFooter({ text: translate(settings.locale, 'knowledge.command.metricsFooter') })],
         });
         return true;
       }
