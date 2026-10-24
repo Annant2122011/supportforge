@@ -43,7 +43,7 @@
 - Extracted deterministic recovery segment markers into a pure helper and added coverage for stable identity, distinct segments, and marker extraction. These markers reduce replay duplication but do not promise cross-system exactly-once delivery.
 - Added guarded saves for quick replies and workflow templates. Create is distinct from update; an update must supply the current `expected-version` shown in the list. Two concurrent updates with the same version cannot both succeed.
 - Added disposable-PostgreSQL integration tests for concurrent quick-reply edits, disabled-state preservation, stale workflow writes, Knowledge Base publication/revision safety, public/staff/role access, hidden search results and duplicate article ratings.
-- These additions require the new PR-head CI run to complete before they are marked verified.
+- These additions were included in consolidated PR #39 and verified by exact-head CI #2574 on 2026-10-24 (212/212 tests, zero skips, disposable PostgreSQL verification passed).
 
 ## 2026-10-24 integrity and release-safety refinement
 
@@ -54,21 +54,21 @@
 - SLA task telemetry now marks a partial sweep as failed if any ticket could not be evaluated, while continuing with other guilds and preserving already persisted/idempotent alerts.
 - Knowledge Base article paging supports 7 pages at 3,500 characters, matching the service's 20,000-character article limit.
 
-These changes require CI on the latest exact PR head. The older passing CI run below is retained as historical evidence only and does not certify this refinement commit.
+The latest consolidated implementation is verified by exact-head CI #2574 below. The earlier CI runs in this file are retained as historical evidence and do not replace the latest run.
 
 ## Stage 1 and Stage 2 acceptance truth
 
 - Stage 1 recorded CI #2052 passed build, 138/138 tests, zero skips and disposable PostgreSQL verification.
 - Stage 2 recorded CI #2065 passed build, 172/172 tests, zero skips and disposable PostgreSQL verification.
 - Stage 3 recorded CI #2155 passed build, 186/186 tests, zero skips and disposable PostgreSQL schema verification.
-- These CI runs are different commits and are not evidence that all four-stage code passes together until the Stage 4 head CI is green.
-- PR chain remains #33 (main baseline cleanup) → #31 (Stage 1) → #32 (Stage 2) → #34 (Stage 3) → Stage 4 PR.
+- The consolidated Stage 4 candidate now has exact-head CI evidence recorded below; the earlier stage-specific CI runs remain historical evidence for their respective commits.
+- Intended review order remains PR #33 (baseline cleanup) → #31 (Stage 1) → #32 (Stage 2) → #34 (Stage 3) → PR #39 (consolidated Stage 4). PR #36 is an older alternate Stage 4 candidate.
 - Test-guild acceptance, actual command registration in a non-production guild and a successful restore into a new isolated Neon database remain blocked/not run. No stage may be marked production-accepted until these are executed and evidence is recorded.
 
 ## Release readiness checklist
 
 - [ ] The ordered PR chain is reviewed and merged without bypassing CI.
-- [ ] The exact combined Stage 4 head passes TypeScript build, all tests with zero skips, PostgreSQL migration/integrity verification and command registration limit tests.
+- [x] The consolidated Stage 4 head passed TypeScript build, 212/212 tests with zero skips, disposable PostgreSQL migration/integrity verification and the CI command-registration checks (CI #2574).
 - [ ] An authorized test guild validates commands and role access independently from buttons, private ticket threads, stale revisions, staff-only articles, quick replies, related ticket privacy, and unauthorized actions.
 - [ ] A backup is generated from a non-production Neon source; manifest checksum is verified; restore into a freshly created empty non-production target completes; schema migration level, table counts, ticket/event/outbox integrity and an application-level smoke test are recorded.
 - [ ] A failed restore drill is repeated only after inspecting the isolated target; never switch the restore script to drop/clean populated targets.
@@ -97,3 +97,11 @@ This is combined-code CI evidence only. Test-guild role/command acceptance and a
 ## Consolidated branch and schema sequence
 
 This implementation is carried by the consolidated Stage 4 review on top of the latest Stage 3 Recovery Vault branch. Stage 3 migration 13 owns the durable replay-segment ledger; the Knowledge Base, quick-reply and safe-workflow catalog schema now uses migrations 14–17 for the article, quick-reply, related-ticket, workflow-catalog, revision and execution-audit schemas. Only CI on the exact consolidated PR #39 head can verify this combined code and schema. Live Discord acceptance and an isolated non-production Neon restore drill remain separate release gates.
+
+
+## Latest consolidated Stage 4 CI — 2026-10-24
+
+- Review target: [PR #39](https://github.com/Annant2122011/supportforge/pull/39), exact head `dd740bd0b6721a13c41705468dd78607a4b91af2`.
+- [ResolvX CI #2574](https://github.com/Annant2122011/supportforge/actions/runs/40094178966) passed: TypeScript build passed, **212/212 tests passed**, zero skipped, and disposable PostgreSQL verification passed.
+- The current increment adds admin-confirmed `workflow execute`, `workflow resume` and `workflow runs` slash commands; execution is manual only. Department reassignment is intentionally blocked until category and Discord role-permission reconciliation can be safely reused.
+- The pull request remains open and unmerged. Live non-production Discord acceptance, actual command registration/permission testing in a test guild, and an isolated non-production Neon backup/restore drill remain **not run**. No deployment or production acceptance is claimed.
