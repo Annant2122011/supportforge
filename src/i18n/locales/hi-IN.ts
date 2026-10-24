@@ -542,6 +542,16 @@ const hiIN: Record<TranslationKey, string> = {
   'settings.customPanel.error.noChannels': "ऐसा कोई सुलभ टेक्स्ट चैनल नहीं मिला जहाँ QueryFixr संदेश देख, भेज और एम्बेड पोस्ट कर सके।",
   'settings.customPanel.panelPublished.cleanupWarning': "पुराना संदेश हटाया नहीं जा सका। दोहरे प्रवेश बिंदु रोकने के लिए उसे मैन्युअल रूप से हटाएँ।",
   'settings.customPanel.panelDeleted.cleanupWarning': "पैनल परिभाषा हट चुकी है और उसके बटन अब काम नहीं करते, लेकिन पुराना Discord संदेश नहीं हट सका। उसे मैन्युअल रूप से हटाएँ।",
+  'settings.customPanel.detail.panelId': "पैनल ID",
+  'settings.customPanel.detail.status': "स्थिति",
+  'settings.customPanel.detail.formTargetLine': "फ़ॉर्म `{formId}` v{version}",
+  'settings.customPanel.detail.missingDepartment': "विभाग उपलब्ध नहीं है",
+  'settings.customPanel.detail.tagLabel': "टैग",
+  'settings.customPanel.detail.restricted': "प्रतिबंधित",
+  'settings.customPanel.detail.confirmation': "पुष्टिकरण",
+  'settings.customPanel.modal.editButtonTitle': "बटन संपादित करें",
+  'settings.customPanel.error.invalidStyle': "बटन शैली primary, secondary, success या danger होनी चाहिए।",
+  'settings.customPanel.error.unknown': "अज्ञात कस्टम पैनल त्रुटि।",
 };
 
 export default hiIN;
