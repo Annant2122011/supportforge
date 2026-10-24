@@ -26,6 +26,33 @@ export function slugifyKnowledgeTitle(title: string): string {
   return slug || 'article';
 }
 
+export function paginateKnowledgeText(
+  text: string,
+  maximumCharacters = 3200,
+): string[] {
+  if (!Number.isInteger(maximumCharacters) || maximumCharacters < 100 || maximumCharacters > 4000) {
+    throw new Error('Knowledge page size must be between 100 and 4,000 characters.');
+  }
+  if (!text) return [''];
+  const characters = [...text];
+  const pages: string[] = [];
+  let offset = 0;
+  while (offset < characters.length) {
+    const remaining = characters.slice(offset);
+    if (remaining.length <= maximumCharacters) {
+      pages.push(remaining.join(''));
+      break;
+    }
+    const window = remaining.slice(0, maximumCharacters);
+    let cut = window.lastIndexOf('\n');
+    if (cut < Math.floor(maximumCharacters * 0.55)) cut = window.lastIndexOf(' ');
+    if (cut < Math.floor(maximumCharacters * 0.55)) cut = maximumCharacters;
+    pages.push(window.slice(0, cut).join(''));
+    offset += cut;
+  }
+  return pages;
+}
+
 export function normalizeKnowledgeTags(tags: readonly string[]): string[] {
   const seen = new Set<string>();
   const output: string[] = [];

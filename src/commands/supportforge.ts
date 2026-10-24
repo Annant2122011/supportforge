@@ -33,7 +33,7 @@ import { getPersistedTicket, getPersistedTicketStatus } from '../services/ticket
 import { UI_THEMES, getThemeColor } from '../services/uiThemeService';
 import { buildSystemDiagnosticsEmbed, runSystemDiagnostics } from '../services/systemDiagnosticsService';
 import { getTicketRecoveryPreview } from '../services/ticketArchiveService';
-import { renderQuickReplyTemplate } from '../core/domain/knowledgeTools';
+import { paginateKnowledgeText, renderQuickReplyTemplate } from '../core/domain/knowledgeTools';
 import {
   createKnowledgeArticle,
   createQuickReply,
@@ -927,8 +927,9 @@ export const data =
             .addStringOption((option) => option.setName('query').setDescription('What do you need help with?').setRequired(true).setMinLength(2).setMaxLength(120)),
         )
         .addSubcommand((subcommand) =>
-          subcommand.setName('show').setDescription('Open a published article by ID or slug')
-            .addStringOption((option) => option.setName('article').setDescription('Article ID or slug').setRequired(true).setMaxLength(80)),
+          subcommand.setName('show').setDescription('Open a published article by ID or slug; use page for longer articles')
+            .addStringOption((option) => option.setName('article').setDescription('Article ID or slug').setRequired(true).setMaxLength(80))
+            .addIntegerOption((option) => option.setName('page').setDescription('Article page number').setRequired(false).setMinValue(1).setMaxValue(999)),
         )
         .addSubcommand((subcommand) =>
           subcommand.setName('share').setDescription('Share a published article in a ticket channel')
@@ -2382,8 +2383,20 @@ export async function execute(
           if (!article || (!admin && article.status !== 'published')) throw new Error('Published article not found or you do not have permission to view it.');
           if (action === 'show') {
             if (article.status === 'published') await recordKnowledgeArticleView(guild.id, article.id).catch(() => undefined);
-            const text = '**Category:** ' + article.category + '\n**Tags:** ' + (article.tags.join(', ') || 'none') + '\n**Revision:** ' + article.revision + ' · **Visibility:** ' + article.visibility + '\n\n' + article.body;
-            await interaction.editReply({ embeds: [new EmbedBuilder().setColor(getThemeColor(config.theme)).setTitle(article.title.slice(0, 256)).setDescription(text.slice(0, 4000)).setFooter({ text: 'Article slug: ' + article.slug + ' • ID: ' + article.id })] });
+            const pages = paginateKnowledgeText(article.body, 3200);
+            const page = interaction.options.getInteger('page') ?? 1;
+            if (page > pages.length) throw new Error('Article page ' + page + ' does not exist. This article has ' + pages.length + ' page(s).');
+            const text = '**Category:** ' + article.category +
+              '\n**Tags:** ' + (article.tags.join(', ') || 'none') +
+              '\n**Revision:** ' + article.revision + ' · **Visibility:** ' + article.visibility +
+              '\n\n' + pages[page - 1];
+            await interaction.editReply({
+              embeds: [new EmbedBuilder()
+                .setColor(getThemeColor(config.theme))
+                .setTitle(article.title.slice(0, 256))
+                .setDescription(text.slice(0, 4000))
+                .setFooter({ text: 'Article slug: ' + article.slug + ' • ID: ' + article.id + ' • Page ' + page + ' / ' + pages.length })],
+            });
             return;
           }
           if (!staffAccess) throw new Error('Only configured department staff or administrators can share an article into a ticket.');

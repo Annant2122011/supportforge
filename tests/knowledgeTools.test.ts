@@ -6,6 +6,7 @@ import {
   fuzzyKnowledgeScore,
   normalizeKnowledgeTags,
   normalizeKnowledgeText,
+  paginateKnowledgeText,
   renderQuickReplyTemplate,
   slugifyKnowledgeTitle,
   validateQuickReplyTemplate,
@@ -41,4 +42,14 @@ test('quick reply placeholders are allowlisted and mention-safe', () => {
   assert.throws(() => validateQuickReplyTemplate('Use {unknown_secret}'), /Unsupported placeholder/);
   assert.throws(() => validateQuickReplyTemplate('Use {user-name}'), /Unsupported placeholder/);
   assert.throws(() => validateQuickReplyTemplate('x'.repeat(1901)), /1,900 characters/);
+});
+
+
+test('knowledge article pagination preserves all Unicode text and respects Discord embed limits', () => {
+  const content = ('Refund policy and payment reference. 🧾\n').repeat(950);
+  const pages = paginateKnowledgeText(content, 3200);
+  assert.ok(pages.length > 1);
+  assert.ok(pages.every((page) => [...page].length <= 3200));
+  assert.equal(pages.join(''), content);
+  assert.throws(() => paginateKnowledgeText('too small', 20), /between 100 and 4,000/);
 });
