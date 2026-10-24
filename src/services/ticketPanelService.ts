@@ -219,10 +219,10 @@ export function buildTicketPanelComponents(
         .setEmoji('⬇️')
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
-        .setCustomId('ticket:panel:history')
-        .setLabel('History')
-        .setEmoji('📜')
-        .setStyle(ButtonStyle.Secondary),
+        .setCustomId('ticket:panel:quick-reply')
+        .setLabel('Quick Reply')
+        .setEmoji('💬')
+        .setStyle(ButtonStyle.Primary),
     );
 
     return voiceControls.components.length
