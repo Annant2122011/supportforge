@@ -67,7 +67,9 @@ function isAdmin(interaction: Stage4Component): boolean {
 async function resolveTicketToolsContext(interaction: Stage4Component): Promise<TicketToolsContext> {
   const guild = interaction.guild;
   if (!guild) throw new Error('Support Tools can only be used inside a server ticket.');
-  const ticket = await getPersistedTicket(interaction.channelId);
+  const channelId = interaction.channelId;
+  if (!channelId) throw new Error('Discord did not provide the current ticket channel. Reopen Support Tools from the ticket panel.');
+  const ticket = await getPersistedTicket(channelId);
   if (!ticket || ticket.guildId !== guild.id || ticket.deletedAt) {
     throw new Error('This channel is no longer an active managed ticket. Refresh the ticket panel.');
   }
@@ -75,7 +77,7 @@ async function resolveTicketToolsContext(interaction: Stage4Component): Promise<
     throw new Error('Support Tools are available only while the ticket is active.');
   }
 
-  const channel = guild.channels.cache.get(interaction.channelId) ?? await guild.channels.fetch(interaction.channelId);
+  const channel = guild.channels.cache.get(channelId) ?? await guild.channels.fetch(channelId);
   if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.PrivateThread)) {
     throw new Error('The current channel is not a supported ticket text channel or private thread.');
   }
@@ -246,7 +248,7 @@ async function handleKnowledgeSearchModal(interaction: ModalSubmitInteraction): 
     }
     const description = results.slice(0, 10).map((result, index) =>
       '**' + (index + 1) + '. ' + result.title + '**' +
-      (result.confidence === 'suggestion' ? ' · *Possible match, please verify*' : '') +
+      (result.confidence !== 'high' ? ' · *Possible match, please verify*' : '') +
       '\n' + (result.summary || result.category) +
       '\nScore: ' + result.score.toFixed(2) + ' · ID: ' + result.id,
     ).join('\n\n');
