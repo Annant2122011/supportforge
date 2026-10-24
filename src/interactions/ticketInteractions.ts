@@ -65,7 +65,7 @@ import type { TranslationKey } from '../i18n/locales/en-US';
 import { ensureDepartmentCategory } from '../services/departmentCategoryService';
 import { endTicketVoiceMode, startTicketVoiceMode, syncTicketVoiceParticipants } from '../services/voiceModeService';
 import { getUserFlagCount, isTicketCreationRestricted, recordReport } from '../services/reportService';
-import { listQuickReplies, sendQuickReplyInTicket } from '../services/quickReplyService';
+import { searchQuickRepliesPage, sendQuickReplyInTicket } from '../services/quickReplyService';
 import { getKnowledgeArticle, recordKnowledgeArticleShare } from '../services/knowledgeBaseService';
 
 import {
@@ -5127,21 +5127,17 @@ async function showQuickReplySelector(
     const context = await getQuickReplyTicketContext(interaction);
     const settings = await getAdvancedSettings(interaction.guildId!);
     const locale = settings.locale;
-    const replies = (await listQuickReplies(
+    const resultPage = await searchQuickRepliesPage(
       interaction.guildId!,
       context.access,
-    )).filter((reply) => reply.enabled);
-    if (!replies.length) {
+      { page: requestedPage, pageSize: 25, enabledOnly: true },
+    );
+    if (!resultPage.total) {
       await interaction.editReply(translate(locale, 'quickReply.picker.empty'));
       return;
     }
 
-    const pageSize = 25;
-    const pageCount = Math.max(1, Math.ceil(replies.length / pageSize));
-    const page = Number.isInteger(requestedPage)
-      ? Math.max(0, Math.min(pageCount - 1, requestedPage))
-      : 0;
-    const options = replies.slice(page * pageSize, (page + 1) * pageSize).map((reply) => ({
+    const options = resultPage.replies.map((reply) => ({
       label: reply.name.slice(0, 100),
       value: reply.id,
       description: (reply.category + ' • ' + (reply.tags.join(', ') || 'no tags')).slice(0, 100),
@@ -5155,24 +5151,27 @@ async function showQuickReplySelector(
     const components: Array<ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<ButtonBuilder>> = [
       new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
     ];
-    if (pageCount > 1) {
+    if (resultPage.pageCount > 1) {
       components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
-          .setCustomId('ticket:quick-reply:page:' + (page - 1))
+          .setCustomId('ticket:quick-reply:page:' + (resultPage.page - 1))
           .setLabel(translate(locale, 'quickReply.picker.previous'))
           .setEmoji('⬅️')
           .setStyle(ButtonStyle.Secondary)
-          .setDisabled(page === 0),
+          .setDisabled(resultPage.page === 0),
         new ButtonBuilder()
-          .setCustomId('ticket:quick-reply:page:' + (page + 1))
+          .setCustomId('ticket:quick-reply:page:' + (resultPage.page + 1))
           .setLabel(translate(locale, 'quickReply.picker.next'))
           .setEmoji('➡️')
           .setStyle(ButtonStyle.Secondary)
-          .setDisabled(page >= pageCount - 1),
+          .setDisabled(resultPage.page >= resultPage.pageCount - 1),
       ));
     }
     await interaction.editReply({
-      content: translate(locale, 'quickReply.picker.prompt', { page: page + 1, pages: pageCount }),
+      content: translate(locale, 'quickReply.picker.prompt', {
+        page: resultPage.page + 1,
+        pages: resultPage.pageCount,
+      }),
       components,
     });
   } catch (error) {
