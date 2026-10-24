@@ -13,7 +13,6 @@ import { logTicketEvent } from './auditLogService';
 import { getPersistedTicket, transitionPersistedTicket, updatePersistedTicketMetadata, type PersistedTicket } from './ticketPersistenceService';
 import { getQuickReply, renderQuickReply } from './quickReplyService';
 import { getWorkflowTemplateById } from './workflowTemplateService';
-import { getThemeColor } from './uiThemeService';
 import { projectDurableTicketTopic } from './ticketTopicProjectionService';
 import { setChannelTopic } from './discordChannelService';
 import { getTicketChannelName, queueTicketChannelRename, refreshTicketPanel } from './ticketPanelService';
@@ -97,19 +96,6 @@ function iso(value: Date | string | null): string | null {
   if (value == null) return null;
   const parsed = value instanceof Date ? value.getTime() : Date.parse(value);
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
-}
-
-function jsonObject(value: unknown): Record<string, unknown> {
-  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
-  if (typeof value === 'string') {
-    try {
-      const parsed: unknown = JSON.parse(value);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
-    } catch {
-      // Corrupt JSON should be treated as an empty result summary, never code.
-    }
-  }
-  return {};
 }
 
 function summaryFromRow(row: WorkflowRunRow, stepCount: number): WorkflowExecutionSummary {
@@ -295,7 +281,6 @@ async function executeAction(
   channel: TextChannel | ThreadChannel,
   run: WorkflowRunRow,
   step: WorkflowStepRow,
-  ticket: PersistedTicket,
   actorId: string,
 ): Promise<void> {
   const pool = getPostgresPool();
@@ -442,7 +427,7 @@ async function resumeRunUnlocked(
       try {
         const ticket = await getPersistedTicket(channel.id);
         if (!ticket) throw new Error('Ticket record is no longer available.');
-        await executeAction(guild,channel,run,runningStep,ticket,actorId);
+        await executeAction(guild,channel,run,runningStep,actorId);
         const refreshedStep = await pool.query<WorkflowStepRow>(
           'SELECT id,run_id,step_index,action_type,action_value,status,attempts,marker,destination_message_id,result,error_code,started_at,completed_at ' +
             'FROM workflow_execution_steps WHERE run_id=$1 AND step_index=$2 LIMIT 1',
