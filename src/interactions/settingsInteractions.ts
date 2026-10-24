@@ -907,10 +907,19 @@ async function showSupportHoursSettings(
         })
       : translate(locale, 'settings.supportHours.scope.panel', { id: scope.scopeId! });
 
+  const inheritedScope = effectivePolicy?.scopeType === 'guild'
+    ? translate(locale, 'settings.supportHours.scope.server')
+    : effectivePolicy?.scopeType === 'department'
+      ? translate(locale, 'settings.supportHours.scope.department', {
+          name: config.departments[effectivePolicy.scopeId!]?.name ?? effectivePolicy.scopeId!,
+        })
+      : effectivePolicy?.scopeType === 'panel'
+        ? translate(locale, 'settings.supportHours.scope.panel', { id: effectivePolicy.scopeId! })
+        : '';
   const inheritance = localPolicy
     ? translate(locale, 'settings.supportHours.overrideSaved')
     : effectivePolicy
-      ? translate(locale, 'settings.supportHours.inherits', { scope: effectivePolicy.scopeType })
+      ? translate(locale, 'settings.supportHours.inherits', { scope: inheritedScope })
       : translate(locale, 'settings.supportHours.noSchedule');
 
   const policyVersion = localPolicy?.version !== undefined
@@ -921,9 +930,7 @@ async function showSupportHoursSettings(
 
   const outsideHoursValue = effectivePolicy?.outsideHoursBehavior === 'allow'
     ? translate(locale, 'settings.supportHours.action.allow')
-    : effectivePolicy
-      ? translate(locale, 'settings.supportHours.action.restrict')
-      : (effectivePolicy?.outsideHoursBehavior ?? 'restrict');
+    : translate(locale, 'settings.supportHours.action.restrict');
 
   const embed = new EmbedBuilder()
     .setTitle('🕒 ' + translate(locale, 'settings.supportHours.title'))
