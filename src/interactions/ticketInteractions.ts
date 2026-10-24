@@ -5316,7 +5316,7 @@ async function showQuickReplySelector(
       session = quickReplyPickerSessions.get(sessionId)!;
     }
     if (!sessionId || !session) {
-      await interaction.editReply('Quick Reply picker could not be initialized. Reopen it from the ticket panel.');
+      await interaction.editReply(translate(settings.locale, 'quickReply.picker.initializationFailed'));
       return;
     }
     await renderQuickReplySelector(interaction, context, sessionId, requestedPage);
@@ -5378,7 +5378,7 @@ async function handleQuickReplyFilterModal(interaction: ModalSubmitInteraction):
     };
     await renderQuickReplySelector(interaction, context, sessionId, 0);
   } catch (error) {
-    await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : 'Quick reply filtering is temporarily unavailable.');
+    await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : translate(settings.locale, 'quickReply.picker.filterUnavailable'));
   }
 }
 
@@ -5413,7 +5413,7 @@ async function handleQuickReplySelection(interaction: StringSelectMenuInteractio
     }
     const context = await getQuickReplyTicketContext(interaction);
     const quickReplyId = interaction.values[0];
-    if (!quickReplyId) throw new Error('Choose one quick reply from the current list.');
+    if (!quickReplyId) throw new Error(translate(settings.locale, 'quickReply.picker.selectionRequired'));
     const currentPage = await searchQuickRepliesPage(interaction.guildId!, context.access, {
       ...session.filters,
       page,
@@ -5443,7 +5443,7 @@ async function handleQuickReplySelection(interaction: StringSelectMenuInteractio
       { name: reply.reply.name },
     ));
   } catch (error) {
-    await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : 'Quick reply could not be sent safely.');
+    await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : translate(settings.locale, 'quickReply.picker.sendFailed'));
   }
 }
 
@@ -6851,7 +6851,7 @@ export async function handleTicketInteraction(
       const targetChannelId = parts[4] ?? '';
       if (!interaction.guildId || !interaction.guild || !articleId || !targetChannelId ||
           interaction.channelId !== targetChannelId) {
-        await interaction.editReply('This article-share control is no longer valid in this ticket. Run /supportforge knowledge suggest again.');
+        await interaction.editReply(translate((await getAdvancedSettings(interaction.guildId ?? '')).locale, 'knowledge.command.invalidShareControl'));
         return;
       }
 
@@ -6937,7 +6937,7 @@ export async function handleTicketInteraction(
         const targetThreadId = interaction.customId.split(':')[3] ?? '';
         if (!targetThreadId || targetThreadId !== interaction.channelId) {
           if (await safeDeferReply(interaction)) {
-            await interaction.editReply('This quick-reply control no longer matches the current ticket thread.');
+            await interaction.editReply(translate((await getAdvancedSettings(interaction.guildId ?? '')).locale, 'quickReply.picker.invalidThreadControl'));
           }
           return;
         }
