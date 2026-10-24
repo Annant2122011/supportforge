@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { quickReplyHasTag, renderQuickReply, validateQuickReplyInput, type QuickReply } from '../src/services/quickReplyService';
+import { parseQuickReplyPage, quickReplyHasTag, renderQuickReply, validateQuickReplyInput, type QuickReply } from '../src/services/quickReplyService';
 
 const validReply = (): QuickReply => ({
   id:'reply-1',guildId:'guild-1',name:'Refund update',body:'Hello {username}, ticket {ticket_number} is {priority}.',
@@ -46,4 +46,14 @@ test('quick reply tag filtering is normalized but matches complete tags only', (
   assert.equal(quickReplyHasTag(tags, 'bill'), false);
   assert.equal(quickReplyHasTag(tags, 'access'), false);
   assert.equal(quickReplyHasTag(tags), true);
+});
+
+
+test('quick-reply select menu page tokens accept bounded decimal pages and reject malformed values',()=>{
+  assert.equal(parseQuickReplyPage('0'),0);
+  assert.equal(parseQuickReplyPage('1'),1);
+  assert.equal(parseQuickReplyPage('99999'),99999);
+  for (const value of ['', ' ', '-1', '+1', '1.0', '1e2', '100000', '1x', '\\d', '１２']) {
+    assert.equal(parseQuickReplyPage(value),null,'Expected invalid page token: '+JSON.stringify(value));
+  }
 });
