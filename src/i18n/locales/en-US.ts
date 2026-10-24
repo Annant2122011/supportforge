@@ -1024,6 +1024,13 @@ const enUS = {
   'forms.settings.embed.continue': "Use the controls below to continue.",
   'forms.settings.detail.statusActive': "Active",
   'forms.settings.detail.statusInactive': "Inactive",
+  'forms.settings.pageIndicator': "Page {page} / {pages}",
+  'quickReply.picker.initializationFailed': "Quick Reply picker could not be initialized. Reopen it from the ticket panel.",
+  'quickReply.picker.filterUnavailable': "Quick reply filtering is temporarily unavailable.",
+  'quickReply.picker.selectionRequired': "Choose one quick reply from the current list.",
+  'quickReply.picker.sendFailed': "Quick reply could not be sent safely.",
+  'quickReply.picker.invalidThreadControl': "This quick-reply control no longer matches the current ticket thread.",
+  'knowledge.command.invalidShareControl': "This article-share control is no longer valid in this ticket. Run /supportforge knowledge suggest again.",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
