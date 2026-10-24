@@ -901,6 +901,10 @@ const hiIN: Record<TranslationKey, string> = {
   'ticket.report.review.flagButton': "उल्लंघन फ़्लैग करें",
   'ticket.report.review.recordOnlyButton': "केवल दर्ज करें",
   'ticket.report.command.categoryMissing': "रिपोर्ट श्रेणी/उपश्रेणी नहीं मिली। Settings → Reports में दिखाया गया कॉन्फ़िगर किया हुआ नाम या ID दर्ज करें।",
+  'panelBuilder.fallback.description': "सहायता अनुरोध शुरू करने के लिए नीचे दिया गया विकल्प चुनें।",
+  'panelBuilder.fallback.footer': "ResolvX • ग्राहक सहायता",
+  'panelBuilder.preview.label': "पूर्वावलोकन",
+  'panelBuilder.preview.description': "यह केवल ड्राफ़्ट का पूर्वावलोकन है। नियंत्रण निष्क्रिय हैं और प्रकाशित पैनल में कोई बदलाव नहीं किया गया है।",
 };
 
 export default hiIN;
