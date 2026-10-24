@@ -538,6 +538,8 @@ const bnIN: Record<TranslationKey, string> = {
   'settings.customPanel.roles.current': "বর্তমানে অনুমোদিত ভূমিকা",
   'settings.customPanel.roles.description': "নিচে ভূমিকা বেছে নিন। নির্বাচন বর্তমান অনুমোদিত ভূমিকার তালিকা প্রতিস্থাপন করবে। খালি নির্বাচন এই স্তরে সবাইকে অনুমতি দেয়। প্যানেল ও বোতামের নিয়ম একত্রে প্রয়োগ হয়: দুটিই সীমাবদ্ধ হলে সদস্যকে উভয় শর্ত পূরণ করতে হবে।",
   'settings.customPanel.roles.allowEveryone': "সকলকে অনুমতি দিন",
+  'settings.customPanel.form.tagPickerDescription': "এই ফর্মটি সব ট্যাগের জন্য প্রযোজ্য। যে ট্যাগের টিকিটে এই ফর্ম খুলবে সেটি বেছে নিন।",
+  'settings.customPanel.error.noChannels': "এমন কোনো অ্যাক্সেসযোগ্য টেক্সট চ্যানেল পাওয়া যায়নি যেখানে QueryFixr বার্তা দেখতে, পাঠাতে ও এম্বেড পোস্ট করতে পারে।",
 };
 
 export default bnIN;
