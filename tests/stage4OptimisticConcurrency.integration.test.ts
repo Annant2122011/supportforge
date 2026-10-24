@@ -5,7 +5,7 @@ import test from 'node:test';
 import { closePostgresDatabase, getPostgresPool } from '../src/core/persistence/postgresDatabase';
 import { migratePostgres } from '../src/core/persistence/migrationRunner';
 import { deleteQuickReply, saveQuickReply, getQuickReply, listQuickReplyRevisions, restoreQuickReplyRevision } from '../src/services/quickReplyService';
-import { deleteWorkflowTemplate, saveWorkflowTemplate, listWorkflowTemplates, listWorkflowTemplateRevisions, restoreWorkflowTemplateRevision } from '../src/services/workflowTemplateService';
+import { deleteWorkflowTemplate, saveWorkflowTemplate, listWorkflowTemplates, listWorkflowTemplateRevisions, getWorkflowTemplateById, restoreWorkflowTemplateRevision } from '../src/services/workflowTemplateService';
 
 const hasPostgres =
   process.env.SUPPORTFORGE_POSTGRES_TEST === '1' &&
@@ -107,6 +107,8 @@ test('workflow template saves require an expected version instead of silently re
   try {
     const created = await saveWorkflowTemplate(guildId, actorId, name, definition);
     assert.equal(created.version, 1);
+    assert.equal((await getWorkflowTemplateById(guildId, created.id))?.version, 1);
+    assert.equal(await getWorkflowTemplateById(guildId + '-other', created.id), undefined, 'workflow lookup must not leak across guilds');
     assert.equal(created.enabled, false);
 
     await assert.rejects(
@@ -139,6 +141,7 @@ test('workflow template saves require an expected version instead of silently re
     assert.equal(restored.enabled, false);
 
     assert.equal(await deleteWorkflowTemplate(guildId, created.id, restored.version, actorId), true);
+    assert.equal(await getWorkflowTemplateById(guildId, created.id), undefined, 'deleted templates must not be executable');
     const restoredAfterDelete = await restoreWorkflowTemplateRevision(guildId, created.id, 2, 4, actorId);
     assert.equal(restoredAfterDelete.version, 5);
     assert.deepEqual(restoredAfterDelete.definition, {
