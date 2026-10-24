@@ -1,6 +1,6 @@
 # ResolveX Four-Stage Product Excellence Programme
 
-**Status:** Stage 4 consolidated candidate rebased on the latest Stage 3 recovery ledger; combined CI for this head is pending  
+**Status:** Consolidated Stage 4 source and CI verified on PR #39 head `dd740bd0b6721a13c41705468dd78607a4b91af2` by [CI #2574](https://github.com/Annant2122011/supportforge/actions/runs/40094178966) (212/212 tests, zero skips, disposable PostgreSQL passed). Live Discord acceptance and isolated Neon restore remain not run.  
 **Product surface:** Discord-first ResolveX  
 **Production persistence:** Neon PostgreSQL; SQLite is not an allowed live provider  
 **Delivery policy:** Small, reviewable commits and pull requests. No production deployment is implied by source changes or green CI.
@@ -90,7 +90,7 @@ Recovery has passed destructive-scenario testing in a non-production guild; Neon
 2. **KB-to-ticket integration:** relevant article suggestions for customers or support staff, a controlled way to share articles and a clear fallback to ordinary ticket support. Low-confidence matches must not block human support.
 3. **Stage J quick replies:** reusable, permission-controlled staff responses with placeholders, category/tag organization, safe validation and usage reporting. Keep canned replies distinct from full KB articles.
 4. **Ticket productivity:** related-ticket linking, safe duplicate detection, configurable ticket templates and well-audited workflow automation built on existing domain services.
-5. **Workflow expansion:** extend the current department/form target catalog only after defining safe conditions, action validation, versioning, preview, audit and rollback. No arbitrary workflow graph may bypass authorization or the ticket lifecycle.
+5. **Workflow execution:** reviewed templates support explicit admin-confirmed `/supportforge workflow execute`, `/workflow resume` and `/workflow runs` commands against an active ticket. Actions are allowlisted and recorded in a durable PostgreSQL step ledger; no automatic triggers run. Department reassignment stays blocked until ticket category and Discord role-permission reconciliation can be safely reused.
 6. **Transcript access improvements:** searchable/archive navigation, clear retention status, permission checks and reliable attachment references, respecting the Recovery Vault contract.
 7. **Expanded quality programme:** broad regression suites, realistic failure injection, command-registration checks, performance tests and documented acceptance for supported Discord workspace modes.
 8. **Deployment and ecosystem readiness:** consistent release process, operator docs, secure webhook/API boundaries and a web dashboard/API only after the Discord-first workflows and multi-tenant authorization model are stable.
@@ -99,6 +99,14 @@ Recovery has passed destructive-scenario testing in a non-production guild; Neon
 ### Exit criteria
 
 Knowledge Base and quick replies are persistent, permission-safe and usable without AI; workflow execution is audited and recoverable; support metrics have documented definitions; transcripts obey retention/access rules; and release readiness is evidenced through CI and controlled acceptance.
+
+## Consolidated acceptance status — 2026-10-24
+
+- **Stage 1:** acceptance definition and evidence matrix are documented. Historical CI #2052 passed 138 tests; live Discord acceptance and isolated Neon backup/restore remain outstanding. Localization H2 has named remaining coverage gaps.
+- **Stage 2:** Setup Doctor, health diagnostics and safe configuration-history flows are documented and implemented on the stacked feature branch. Historical CI #2065 passed 172 tests; real test-guild repair/re-check and Neon restore acceptance remain outstanding.
+- **Stage 3:** [PR #34 CI #2396](https://github.com/Annant2122011/supportforge/actions/runs/40054056156) passed 194/194 tests with zero skips and PostgreSQL verification. Live recovery/destructive scenarios, large-guild SLA tests, and the isolated Neon restore drill remain unrun.
+- **Stage 4:** [Consolidated PR #39 CI #2574](https://github.com/Annant2122011/supportforge/actions/runs/40094178966) passed 212/212 tests with zero skips and PostgreSQL verification. Workflow execution is manual and admin-confirmed only; department reassignment is deliberately blocked pending safe Discord permission/category reconciliation.
+- **PR/release state:** PR #39 remains open and unmerged. No test-guild acceptance, live Neon restore, or production deployment is claimed. Keep the PR chain in order: #33 → #31 → #32 → #34 → #39.
 
 ## Current Stage 1 implementation log
 
