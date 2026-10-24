@@ -3,6 +3,7 @@ import type { PoolClient, QueryResultRow } from 'pg';
 import type { TextChannel, ThreadChannel } from 'discord.js';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
+import { recoverySegmentMarker } from '../core/domain/recoveryReplayMarkers';
 import { evaluateWorkflowConditions, validateWorkflowTemplateDefinition, type WorkflowAction, type WorkflowTemplateDefinition } from '../core/domain/workflowSafety';
 import { getGuildConfig } from './configService';
 import { getPersistedTicket, updatePersistedTicketMetadata } from './ticketPersistenceService';
@@ -120,7 +121,12 @@ async function setRunStatus(client:PoolClient,runId:string,status:RunStatus,curr
     [runId,status,currentStep,JSON.stringify(result)],
   );
 }
+function workflowDeliveryMarker(runId: string, stepIndex: number): string {
+  return recoverySegmentMarker(runId, 'workflow-step-' + stepIndex, 'quick-reply-delivery');
+}
+
 async function findDeliveryMarker(channel:TicketChannel,marker:string,startedAt:Date|string|null):Promise<{messageId:string|null;historyCovered:boolean}>{
+  if (!marker) return { messageId: null, historyCovered: false };
   const startMs=startedAt===null?Date.now():new Date(startedAt).getTime();
   let before:string|undefined;
   for(let index=0;index<25;index+=1){
@@ -184,7 +190,7 @@ async function sendQuickReply(guildId:string,channel:TicketChannel,actorName:str
     priority:ticket.priority??'normal',
     staff:actorName,
   });
-  const marker=step.marker??'||ResolvX workflow recovery:'+run.id+':'+step.step_index+'||';
+  const marker=step.marker??workflowDeliveryMarker(run.id,step.step_index);
   const message=await channel.send({content:content+'\n'+marker,allowedMentions:{parse:[]}});
   return message.id;
 }
@@ -309,7 +315,7 @@ export async function executeWorkflowTemplateForTicket(input:{
         const action=definition.actions[index]!;
         await client.query(
           'INSERT INTO workflow_execution_steps (id,guild_id,run_id,step_index,action_type,action_value,status,marker) VALUES ($1,$2,$3,$4,$5,$6,\'pending\',$7)',
-          [randomUUID(),guildId,runId,index,action.type,action.value,'||ResolvX workflow recovery:'+runId+':'+index+'||']);
+          [randomUUID(),guildId,runId,index,action.type,action.value,workflowDeliveryMarker(runId,index)]);
       }
       await client.query('COMMIT');
     }catch(error){await client.query('ROLLBACK').catch(()=>undefined);throw error;}
