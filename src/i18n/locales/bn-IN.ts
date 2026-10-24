@@ -1026,6 +1026,13 @@ const bnIN: Record<TranslationKey, string> = {
   'forms.settings.embed.continue': "চালিয়ে যেতে নিচের নিয়ন্ত্রণগুলি ব্যবহার করুন।",
   'forms.settings.detail.statusActive': "সক্রিয়",
   'forms.settings.detail.statusInactive': "নিষ্ক্রিয়",
+  'forms.settings.pageIndicator': "পৃষ্ঠা {page} / {pages}",
+  'quickReply.picker.initializationFailed': "Quick Reply পিকার চালু করা যায়নি। টিকিট প্যানেল থেকে আবার খুলুন।",
+  'quickReply.picker.filterUnavailable': "Quick Reply ফিল্টারিং সাময়িকভাবে উপলভ্য নয়।",
+  'quickReply.picker.selectionRequired': "বর্তমান তালিকা থেকে একটি Quick Reply বেছে নিন।",
+  'quickReply.picker.sendFailed': "Quick Reply নিরাপদভাবে পাঠানো যায়নি।",
+  'quickReply.picker.invalidThreadControl': "এই Quick Reply নিয়ন্ত্রণটি আর বর্তমান টিকিট থ্রেডের সঙ্গে মেলে না।",
+  'knowledge.command.invalidShareControl': "এই টিকিটে নিবন্ধ শেয়ার করার নিয়ন্ত্রণটি আর বৈধ নয়। আবার /supportforge knowledge suggest চালান।",
 };
 
 export default bnIN;
