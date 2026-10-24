@@ -415,14 +415,14 @@ async function showTargetTypePicker(
   const settings = await getAdvancedSettings(interaction.guild!.id);
   const chooser = new StringSelectMenuBuilder()
     .setCustomId(PREFIX + 'retarget-type:' + panelId + ':' + buttonId)
-    .setPlaceholder('Choose what this button should open')
+    .setPlaceholder(translate(settings.locale, 'settings.customPanel.detail.chooseTargetPlaceholder'))
     .addOptions(
       { label: translate(settings.locale, 'settings.customPanel.target.department'), value: 'department', description: translate(settings.locale, 'settings.customPanel.target.departmentDescription'), default: button.targetType === 'department' },
       { label: translate(settings.locale, 'settings.customPanel.target.form'), value: 'form', description: translate(settings.locale, 'settings.customPanel.target.formDescription'), default: button.targetType === 'form' },
     );
   await render(interaction, translate(settings.locale, 'settings.customPanel.target.title'), translate(settings.locale, 'settings.customPanel.target.current', { target: button.targetType }), [
     selectRow(chooser),
-    row(makeButton(PREFIX + 'button:' + panelId + ':' + buttonId, 'Cancel', ButtonStyle.Secondary, '↩️')),
+    row(makeButton(PREFIX + 'button:' + panelId + ':' + buttonId, translate(settings.locale, 'common.cancel'), ButtonStyle.Secondary, '↩️')),
   ]);
 }
 
@@ -673,7 +673,7 @@ async function showFormTagPicker(
     translate(settings.locale, 'common.cancel'), ButtonStyle.Secondary, '↩️',
   )));
   await render(interaction, translate(settings.locale, 'settings.customPanel.form.chooseTagTitle'),
-    translate(settings.locale, 'settings.customPanel.tag.description'), components);
+    translate(settings.locale, 'settings.customPanel.form.tagPickerDescription'), components);
 }
 
 async function showPanelAccess(interaction: PanelSettingsInteraction, panelId: string, buttonId?: string): Promise<void> {
@@ -722,7 +722,7 @@ async function showPublishChannelPicker(
     )
     .sort((a, b) => a.name.localeCompare(b.name));
   if (!channels.length) {
-    throw new Error('No accessible text channels were found where ResolvX can view, send messages and embeds.');
+    throw new Error(translate(settings.locale, 'settings.customPanel.error.noChannels'));
   }
   const pageCount = Math.max(1, Math.ceil(channels.length / PAGE_SIZE));
   const safePage = Math.min(Math.max(page, 0), pageCount - 1);
@@ -739,8 +739,8 @@ async function showPublishChannelPicker(
   ];
   if (pageCount > 1) {
     components.push(row(
-      makeButton(PREFIX + 'channels:' + panelId + ':' + (safePage - 1), 'Previous', ButtonStyle.Secondary, '⬅️', safePage === 0),
-      makeButton(PREFIX + 'channels:' + panelId + ':' + (safePage + 1), 'Next', ButtonStyle.Secondary, '➡️', safePage >= pageCount - 1),
+      makeButton(PREFIX + 'channels:' + panelId + ':' + (safePage - 1), translate(settings.locale, 'settings.customPanel.home.previous'), ButtonStyle.Secondary, '⬅️', safePage === 0),
+      makeButton(PREFIX + 'channels:' + panelId + ':' + (safePage + 1), translate(settings.locale, 'settings.customPanel.home.next'), ButtonStyle.Secondary, '➡️', safePage >= pageCount - 1),
     ));
   }
   components.push(row(makeButton(PREFIX + 'detail:' + panelId, 'Cancel', ButtonStyle.Secondary, '↩️')));
