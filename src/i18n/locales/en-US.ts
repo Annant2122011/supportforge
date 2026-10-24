@@ -1031,6 +1031,11 @@ const enUS = {
   'quickReply.picker.sendFailed': "Quick reply could not be sent safely.",
   'quickReply.picker.invalidThreadControl': "This quick-reply control no longer matches the current ticket thread.",
   'knowledge.command.invalidShareControl': "This article-share control is no longer valid in this ticket. Run /supportforge knowledge suggest again.",
+  'ticket.report.error.disabled': "User reporting is currently disabled by the server administrators.",
+  'ticket.report.error.noOtherParticipants': "There are no other reportable participants on this ticket.",
+  'ticket.report.error.reviewExpired': "This report review has expired or is not assigned to you.",
+  'ticket.report.error.targetNotParticipant': "The target must be a participant in this ticket.",
+  'ticket.report.error.selfReport': "You cannot report yourself.",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
