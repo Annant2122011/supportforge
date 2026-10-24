@@ -3272,7 +3272,7 @@ async function showTicketTagSelector(
           .setCustomId(
             'ticket:create-tag:page:' + departmentId + ':' + (safePage - 1) + (panelId ? ':' + panelId : ''),
           )
-          .setLabel(translate(locale, 'quickReply.picker.previous'))
+          .setLabel('Previous')
           .setEmoji('⬅️')
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(safePage === 0),
@@ -3286,7 +3286,7 @@ async function showTicketTagSelector(
           .setCustomId(
             'ticket:create-tag:page:' + departmentId + ':' + (safePage + 1) + (panelId ? ':' + panelId : ''),
           )
-          .setLabel(translate(locale, 'quickReply.picker.next'))
+          .setLabel('Next')
           .setEmoji('➡️')
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(safePage >= pageCount - 1),
@@ -5159,13 +5159,13 @@ async function showQuickReplySelector(
       components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
           .setCustomId('ticket:quick-reply:page:' + (page - 1))
-          .setLabel('Previous')
+          .setLabel(translate(locale, 'quickReply.picker.previous'))
           .setEmoji('⬅️')
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(page === 0),
         new ButtonBuilder()
           .setCustomId('ticket:quick-reply:page:' + (page + 1))
-          .setLabel('Next')
+          .setLabel(translate(locale, 'quickReply.picker.next'))
           .setEmoji('➡️')
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(page >= pageCount - 1),
