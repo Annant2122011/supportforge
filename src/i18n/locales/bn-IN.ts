@@ -540,6 +540,8 @@ const bnIN: Record<TranslationKey, string> = {
   'settings.customPanel.roles.allowEveryone': "সকলকে অনুমতি দিন",
   'settings.customPanel.form.tagPickerDescription': "এই ফর্মটি সব ট্যাগের জন্য প্রযোজ্য। যে ট্যাগের টিকিটে এই ফর্ম খুলবে সেটি বেছে নিন।",
   'settings.customPanel.error.noChannels': "এমন কোনো অ্যাক্সেসযোগ্য টেক্সট চ্যানেল পাওয়া যায়নি যেখানে QueryFixr বার্তা দেখতে, পাঠাতে ও এম্বেড পোস্ট করতে পারে।",
+  'settings.customPanel.panelPublished.cleanupWarning': "পুরোনো বার্তাটি সরানো যায়নি। একাধিক প্রবেশদ্বার ঠেকাতে এটি নিজে মুছে দিন।",
+  'settings.customPanel.panelDeleted.cleanupWarning': "প্যানেলের সংজ্ঞা মুছে গেছে এবং বোতাম আর কাজ করে না, তবে পুরোনো Discord বার্তাটি সরানো যায়নি। সেটি নিজে মুছে দিন।",
 };
 
 export default bnIN;
