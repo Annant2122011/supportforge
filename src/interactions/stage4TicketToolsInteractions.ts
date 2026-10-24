@@ -289,10 +289,10 @@ async function handleToolsActionMenu(interaction: StringSelectMenuInteraction): 
     const context = await resolveTicketToolsContext(interaction);
     if (action === 'quick-replies') {
       if (!context.permissions.canUseQuickReplies) throw new Error('Only administrators or staff assigned to this ticket department can use quick replies.');
-      const replies = await listQuickReplies(context.guild.id, {
+      const replies = (await listQuickReplies(context.guild.id, {
         isAdmin: context.isAdmin,
         roleIds: context.roleIds,
-      });
+      })).filter((reply) => reply.enabled);
       if (!replies.length) {
         await interaction.editReply('No enabled quick replies are available to your roles. Administrators can create replies with /supportforge quick-reply create.');
         return;
