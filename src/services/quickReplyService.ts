@@ -81,6 +81,7 @@ export interface QuickReplySearchFilters {
   tag?: string;
   page?: number;
   pageSize?: number;
+  enabledOnly?: boolean;
 }
 
 export interface QuickReplySearchPage {
@@ -208,9 +209,10 @@ export async function searchQuickRepliesPage(
     'AND ($2::boolean OR (enabled=TRUE AND (cardinality(allowed_role_ids)=0 OR allowed_role_ids && $3::text[]))) ' +
     'AND ($4::text IS NULL OR LOWER(category)=LOWER($4)) ' +
     "AND ($5::text IS NULL OR EXISTS (SELECT 1 FROM unnest(tags) AS candidate_tag(tag) WHERE LOWER(regexp_replace(btrim(tag),'[[:space:]]+',' ','g'))=LOWER($5))) " +
+    'AND ($7::boolean IS FALSE OR enabled=TRUE) ' +
     "AND ($6::text IS NULL OR POSITION(LOWER($6) IN LOWER(name))>0 OR POSITION(LOWER($6) IN LOWER(category))>0 OR " +
     "EXISTS (SELECT 1 FROM unnest(tags) AS search_tag(tag) WHERE POSITION(LOWER($6) IN LOWER(tag))>0))";
-  const parameters = [guildId, access.isAdmin, access.roleIds, category, tag, query];
+  const parameters = [guildId, access.isAdmin, access.roleIds, category, tag, query, Boolean(filters.enabledOnly)];
   const pool = getPostgresPool();
   const countResult = await pool.query<{ total: string }>(
     'SELECT COUNT(*)::text AS total FROM quick_replies WHERE ' + whereSql,
@@ -221,7 +223,7 @@ export async function searchQuickRepliesPage(
   const page = Math.min(requestedPage, pageCount - 1);
   const repliesResult = await pool.query<QuickReplyRow>(
     'SELECT ' + COLUMNS + ' FROM quick_replies WHERE ' + whereSql +
-      ' ORDER BY LOWER(category),LOWER(name),id LIMIT $7 OFFSET $8',
+      ' ORDER BY LOWER(category),LOWER(name),id LIMIT $8 OFFSET $9',
     [...parameters, pageSize, page * pageSize],
   );
   return { replies: repliesResult.rows.map(fromRow), total, page, pageSize, pageCount };
