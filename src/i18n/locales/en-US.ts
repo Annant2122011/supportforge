@@ -899,6 +899,10 @@ const enUS = {
   'ticket.report.review.flagButton': "Flag Violation",
   'ticket.report.review.recordOnlyButton': "Record Only",
   'ticket.report.command.categoryMissing': "Report category/subcategory not found. Enter the configured name or ID shown in Settings → Reports.",
+  'panelBuilder.fallback.description': "Choose an option below to start a support request.",
+  'panelBuilder.fallback.footer': "ResolvX • Customer Support",
+  'panelBuilder.preview.label': "Preview",
+  'panelBuilder.preview.description': "Draft preview only. Controls are disabled and the published panel is not changed.",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
