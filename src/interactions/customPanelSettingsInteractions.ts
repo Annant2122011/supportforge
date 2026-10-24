@@ -429,30 +429,31 @@ async function showTargetTypePicker(
 async function showButtonDetail(interaction: PanelSettingsInteraction, panelId: string, buttonId: string): Promise<void> {
   const panel = await getCustomPanel(interaction.guild!.id, panelId);
   if (!panel) throw new Error('Panel not found.');
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   const index = panel.buttons.findIndex((button) => button.id === buttonId);
   const button = panel.buttons[index];
-  if (!button) throw new Error('Button not found. Return to the button builder and refresh the list.');
+  if (!button) throw new Error(translate(settings.locale, 'settings.customPanel.error.buttonMissing'));
   const target = button.targetType === 'form'
-    ? 'Form `' + button.formId + '` version ' + button.formVersion + ', tag `' + button.tagId + '`'
-    : 'Department `' + button.departmentId + '`' + (button.tagId ? ', fixed tag `' + button.tagId + '`' : ', customer chooses a tag');
+    ? translate(settings.locale, 'settings.customPanel.button.formTarget') + ' `' + button.formId + '` v' + button.formVersion + ', ' + translate(settings.locale, 'settings.customPanel.button.pinnedTag') + ' `' + button.tagId + '`'
+    : translate(settings.locale, 'settings.customPanel.button.departmentTarget') + ' `' + button.departmentId + '`' + (button.tagId ? ', ' + translate(settings.locale, 'settings.customPanel.button.pinnedTag') + ' `' + button.tagId + '`' : ', ' + translate(settings.locale, 'settings.customPanel.tag.askCustomer'));
   await render(
     interaction,
-    'Button • ' + button.label,
-    '**Type:** ' + button.targetType + '\n**Target:** ' + target + '\n**Style:** ' + button.style +
-      '\n**Allowed roles:** ' + (button.allowedRoleIds.length ? button.allowedRoleIds.map((id) => '<@&' + id + '>').join(', ') : 'Same as panel access') +
-      '\n**Confirmation:** ' + (button.confirmationMessage ? button.confirmationMessage : 'None') +
-      '\n**Order:** ' + (index + 1) + ' of ' + panel.buttons.length,
+    translate(settings.locale, 'settings.customPanel.button.detailTitle', { label: button.label }),
+    '**' + translate(settings.locale, 'settings.customPanel.button.type') + ':** ' + button.targetType + '\n**' + translate(settings.locale, 'settings.customPanel.button.target') + ':** ' + target + '\n**' + translate(settings.locale, 'settings.customPanel.button.style') + ':** ' + button.style +
+      '\n**' + translate(settings.locale, 'settings.customPanel.button.allowedRoles') + ':** ' + (button.allowedRoleIds.length ? button.allowedRoleIds.map((id) => '<@&' + id + '>').join(', ') : translate(settings.locale, 'settings.customPanel.button.sameAsPanelAccess')) +
+      '\n**' + translate(settings.locale, 'settings.customPanel.button.confirmation') + ':** ' + (button.confirmationMessage ? button.confirmationMessage : translate(settings.locale, 'settings.customPanel.button.none')) +
+      '\n**' + translate(settings.locale, 'settings.customPanel.button.order') + ':** ' + (index + 1) + ' / ' + panel.buttons.length,
     [
       row(
-        makeButton(PREFIX + 'edit-button:' + panelId + ':' + buttonId, 'Edit Button', ButtonStyle.Primary, '✏️'),
-        makeButton(PREFIX + 'retarget:' + panelId + ':' + buttonId, 'Change Target', ButtonStyle.Secondary, '🎯'),
-        makeButton(PREFIX + 'access-button:' + panelId + ':' + buttonId, 'Button Access', ButtonStyle.Secondary, '🔐'),
+        makeButton(PREFIX + 'edit-button:' + panelId + ':' + buttonId, translate(settings.locale, 'settings.customPanel.button.editButton'), ButtonStyle.Primary, '✏️'),
+        makeButton(PREFIX + 'retarget:' + panelId + ':' + buttonId, translate(settings.locale, 'settings.customPanel.button.changeTarget'), ButtonStyle.Secondary, '🎯'),
+        makeButton(PREFIX + 'access-button:' + panelId + ':' + buttonId, translate(settings.locale, 'settings.customPanel.button.buttonAccess'), ButtonStyle.Secondary, '🔐'),
       ),
       row(
-        makeButton(PREFIX + 'move-up:' + panelId + ':' + buttonId, 'Move Up', ButtonStyle.Secondary, '⬆️', index === 0),
-        makeButton(PREFIX + 'move-down:' + panelId + ':' + buttonId, 'Move Down', ButtonStyle.Secondary, '⬇️', index === panel.buttons.length - 1),
-        makeButton(PREFIX + 'delete-button:' + panelId + ':' + buttonId, 'Remove Button', ButtonStyle.Danger, '🗑️'),
-        makeButton(PREFIX + 'buttons:' + panelId, 'Button List', ButtonStyle.Secondary, '↩️'),
+        makeButton(PREFIX + 'move-up:' + panelId + ':' + buttonId, translate(settings.locale, 'settings.customPanel.button.moveUp'), ButtonStyle.Secondary, '⬆️', index === 0),
+        makeButton(PREFIX + 'move-down:' + panelId + ':' + buttonId, translate(settings.locale, 'settings.customPanel.button.moveDown'), ButtonStyle.Secondary, '⬇️', index === panel.buttons.length - 1),
+        makeButton(PREFIX + 'delete-button:' + panelId + ':' + buttonId, translate(settings.locale, 'settings.customPanel.button.remove'), ButtonStyle.Danger, '🗑️'),
+        makeButton(PREFIX + 'buttons:' + panelId, translate(settings.locale, 'settings.customPanel.button.list'), ButtonStyle.Secondary, '↩️'),
       ),
     ],
   );
