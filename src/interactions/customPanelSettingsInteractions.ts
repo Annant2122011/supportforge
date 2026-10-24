@@ -766,13 +766,13 @@ export async function handleCustomPanelSettingsInteraction(
   if (!interaction.customId.startsWith(PREFIX)) return false;
   if (!interaction.guild) {
     if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: 'Custom panel management can only be used inside a server.', flags: MessageFlags.Ephemeral }).catch(() => undefined);
+      await interaction.reply({ content: translate('en-US', 'settings.customPanel.error.serverOnly'), flags: MessageFlags.Ephemeral }).catch(() => undefined);
     }
     return true;
   }
   if (!isAdmin(interaction)) {
     if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: 'You need Manage Server or Administrator to manage custom support panels.', flags: MessageFlags.Ephemeral }).catch(() => undefined);
+      await interaction.reply({ content: translate((await getAdvancedSettings(interaction.guild.id)).locale, 'settings.customPanel.error.adminOnly'), flags: MessageFlags.Ephemeral }).catch(() => undefined);
     }
     return true;
   }
@@ -881,7 +881,7 @@ export async function handleCustomPanelSettingsInteraction(
       if (!panel) throw new Error(translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'settings.customPanel.error.notFound'));
       const theme = await getGuildTheme(guild.id);
       const settings = await getAdvancedSettings(guild.id);
-      const embed = buildCustomPanelEmbed(panel, guild.name, theme.color, true);
+      const embed = buildCustomPanelEmbed(panel, guild.name, theme.color, true, false, settings.locale);
       const previewRows = buildCustomPanelComponents(panel, true);
       // Reserve one row for navigation. Discord permits five action rows per message.
       const visiblePreviewRows = previewRows.slice(0, 4);
@@ -1089,7 +1089,7 @@ export async function handleCustomPanelSettingsInteraction(
       if (target?.type !== 0) throw new Error(translate(settings.locale, 'settings.customPanel.error.invalidChannel'));
       const theme = await getGuildTheme(guild.id);
       const payload = {
-        embeds: [buildCustomPanelEmbed(panel, guild.name, theme.color)],
+        embeds: [buildCustomPanelEmbed(panel, guild.name, theme.color, false, false, settings.locale)],
         components: buildCustomPanelComponents(panel, false),
       };
       const oldChannelId = panel.publishedChannelId;
