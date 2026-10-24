@@ -752,6 +752,7 @@ const bnIN: Record<TranslationKey, string> = {
   'settings.recovery.replayed': "আগে পুনরায় চালানো বার্তার রেকর্ড: **{count}**",
   'settings.recovery.snapshotStatus': "আর্কাইভ স্ন্যাপশট: **{status}**",
   'settings.recovery.historyStatus': "পুরোনো বার্তার স্ক্যান: **{status}**",
+  'settings.recovery.restoreEligibility': "পুনরুদ্ধারের যোগ্যতা",
 };
 
 export default bnIN;
