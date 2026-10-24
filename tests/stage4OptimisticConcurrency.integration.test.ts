@@ -5,6 +5,7 @@ import test from 'node:test';
 import { closePostgresDatabase, getPostgresPool } from '../src/core/persistence/postgresDatabase';
 import { migratePostgres } from '../src/core/persistence/migrationRunner';
 import { deleteQuickReply, saveQuickReply, getQuickReply, listQuickReplyRevisions, restoreQuickReplyRevision } from '../src/services/quickReplyService';
+import { quickReplySendMarker } from '../src/core/domain/quickReplySendMarkers';
 import { deleteWorkflowTemplate, saveWorkflowTemplate, listWorkflowTemplates, listWorkflowTemplateRevisions, getWorkflowTemplateById, restoreWorkflowTemplateRevision } from '../src/services/workflowTemplateService';
 
 const hasPostgres =
@@ -31,6 +32,48 @@ test('quick reply saves require an expected version and reject stale concurrent 
     });
     assert.equal(created.version, 1);
     assert.equal(created.enabled, true);
+
+    // Exercise the durable send ledger independently of Discord HTTP delivery.
+    // A repeated interaction must resolve to one intent and one usage event.
+    const ticketId = 'stage4-ticket-' + randomUUID();
+    const channelId = 'stage4-channel-' + randomUUID();
+    const interactionId = 'stage4-interaction-' + randomUUID();
+    const marker = quickReplySendMarker(interactionId, guildId, ticketId, created.id);
+    await pool.query(
+      'INSERT INTO tickets (id,guild_id,channel_id,ticket_number,status,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,NOW(),NOW())',
+      [ticketId,guildId,channelId,ticketId,'open'],
+    );
+    const insertIntent = () => pool.query(
+      'INSERT INTO quick_reply_send_intents (interaction_id,guild_id,quick_reply_id,ticket_id,channel_id,actor_id,marker,status) ' +
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,'pending') ON CONFLICT (interaction_id) DO NOTHING RETURNING interaction_id",
+      [interactionId,guildId,created.id,ticketId,channelId,actorId,marker],
+    );
+    assert.equal((await insertIntent()).rowCount, 1, 'first delivery attempt creates the intent');
+    assert.equal((await insertIntent()).rowCount, 0, 'replay of the same interaction cannot create another intent');
+    await pool.query(
+      "UPDATE quick_reply_send_intents SET status='uncertain',error_class='NetworkError',updated_at=NOW() WHERE interaction_id=$1",
+      [interactionId],
+    );
+    assert.equal((await pool.query(
+      "UPDATE quick_reply_send_intents SET status='completed',discord_message_id=$2,completed_at=NOW(),error_class=NULL,updated_at=NOW() WHERE interaction_id=$1 AND status IN ('pending','uncertain')",
+      [interactionId,'stage4-discord-message-1'],
+    )).rowCount, 1);
+    assert.equal((await pool.query(
+      "UPDATE quick_reply_send_intents SET status='completed',discord_message_id=$2,completed_at=NOW(),updated_at=NOW() WHERE interaction_id=$1 AND status IN ('pending','uncertain')",
+      [interactionId,'stage4-discord-message-2'],
+    )).rowCount, 0, 'completed delivery must not be overwritten by a competing completion');
+    const completedIntent = await pool.query<{ status: string; discord_message_id: string|null }>(
+      'SELECT status,discord_message_id FROM quick_reply_send_intents WHERE interaction_id=$1',
+      [interactionId],
+    );
+    assert.equal(completedIntent.rows[0]?.status, 'completed');
+    assert.equal(completedIntent.rows[0]?.discord_message_id, 'stage4-discord-message-1');
+    const insertUsage = () => pool.query(
+      "INSERT INTO quick_reply_usage_events (id,guild_id,quick_reply_id,send_intent_id,event_type) VALUES ($1,$2,$3,$4,'sent') ON CONFLICT (send_intent_id) DO NOTHING RETURNING id",
+      [randomUUID(),guildId,created.id,interactionId],
+    );
+    assert.equal((await insertUsage()).rowCount, 1);
+    assert.equal((await insertUsage()).rowCount, 0, 'one send intent can produce only one usage event');
 
     await assert.rejects(
       saveQuickReply(guildId, actorId, { name: created.name, body: 'Blind overwrite' }),
@@ -89,6 +132,9 @@ test('quick reply saves require an expected version and reject stale concurrent 
       /changed since it was opened/,
     );
   } finally {
+    await pool.query('DELETE FROM quick_reply_usage_events WHERE guild_id=$1', [guildId]);
+    await pool.query('DELETE FROM quick_reply_send_intents WHERE guild_id=$1', [guildId]);
+    await pool.query('DELETE FROM tickets WHERE guild_id=$1', [guildId]);
     await pool.query('DELETE FROM quick_reply_revisions WHERE guild_id=$1', [guildId]);
     await pool.query('DELETE FROM quick_replies WHERE guild_id=$1', [guildId]);
     await pool.query('DELETE FROM app_documents WHERE POSITION($1 IN document_key)>0', [guildId]);
