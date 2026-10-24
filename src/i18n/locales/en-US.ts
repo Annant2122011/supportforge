@@ -619,6 +619,15 @@ const enUS = {
   'quickReply.command.deleteNotConfirmed': "Delete was not confirmed. No quick reply was removed.",
   'quickReply.command.deleted': "Quick reply deleted.",
   'quickReply.command.deleteNotFound': "No matching quick reply was found.",
+  'knowledge.command.publishedSuccess': "Article \"{title}\" is now published at revision {revision}.",
+  'knowledge.command.archivedSuccess': "Article \"{title}\" is now archived at revision {revision}.",
+  'knowledge.command.visibilityPublic': "public",
+  'knowledge.command.visibilityStaff': "staff",
+  'quickReply.command.operationCreated': "created",
+  'quickReply.command.operationUpdated': "updated",
+  'quickReply.command.operationDeleted': "deleted",
+  'quickReply.command.operationBaseline': "baseline",
+  'quickReply.command.operationRestored': "restored",
 } as const;
 
 export type TranslationKey = keyof typeof enUS;
