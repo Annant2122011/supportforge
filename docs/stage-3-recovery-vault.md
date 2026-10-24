@@ -43,13 +43,13 @@
 - Added PostgreSQL migration 13 for durable per-segment send intent and reconciliation.
 - Expanded `db:verify` to require the new ledger table.
 - Added a PostgreSQL integration test for pending/completed segment state and stored Discord message identity, plus pure marker tests covering determinism and extraction.
-- CI must pass on this exact branch head before the increment is considered automated-verified.
+- The segment-ledger increment is included in the consolidated candidate, whose exact source head passed CI #2739 (216 tests, zero skips, disposable PostgreSQL verification).
 
 ## Automated evidence and Stage 1/2 re-audit
 
 ### Latest exact-head evidence
 
-- Stage 3: [CI #2396](https://github.com/Annant2122011/supportforge/actions/runs/40054056156) for `d5245a8dcefc213a74c6469e56234357350ecc6c`, build passed, **194/194 tests**, zero skipped, disposable PostgreSQL verification passed.
+- Original Stage 3 branch baseline: [CI #2396](https://github.com/Annant2122011/supportforge/actions/runs/40054056156) for `d5245a8dcefc213a74c6469e56234357350ecc6c`, build passed, **194/194 tests**, zero skipped, disposable PostgreSQL verification passed. The consolidated Stage 4 candidate also includes this recovery work and passed [CI #2739](https://github.com/Annant2122011/supportforge/actions/runs/40101705001): build passed, **216/216 tests**, zero skipped, disposable PostgreSQL verification passed.
 
 | Acceptance gate | Result |
 |---|---|
