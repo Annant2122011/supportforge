@@ -621,6 +621,15 @@ const hiIN: Record<TranslationKey, string> = {
   'quickReply.command.deleteNotConfirmed': "हटाने की पुष्टि नहीं हुई। कोई Quick Reply नहीं हटाया गया।",
   'quickReply.command.deleted': "Quick Reply हटाया गया।",
   'quickReply.command.deleteNotFound': "कोई मिलती हुई Quick Reply नहीं मिली।",
+  'knowledge.command.publishedSuccess': "लेख \"{title}\" अब संस्करण {revision} पर प्रकाशित है।",
+  'knowledge.command.archivedSuccess': "लेख \"{title}\" अब संस्करण {revision} पर संग्रहित है।",
+  'knowledge.command.visibilityPublic': "सार्वजनिक",
+  'knowledge.command.visibilityStaff': "स्टाफ",
+  'quickReply.command.operationCreated': "बनाया गया",
+  'quickReply.command.operationUpdated': "अपडेट किया गया",
+  'quickReply.command.operationDeleted': "हटाया गया",
+  'quickReply.command.operationBaseline': "मूल रिकॉर्ड",
+  'quickReply.command.operationRestored': "पुनर्स्थापित",
 };
 
 export default hiIN;
