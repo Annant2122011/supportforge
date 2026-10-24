@@ -25,6 +25,8 @@ const enUS = {
   'settings.repair.title': "Repair System",
   'settings.repair.description': "Repair managed infrastructure without resetting Neon data. Restore & Update reconciles Discord infrastructure and requests a GitHub Actions deployment. Automatic pushes and the independent server watchdog deploy code without this button. Restore Channel handles native Discord channel deletions; Ticket Deletion Review handles ticket-button deletions and the accidental-deletion question. Normal Repair checks infrastructure without deploying code. Storage Repair verifies Closed and Archive categories.",
   'settings.repair.action.restoreUpdate': "Restore & Update",
+  'settings.repair.action.restoreChannel': "Restore Channel",
+  'settings.repair.action.deletionReview': "Ticket Deletion Review",
   'settings.repair.action.normal': "Normal Repair",
   'settings.repair.action.storage': "Storage Repair",
   'settings.repair.action.setup': "Setup",
