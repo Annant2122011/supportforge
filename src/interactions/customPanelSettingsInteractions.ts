@@ -566,10 +566,11 @@ async function showFormPicker(
   page = 0,
   retargetButtonId?: string,
 ): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   const forms = (await listTicketForms(interaction.guild!.id))
     .filter((form) => form.active)
     .sort((a, b) => a.name.localeCompare(b.name));
-  if (!forms.length) throw new Error('There are no active forms. Create and activate a form before adding a form-target button.');
+  if (!forms.length) throw new Error(translate(settings.locale, 'settings.customPanel.form.noActiveForms'));
   const pageCount = Math.max(1, Math.ceil(forms.length / PAGE_SIZE));
   const safePage = Math.min(Math.max(page, 0), pageCount - 1);
   const visible = forms.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
@@ -578,11 +579,11 @@ async function showFormPicker(
     : PREFIX + 'form-pick:' + panelId + ':' + safePage;
   const components: PanelComponents = [
     selectRow(new StringSelectMenuBuilder().setCustomId(selectId)
-      .setPlaceholder('Choose an active form')
+      .setPlaceholder(translate(settings.locale, 'settings.customPanel.form.choosePlaceholder'))
       .addOptions(visible.map((form) => ({
         label: (form.name + ' · v' + form.version).slice(0, 100),
         value: form.id,
-        description: (form.tagId ? 'Exact tag' : 'Wildcard form; choose a tag') + ' • ' + form.departmentId,
+        description: translate(settings.locale, form.tagId ? 'settings.customPanel.form.exactTag' : 'settings.customPanel.form.wildcard') + ' • ' + form.departmentId,
       })))),
   ];
   if (pageCount > 1) {
@@ -591,13 +592,13 @@ async function showFormPicker(
         retargetButtonId
           ? PREFIX + 'retarget-form:' + panelId + ':' + retargetButtonId + ':' + (safePage - 1)
           : PREFIX + 'add-form:' + panelId + ':' + (safePage - 1),
-        'Previous', ButtonStyle.Secondary, '⬅️', safePage === 0,
+        translate(settings.locale, 'settings.customPanel.home.previous'), ButtonStyle.Secondary, '⬅️', safePage === 0,
       ),
       makeButton(
         retargetButtonId
           ? PREFIX + 'retarget-form:' + panelId + ':' + retargetButtonId + ':' + (safePage + 1)
           : PREFIX + 'add-form:' + panelId + ':' + (safePage + 1),
-        'Next', ButtonStyle.Secondary, '➡️', safePage >= pageCount - 1,
+        translate(settings.locale, 'settings.customPanel.home.next'), ButtonStyle.Secondary, '➡️', safePage >= pageCount - 1,
       ),
     ));
   }
@@ -605,14 +606,14 @@ async function showFormPicker(
     retargetButtonId
       ? PREFIX + 'button:' + panelId + ':' + retargetButtonId
       : PREFIX + 'buttons:' + panelId,
-    'Cancel', ButtonStyle.Secondary, '↩️',
+    translate(settings.locale, 'common.cancel'), ButtonStyle.Secondary, '↩️',
   )));
   await render(
     interaction,
-    retargetButtonId ? 'Change Button Target • Form' : 'Add Form Button',
-    'Choose an active form. Buttons pin the current form version so a saved form edit cannot silently change the published panel flow. ' +
-      (retargetButtonId ? 'Changing target rotates the button identity.' : '') +
-      '\nPage ' + (safePage + 1) + ' / ' + pageCount,
+    translate(settings.locale, retargetButtonId ? 'settings.customPanel.form.retargetTitle' : 'settings.customPanel.form.title'),
+    translate(settings.locale, 'settings.customPanel.form.pageDescription') +
+      (retargetButtonId ? ' ' + translate(settings.locale, 'settings.customPanel.form.changeNote') : '') +
+      '\n' + translate(settings.locale, 'settings.customPanel.department.page', { page: safePage + 1, pages: pageCount }),
     components,
   );
 }
