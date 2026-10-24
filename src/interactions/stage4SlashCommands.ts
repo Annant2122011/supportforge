@@ -351,7 +351,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
               '**' + translate(settings.locale, 'knowledge.command.shareCategoryLabel') + ':** ' + article.category + '\n' +
               '**' + translate(settings.locale, 'knowledge.command.shareTagsLabel') + ':** ' + (article.tags.join(', ') || translate(settings.locale, 'knowledge.command.shareNoTags')) + '\n\n' +
               shareBody + (truncated ? '\n\n' + translate(settings.locale, 'knowledge.command.truncatedNotice', { id: article.id }) : '') +
-              '\n\n' + translate(settings.locale, 'knowledge.command.humanSupportNote')',
+              '\n\n' + translate(settings.locale, 'knowledge.command.humanSupportNote'),
             )
             .setFooter({ text: translate(settings.locale, 'knowledge.command.shareFooter', { id: article.id, revision: article.revision }) })],
           allowedMentions: { parse: [] },
