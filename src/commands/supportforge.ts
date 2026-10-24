@@ -3913,7 +3913,7 @@ export async function execute(
           }
           const fields = results.map((match) => {
             const timestamp = Math.floor(Date.parse(match.createdAt) / 1000);
-            const author = match.authorDisplayName.replace(/@/g, '@\\u200b').slice(0, 100);
+            const author = match.authorDisplayName.replace(/@/g, '@\u200b').slice(0, 100);
             const safeSnippet = match.contentSnippet
               .replace(/[*_~|]/g, '')
               .split(String.fromCharCode(96)).join('ˋ');
