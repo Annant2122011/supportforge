@@ -3132,9 +3132,9 @@ export async function handleSettingsInteraction(
     }
 
     if (id === 'sf:settings:departments:add') {
-      await openModal(interaction, 'sf:settings:modal:department:add', 'Add Department', [
-        new TextInputBuilder().setCustomId('name').setLabel('Department name').setPlaceholder('Monetary Affairs').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
-        new TextInputBuilder().setCustomId('staff').setLabel('Staff role ID or mention (optional)').setPlaceholder('@Finance Staff').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100),
+      await openModal(interaction, 'sf:settings:modal:department:add', translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.addTitle'), [
+        new TextInputBuilder().setCustomId('name').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.namePlaceholder')).setPlaceholder(translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.namePlaceholder')).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
+        new TextInputBuilder().setCustomId('staff').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.field.staff')).setPlaceholder(translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.staffPlaceholder')).setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100),
       ]);
       return true;
     }
@@ -3147,7 +3147,7 @@ export async function handleSettingsInteraction(
     if (id.startsWith('sf:settings:departments:manage:page:')) {
       const page = Number(id.slice('sf:settings:departments:manage:page:'.length));
       if (!Number.isInteger(page)) {
-        await reject(interaction, '❌ Invalid department page.');
+        await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.invalidPage'));
         return true;
       }
       await showDepartmentPicker(interaction, page);
@@ -3162,18 +3162,18 @@ export async function handleSettingsInteraction(
     if (id.startsWith('sf:settings:department:edit:')) {
       const departmentId = id.slice('sf:settings:department:edit:'.length);
       const d = (await getGuildConfig(guild.id)).departments[departmentId];
-      if (!d) { await reject(interaction, '❌ Department not found.'); return true; }
-      await openModal(interaction, 'sf:settings:modal:department:edit:' + departmentId, 'Edit Department', [
-        new TextInputBuilder().setCustomId('name').setLabel('Department name').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(d.name),
-        new TextInputBuilder().setCustomId('staff').setLabel('Staff role ID or mention (optional)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100).setValue(d.staffRoleId ? '<@&' + d.staffRoleId + '>' : ''),
+      if (!d) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.notFound')); return true; }
+      await openModal(interaction, 'sf:settings:modal:department:edit:' + departmentId, translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.editTitle'), [
+        new TextInputBuilder().setCustomId('name').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.namePlaceholder')).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(d.name),
+        new TextInputBuilder().setCustomId('staff').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.field.staff')).setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100).setValue(d.staffRoleId ? '<@&' + d.staffRoleId + '>' : ''),
       ]);
       return true;
     }
 
     if (id.startsWith('sf:settings:tag:add:')) {
       const departmentId = id.slice('sf:settings:tag:add:'.length);
-      await openModal(interaction, 'sf:settings:modal:tag:add:' + departmentId, 'Add Tag', [
-        new TextInputBuilder().setCustomId('name').setLabel('Tag name').setPlaceholder('Billing, Refund, Chargeback').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
+      await openModal(interaction, 'sf:settings:modal:tag:add:' + departmentId, translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.addTitle'), [
+        new TextInputBuilder().setCustomId('name').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.namePlaceholder')).setPlaceholder(translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.namePlaceholder')).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
       ]);
       return true;
     }
@@ -3183,7 +3183,7 @@ export async function handleSettingsInteraction(
       const departmentId = parts[5] ?? '';
       const page = Number(parts[6] ?? '0');
       if (!Number.isInteger(page)) {
-        await reject(interaction, '❌ Invalid tag page.');
+        await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.invalidPage'));
         return true;
       }
       await showTagManager(interaction, departmentId, page);
@@ -3199,9 +3199,9 @@ export async function handleSettingsInteraction(
       const parts = id.split(':');
       const departmentId = parts[5] ?? ''; const tagId = parts[6] ?? '';
       const tag = (await getGuildConfig(guild.id)).departments[departmentId]?.tags?.[tagId];
-      if (!tag) { await reject(interaction, '❌ Tag not found.'); return true; }
-      await openModal(interaction, 'sf:settings:modal:tag:edit:' + departmentId + ':' + tagId, 'Edit Tag', [
-        new TextInputBuilder().setCustomId('name').setLabel('Tag name').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(tag.name),
+      if (!tag) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.notFound')); return true; }
+      await openModal(interaction, 'sf:settings:modal:tag:edit:' + departmentId + ':' + tagId, translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.editTitle'), [
+        new TextInputBuilder().setCustomId('name').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.namePlaceholder')).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(tag.name),
       ]);
       return true;
     }
@@ -3210,10 +3210,10 @@ export async function handleSettingsInteraction(
       const parts = id.split(':');
       const departmentId = parts[4] ?? ''; const tagId = parts[5] ?? '';
       const config = await getGuildConfig(guild.id); const d = config.departments[departmentId];
-      if (!d?.tags?.[tagId]) { await reject(interaction, '❌ Tag not found.'); return true; }
-      if (Object.keys(d.tags).length <= 1) { await reject(interaction, '❌ Each department must keep at least one tag.'); return true; }
+      if (!d?.tags?.[tagId]) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.notFound')); return true; }
+      if (Object.keys(d.tags).length <= 1) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.keepOne')); return true; }
       const replacement = Object.values(d.tags).find((t) => t.id !== tagId);
-      if (!replacement) { await reject(interaction, '❌ No replacement tag is available.'); return true; }
+      if (!replacement) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.replacementMissing')); return true; }
       const removedTagName = d.tags[tagId].name;
       const departmentName = d.name;
       await updateGuildConfig(guild.id, (current) => {
