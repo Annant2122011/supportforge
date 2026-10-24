@@ -323,7 +323,7 @@ export function buildSettingsDashboardEmbed(
     .setColor(getThemeColor(theme))
     .setDescription(
       ((
-        settings.settingsDashboard.description === 'Configure your server ticket system, support panels and retention policies.'
+        settings.settingsDashboard.description === ('Configure your server' + String.fromCharCode(0x2019) + 's ticket system, support panels and retention policies.')
           ? translate(settings.locale, 'settings.dashboard.description')
           : settings.settingsDashboard.description || translate(settings.locale, 'settings.dashboard.description')
       ) + '\n\n' + translate(settings.locale, 'settings.dashboard.help')).slice(0, 3900),
