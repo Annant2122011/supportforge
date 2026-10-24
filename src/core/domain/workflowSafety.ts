@@ -88,6 +88,33 @@ export function validateWorkflowTemplateDefinition(value: unknown): WorkflowTemp
   return { conditions, actions };
 }
 
+export interface WorkflowTicketFacts {
+  status: string;
+  priority: string | null;
+  departmentId: string | null;
+}
+
+export interface WorkflowConditionEvaluation {
+  matches: boolean;
+  conditions: Array<WorkflowCondition & { actual: string | null; matches: boolean }>;
+}
+
+/** Deterministic, side-effect-free condition evaluation against a ticket snapshot. */
+export function evaluateWorkflowConditions(
+  definition: WorkflowTemplateDefinition,
+  ticket: WorkflowTicketFacts,
+): WorkflowConditionEvaluation {
+  const conditions = definition.conditions.map((condition) => {
+    const actual = condition.field === 'status'
+      ? ticket.status
+      : condition.field === 'priority'
+        ? ticket.priority
+        : ticket.departmentId;
+    return { ...condition, actual, matches: actual === condition.equals };
+  });
+  return { matches: conditions.every((condition) => condition.matches), conditions };
+}
+
 export function previewWorkflowTemplate(definition: WorkflowTemplateDefinition): {
   executable: false;
   conditionCount: number;
