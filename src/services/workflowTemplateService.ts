@@ -24,7 +24,7 @@ export interface WorkflowTemplateRevision {
   name: string;
   enabled: boolean;
   deleted: boolean;
-  operation: 'created' | 'updated' | 'enabled' | 'disabled' | 'deleted' | 'baseline';
+  operation: 'created' | 'updated' | 'enabled' | 'disabled' | 'deleted' | 'baseline' | 'restored';
   changedBy: string;
   createdAt: string;
 }
@@ -324,7 +324,7 @@ export async function restoreWorkflowTemplateRevision(
     );
     if (!updated.rows[0]) throw new Error('This workflow template changed during history restoration. Refresh and retry.');
     const saved = fromRow(updated.rows[0]);
-    await insertWorkflowRevision(client, saved, actorId, 'updated');
+    await insertWorkflowRevision(client, saved, actorId, 'restored');
     await client.query('COMMIT');
     return saved;
   } catch (error) {
