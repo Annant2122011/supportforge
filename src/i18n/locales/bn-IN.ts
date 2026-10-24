@@ -707,6 +707,7 @@ const bnIN: Record<TranslationKey, string> = {
   'settings.diagnostics.restoredDescription': "**পুনরুদ্ধার:** `{restored}`\n**পুনরুদ্ধারের আগের চেকপয়েন্ট:** `{checkpoint}`\n\nচেকপয়েন্টে থাকা ফর্মগুলির সার্ভার/উন্নত সেটিংস, সহায়তা-সময়ের নীতি এবং বর্তমান স্কিমা নতুন অপরিবর্তনীয় সংস্করণ দিয়ে পুনরুদ্ধার হয়েছে। বিদ্যমান সাবমিশন, পুরোনো ফর্ম সংস্করণ এবং পরে তৈরি ফর্ম মোছা হয়নি।{refreshFailures}",
   'settings.diagnostics.refreshFailures': "\n\n⚠️ রিফ্রেশ ব্যর্থ: {failures}। অনুমতি যাচাইয়ের পরে Settings Refresh ব্যবহার করুন।",
   'settings.diagnostics.restoreFailed': "কনফিগারেশন পুনরুদ্ধার সম্পূর্ণ হয়নি। লগ দেখুন এবং আংশিক ব্যর্থতা হলে সংরক্ষিত পূর্ব-পুনরুদ্ধার চেকপয়েন্ট ব্যবহার করুন।",
+  'settings.recovery.modalOpenFailed': "সেটিংস ফর্ম খোলা যায়নি। আবার চেষ্টা করুন।",
 };
 
 export default bnIN;
