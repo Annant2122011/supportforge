@@ -493,9 +493,19 @@ export async function searchKnowledgeBase(
   const permissionPredicate = 'guild_id=$1 AND status=\'published\' AND ' +
     '(visibility=\'public\' OR $3::boolean OR $4::boolean) AND ' +
     '(cardinality(allowed_role_ids)=0 OR allowed_role_ids && $5::text[] OR $3::boolean)';
-  const fts = await pool.query<KnowledgeArticleRow>(
+  const fts = await pool.query<KnowledgeArticleRow & { search_rank: number | string }>(
     'SELECT ' + ARTICLE_COLUMNS + ',ts_rank_cd(search_vector,websearch_to_tsquery(\'english\'::regconfig,$2)) AS search_rank ' +
       'FROM knowledge_base_articles WHERE ' + permissionPredicate + ' AND search_vector @@ websearch_to_tsquery(\'english\'::regconfig,$2) ' +
+      'ORDER BY search_rank DESC,updated_at DESC LIMIT 50',
+    [guildId, searchExpression, access.isAdmin, access.isStaff, access.roleIds],
+  );
+  // The English vector preserves stemming and weighted ranking for English.
+  // A second indexed "simple" vector provides exact, language-neutral token
+  // search for Hindi, Bengali and other scripts without limiting recall to the
+  // most recently edited articles during the fuzzy metadata fallback.
+  const simpleFts = await pool.query<KnowledgeArticleRow & { search_rank: number | string }>(
+    'SELECT ' + ARTICLE_COLUMNS + ',ts_rank_cd(simple_search_vector,websearch_to_tsquery(\'simple\'::regconfig,$2)) AS search_rank ' +
+      'FROM knowledge_base_articles WHERE ' + permissionPredicate + ' AND simple_search_vector @@ websearch_to_tsquery(\'simple\'::regconfig,$2) ' +
       'ORDER BY search_rank DESC,updated_at DESC LIMIT 50',
     [guildId, searchExpression, access.isAdmin, access.isStaff, access.roleIds],
   );
@@ -524,14 +534,21 @@ export async function searchKnowledgeBase(
       articleMap.set(article.id, { row, score });
     }
   }
-  for (const row of fts.rows) {
-    const article = fromRow(row);
-    if (!canRead(article, access)) continue;
-    const rawRank = Number(row.search_rank ?? 0);
-    const ftsScore = Math.min(0.99,0.48 + Math.max(0,rawRank) * 2.5);
-    const existing = articleMap.get(article.id);
-    articleMap.set(article.id,{row,score:Math.max(existing?.score ?? 0,ftsScore)});
-  }
+  const mergeFullTextResults = (
+    rows: Array<KnowledgeArticleRow & { search_rank: number | string }>,
+    baseScore: number,
+  ): void => {
+    for (const row of rows) {
+      const article = fromRow(row);
+      if (!canRead(article, access)) continue;
+      const rawRank = Number(row.search_rank ?? 0);
+      const score = Math.min(0.99, baseScore + Math.max(0, rawRank) * 2.5);
+      const existing = articleMap.get(article.id);
+      articleMap.set(article.id, { row, score: Math.max(existing?.score ?? 0, score) });
+    }
+  };
+  mergeFullTextResults(fts.rows, 0.48);
+  mergeFullTextResults(simpleFts.rows, 0.50);
   const results = [...articleMap.values()]
     .map(({row,score}) => ({
       id:row.id,title:row.title,summary:row.summary,category:row.category,
