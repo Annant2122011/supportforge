@@ -47,7 +47,7 @@ export async function linkRelatedTickets(guildId: string,leftTicketId: string,ri
 }
 
 export async function unlinkRelatedTickets(guildId: string,leftTicketId: string,rightTicketId: string): Promise<boolean> {
-  const [left,right]=canonicalPair(leftTicketId,rightTicketId);
+  const [left,right]=canonicalRelatedTicketPair(leftTicketId,rightTicketId);
   const result=await getPostgresPool().query(
     'DELETE FROM related_ticket_links WHERE guild_id=$1 AND left_ticket_id=$2 AND right_ticket_id=$3',
     [guildId,left,right],
