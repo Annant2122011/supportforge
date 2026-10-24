@@ -37,12 +37,12 @@
 ### Recorded runs before the current recovery-lock increment
 - Stage 1: [CI #2052](https://github.com/Annant2122011/supportforge/actions/runs/39972706424), build passed, 138/138 tests, zero skipped, disposable PostgreSQL verification passed.
 - Stage 2: [CI #2065](https://github.com/Annant2122011/supportforge/actions/runs/39974451567), build passed, 172/172 tests, zero skipped, disposable PostgreSQL verification passed.
-- Stage 3 before the newest lock test: [CI #2254](https://github.com/Annant2122011/supportforge/actions/runs/40008064111), build passed, 186/186 tests, zero skipped, disposable PostgreSQL verification passed.
-- The lock utility adds an environment-gated PostgreSQL integration test. CI must pass on the resulting exact Stage 3 head before this increment can be called verified.
+- Stage 3 PR #34 current head `d5245a8dcefc213a74c6469e56234357350ecc6c` passed [CI #2396](https://github.com/Annant2122011/supportforge/actions/runs/40054056156): build passed, 194/194 tests, zero skipped, and disposable PostgreSQL verification passed.
+- The passing suite includes the durable recovery segment ledger integration test and the PostgreSQL advisory-lock test. These tests validate persistence and locking behavior on disposable CI PostgreSQL; they do not demonstrate live Discord replay behavior or a Neon backup/restore drill.
 
 | Acceptance gate | Result |
 |---|---|
-| Source and tests for recovery preview, replay markers, backup/restore safeguards, SLA and CSAT | Implemented in source; latest lock increment awaits its CI result |
+| Source and tests for recovery preview, durable replay segments, backup/restore safeguards, SLA and CSAT | Implemented; CI #2396 passed on the current Stage 3 head |
 | Build/test against disposable PostgreSQL | Prior Stage 3 head passed; rerun required after the current increment |
 | Live Discord deletion/recovery/permissions/429/restart scenarios | **Blocked / not run** |
 | Isolated Neon backup and restore, including checksum/schema/row-count/application smoke test | **Blocked / not run** |
