@@ -538,6 +538,8 @@ const hiIN: Record<TranslationKey, string> = {
   'settings.customPanel.roles.current': "वर्तमान अनुमत भूमिकाएँ",
   'settings.customPanel.roles.description': "नीचे भूमिकाएँ चुनें। चयन मौजूदा अनुमत भूमिका सूची को बदल देगा। खाली चयन इस स्तर पर सभी को अनुमति देता है। पैनल और बटन नियम संयुक्त हैं: दोनों प्रतिबंधित हों तो सदस्य को दोनों पूरे करने होंगे।",
   'settings.customPanel.roles.allowEveryone': "सभी को अनुमति दें",
+  'settings.customPanel.form.tagPickerDescription': "यह फ़ॉर्म सभी टैग पर लागू होता है। वह टैग चुनें जिसके टिकटों में यही फ़ॉर्म खुले।",
+  'settings.customPanel.error.noChannels': "ऐसा कोई सुलभ टेक्स्ट चैनल नहीं मिला जहाँ QueryFixr संदेश देख, भेज और एम्बेड पोस्ट कर सके।",
 };
 
 export default hiIN;
