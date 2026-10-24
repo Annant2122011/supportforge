@@ -87,9 +87,9 @@ The latest consolidated implementation is verified by exact-head CI #2574 below.
 **Completion policy:** All implementation, CI, test-guild and database restore evidence must be reported separately. Do not mark the programme complete merely because all feature files exist.
 
 
-## Latest combined Stage 4 CI — 2026-10-23
+## Historical combined Stage 4 CI — 2026-10-23
 
-The current Stage 4 PR head `106b25a399d13a1012b093131b1c7719bd25529d` passed [ResolvX CI #2249](https://github.com/Annant2122011/supportforge/actions/runs/40007820017): TypeScript build passed, **196/196 tests passed**, zero skipped, and disposable PostgreSQL verification passed. The database verification checks the Stage 3 and Stage 4 tables and performs insert/update smoke tests against the Knowledge Base search-vector trigger inside a rolled-back transaction. Synthetic rows are not retained.
+Historical evidence only: earlier Stage 4 candidate head `106b25a399d13a1012b093131b1c7719bd25529d` passed [ResolvX CI #2249](https://github.com/Annant2122011/supportforge/actions/runs/40007820017) with 196/196 tests, zero skipped, and disposable PostgreSQL verification. That was not the consolidated PR #39 code head; the tested consolidated source head and current evidence are recorded below.
 
 This is combined-code CI evidence only. Test-guild role/command acceptance and an isolated non-production Neon backup/restore drill remain unrun. The Knowledge Base/quick-reply commands now check the staff role configured for the current ticket’s department before sharing or sending into that ticket.
 
@@ -101,7 +101,7 @@ This implementation is carried by the consolidated Stage 4 review on top of the 
 
 ## Latest consolidated Stage 4 CI — 2026-10-24
 
-- Review target: [PR #39](https://github.com/Annant2122011/supportforge/pull/39), exact head `dd740bd0b6721a13c41705468dd78607a4b91af2`.
+- Review target: [PR #39](https://github.com/Annant2122011/supportforge/pull/39). Tested source-code head: `dd740bd0b6721a13c41705468dd78607a4b91af2`; later commits in this document only update acceptance notes.
 - [ResolvX CI #2574](https://github.com/Annant2122011/supportforge/actions/runs/40094178966) passed: TypeScript build passed, **212/212 tests passed**, zero skipped, and disposable PostgreSQL verification passed.
 - The current increment adds admin-confirmed `workflow execute`, `workflow resume` and `workflow runs` slash commands; execution is manual only. Department reassignment is intentionally blocked until category and Discord role-permission reconciliation can be safely reused.
 - The pull request remains open and unmerged. Live non-production Discord acceptance, actual command registration/permission testing in a test guild, and an isolated non-production Neon backup/restore drill remain **not run**. No deployment or production acceptance is claimed.
