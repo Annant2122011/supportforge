@@ -1994,15 +1994,16 @@ async function showRecoveryCandidateDetail(
   await ensureRecoveryReply(interaction);
   const guild = interaction.guild;
   if (!guild) {
-    await interaction.editReply('Ticket recovery must be opened inside a server.');
+    await interaction.editReply(translate('en-US', 'settings.recovery.mustBeInServer'));
     return;
   }
+  const settings = await getAdvancedSettings(guild.id);
   const item = (await listTicketRecoveryCandidates(guild.id, source)).find((candidate) => candidate.ticketId === ticketId);
   if (!item) {
     await interaction.editReply({
       content: '',
-      embeds: [await recoveryEmbed(guild, 'Recovery record no longer available', 'Refresh the recovery list. The record may already have been restored or reviewed.')],
-      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:' + (source === 'discord_native' ? 'channels' : 'review'), 'Back to list', ButtonStyle.Secondary, '↩️'))],
+      embeds: [await recoveryEmbed(guild, translate(settings.locale, 'settings.recovery.recordMissingTitle'), translate(settings.locale, 'settings.recovery.recordMissingDescription'))],
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:' + (source === 'discord_native' ? 'channels' : 'review'), translate(settings.locale, 'settings.recovery.backToList'), ButtonStyle.Secondary, '↩️'))],
     });
     return;
   }
@@ -2013,61 +2014,70 @@ async function showRecoveryCandidateDetail(
   } catch (error) {
     await interaction.editReply({
       content: '',
-      embeds: [await recoveryEmbed(guild, 'Recovery preview unavailable', error instanceof Error ? error.message : 'The archive summary could not be loaded safely.')],
-      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:' + (source === 'discord_native' ? 'channels' : 'review'), 'Back to list', ButtonStyle.Secondary, '↩️'))],
+      embeds: [await recoveryEmbed(guild, translate(settings.locale, 'settings.recovery.previewUnavailable'), error instanceof Error ? error.message : translate(settings.locale, 'settings.recovery.archiveSummaryFailed'))],
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:' + (source === 'discord_native' ? 'channels' : 'review'), translate(settings.locale, 'settings.recovery.backToList'), ButtonStyle.Secondary, '↩️'))],
     });
     return;
   }
 
   const previewLines = [
-    '**Read-only recovery preview**',
-    'Archive snapshot: **' + (preview.channelSnapshotAvailable ? 'available' : 'missing, safe channel defaults will be used') + '**',
-    'Historic message scan: **' + (preview.historicalBackfillComplete ? 'complete' : 'incomplete') + '**',
-    'Archived message records: **' + preview.archivedMessageCount + '** (source-deleted: ' + preview.deletedMessageCount + ')',
-    'Attachments: **' + preview.totalAttachmentCount + '** metadata; **' + preview.restorableAttachmentCount + '** with archived bytes; **' + preview.tooLargeAttachmentCount + '** oversized; **' + preview.metadataOnlyAttachmentCount + '** metadata-only; **' + preview.pendingAttachmentCount + '** pending; **' + preview.failedAttachmentCount + '** failed',
-    'Attachment archive rows: **' + preview.trackedAttachmentCount + ' / ' + preview.totalAttachmentCount + '**; missing rows: **' + preview.attachmentRecordsMissing + '**',
-    'Previously replayed message records: **' + preview.alreadyReplayedMessageCount + '**',
-    'Restore eligibility: **' + (preview.eligibleToRestore ? 'eligible' : 'not eligible') + '**',
-    ...(preview.latestArchivedAt ? ['Latest archived message: <t:' + Math.floor(Date.parse(preview.latestArchivedAt) / 1000) + ':F>'] : []),
-    ...(preview.warnings.length ? ['', '**Recovery limitations**', ...preview.warnings.map((warning) => '• ' + warning)] : []),
+    '**' + translate(settings.locale, 'settings.recovery.readOnlyPreview') + '**',
+    translate(settings.locale, 'settings.recovery.snapshotStatus', {
+      status: translate(settings.locale, preview.channelSnapshotAvailable ? 'settings.recovery.snapshotAvailable' : 'settings.recovery.snapshotMissing'),
+    }),
+    translate(settings.locale, 'settings.recovery.historyStatus', {
+      status: translate(settings.locale, preview.historicalBackfillComplete ? 'settings.recovery.historicalComplete' : 'settings.recovery.historicalIncomplete'),
+    }),
+    translate(settings.locale, 'settings.recovery.archiveCounts', { archived: preview.archivedMessageCount, deleted: preview.deletedMessageCount }),
+    translate(settings.locale, 'settings.recovery.attachments', {
+      total: preview.totalAttachmentCount, restorable: preview.restorableAttachmentCount, oversized: preview.tooLargeAttachmentCount,
+      metadataOnly: preview.metadataOnlyAttachmentCount, pending: preview.pendingAttachmentCount, failed: preview.failedAttachmentCount,
+    }),
+    translate(settings.locale, 'settings.recovery.attachmentRows', { tracked: preview.trackedAttachmentCount, total: preview.totalAttachmentCount, missing: preview.attachmentRecordsMissing }),
+    translate(settings.locale, 'settings.recovery.replayed', { count: preview.alreadyReplayedMessageCount }),
+    translate(settings.locale, 'settings.recovery.restoreEligibility') + ': **' +
+      translate(settings.locale, preview.eligibleToRestore ? 'settings.recovery.restoreEligible' : 'settings.recovery.restoreNotEligible') + '**',
+    ...(preview.latestArchivedAt ? [translate(settings.locale, 'settings.recovery.latestArchived') + ': <t:' + Math.floor(Date.parse(preview.latestArchivedAt) / 1000) + ':F>'] : []),
+    ...(preview.warnings.length ? ['', '**' + translate(settings.locale, 'settings.recovery.limitations') + '**', ...preview.warnings.map((warning) => '• ' + warning)] : []),
     '',
-    'Restoration creates a replacement channel with a new Discord ID. Replayed content is posted by the bot and labelled with original author, channel, message ID and timestamp; historical users are never impersonated. Existing ticket controls are rebuilt from current safe actions.',
+    translate(settings.locale, 'settings.recovery.restoreSafety'),
   ].join('\\n');
 
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
   if (source === 'discord_native') {
     rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-      recoveryButton('sf:settings:recovery:channels:restore:' + ticketId, 'Restore Channel', ButtonStyle.Success, '♻️', !preview.eligibleToRestore),
-      recoveryButton('sf:settings:recovery:channels', 'Back to list', ButtonStyle.Secondary, '↩️'),
+      recoveryButton('sf:settings:recovery:channels:restore:' + ticketId, translate(settings.locale, 'settings.recovery.nativeRestore'), ButtonStyle.Success, '♻️', !preview.eligibleToRestore),
+      recoveryButton('sf:settings:recovery:channels', translate(settings.locale, 'settings.recovery.backToList'), ButtonStyle.Secondary, '↩️'),
     ));
   } else if (item.accidentalAnswer === 'yes') {
     rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-      recoveryButton('sf:settings:recovery:review:restore:' + ticketId, 'Restore Ticket', ButtonStyle.Success, '♻️', !preview.eligibleToRestore),
-      recoveryButton('sf:settings:recovery:review', 'Back to list', ButtonStyle.Secondary, '↩️'),
+      recoveryButton('sf:settings:recovery:review:restore:' + ticketId, translate(settings.locale, 'settings.recovery.ticketRestore'), ButtonStyle.Success, '♻️', !preview.eligibleToRestore),
+      recoveryButton('sf:settings:recovery:review', translate(settings.locale, 'settings.recovery.backToList'), ButtonStyle.Secondary, '↩️'),
     ));
   } else {
     rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-      recoveryButton('sf:settings:recovery:review:answer:' + ticketId + ':yes', 'Yes, deleted by mistake', ButtonStyle.Success, '✅'),
-      recoveryButton('sf:settings:recovery:review:answer:' + ticketId + ':no', 'No, intentional', ButtonStyle.Danger, '🛑'),
-      recoveryButton('sf:settings:recovery:review', 'Back', ButtonStyle.Secondary, '↩️'),
+      recoveryButton('sf:settings:recovery:review:answer:' + ticketId + ':yes', translate(settings.locale, 'settings.recovery.answerYes'), ButtonStyle.Success, '✅'),
+      recoveryButton('sf:settings:recovery:review:answer:' + ticketId + ':no', translate(settings.locale, 'settings.recovery.answerNo'), ButtonStyle.Danger, '🛑'),
+      recoveryButton('sf:settings:recovery:review', translate(settings.locale, 'settings.recovery.back'), ButtonStyle.Secondary, '↩️'),
     ));
   }
 
+  const sourceLabel = translate(settings.locale, source === 'discord_native' ? 'settings.recovery.listNativeTitle' : 'settings.recovery.listReviewTitle');
   const context = source === 'discord_native'
-    ? 'This channel was deleted outside the ResolvX ticket Delete button. Native deletion is recorded separately and does not trigger the accidental-deletion question.'
+    ? translate(settings.locale, 'settings.recovery.nativeContext')
     : item.accidentalAnswer === 'yes'
-      ? 'Review answer: **Yes, it was deleted by mistake.** This ticket is eligible for restoration through this review workflow.'
+      ? translate(settings.locale, 'settings.recovery.accidentalYesContext')
       : [
-          'Was this ticket deleted by mistake?',
+          translate(settings.locale, 'settings.recovery.question'),
           '',
-          'Original channel ID: ' + item.originalChannelId,
-          'Ticket creator ID: ' + item.ownerId,
-          'Archived messages: ' + item.messageCount,
+          translate(settings.locale, 'settings.recovery.originalChannelId') + ': ' + item.originalChannelId,
+          translate(settings.locale, 'settings.recovery.ticketCreatorId') + ': ' + item.ownerId,
+          translate(settings.locale, 'settings.recovery.archivedMessages') + ': ' + item.messageCount,
           '',
-          'Your answer will be saved in Neon and logged in both the ticket audit stream and developer/system audit stream.',
+          translate(settings.locale, 'settings.recovery.answerSaved'),
         ].join('\n');
   const text = [context, '', ...previewLines].join('\n');
-  const embed = await recoveryEmbed(guild, (source === 'discord_native' ? '♻️ Restore Channel' : '🛡️ Ticket Deletion Review') + ' • Ticket #' + item.ticketNumber, text);
+  const embed = await recoveryEmbed(guild, translate(settings.locale, 'settings.recovery.previewTitle', { source: sourceLabel, number: item.ticketNumber }), text);
   await interaction.editReply({ content: '', embeds: [embed], components: rows });
 }
 
