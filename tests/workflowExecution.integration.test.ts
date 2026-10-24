@@ -92,7 +92,6 @@ test('manual workflow execution records durable steps, applies a guarded mutatio
     assert.equal((await listWorkflowExecutionRunsForTicket(guildId, run.ticketId)).length, 1);
   } finally {
     await cleanupGuild(guildId);
-    await closePostgresDatabase();
   }
 });
 
@@ -128,4 +127,8 @@ test('manual workflows record a condition mismatch without creating executable s
     await cleanupGuild(guildId);
     await closePostgresDatabase();
   }
+});
+
+test.after(async () => {
+  await closePostgresDatabase();
 });
