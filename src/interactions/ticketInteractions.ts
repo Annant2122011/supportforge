@@ -65,6 +65,8 @@ import type { TranslationKey } from '../i18n/locales/en-US';
 import { ensureDepartmentCategory } from '../services/departmentCategoryService';
 import { endTicketVoiceMode, startTicketVoiceMode, syncTicketVoiceParticipants } from '../services/voiceModeService';
 import { getUserFlagCount, isTicketCreationRestricted, recordReport } from '../services/reportService';
+import { parseQuickReplyPage, searchQuickRepliesPage, sendQuickReplyInTicket } from '../services/quickReplyService';
+import { getKnowledgeArticle, recordKnowledgeArticleShare } from '../services/knowledgeBaseService';
 
 import {
   findActivePersistedTickets,
@@ -3944,7 +3946,7 @@ function isTicketParticipant(topic: string, userId: string, reporterId?: string)
 async function showReportTargetSelector(interaction: ButtonInteraction, page = 0): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
-    await replyError(interaction, '❌ Reporting is only available inside a ticket.');
+    await replyError(interaction, '❌ ' + translate('en-US', 'ticket.report.error.ticketOnly'));
     return;
   }
 
@@ -3955,20 +3957,20 @@ async function showReportTargetSelector(interaction: ButtonInteraction, page = 0
   const reportSettings = await getAdvancedSettings(interaction.guild.id);
 
   if (!isTicketTopic(topic) || !isActiveTicketStatus(getTicketStatus(topic))) {
-    await replyError(interaction, '❌ Reporting is only available on an active ResolvX ticket.');
+    await replyError(interaction, '❌ ' + translate(reportSettings.locale, 'ticket.report.error.activeTicketOnly'));
     return;
   }
 
   if (!reportSettings.reports.enabled) {
     await interaction.editReply(
-      '🛡️ User reporting is currently disabled by the server administrators.',
+      '🛡️ ' + translate(reportSettings.locale, 'ticket.report.error.disabled'),
     );
     return;
   }
 
   const staff = getStaffContext(interaction, topic);
   if (!staff.authorized) {
-    await replyError(interaction, '❌ Only configured moderators or administrators can submit a report.');
+    await replyError(interaction, '❌ ' + translate(reportSettings.locale, 'ticket.report.error.staffOnly'));
     return;
   }
 
@@ -3979,7 +3981,7 @@ async function showReportTargetSelector(interaction: ButtonInteraction, page = 0
   ].filter((id): id is string => Boolean(id) && id !== interaction.user.id)));
 
   if (!targetIds.length) {
-    await replyError(interaction, '❌ There are no other reportable participants on this ticket.');
+    await replyError(interaction, '❌ ' + translate(reportSettings.locale, 'ticket.report.error.noOtherParticipants'));
     return;
   }
 
@@ -3992,11 +3994,11 @@ async function showReportTargetSelector(interaction: ButtonInteraction, page = 0
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId('ticket:report:target')
-        .setPlaceholder('Choose the reported user')
+        .setPlaceholder(translate(reportSettings.locale, 'ticket.report.target.placeholder'))
         .addOptions(visibleTargets.map((id) => ({
           label: 'User ' + id.slice(-6),
           value: id,
-          description: id === getField(topic, 'owner') ? 'Ticket owner' : 'Ticket participant',
+          description: id === getField(topic, 'owner') ? translate(reportSettings.locale, 'ticket.report.target.owner') : translate(reportSettings.locale, 'ticket.report.target.participant'),
         }))),
     ),
   ];
@@ -4006,17 +4008,17 @@ async function showReportTargetSelector(interaction: ButtonInteraction, page = 0
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
           .setCustomId('ticket:panel:report:page:' + (safePage - 1))
-          .setLabel('Previous')
+          .setLabel(translate(reportSettings.locale, 'ticket.report.previous'))
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(safePage === 0),
         new ButtonBuilder()
           .setCustomId('ticket:panel:report:page:' + safePage)
-          .setLabel('Page ' + (safePage + 1) + ' / ' + pageCount)
+          .setLabel(translate(reportSettings.locale, 'ticket.report.page', { page: safePage + 1, pages: pageCount }))
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(true),
         new ButtonBuilder()
           .setCustomId('ticket:panel:report:page:' + (safePage + 1))
-          .setLabel('Next')
+          .setLabel(translate(reportSettings.locale, 'ticket.report.next'))
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(safePage >= pageCount - 1),
       ),
@@ -4024,8 +4026,8 @@ async function showReportTargetSelector(interaction: ButtonInteraction, page = 0
   }
 
   await interaction.editReply({
-    content: '🚩 **Report a user**\nChoose the participant whose behaviour you want to report.' +
-      (pageCount > 1 ? '\nPage ' + (safePage + 1) + ' of ' + pageCount + '.' : ''),
+    content: '🚩 **' + translate(reportSettings.locale, 'ticket.report.target.title') + '**\n' + translate(reportSettings.locale, 'ticket.report.target.prompt') +
+      (pageCount > 1 ? '\n' + translate(reportSettings.locale, 'ticket.report.page', { page: safePage + 1, pages: pageCount }) + '.' : ''),
     components,
   });
 }
@@ -4040,26 +4042,26 @@ async function handleReportTargetSelection(interaction: StringSelectMenuInteract
       )
     : '';
 
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   if (!isTicketParticipant(topic, targetId, interaction.user.id)) {
-    await replyError(interaction, '❌ That user is no longer a reportable participant on this ticket.');
+    await replyError(interaction, '❌ ' + translate(settings.locale, 'ticket.report.error.notParticipant'));
     return;
   }
 
-  const settings = await getAdvancedSettings(interaction.guild!.id);
 
   const rows = Object.values(settings.reports.categories).slice(0, 25);
   await interaction.editReply({
-    content: '🚩 **Report category**\nChoose the category that best describes the behaviour. The category set is built into ResolvX and is separate from ticket use-case/departments.',
+    content: '🚩 **' + translate(settings.locale, 'ticket.report.category.title') + '**\n' + translate(settings.locale, 'ticket.report.category.description'),
     components: [
       new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
         new StringSelectMenuBuilder()
           .setCustomId('ticket:report:category:' + targetId)
-          .setPlaceholder('Choose a report category')
+          .setPlaceholder(translate(settings.locale, 'ticket.report.category.placeholder'))
           .addOptions(rows.map((category) => ({
             label: category.name.slice(0, 100),
             value: category.id,
             emoji: category.emoji,
-            description: 'Select a subcategory next',
+            description: translate(settings.locale, 'ticket.report.category.optionDescription'),
           }))),
       ),
     ],
@@ -4076,13 +4078,13 @@ async function renderReportSubcategorySelector(
   const category = settings.reports.categories[categoryId];
 
   if (!category) {
-    await replyError(interaction, '❌ That report category is no longer available.');
+    await replyError(interaction, '❌ ' + translate(settings.locale, 'ticket.report.error.categoryUnavailable'));
     return;
   }
 
   const subcategories = Object.values(category.subcategories);
   if (!subcategories.length) {
-    await replyError(interaction, '❌ That report category has no configured subcategories.');
+    await replyError(interaction, '❌ ' + translate(settings.locale, 'ticket.report.error.noSubcategories'));
     return;
   }
 
@@ -4095,7 +4097,7 @@ async function renderReportSubcategorySelector(
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId('ticket:report:subcategory:' + targetId + ':' + categoryId)
-        .setPlaceholder('Choose a report subcategory')
+        .setPlaceholder(translate(settings.locale, 'ticket.report.subcategory.placeholder'))
         .addOptions(visible.map((sub) => ({
           label: sub.name.slice(0, 100),
           value: sub.id,
@@ -4109,17 +4111,17 @@ async function renderReportSubcategorySelector(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
           .setCustomId('ticket:report:subcategory:page:' + targetId + ':' + categoryId + ':' + (safePage - 1))
-          .setLabel('Previous')
+          .setLabel(translate(settings.locale, 'ticket.report.previous'))
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(safePage === 0),
         new ButtonBuilder()
           .setCustomId('ticket:report:subcategory:page:' + targetId + ':' + categoryId + ':' + safePage)
-          .setLabel('Page ' + (safePage + 1) + ' / ' + pageCount)
+          .setLabel(translate(settings.locale, 'ticket.report.page', { page: safePage + 1, pages: pageCount }))
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(true),
         new ButtonBuilder()
           .setCustomId('ticket:report:subcategory:page:' + targetId + ':' + categoryId + ':' + (safePage + 1))
-          .setLabel('Next')
+          .setLabel(translate(settings.locale, 'ticket.report.next'))
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(safePage >= pageCount - 1),
       ),
@@ -4127,8 +4129,8 @@ async function renderReportSubcategorySelector(
   }
 
   const payload = {
-    content: '🚩 **Report subcategory**\nChoose the most specific reason.' +
-      (pageCount > 1 ? '\nPage ' + (safePage + 1) + ' of ' + pageCount + '.' : ''),
+    content: '🚩 **' + translate(settings.locale, 'ticket.report.subcategory.title') + '**\n' + translate(settings.locale, 'ticket.report.subcategory.description') +
+      (pageCount > 1 ? '\n' + translate(settings.locale, 'ticket.report.page', { page: safePage + 1, pages: pageCount }) + '.' : ''),
     components,
   };
 
@@ -4150,14 +4152,14 @@ async function handleReportCategorySelection(interaction: StringSelectMenuIntera
       )
     : '';
 
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   if (!isTicketParticipant(topic, targetId, interaction.user.id)) {
-    await replyError(interaction, '❌ That user is no longer a reportable participant on this ticket.');
+    await replyError(interaction, '❌ ' + translate(settings.locale, 'ticket.report.error.notParticipant'));
     return;
   }
 
-  const settings = await getAdvancedSettings(interaction.guild!.id);
   if (!settings.reports.categories[interaction.values[0]]) {
-    await replyError(interaction, '❌ That report category is no longer configured.');
+    await replyError(interaction, '❌ ' + translate(settings.locale, 'ticket.report.error.categoryNotConfigured'));
     return;
   }
 
@@ -4182,20 +4184,20 @@ async function handleReportSubcategorySelection(interaction: StringSelectMenuInt
     !isTicketParticipant(topic, targetId, interaction.user.id) ||
     !settings.reports.categories[categoryId]?.subcategories[subcategoryId]
   ) {
-    await replyError(interaction, '❌ This report selection is no longer valid for the current ticket.');
+    await replyError(interaction, '❌ ' + translate(settings.locale, 'ticket.report.error.selectionInvalid'));
     return;
   }
 
   await interaction.showModal(
     new ModalBuilder()
       .setCustomId('ticket:report:modal:' + targetId + ':' + categoryId + ':' + subcategoryId)
-      .setTitle('Report User')
+      .setTitle(translate(settings.locale, 'ticket.report.modal.title'))
       .addComponents(
         new ActionRowBuilder<TextInputBuilder>().addComponents(
           new TextInputBuilder()
             .setCustomId('description')
-            .setLabel('What happened? (optional)')
-            .setPlaceholder('Briefly describe the behaviour. Maximum 500 characters.')
+            .setLabel(translate(settings.locale, 'ticket.report.modal.descriptionLabel'))
+            .setPlaceholder(translate(settings.locale, 'ticket.report.modal.descriptionPlaceholder'))
             .setStyle(TextInputStyle.Paragraph)
             .setRequired(false)
             .setMaxLength(500),
@@ -4207,10 +4209,11 @@ async function handleReportSubcategorySelection(interaction: StringSelectMenuInt
 async function handleReportModal(interaction: ModalSubmitInteraction): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
-    await replyError(interaction, '❌ This report can only be submitted from a ticket.');
+    await replyError(interaction, '❌ ' + translate('en-US', 'ticket.report.error.ticketOnly'));
     return;
   }
 
+  const settings = await getAdvancedSettings(interaction.guild.id);
   const parts = interaction.customId.split(':');
   const targetUserId = parts[3] ?? '';
   const categoryId = parts[4] ?? '';
@@ -4218,25 +4221,24 @@ async function handleReportModal(interaction: ModalSubmitInteraction): Promise<v
   const topic = interaction.channel.topic ?? '';
   const staff = getStaffContext(interaction, topic);
   if (!staff.authorized) {
-    await replyError(interaction, '❌ Only configured moderators or administrators can submit reports.');
+    await replyError(interaction, '❌ ' + translate(settings.locale, 'ticket.report.error.staffOnly'));
     return;
   }
 
   if (!isTicketTopic(topic) || !isActiveTicketStatus(getTicketStatus(topic))) {
-    await replyError(interaction, '❌ Reporting is only available on an active ResolvX ticket.');
+    await replyError(interaction, '❌ ' + translate(settings.locale, 'ticket.report.error.activeTicketOnly'));
     return;
   }
 
   if (!isTicketParticipant(topic, targetUserId, interaction.user.id)) {
-    await replyError(interaction, '❌ The reported user is no longer a participant on this ticket.');
+    await replyError(interaction, '❌ ' + translate(settings.locale, 'ticket.report.error.reportedParticipantMissing'));
     return;
   }
 
-  const settings = await getAdvancedSettings(interaction.guild.id);
   if (
     !settings.reports.categories[categoryId]?.subcategories[subcategoryId]
   ) {
-    await replyError(interaction, '❌ The selected report reason is no longer configured.');
+    await replyError(interaction, '❌ ' + translate(settings.locale, 'ticket.report.error.reasonMissing'));
     return;
   }
 
@@ -4256,11 +4258,11 @@ async function handleReportModal(interaction: ModalSubmitInteraction): Promise<v
   });
 
   await interaction.editReply({
-    content: '🚩 **Review report**\nChoose whether this incident should count as a serious violation (a flag) or simply be recorded without adding a flag.',
+    content: '🚩 **' + translate(settings.locale, 'ticket.report.review.title') + '**\n' + translate(settings.locale, 'ticket.report.review.description'),
     components: [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId('ticket:report:decision:' + nonce + ':flag').setLabel('Flag Violation').setEmoji('🚩').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId('ticket:report:decision:' + nonce + ':record').setLabel('Record Only').setEmoji('📝').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('ticket:report:decision:' + nonce + ':flag').setLabel(translate(settings.locale, 'ticket.report.review.flagButton')).setEmoji('🚩').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('ticket:report:decision:' + nonce + ':record').setLabel(translate(settings.locale, 'ticket.report.review.recordOnlyButton')).setEmoji('📝').setStyle(ButtonStyle.Secondary),
       ),
     ],
   });
@@ -4272,6 +4274,7 @@ async function handleReportDecision(interaction: ButtonInteraction): Promise<voi
   const nonce = parts[3] ?? '';
   const decision = parts[4] ?? '';
   prunePendingReportDecisions();
+  const locale = interaction.guild ? (await getAdvancedSettings(interaction.guild.id)).locale : 'en-US';
   const pending = pendingReportDecisions.get(nonce);
 
   if (
@@ -4282,7 +4285,7 @@ async function handleReportDecision(interaction: ButtonInteraction): Promise<voi
     pending.channelId !== interaction.channel?.id ||
     (decision !== 'flag' && decision !== 'record')
   ) {
-    await replyError(interaction, '❌ This report review has expired or is not assigned to you.');
+    await replyError(interaction, '❌ ' + translate(locale, 'ticket.report.error.reviewExpired'));
     return;
   }
 
@@ -4448,19 +4451,20 @@ async function renderDepartmentSelector(interaction: ButtonInteraction | StringS
 export async function executeTicketReportCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!(await safeDeferReply(interaction))) return;
   if (!interaction.guild || interaction.channel?.type !== ChannelType.GuildText) {
-    await replyError(interaction, 'Reporting must be run inside an active ResolvX ticket.');
+    await replyError(interaction, translate('en-US', 'ticket.report.error.ticketOnly'));
     return;
   }
   const channel = interaction.channel as TextChannel;
+  const reportSettings = await getAdvancedSettings(interaction.guild.id);
   const topic = await getEffectiveTicketTopic(channel, channel.topic ?? '');
   const status = (await getPersistedTicketStatus(channel.id)) ?? getTicketStatus(topic);
   if (!isTicketTopic(topic) || !isActiveTicketStatus(status)) {
-    await replyError(interaction, 'Reporting is only available inside an active ResolvX ticket.');
+    await replyError(interaction, translate(reportSettings.locale, 'ticket.report.error.activeTicketOnly'));
     return;
   }
   const staff = getStaffContext(interaction, topic);
   if (!staff.authorized) {
-    await replyError(interaction, 'Only configured staff or administrators can submit a report.');
+    await replyError(interaction, translate(reportSettings.locale, 'ticket.report.error.staffOnly'));
     return;
   }
   const target = interaction.options.getUser('target', true);
@@ -4468,7 +4472,6 @@ export async function executeTicketReportCommand(interaction: ChatInputCommandIn
   const subcategoryInput = interaction.options.getString('subcategory-id', true).trim();
   const description = interaction.options.getString('description') ?? '';
   const flagged = interaction.options.getBoolean('flag', true);
-  const reportSettings = await getAdvancedSettings(interaction.guild.id);
   const selectedCategory = Object.values(reportSettings.reports.categories).find((item) =>
     item.id.toLowerCase() === categoryInput.toLowerCase() || item.name.toLowerCase() === categoryInput.toLowerCase());
   const selectedSubcategory = selectedCategory
@@ -4476,7 +4479,7 @@ export async function executeTicketReportCommand(interaction: ChatInputCommandIn
         item.id.toLowerCase() === subcategoryInput.toLowerCase() || item.name.toLowerCase() === subcategoryInput.toLowerCase())
     : undefined;
   if (!selectedCategory || !selectedSubcategory) {
-    await replyError(interaction, 'Report category/subcategory not found. Enter the configured name or ID shown in Settings → Reports.');
+    await replyError(interaction, translate(reportSettings.locale, 'ticket.report.command.categoryMissing'));
     return;
   }
   const categoryId = selectedCategory.id;
@@ -4487,11 +4490,11 @@ export async function executeTicketReportCommand(interaction: ChatInputCommandIn
     ...(getField(topic, 'claimed_by') ?? '').split(',').filter(Boolean),
   ].filter((id): id is string => Boolean(id)));
   if (!participants.has(target.id)) {
-    await replyError(interaction, 'The target must be a participant in this ticket.');
+    await replyError(interaction, translate(reportSettings.locale, 'ticket.report.error.targetNotParticipant'));
     return;
   }
   if (target.id === interaction.user.id) {
-    await replyError(interaction, 'You cannot report yourself.');
+    await replyError(interaction, translate(reportSettings.locale, 'ticket.report.error.selfReport'));
     return;
   }
   try {
@@ -5079,6 +5082,375 @@ async function handleTicketVoiceJoin(interaction: ButtonInteraction | ChatInputC
   );
 }
 
+type QuickReplyInteraction = ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction;
+type QuickReplyPickerUiInteraction = ButtonInteraction | ModalSubmitInteraction;
+
+interface QuickReplyPickerFilters {
+  query?: string;
+  category?: string;
+  tag?: string;
+}
+
+interface QuickReplyPickerSession {
+  guildId: string;
+  channelId: string;
+  userId: string;
+  locale: string;
+  filters: QuickReplyPickerFilters;
+  lastAccessedAt: number;
+}
+
+const QUICK_REPLY_PICKER_SESSION_TTL_MS = 15 * 60 * 1000;
+const QUICK_REPLY_PICKER_SESSION_MAX = 2000;
+const quickReplyPickerSessions = new Map<string, QuickReplyPickerSession>();
+
+function cleanQuickReplyPickerSessions(now = Date.now()): void {
+  for (const [id, session] of quickReplyPickerSessions) {
+    if (now - session.lastAccessedAt > QUICK_REPLY_PICKER_SESSION_TTL_MS) {
+      quickReplyPickerSessions.delete(id);
+    }
+  }
+  if (quickReplyPickerSessions.size > QUICK_REPLY_PICKER_SESSION_MAX) {
+    const oldest = [...quickReplyPickerSessions.entries()]
+      .sort((left, right) => left[1].lastAccessedAt - right[1].lastAccessedAt)
+      .slice(0, quickReplyPickerSessions.size - QUICK_REPLY_PICKER_SESSION_MAX);
+    for (const [id] of oldest) quickReplyPickerSessions.delete(id);
+  }
+}
+
+function createQuickReplyPickerSession(
+  interaction: ButtonInteraction,
+  locale: string,
+): string {
+  const now = Date.now();
+  cleanQuickReplyPickerSessions(now);
+  let id = '';
+  do {
+    id = randomBytes(9).toString('base64url');
+  } while (quickReplyPickerSessions.has(id));
+  quickReplyPickerSessions.set(id, {
+    guildId: interaction.guildId!,
+    channelId: interaction.channelId,
+    userId: interaction.user.id,
+    locale,
+    filters: {},
+    lastAccessedAt: now,
+  });
+  return id;
+}
+
+function getQuickReplyPickerSession(
+  sessionId: string,
+  interaction: QuickReplyInteraction,
+): QuickReplyPickerSession | null {
+  const session = quickReplyPickerSessions.get(sessionId);
+  const now = Date.now();
+  if (!session || now - session.lastAccessedAt > QUICK_REPLY_PICKER_SESSION_TTL_MS ||
+      session.guildId !== interaction.guildId ||
+      session.channelId !== interaction.channelId ||
+      session.userId !== interaction.user.id) {
+    quickReplyPickerSessions.delete(sessionId);
+    return null;
+  }
+  session.lastAccessedAt = now;
+  return session;
+}
+
+function quickReplyPickerFilterSummary(
+  locale: string,
+  filters: QuickReplyPickerFilters,
+): string {
+  const fields: string[] = [];
+  if (filters.query) fields.push(translate(locale, 'quickReply.picker.filterQueryLabel') + ': ' + filters.query);
+  if (filters.category) fields.push(translate(locale, 'quickReply.picker.filterCategoryLabel') + ': ' + filters.category);
+  if (filters.tag) fields.push(translate(locale, 'quickReply.picker.filterTagLabel') + ': ' + filters.tag);
+  return fields.join(' • ');
+}
+
+async function getQuickReplyTicketContext(interaction: QuickReplyInteraction) {
+  if (!interaction.guild || !interaction.guildId || !interaction.channelId || !interaction.channel || !('send' in interaction.channel)) {
+    throw new Error('Quick replies require a server ticket channel or private ticket thread.');
+  }
+  const ticket = await getPersistedTicket(interaction.channelId);
+  if (!ticket || ticket.guildId !== interaction.guildId || ticket.channelId !== interaction.channelId ||
+      ticket.deletedAt || !['open', 'claimed', 'pending', 'reopened'].includes(ticket.status)) {
+    throw new Error('Quick replies are available only in an active managed ticket.');
+  }
+
+  const config = await getGuildConfig(interaction.guildId);
+  const member = interaction.member;
+  const roleIds = !member ? [] : Array.isArray(member.roles)
+    ? member.roles
+    : member.roles.cache.map((role) => role.id);
+  const isAdmin = Boolean(
+    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild),
+  );
+  const department = ticket.departmentId ? config.departments[ticket.departmentId] : undefined;
+  const isTicketStaff = Boolean(department?.staffRoleId && roleIds.includes(department.staffRoleId));
+  if (!isAdmin && !isTicketStaff) {
+    throw new Error('Only the staff role configured for this ticket department or a server administrator can send quick replies.');
+  }
+
+  return {
+    guild: interaction.guild,
+    channel: interaction.channel as TextChannel | ThreadChannel,
+    ticket,
+    config,
+    access: { isAdmin, roleIds },
+    department,
+  };
+}
+
+function quickReplyPickerFilterButton(sessionId: string, locale: string): ButtonBuilder {
+  return new ButtonBuilder()
+    .setCustomId('ticket:quick-reply:filter:' + sessionId)
+    .setLabel(translate(locale, 'quickReply.picker.filter').slice(0, 80))
+    .setEmoji('🔎')
+    .setStyle(ButtonStyle.Primary);
+}
+
+function quickReplyPickerClearButton(sessionId: string, locale: string): ButtonBuilder {
+  return new ButtonBuilder()
+    .setCustomId('ticket:quick-reply:clear:' + sessionId)
+    .setLabel(translate(locale, 'quickReply.picker.clearFilters').slice(0, 80))
+    .setEmoji('✖️')
+    .setStyle(ButtonStyle.Secondary);
+}
+
+async function renderQuickReplySelector(
+  interaction: QuickReplyPickerUiInteraction,
+  context: Awaited<ReturnType<typeof getQuickReplyTicketContext>>,
+  sessionId: string,
+  requestedPage: number,
+): Promise<void> {
+  const session = getQuickReplyPickerSession(sessionId, interaction);
+  if (!session) {
+    const settings = await getAdvancedSettings(interaction.guildId!);
+    await interaction.editReply(translate(settings.locale, 'quickReply.picker.invalidSession'));
+    return;
+  }
+  const locale = session.locale;
+  const resultPage = await searchQuickRepliesPage(
+    interaction.guildId!,
+    context.access,
+    { ...session.filters, page: requestedPage, pageSize: 25, enabledOnly: true },
+  );
+  const hasFilters = Boolean(session.filters.query || session.filters.category || session.filters.tag);
+  const filterSummary = quickReplyPickerFilterSummary(locale, session.filters);
+  const controls: ButtonBuilder[] = [quickReplyPickerFilterButton(sessionId, locale)];
+  if (hasFilters) controls.push(quickReplyPickerClearButton(sessionId, locale));
+
+  if (!resultPage.total) {
+    await interaction.editReply({
+      content: hasFilters
+        ? translate(locale, 'quickReply.list.noResults')
+        : translate(locale, 'quickReply.picker.empty'),
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(controls)],
+      allowedMentions: { parse: [] },
+    });
+    return;
+  }
+
+  const options = resultPage.replies.map((reply) => ({
+    label: reply.name.slice(0, 100),
+    value: reply.id,
+    description: (reply.category + ' • ' + (reply.tags.join(', ') || 'no tags')).slice(0, 100),
+  }));
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId('ticket:quick-reply:select:' + sessionId + ':' + resultPage.page)
+    .setPlaceholder(translate(locale, 'quickReply.picker.placeholder').slice(0, 150))
+    .setMinValues(1)
+    .setMaxValues(1)
+    .addOptions(options);
+  const components: Array<ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<ButtonBuilder>> = [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu),
+  ];
+  if (resultPage.pageCount > 1) {
+    controls.unshift(
+      new ButtonBuilder()
+        .setCustomId('ticket:quick-reply:page:' + sessionId + ':' + (resultPage.page - 1))
+        .setLabel(translate(locale, 'quickReply.picker.previous'))
+        .setEmoji('⬅️')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(resultPage.page === 0),
+      new ButtonBuilder()
+        .setCustomId('ticket:quick-reply:page:' + sessionId + ':' + (resultPage.page + 1))
+        .setLabel(translate(locale, 'quickReply.picker.next'))
+        .setEmoji('➡️')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(resultPage.page >= resultPage.pageCount - 1),
+    );
+  }
+  components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(controls));
+  await interaction.editReply({
+    content: translate(locale, 'quickReply.picker.prompt', {
+      page: resultPage.page + 1,
+      pages: resultPage.pageCount,
+    }) + (filterSummary ? '\n' + translate(locale, 'quickReply.picker.activeFilters', { filters: filterSummary }) : ''),
+    components,
+    allowedMentions: { parse: [] },
+  });
+}
+
+async function showQuickReplySelector(
+  interaction: ButtonInteraction,
+  requestedPage = 0,
+  existingSessionId?: string,
+): Promise<void> {
+  if (!(await safeDeferReply(interaction))) return;
+  let locale = 'en-US';
+  try {
+    const settings = await getAdvancedSettings(interaction.guildId!);
+    locale = settings.locale;
+    let sessionId = existingSessionId;
+    let session = existingSessionId
+      ? getQuickReplyPickerSession(existingSessionId, interaction)
+      : null;
+    if (existingSessionId && !session) {
+      await interaction.editReply(translate(settings.locale, 'quickReply.picker.invalidSession'));
+      return;
+    }
+
+    const context = await getQuickReplyTicketContext(interaction);
+    if (!sessionId) {
+      sessionId = createQuickReplyPickerSession(interaction, settings.locale);
+      session = quickReplyPickerSessions.get(sessionId)!;
+    }
+    if (!sessionId || !session) {
+      await interaction.editReply(translate(settings.locale, 'quickReply.picker.initializationFailed'));
+      return;
+    }
+    await renderQuickReplySelector(interaction, context, sessionId, requestedPage);
+  } catch (error) {
+    await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : translate(locale, 'quickReply.picker.filterUnavailable'));
+  }
+}
+
+async function showQuickReplyFilterModal(
+  interaction: ButtonInteraction,
+  sessionId: string,
+): Promise<void> {
+  const session = getQuickReplyPickerSession(sessionId, interaction);
+  if (!session) {
+    if (await safeDeferReply(interaction)) {
+      const settings = await getAdvancedSettings(interaction.guildId!);
+      await interaction.editReply(translate(settings.locale, 'quickReply.picker.invalidSession'));
+    }
+    return;
+  }
+  const settings = session.locale;
+  const field = (id: string, label: TranslationKey, maxLength: number, value?: string) => {
+    const input = new TextInputBuilder()
+      .setCustomId(id)
+      .setLabel(translate(settings, label).slice(0, 45))
+      .setStyle(TextInputStyle.Short)
+      .setRequired(false)
+      .setMaxLength(maxLength);
+    if (value) input.setValue(value);
+    return new ActionRowBuilder<TextInputBuilder>().addComponents(input);
+  };
+  const modal = new ModalBuilder()
+    .setCustomId('ticket:quick-reply:filter-modal:' + sessionId)
+    .setTitle(translate(settings, 'quickReply.picker.filterTitle').slice(0, 45))
+    .addComponents(
+      field('query', 'quickReply.picker.filterQueryLabel', 80, session.filters.query),
+      field('category', 'quickReply.picker.filterCategoryLabel', 80, session.filters.category),
+      field('tag', 'quickReply.picker.filterTagLabel', 32, session.filters.tag),
+    );
+  await interaction.showModal(modal);
+}
+
+async function handleQuickReplyFilterModal(interaction: ModalSubmitInteraction): Promise<void> {
+  if (!(await safeDeferReply(interaction))) return;
+  const sessionId = interaction.customId.slice('ticket:quick-reply:filter-modal:'.length);
+  const session = getQuickReplyPickerSession(sessionId, interaction);
+  if (!session) {
+    const settings = await getAdvancedSettings(interaction.guildId!);
+    await interaction.editReply(translate(settings.locale, 'quickReply.picker.invalidSession'));
+    return;
+  }
+  try {
+    const context = await getQuickReplyTicketContext(interaction);
+    const normalize = (value: string, maxLength: number) => value.trim().replace(/\s+/g, ' ').slice(0, maxLength) || undefined;
+    session.filters = {
+      query: normalize(interaction.fields.getTextInputValue('query'), 80),
+      category: normalize(interaction.fields.getTextInputValue('category'), 80),
+      tag: normalize(interaction.fields.getTextInputValue('tag'), 32),
+    };
+    await renderQuickReplySelector(interaction, context, sessionId, 0);
+  } catch (error) {
+    await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : translate(session.locale, 'quickReply.picker.filterUnavailable'));
+  }
+}
+
+async function handleQuickReplyClear(
+  interaction: ButtonInteraction,
+  sessionId: string,
+): Promise<void> {
+  const session = getQuickReplyPickerSession(sessionId, interaction);
+  if (!session) {
+    if (await safeDeferReply(interaction)) {
+      const settings = await getAdvancedSettings(interaction.guildId!);
+      await interaction.editReply(translate(settings.locale, 'quickReply.picker.invalidSession'));
+    }
+    return;
+  }
+  session.filters = {};
+  await showQuickReplySelector(interaction, 0, sessionId);
+}
+
+async function handleQuickReplySelection(interaction: StringSelectMenuInteraction): Promise<void> {
+  if (!(await safeDeferReply(interaction))) return;
+  let locale = 'en-US';
+  try {
+    locale = (await getAdvancedSettings(interaction.guildId!)).locale;
+    const [sessionId = '', rawPage = ''] = interaction.customId
+      .slice('ticket:quick-reply:select:'.length)
+      .split(':');
+    const session = getQuickReplyPickerSession(sessionId, interaction);
+    const page = parseQuickReplyPage(rawPage);
+    if (!session || page === null) {
+      const settings = await getAdvancedSettings(interaction.guildId!);
+      await interaction.editReply(translate(settings.locale, 'quickReply.picker.invalidSession'));
+      return;
+    }
+    const context = await getQuickReplyTicketContext(interaction);
+    const quickReplyId = interaction.values[0];
+    if (!quickReplyId) throw new Error(translate(locale, 'quickReply.picker.selectionRequired'));
+    const currentPage = await searchQuickRepliesPage(interaction.guildId!, context.access, {
+      ...session.filters,
+      page,
+      pageSize: 25,
+      enabledOnly: true,
+    });
+    if (!currentPage.replies.some((reply) => reply.id === quickReplyId)) {
+      const settings = await getAdvancedSettings(interaction.guildId!);
+      await interaction.editReply(translate(settings.locale, 'quickReply.picker.invalidSession'));
+      return;
+    }
+    const reply = await sendQuickReplyInTicket({
+      guild: context.guild,
+      channel: context.channel,
+      quickReplyId,
+      sendIntentId: interaction.id,
+      actorId: interaction.user.id,
+      actorName: interaction.user.tag,
+      actorUsername: interaction.user.username,
+      isAdmin: context.access.isAdmin,
+      roleIds: context.access.roleIds,
+    });
+    const settings = await getAdvancedSettings(interaction.guildId!);
+    await interaction.editReply(translate(
+      settings.locale,
+      reply.status === 'uncertain' ? 'quickReply.picker.uncertain' : 'quickReply.picker.sent',
+      { name: reply.reply.name },
+    ));
+  } catch (error) {
+    await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : translate(locale, 'quickReply.picker.sendFailed'));
+  }
+}
+
 async function handlePanelButton(
   interaction: ButtonInteraction,
 ): Promise<void> {
@@ -5448,6 +5820,11 @@ async function handlePanelButton(
   }
   if (id === 'ticket:panel:history') {
     await showTicketHistory(interaction);
+    return;
+  }
+
+  if (id === 'ticket:panel:quick-reply') {
+    await showQuickReplySelector(interaction);
     return;
   }
 
@@ -6426,7 +6803,151 @@ export async function handleTicketInteraction(
     | ModalSubmitInteraction,
 ): Promise<void> {
   try {
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket:quick-reply:filter-modal:')) {
+      await handleQuickReplyFilterModal(interaction);
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('ticket:quick-reply:filter:')) {
+      await showQuickReplyFilterModal(
+        interaction,
+        interaction.customId.slice('ticket:quick-reply:filter:'.length),
+      );
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('ticket:quick-reply:clear:')) {
+      await handleQuickReplyClear(
+        interaction,
+        interaction.customId.slice('ticket:quick-reply:clear:'.length),
+      );
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('ticket:quick-reply:page:')) {
+      const [sessionId = '', rawPage = ''] = interaction.customId
+        .slice('ticket:quick-reply:page:'.length)
+        .split(':');
+      const page = Number(rawPage);
+      if (!/^[A-Za-z0-9_-]{12}$/.test(sessionId) || !/^\d{1,5}$/.test(rawPage) ||
+          !Number.isInteger(page) || page < 0 || page > 99999) {
+        if (await safeDeferReply(interaction)) {
+          const settings = await getAdvancedSettings(interaction.guildId!);
+          await interaction.editReply(translate(settings.locale, 'quickReply.picker.invalidPage'));
+        }
+        return;
+      }
+      if (!getQuickReplyPickerSession(sessionId, interaction)) {
+        if (await safeDeferReply(interaction)) {
+          const settings = await getAdvancedSettings(interaction.guildId!);
+          await interaction.editReply(translate(settings.locale, 'quickReply.picker.invalidSession'));
+        }
+        return;
+      }
+      await showQuickReplySelector(interaction, page, sessionId);
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('sf:kb:share:')) {
+      if (!(await safeDeferReply(interaction))) return;
+      const parts = interaction.customId.split(':');
+      const articleId = parts[3] ?? '';
+      const targetChannelId = parts[4] ?? '';
+      if (!interaction.guildId || !interaction.guild || !articleId || !targetChannelId ||
+          interaction.channelId !== targetChannelId) {
+        await interaction.editReply(translate((await getAdvancedSettings(interaction.guildId ?? '')).locale, 'knowledge.command.invalidShareControl'));
+        return;
+      }
+
+      const ticket = await getPersistedTicket(targetChannelId);
+      if (!ticket || ticket.guildId !== interaction.guildId || ticket.channelId !== targetChannelId ||
+          ticket.deletedAt || !['open', 'claimed', 'pending', 'reopened'].includes(ticket.status)) {
+        await interaction.editReply('This ticket is no longer active. No article was shared.');
+        return;
+      }
+
+      const config = await getGuildConfig(interaction.guildId);
+      const member = interaction.member;
+      const roleIds = !member ? [] : Array.isArray(member.roles)
+        ? member.roles
+        : member.roles.cache.map((role) => role.id);
+      const isAdmin = Boolean(
+        interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
+        interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild),
+      );
+      const department = ticket.departmentId ? config.departments[ticket.departmentId] : undefined;
+      const isTicketStaff = Boolean(department?.staffRoleId && roleIds.includes(department.staffRoleId));
+      if (!isAdmin && !isTicketStaff) {
+        await interaction.editReply('You need the staff role configured for this ticket department to share an article.');
+        return;
+      }
+
+      const access = { isAdmin, isStaff: isAdmin || isTicketStaff, roleIds };
+      const article = await getKnowledgeArticle(interaction.guildId, articleId, access);
+      if (!article || article.status !== 'published') {
+        await interaction.editReply('This published article is no longer available to your role. No content was shared.');
+        return;
+      }
+
+      const summary = article.summary.slice(0, 500);
+      const excerpt = article.body.slice(0, 2200);
+      const truncated = article.body.length > excerpt.length;
+      const targetChannel = interaction.channel;
+      if (!targetChannel || !('send' in targetChannel)) {
+        await interaction.editReply('This ticket channel is not available for sharing. No article was posted.');
+        return;
+      }
+      const shareChannel = targetChannel as TextChannel | ThreadChannel;
+      const shareDescription = [
+        summary,
+        '**Category:** ' + article.category,
+        '**Tags:** ' + (article.tags.join(', ') || 'none'),
+        excerpt,
+        ...(truncated ? ['Open /supportforge knowledge view with article ID ' + article.id + ' for the full article.'] : []),
+        '_This is a suggested resource, not a replacement for human support. The ticket remains open for follow-up._',
+      ].filter(Boolean).join('\n\n').slice(0, 3900);
+      await shareChannel.send({
+        embeds: [new EmbedBuilder().setTitle('📚 Suggested article: ' + article.title)
+          .setDescription(shareDescription)
+          .setFooter({ text: 'Knowledge Base article ' + article.id + ' • revision ' + article.revision })],
+        allowedMentions: { parse: [] },
+      });
+      try {
+        await recordKnowledgeArticleShare(interaction.guildId, article.id, access, interaction.user.id);
+      } catch {
+        console.warn('Knowledge Base article was shared, but its usage metric could not be recorded.');
+      }
+      if (config.supportCategoryId) {
+        try {
+        await logTicketEvent(interaction.guild, config.supportCategoryId, {
+          ticketNumber: ticket.ticketNumber ?? ticket.id,
+          ticketChannelId: ticket.channelId,
+          event: 'KNOWLEDGE_ARTICLE_SHARED',
+          actorId: interaction.user.id,
+          actor: interaction.user.tag,
+          actorName: interaction.user.tag,
+          detail: 'Shared published Knowledge Base article ' + article.id + ' revision ' + article.revision + ' via a ticket suggestion control.',
+        });
+        } catch {
+          console.warn('Knowledge Base article was shared, but its ticket audit notification failed.');
+        }
+      }
+      await interaction.editReply('Shared "' + article.title + '" in this ticket. Automatic mentions are disabled; the ticket remains open.');
+      return;
+    }
+
     if (interaction.customId.startsWith('ticket:thread:')) {
+      if (interaction.isButton() && interaction.customId.startsWith('ticket:thread:quick-reply:')) {
+        const targetThreadId = interaction.customId.split(':')[3] ?? '';
+        if (!targetThreadId || targetThreadId !== interaction.channelId) {
+          if (await safeDeferReply(interaction)) {
+            await interaction.editReply(translate((await getAdvancedSettings(interaction.guildId ?? '')).locale, 'quickReply.picker.invalidThreadControl'));
+          }
+          return;
+        }
+        await showQuickReplySelector(interaction);
+        return;
+      }
       if (interaction.isButton()) {
         const handled = await handlePrivateThreadAuxButton(interaction);
         if (!handled) await handlePrivateThreadTicketButton(interaction);
@@ -6461,6 +6982,10 @@ export async function handleTicketInteraction(
     }
 
     if (interaction.isStringSelectMenu()) {
+      if (interaction.customId.startsWith('ticket:quick-reply:select:')) {
+        await handleQuickReplySelection(interaction);
+        return;
+      }
       if (routingComponentRoute === 'department-select') {
         await changeTicketDepartment(interaction);
         return;

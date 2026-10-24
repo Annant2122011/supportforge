@@ -5,6 +5,8 @@
 **Stack:** PR #34 → Stage 2 PR #32 → Stage 1 PR #31 → baseline cleanup PR #33  
 **Production persistence:** Neon PostgreSQL. The scripts use explicit connection variables; no production database operation or Discord deployment is implied by these source changes.
 
+**Stage 4 follow-on:** [Knowledge Base, related tickets, quick replies and safe workflows](stage-4-knowledge-base-productivity.md) are consolidated in Stage 4 PR #39, which is stacked on this Stage 3 branch.
+
 ## Implemented source scope
 
 ### 1. Recovery Vault and transparent recovery previews
@@ -41,18 +43,18 @@
 - Added PostgreSQL migration 13 for durable per-segment send intent and reconciliation.
 - Expanded `db:verify` to require the new ledger table.
 - Added a PostgreSQL integration test for pending/completed segment state and stored Discord message identity, plus pure marker tests covering determinism and extraction.
-- CI must pass on this exact branch head before the increment is considered automated-verified.
+- The segment-ledger increment is included in the consolidated candidate, whose exact source head passed CI #2739 (216 tests, zero skips, disposable PostgreSQL verification).
 
 ## Automated evidence and Stage 1/2 re-audit
 
 ### Latest exact-head evidence
 
-- Stage 3: [CI #2389](https://github.com/Annant2122011/supportforge/actions/runs/40053953590) for `f16b73dac24e5885875d632db959f9f0e012c071`, build passed, **194/194 tests**, zero skipped, disposable PostgreSQL verification passed.
+- Original Stage 3 branch baseline: [CI #2396](https://github.com/Annant2122011/supportforge/actions/runs/40054056156) for `d5245a8dcefc213a74c6469e56234357350ecc6c`, build passed, **194/194 tests**, zero skipped, disposable PostgreSQL verification passed. The consolidated Stage 4 candidate also includes this recovery work and passed [CI #2739](https://github.com/Annant2122011/supportforge/actions/runs/40101705001): build passed, **216/216 tests**, zero skipped, disposable PostgreSQL verification passed.
 
 | Acceptance gate | Result |
 |---|---|
-| Source and tests for recovery preview, replay markers, backup/restore safeguards, SLA, CSAT and durable segment ledger | Implemented; latest CI passed on head f16b73d |
-| Build/test against disposable PostgreSQL | **PASS**: CI #2389, 194 tests, zero skipped; DB schema/integrity verification passed |
+| Source and tests for recovery preview, replay markers, backup/restore safeguards, SLA, CSAT and durable segment ledger | Implemented; latest exact-head CI #2396 passed on `d5245a8dcefc213a74c6469e56234357350ecc6c` |
+| Build/test against disposable PostgreSQL | **PASS**: [CI #2396](https://github.com/Annant2122011/supportforge/actions/runs/40054056156), 194/194 tests, zero skipped; DB schema/integrity verification passed |
 | Live Discord deletion/recovery/permissions/429/restart scenarios | **Blocked / not run** |
 | Isolated Neon backup and restore, including checksum/schema/row-count/application smoke test | **Blocked / not run** |
 | Real SLA alert timing and large-guild throughput | **Blocked / not run** |

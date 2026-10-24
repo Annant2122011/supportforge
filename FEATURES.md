@@ -4834,12 +4834,23 @@ A consolidated source review is tracked in [docs/stage-a-to-g-reverification.md]
 
 # Stage H — Translation and Localization Architecture
 
-**Status:** H1 implementation in progress on a separate feature branch. This is not yet merged to main.
+**Status:** H1 and initial H2 implementation are present on the consolidated feature branch; PR #39 remains an open draft and live Discord acceptance is outstanding.
 
 The two-part design and acceptance checklist are tracked in [docs/stage-h-translation-architecture.md](docs/stage-h-translation-architecture.md).
 
-- **H1 — Translation core:** supported-locale registry, canonical English catalog, partial Hindi/Bengali catalogs, safe interpolation, locale-aware date/number formatting, and a per-guild locale preference in the existing Neon-backed advanced-settings JSON document. No SQL migration or third-party i18n dependency.
+- **H1 — Translation core:** supported-locale registry, canonical English catalog, complete typed Hindi/Bengali catalogs, safe interpolation, locale-aware date/number formatting, and per-guild locale preference in the existing Neon-backed advanced-settings JSON document. Missing catalog keys fail verification rather than silently falling back to English. No SQL migration or third-party i18n dependency.
 - **H2 — User-facing localization:** Settings dashboard and slash-command language controls with parity; gradual coverage of ticket intake/lifecycle, forms, support-hours messages, settings, panel previews and selected reports; locale-specific interaction regression tests.
-- The canonical catalog defines typed keys. Missing translated keys fall back to English individually. Stable command names, internal IDs, audit action identifiers and user-generated content remain untranslated.
+- The canonical catalog defines typed keys that must exist in English, Hindi and Bengali. Stable command names, internal IDs, audit action identifiers, and user-generated content/custom labels remain untranslated.
 - H1 keeps broad message changes opt-in. A green CI run and non-production Discord acceptance are required before merging/rolling out the framework.
 
+
+
+### Stage H refinement — strict catalogs and Settings navigation
+
+On the consolidated Stage 4 feature branch, all three translation catalogs contain the same 352 keys (English, Hindi and Bengali). TypeScript enforces complete typed catalog maps; translation lookup fails on missing keys rather than silently falling back to English, and malformed stored locale values resolve safely to en-US. Localized built-in surfaces include the Settings dashboard and summary; panel automation; support hours; Defaults, Retention, Team/Voice, Inactivity Automation, Ticket Workspace and Storage; the quick and detailed Staff Manual; Repair; Appearance/Theme; Safety & Reports; Settings/dashboard and custom-panel previews; and the Quick Reply picker, filtering, pagination, metrics and send confirmation. Custom per-server labels, category names, role names and panel-authored title/body copy remain preserved. The eight missing Bengali use-case preset labels have been added; the corrected implementation head passed CI #40106837586 (build passed, 220 tests passed, zero skipped, and disposable PostgreSQL verification passed). Remaining work is custom-panel builder shell copy, other detailed subpage copy, fuller report rule/category content and live locale acceptance.
+
+## Stages I and J — implementation checkpoint
+
+- **Stage I:** deterministic PostgreSQL Knowledge Base, weighted/typo-tolerant search, synonyms, visibility/role checks, article revisions and contextual suggestions within active tickets. High/medium-confidence results may be shared only after current access and ticket-state checks. This does not claim semantic AI/RAG.
+- **Stage J:** versioned quick replies, allowlisted placeholders, mention-safe delivery, role/department checks, paginated server-side filtering, immutable revisions, aggregate usage metrics and durable send-intent reconciliation. Ambiguous delivery outcomes are not blindly retried.
+- Both remain subject to exact-head CI, ordered PR integration and authorized non-production Discord acceptance. The full four-stage programme also requires an isolated non-production Neon backup/restore drill before production acceptance.

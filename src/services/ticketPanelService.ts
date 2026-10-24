@@ -209,9 +209,9 @@ export function buildTicketPanelComponents(
         .setEmoji('📝')
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
-        .setCustomId('ticket:panel:report')
-        .setLabel('Report User')
-        .setEmoji('🛡️')
+        .setCustomId('ticket:panel:quick-reply')
+        .setLabel('Quick Reply')
+        .setEmoji('💬')
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
         .setCustomId('ticket:panel:move-bottom')

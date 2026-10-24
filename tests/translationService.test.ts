@@ -34,11 +34,19 @@ test('canonical English catalog contains non-empty copy for every registered key
   }
 });
 
-test('partial translations fall back to English on a key-by-key basis', () => {
-  const params = { timezone: 'UTC', nextOpening: 'Next opening: 09:00 UTC.' };
+test('every supported locale has its own non-empty string for every canonical key', () => {
+  const keys = getTranslationKeys();
+  for (const locale of SUPPORTED_LOCALES) {
+    for (const key of keys) {
+      assert.equal(hasOwnTranslation(locale, key), true, 'Missing ' + locale + ' translation for ' + key);
+      assert.ok(translate(locale, key).trim().length > 0, 'Expected localized copy for ' + locale + '/' + key);
+    }
+  }
+  const params = { timezone: 'UTC', nextOpening: '09:00 UTC' };
   const english = translate('en-US', 'ticket.intake.outsideHours', params);
-  const bengaliFallback = translate('bn-IN', 'ticket.intake.outsideHours', params);
-  assert.equal(bengaliFallback, english);
+  const bengali = translate('bn-IN', 'ticket.intake.outsideHours', params);
+  assert.notEqual(bengali, english);
+  assert.match(bengali, /সহায়তা/);
   assert.equal(translate('unknown-locale', 'ticket.created.title', { ticketNumber: 42 }), 'Ticket #42 created');
 });
 
@@ -75,4 +83,21 @@ test('date formatting is locale-aware and refuses invalid dates', () => {
   assert.equal(english, '04/05/2026');
   assert.notEqual(hindi, english);
   assert.throws(() => formatLocaleDate('en-US', 'not-a-date'), RangeError);
+});
+
+
+test('all translated catalog entries preserve the canonical placeholder contract', () => {
+  const placeholders = (value: string): string[] =>
+    [...value.matchAll(/\{([A-Za-z][A-Za-z0-9_]*)\}/g)].map((match) => match[1]).sort();
+
+  for (const key of getTranslationKeys()) {
+    const canonical = placeholders(translate('en-US', key));
+    for (const locale of SUPPORTED_LOCALES) {
+      assert.deepEqual(
+        placeholders(translate(locale, key)),
+        canonical,
+        'Placeholder mismatch for ' + locale + '/' + key,
+      );
+    }
+  }
 });

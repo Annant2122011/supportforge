@@ -236,6 +236,7 @@ export function buildPrivateThreadTicketComponents(status: TicketStatus, threadI
   ));
   rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId('ticket:thread:reassign:' + threadId).setLabel('Reassign').setEmoji('👥').setStyle(ButtonStyle.Primary).setDisabled(!mutable),
+    new ButtonBuilder().setCustomId('ticket:thread:quick-reply:' + threadId).setLabel('Quick Reply').setEmoji('💬').setStyle(ButtonStyle.Secondary).setDisabled(!mutable),
     new ButtonBuilder().setCustomId('ticket:thread:delete:' + threadId).setLabel('Delete Ticket').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
   ));
   return rows;

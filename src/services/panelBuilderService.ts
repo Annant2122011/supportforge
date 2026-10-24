@@ -18,6 +18,7 @@ import {
   type CustomSupportPanelTargetType,
 } from './configService';
 import { listTicketForms, type TicketFormVersion } from './ticketFormService';
+import { translate } from '../i18n/translationService';
 
 export interface CustomPanelInput {
   name: string;
@@ -303,6 +304,7 @@ export function buildCustomPanelEmbed(
   themeColor: number,
   preview = false,
   published = false,
+  locale: string = 'en-US',
 ): EmbedBuilder {
   const panel = normalizedDraft(inputPanel);
   const publishedConfig = published ? panel.publishedConfig : null;
@@ -311,10 +313,10 @@ export function buildCustomPanelEmbed(
   const embed = new EmbedBuilder()
     .setColor(color)
     .setTitle(view.title)
-    .setDescription(view.description || 'Choose an option below to start a support request.')
-    .setFooter({ text: view.footer || 'ResolvX • Customer Support' })
+    .setDescription(view.description || translate(locale, 'panelBuilder.fallback.description'))
+    .setFooter({ text: view.footer || translate(locale, 'panelBuilder.fallback.footer') })
     .setAuthor({
-      name: guildName + ' • ResolvX Support',
+      name: guildName + ' • ' + translate(locale, 'panelBuilder.authorSuffix'),
       ...(view.iconUrl ? { iconURL: view.iconUrl } : {}),
     })
     .setTimestamp(new Date(panel.updatedAt));
@@ -322,8 +324,8 @@ export function buildCustomPanelEmbed(
   if (view.bannerUrl) embed.setImage(view.bannerUrl);
   if (preview) {
     embed.addFields({
-      name: 'Preview',
-      value: 'Draft preview only. Controls are disabled and the published panel is not changed.',
+      name: translate(locale, 'panelBuilder.preview.label'),
+      value: translate(locale, 'panelBuilder.preview.description'),
     });
   }
   return embed;

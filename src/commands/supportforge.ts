@@ -32,6 +32,42 @@ import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
 import { UI_THEMES, getThemeColor } from '../services/uiThemeService';
 import { buildSystemDiagnosticsEmbed, runSystemDiagnostics } from '../services/systemDiagnosticsService';
 import { getTicketRecoveryPreview } from '../services/ticketArchiveService';
+import { handleStage4SlashCommand } from '../interactions/stage4SlashCommands';
+import {
+  createKnowledgeArticle,
+  getKnowledgeArticle,
+  getKnowledgeBaseMetrics,
+  listKnowledgeArticles,
+  listKnowledgeArticleRevisions,
+  recordKnowledgeArticleFeedback,
+  restoreKnowledgeArticleRevision,
+  searchKnowledgeBase,
+  setKnowledgeArticleStatus,
+  setKnowledgeSynonyms,
+  listKnowledgeSynonyms,
+  deleteKnowledgeSynonyms,
+  updateKnowledgeArticle,
+} from '../services/knowledgeBaseService';
+import {
+  deleteQuickReply,
+  getQuickReply,
+  listQuickReplies,
+  renderQuickReply,
+  saveQuickReply,
+} from '../services/quickReplyService';
+import {
+  linkRelatedTickets,
+  listRelatedTickets,
+  unlinkRelatedTickets,
+} from '../services/relatedTicketService';
+import {
+  deleteWorkflowTemplate,
+  listWorkflowTemplates,
+  previewWorkflowTemplateById,
+  saveWorkflowTemplate,
+  setWorkflowTemplateEnabled,
+} from '../services/workflowTemplateService';
+import { getPersistedTicket } from '../services/ticketPersistenceService';
 import {
   deleteSupportSlaPolicy,
   evaluateTicketSla,
@@ -79,7 +115,7 @@ import {
   ensureAllDepartmentCategories,
 } from '../services/departmentCategoryService';
 
-import { ensureAuditDeveloperInfrastructure, getOrCreateAuditChannel, logSettingsEvent, logSystemEvent, handleAuditSlashCommand } from '../services/auditLogService';
+import { ensureAuditDeveloperInfrastructure, getOrCreateAuditChannel, logSettingsEvent, logSystemEvent, logTicketEvent, handleAuditSlashCommand } from '../services/auditLogService';
 import { performFactoryReset } from '../services/factoryResetService';
 import { recoverMissingTicketRecords } from '../services/ticketRecoveryService';
 import { addUseCasePreset } from '../services/useCasePresetService';
@@ -280,6 +316,36 @@ function isAdminLike(
         PermissionFlagsBits.ManageGuild,
       ),
   );
+}
+
+interface ServerAccess {
+  isAdmin: boolean;
+  isStaff: boolean;
+  roleIds: string[];
+}
+
+function roleIdsFromInteraction(interaction: ChatInputCommandInteraction): string[] {
+  const member = interaction.member;
+  if (!member) return [];
+  return Array.isArray(member.roles) ? member.roles : member.roles.cache.map((role) => role.id);
+}
+
+async function resolveServerAccess(interaction: ChatInputCommandInteraction): Promise<ServerAccess> {
+  const config = await getGuildConfig(interaction.guildId!);
+  const roleIds = roleIdsFromInteraction(interaction);
+  const staffRoles = new Set(
+    Object.values(config.departments).map((department) => department.staffRoleId).filter((id): id is string => Boolean(id)),
+  );
+  const isAdmin = isAdminLike(interaction);
+  const isStaff = isAdmin || roleIds.some((id) => staffRoles.has(id));
+  return { isAdmin, isStaff, roleIds };
+}
+
+function parseCommaList(value: string | null, field: string, maxItems: number): string[] {
+  if (!value?.trim()) return [];
+  const items = [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))];
+  if (items.length > maxItems) throw new Error(field + ' accepts at most ' + maxItems + ' comma-separated values.');
+  return items;
 }
 
 function categoryButton(
@@ -824,6 +890,206 @@ export const data =
             .setName('summary')
             .setDescription('Show privacy-aware customer satisfaction results (admin only)')
             .addIntegerOption((option) => option.setName('days').setDescription('Reporting window in days').setRequired(false).setMinValue(1).setMaxValue(366)),
+        ),
+    )
+
+    .addSubcommandGroup((group) =>
+      group
+        .setName('knowledge')
+        .setDescription('Manage and search the deterministic, no-AI Knowledge Base')
+        .addSubcommand((subcommand) =>
+          subcommand.setName('create').setDescription('Create a draft article (admin only)')
+            .addStringOption((option) => option.setName('title').setDescription('Article title').setRequired(true).setMaxLength(160))
+            .addStringOption((option) => option.setName('body').setDescription('Article body').setRequired(true).setMaxLength(4000))
+            .addStringOption((option) => option.setName('summary').setDescription('Short search summary').setRequired(false).setMaxLength(500))
+            .addStringOption((option) => option.setName('category').setDescription('Article category').setRequired(false).setMaxLength(80))
+            .addStringOption((option) => option.setName('tags').setDescription('Comma-separated tags, max 12').setRequired(false).setMaxLength(400))
+            .addStringOption((option) => option.setName('visibility').setDescription('Who can see a published article').setRequired(false).addChoices({name:'Public',value:'public'},{name:'Staff only',value:'staff'}))
+            .addStringOption((option) => option.setName('role-ids').setDescription('Optional comma-separated allowed Discord role IDs').setRequired(false).setMaxLength(420)),
+        )
+        .addSubcommand((subcommand) => subcommand.setName('list').setDescription('List articles you are allowed to read'))
+        .addSubcommand((subcommand) =>
+          subcommand.setName('view').setDescription('View a published article or an admin-visible draft')
+            .addStringOption((option) => option.setName('article-id').setDescription('Article ID from the list or search').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('page').setDescription('Article page, 3,500 characters each').setRequired(false).setMinValue(1).setMaxValue(7)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('update').setDescription('Update an article using optimistic revision control (admin only)')
+            .addStringOption((option) => option.setName('article-id').setDescription('Article ID').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('revision').setDescription('Current revision from list/view').setRequired(true).setMinValue(1))
+            .addStringOption((option) => option.setName('title').setDescription('New title').setRequired(false).setMaxLength(160))
+            .addStringOption((option) => option.setName('summary').setDescription('New summary').setRequired(false).setMaxLength(500))
+            .addStringOption((option) => option.setName('body').setDescription('New body').setRequired(false).setMaxLength(4000))
+            .addStringOption((option) => option.setName('category').setDescription('New category').setRequired(false).setMaxLength(80))
+            .addStringOption((option) => option.setName('tags').setDescription('Replace tags with a comma-separated list').setRequired(false).setMaxLength(400))
+            .addStringOption((option) => option.setName('visibility').setDescription('public or staff').setRequired(false).addChoices({name:'Public',value:'public'},{name:'Staff only',value:'staff'}))
+            .addStringOption((option) => option.setName('role-ids').setDescription('Replace allowed roles with comma-separated IDs').setRequired(false).setMaxLength(420)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('publish').setDescription('Publish a draft article at its current revision (admin only)')
+            .addStringOption((option) => option.setName('article-id').setDescription('Article ID').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('revision').setDescription('Current revision').setRequired(true).setMinValue(1)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('archive').setDescription('Archive an article after confirming its ID and revision (admin only)')
+            .addStringOption((option) => option.setName('article-id').setDescription('Article ID').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('revision').setDescription('Current revision').setRequired(true).setMinValue(1))
+            .addBooleanOption((option) => option.setName('confirm').setDescription('Must be true to archive').setRequired(true)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('search').setDescription('Search published articles using PostgreSQL ranking and typo-tolerant fallback')
+            .addStringOption((option) => option.setName('query').setDescription('Search terms, 2–200 characters').setRequired(true).setMaxLength(200)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('suggest').setDescription('Find relevant articles and optionally share one in this ticket (staff only)')
+            .addStringOption((option) => option.setName('query').setDescription('Customer question or issue, 2–200 characters').setRequired(true).setMaxLength(200)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('share').setDescription('Share a permitted article summary in the current ticket (staff only)')
+            .addStringOption((option) => option.setName('article-id').setDescription('Published article ID').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('revisions').setDescription('List an article’s revision history (admin only)')
+            .addStringOption((option) => option.setName('article-id').setDescription('Article ID').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('restore-revision').setDescription('Restore content from an earlier article revision (admin only)')
+            .addStringOption((option) => option.setName('article-id').setDescription('Article ID').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('target-revision').setDescription('Revision whose content should be copied').setRequired(true).setMinValue(1))
+            .addIntegerOption((option) => option.setName('current-revision').setDescription('Current revision, to reject stale edits').setRequired(true).setMinValue(1)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('rate').setDescription('Rate whether a published article was helpful')
+            .addStringOption((option) => option.setName('article-id').setDescription('Article ID').setRequired(true).setMaxLength(36))
+            .addBooleanOption((option) => option.setName('helpful').setDescription('Was this article helpful?').setRequired(true)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('synonyms-set').setDescription('Set deterministic search synonyms for a term (admin only)')
+            .addStringOption((option) => option.setName('term').setDescription('Canonical term').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('synonyms').setDescription('Comma-separated alternatives, max 20').setRequired(true).setMaxLength(1600)),
+        )
+        .addSubcommand((subcommand) => subcommand.setName('synonyms-list').setDescription('List configured search synonyms'))
+        .addSubcommand((subcommand) =>
+          subcommand.setName('synonyms-delete').setDescription('Remove synonym mapping (admin only)')
+            .addStringOption((option) => option.setName('term').setDescription('Canonical term to remove').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('metrics').setDescription('Show article searches, views, shares and helpful votes (admin only)')
+            .addIntegerOption((option) => option.setName('days').setDescription('Window in days').setRequired(false).setMinValue(1).setMaxValue(366)),
+        ),
+    )
+    .addSubcommandGroup((group) =>
+      group
+        .setName('quick-reply')
+        .setDescription('Manage permission-controlled canned staff responses')
+        .addSubcommand((subcommand) =>
+          subcommand.setName('list').setDescription('List quick replies available to you using server-side filters and pagination')
+            .addStringOption((option) => option.setName('category').setDescription('Optional category filter').setRequired(false).setMaxLength(80))
+            .addStringOption((option) => option.setName('tag').setDescription('Optional exact tag filter').setRequired(false).setMaxLength(32))
+            .addStringOption((option) => option.setName('query').setDescription('Optional name/category/tag search text').setRequired(false).setMaxLength(80))
+            .addIntegerOption((option) => option.setName('page').setDescription('Page number, starting at 1').setRequired(false).setMinValue(1).setMaxValue(100000)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('show').setDescription('Preview a quick reply and its supported placeholders')
+            .addStringOption((option) => option.setName('name-or-id').setDescription('Name or ID').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('save').setDescription('Create a quick reply, or update one using its current version (admin only)')
+            .addStringOption((option) => option.setName('name').setDescription('Name shown to staff').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('body').setDescription('Response text; max 1,800 characters').setRequired(true).setMaxLength(1800))
+            .addStringOption((option) => option.setName('category').setDescription('Category').setRequired(false).setMaxLength(80))
+            .addStringOption((option) => option.setName('tags').setDescription('Comma-separated tags').setRequired(false).setMaxLength(400))
+            .addStringOption((option) => option.setName('role-ids').setDescription('Optional comma-separated roles allowed to use it').setRequired(false).setMaxLength(420))
+            .addBooleanOption((option) => option.setName('enabled').setDescription('Explicitly enable or disable the reply; omit to preserve its current state').setRequired(false))
+            .addIntegerOption((option) => option.setName('expected-version').setDescription('Required to update an existing quick reply; current v# from quick-reply list').setRequired(false).setMinValue(1)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('history').setDescription('Show revision and deletion history for a quick reply (admin only)')
+            .addStringOption((option) => option.setName('name-or-id').setDescription('Quick reply name or ID, including deleted replies').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('restore-revision').setDescription('Restore historical quick-reply content as a new version (admin only)')
+            .addStringOption((option) => option.setName('name-or-id').setDescription('Current or deleted quick reply name or ID').setRequired(true).setMaxLength(80))
+            .addIntegerOption((option) => option.setName('revision').setDescription('Historical revision number from quick-reply history').setRequired(true).setMinValue(1))
+            .addIntegerOption((option) => option.setName('expected-version').setDescription('Current record version, including a deleted tombstone version').setRequired(true).setMinValue(1)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('delete').setDescription('Delete a quick reply using its current version (admin only)')
+            .addStringOption((option) => option.setName('name-or-id').setDescription('Name or ID').setRequired(true).setMaxLength(80))
+            .addIntegerOption((option) => option.setName('expected-version').setDescription('Current version shown by quick-reply list').setRequired(true).setMinValue(1))
+            .addBooleanOption((option) => option.setName('confirm').setDescription('Must be true to delete').setRequired(true)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('send').setDescription('Send a permitted quick reply in the current ticket (staff only)')
+            .addStringOption((option) => option.setName('name-or-id').setDescription('Name or ID').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('metrics').setDescription('Show privacy-safe aggregate quick reply usage (admin only)')
+            .addIntegerOption((option) => option.setName('days').setDescription('Window in days').setRequired(false).setMinValue(1).setMaxValue(366)),
+        ),
+    )
+    .addSubcommandGroup((group) =>
+      group
+        .setName('related')
+        .setDescription('Link related tickets in this server')
+        .addSubcommand((subcommand) =>
+          subcommand.setName('link').setDescription('Link the current ticket to another ticket (admin only)')
+            .addStringOption((option) => option.setName('other-ticket-id').setDescription('Durable ticket ID of the related ticket').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) => subcommand.setName('list').setDescription('List related tickets for the current ticket'))
+        .addSubcommand((subcommand) =>
+          subcommand.setName('unlink').setDescription('Remove the relationship to another ticket (admin only)')
+            .addStringOption((option) => option.setName('other-ticket-id').setDescription('Durable ticket ID of the related ticket').setRequired(true).setMaxLength(36))
+            .addBooleanOption((option) => option.setName('confirm').setDescription('Must be true to unlink').setRequired(true)),
+        ),
+    )
+    .addSubcommandGroup((group) =>
+      group
+        .setName('workflow')
+        .setDescription('Manage safe workflow templates and manually execute reviewed actions')
+        .addSubcommand((subcommand) => subcommand.setName('list').setDescription('List workflow templates (admin only)'))
+        .addSubcommand((subcommand) =>
+          subcommand.setName('save').setDescription('Create a template, or update one using its current version (admin only)')
+            .addStringOption((option) => option.setName('name').setDescription('Template name').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('definition-json').setDescription('JSON with conditions and allowlisted actions').setRequired(true).setMaxLength(4000))
+            .addIntegerOption((option) => option.setName('expected-version').setDescription('Required to update an existing template; current v# from workflow list').setRequired(false).setMinValue(1)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('preview').setDescription('Preview safety warnings for a stored template (admin only)')
+            .addStringOption((option) => option.setName('template-id').setDescription('Template ID').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('execute').setDescription('Run a reviewed workflow in this active ticket (admin confirmation required)')
+            .addStringOption((option) => option.setName('template-id').setDescription('Enabled workflow template ID').setRequired(true).setMaxLength(36))
+            .addBooleanOption((option) => option.setName('confirm').setDescription('Must be true to execute the workflow').setRequired(true)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('resume').setDescription('Resume an interrupted workflow run (admin confirmation required)')
+            .addStringOption((option) => option.setName('run-id').setDescription('Workflow run ID shown by execute or runs').setRequired(true).setMaxLength(36))
+            .addBooleanOption((option) => option.setName('confirm').setDescription('Must be true to resume the workflow').setRequired(true)),
+        )
+        .addSubcommand((subcommand) => subcommand.setName('runs').setDescription('List recent workflow runs for this ticket (admin only)'))
+        .addSubcommand((subcommand) =>
+          subcommand.setName('enable').setDescription('Enable a reviewed template for manual execution; never automatic')
+            .addStringOption((option) => option.setName('template-id').setDescription('Template ID').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('version').setDescription('Current version from workflow list').setRequired(true).setMinValue(1))
+            .addBooleanOption((option) => option.setName('enabled').setDescription('Enable/disable the template catalogue item').setRequired(true)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('history').setDescription('Show version and deletion history for a workflow template (admin only)')
+            .addStringOption((option) => option.setName('template-id').setDescription('Workflow template ID, including deleted templates').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('restore-revision').setDescription('Restore a historical template revision as a new disabled version (admin only)')
+            .addStringOption((option) => option.setName('template-id').setDescription('Workflow template ID, including soft-deleted templates').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('revision').setDescription('Historical revision number from workflow history').setRequired(true).setMinValue(1))
+            .addIntegerOption((option) => option.setName('expected-version').setDescription('Current record version, including a deleted tombstone version').setRequired(true).setMinValue(1)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('delete').setDescription('Delete a template catalogue entry using its current version (admin only)')
+            .addStringOption((option) => option.setName('template-id').setDescription('Template ID').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('version').setDescription('Current version').setRequired(true).setMinValue(1))
+            .addBooleanOption((option) => option.setName('confirm').setDescription('Must be true to delete').setRequired(true)),
         ),
     )
 
@@ -1918,6 +2184,10 @@ export async function execute(
     group === 'form' ||
     group === 'panel' ||
     group === 'diagnostics' ||
+    group === 'workflow' ||
+    group === 'related' ||
+    (group === 'quick-reply' && ['save', 'delete'].includes(subcommand)) ||
+    (group === 'knowledge' && ['create', 'update', 'publish', 'archive', 'revisions', 'restore-revision', 'synonyms-set', 'synonyms-delete', 'metrics'].includes(subcommand)) ||
     (group === 'feedback' && subcommand === 'summary')
   ) {
     if (!isAdminLike(interaction)) {
@@ -1932,6 +2202,8 @@ export async function execute(
   }
 
   try {
+    if (await handleStage4SlashCommand(interaction)) return;
+
     if (group === 'feedback') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
@@ -2356,7 +2628,7 @@ export async function execute(
           (item.allowedRoleIds?.length ? ' · role-restricted' : '') +
           (item.confirmationMessage ? ' · confirmation enabled' : ''),
         );
-        const embed = buildCustomPanelEmbed(panel, guild.name, themeColor, true)
+        const embed = buildCustomPanelEmbed(panel, guild.name, themeColor, true, false, (await getAdvancedSettings(guild.id)).locale)
           .setTitle(panel.name + ' · ' + panel.title)
           .addFields({ name: 'Panel ID', value: '`' + panel.id + '`', inline: true }, { name: 'Status', value: panel.publishedMessageId ? 'Published' : 'Draft', inline: true }, { name: 'Ordered ticket buttons', value: buttonLines.join('\n').slice(0, 1024) });
         await interaction.editReply({ embeds: [embed] });
@@ -2390,7 +2662,7 @@ export async function execute(
       }
 
       if (action === 'preview') {
-        const embed = buildCustomPanelEmbed(panel, guild.name, themeColor, true);
+        const embed = buildCustomPanelEmbed(panel, guild.name, themeColor, true, false, (await getAdvancedSettings(guild.id)).locale);
         await interaction.editReply({ embeds: [embed], components: buildCustomPanelComponents(panel, true) });
         return;
       }
@@ -2401,7 +2673,7 @@ export async function execute(
         const targetChannel = channel as TextChannel;
         const oldChannelId = panel.publishedChannelId;
         const oldMessageId = panel.publishedMessageId;
-        const payload = { embeds: [buildCustomPanelEmbed(panel, guild.name, themeColor)], components: buildCustomPanelComponents(panel, false) };
+        const payload = { embeds: [buildCustomPanelEmbed(panel, guild.name, themeColor, false, false, (await getAdvancedSettings(guild.id)).locale)], components: buildCustomPanelComponents(panel, false) };
         // Preserve the last known-good public panel until the new publication
         // has a durable Neon snapshot and channel/message pointer.
         const message = await targetChannel.send(payload);

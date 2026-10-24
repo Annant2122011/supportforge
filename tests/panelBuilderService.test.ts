@@ -165,6 +165,17 @@ test('custom panel embed renders its configured title, description, color, and b
   assert.equal(embed.image?.url, 'https://cdn.example.com/banner.png');
 });
 
+test('custom panel fallback and preview copy follows the selected server locale', () => {
+  const panel = { ...examplePanel, description: '', footer: '', bannerUrl: undefined, thumbnailUrl: undefined };
+  const hindi = buildCustomPanelEmbed(panel, 'Example Server', 0x5865f2, true, false, 'hi-IN').toJSON();
+  assert.equal(hindi.description, 'सहायता अनुरोध शुरू करने के लिए नीचे दिया गया विकल्प चुनें।');
+  assert.equal(hindi.footer?.text, 'QueryFixr • ग्राहक सहायता');
+  assert.equal(hindi.fields?.[0]?.name, 'पूर्वावलोकन');
+  const bengali = buildCustomPanelEmbed(panel, 'Example Server', 0x5865f2, false, false, 'bn-IN').toJSON();
+  assert.equal(bengali.description, 'সাপোর্টের অনুরোধ শুরু করতে নিচের একটি বিকল্প বেছে নিন।');
+  assert.equal(bengali.footer?.text, 'QueryFixr • গ্রাহক সহায়তা');
+});
+
 test('custom panel form buttons pin an active form version and concrete tag', () => {
   const buttons = parseCustomPanelButtons([{
     targetType: 'form',
