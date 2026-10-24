@@ -878,6 +878,61 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+
+  {
+    id: 18,
+    name: 'add_idempotent_quick_reply_delivery_and_usage_metrics',
+    up: async (db) => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS quick_reply_send_intents (
+          interaction_id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          quick_reply_id TEXT NOT NULL REFERENCES quick_replies(id) ON DELETE RESTRICT,
+          ticket_id TEXT NOT NULL,
+          channel_id TEXT NOT NULL,
+          actor_id TEXT NOT NULL,
+          marker TEXT NOT NULL UNIQUE,
+          status TEXT NOT NULL CHECK (status IN ('pending','completed','uncertain')),
+          discord_message_id TEXT,
+          error_class TEXT,
+          started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          completed_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          FOREIGN KEY (guild_id,ticket_id) REFERENCES tickets(guild_id,id) ON DELETE RESTRICT,
+          CHECK (
+            (status = 'completed' AND discord_message_id IS NOT NULL AND completed_at IS NOT NULL)
+            OR status <> 'completed'
+          )
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_quick_reply_send_intents_ticket
+          ON quick_reply_send_intents (guild_id,ticket_id,created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_quick_reply_send_intents_status
+          ON quick_reply_send_intents (guild_id,status,updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS quick_reply_usage_events (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          quick_reply_id TEXT NOT NULL REFERENCES quick_replies(id) ON DELETE RESTRICT,
+          send_intent_id TEXT NOT NULL UNIQUE
+            REFERENCES quick_reply_send_intents(interaction_id) ON DELETE RESTRICT,
+          event_type TEXT NOT NULL CHECK (event_type = 'sent'),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_quick_reply_usage_metrics
+          ON quick_reply_usage_events (guild_id,quick_reply_id,created_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_quick_replies_active_category_name
+          ON quick_replies (guild_id,LOWER(category),LOWER(name))
+          WHERE deleted_at IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_quick_replies_active_tags
+          ON quick_replies USING GIN (tags)
+          WHERE deleted_at IS NULL;
+      `);
+    },
+  },
 ];
 
 /** Latest migration identifier required by this application version. */
