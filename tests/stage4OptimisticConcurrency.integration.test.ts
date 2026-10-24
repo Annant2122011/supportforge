@@ -84,7 +84,7 @@ test('workflow template saves require an expected version instead of silently re
   const guildId = 'stage4-workflow-' + randomUUID();
   const actorId = 'stage4-test-admin';
   const name = 'Escalation policy ' + guildId.slice(-8);
-  const definition = { conditions: [], actions: [{ type: 'set_priority', value: 'high' }] };
+  const definition = { conditions: [{ field: 'priority', equals: 'urgent' }], actions: [{ type: 'set_priority', value: 'high' }] };
 
   try {
     const created = await saveWorkflowTemplate(guildId, actorId, name, definition);
