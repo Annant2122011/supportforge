@@ -90,6 +90,7 @@ async function insertQuickReplyRevision(
 }
 const PLACEHOLDERS = new Set(['user','username','ticket_id','ticket_number','department','priority','staff']);
 const TOKEN_PATTERN = /\{([a-z][a-z0-9_]*)\}/gi;
+const BRACED_TEXT_PATTERN = /\\{([^{}]*)\\}/g;
 
 function iso(value: Date | string): string {
   const time = value instanceof Date ? value.getTime() : Date.parse(value);
@@ -117,10 +118,15 @@ export function validateQuickReplyInput(input: QuickReplyInput): QuickReplyInput
   if (tags.length > 12) throw new Error('A quick reply can have at most 12 tags.');
   const roleIds = [...new Set(input.allowedRoleIds ?? [])];
   if (roleIds.some((id) => !/^\d{17,20}$/.test(id)) || roleIds.length > 20) throw new Error('Allowed role IDs must be valid Discord role IDs; at most 20 roles are supported.');
-  for (const match of body.matchAll(TOKEN_PATTERN)) {
-    if (!PLACEHOLDERS.has(match[1].toLocaleLowerCase('en-US'))) {
-      throw new Error('Unsupported placeholder {' + match[1] + '}. Supported placeholders: ' + [...PLACEHOLDERS].map((token)=>'{'+token+'}').join(', ') + '.');
+  for (const match of body.matchAll(BRACED_TEXT_PATTERN)) {
+    const token = match[1].trim().toLocaleLowerCase('en-US');
+    if (!PLACEHOLDERS.has(token)) {
+      throw new Error('Unsupported placeholder {' + match[1] + '}. Supported placeholders: ' + [...PLACEHOLDERS].map((item) => '{' + item + '}').join(', ') + '.');
     }
+  }
+  const textWithoutPlaceholders = body.replace(BRACED_TEXT_PATTERN, '');
+  if (/[{}]/.test(textWithoutPlaceholders)) {
+    throw new Error('Quick-reply placeholder braces must be complete and non-nested. Use only the supported placeholders.');
   }
   return {name,body,category,tags,allowedRoleIds:roleIds,...(input.enabled === undefined ? {} : {enabled:input.enabled})};
 }
