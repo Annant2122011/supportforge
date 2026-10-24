@@ -822,6 +822,12 @@ const bnIN: Record<TranslationKey, string> = {
   'settings.appearance.emptyFields': "প্যানেলের চেহারার ক্ষেত্র খালি রাখা যাবে না।",
   'settings.appearance.savedTitle': "চেহারা আপডেট হয়েছে",
   'settings.appearance.savedDescription': "প্যানেলের শিরোনাম, বিবরণ ও ফুটার সংরক্ষিত হয়েছে এবং সহায়তা প্যানেল রিফ্রেশ হয়েছে।",
+  'settings.dashboard.brandingSaved': "এই সার্ভারের Settings ড্যাশবোর্ডের ব্র্যান্ডিং সংরক্ষণ ও রিফ্রেশ হয়েছে।",
+  'settings.dashboard.modal.buttonLabel': "বোতামের লেবেল (রিসেট করতে default লিখুন)",
+  'settings.dashboard.modal.emoji': "ইমোজি (সরাতে none লিখুন)",
+  'settings.dashboard.modal.description': "ড্যাশবোর্ডের বিবরণ",
+  'settings.dashboard.modal.footer': "ড্যাশবোর্ডের ফুটার",
+  'settings.dashboard.modal.title': "ড্যাশবোর্ডের শিরোনাম",
 };
 
 export default bnIN;
