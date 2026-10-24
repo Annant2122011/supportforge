@@ -116,7 +116,7 @@ function accessDenied(action: string): Error {
 }
 
 function safeWorkflowText(value: string): string {
-  return value.split(String.fromCharCode(96)).join('').replace(/[*_~|<>@]/g, '').replace(/\\s+/g, ' ').slice(0, 100);
+  return value.split(String.fromCharCode(96)).join('').replace(/[*_~|<>@]/g, '').replace(/\s+/g, ' ').slice(0, 100);
 }
 
 function formatWorkflowRun(details: WorkflowExecutionDetails): string {
@@ -131,8 +131,8 @@ function formatWorkflowRun(details: WorkflowExecutionDetails): string {
     'Run ID: ' + run.id,
     'Ticket ID: ' + run.ticketId,
     'Steps: ' + run.stepCount,
-    steps.length ? steps.join('\\n') : 'No workflow steps were recorded.',
-  ].join('\\n').slice(0, 3900);
+    steps.length ? steps.join('\n') : 'No workflow steps were recorded.',
+  ].join('\n').slice(0, 3900);
 }
 
 function formatWorkflowRunList(
@@ -140,10 +140,10 @@ function formatWorkflowRunList(
 ): string {
   if (!runs.length) return 'No workflow runs are recorded for this ticket.';
   return runs.map((run) =>
-    run.status + ' • ' + run.id + '\\n' +
+    run.status + ' • ' + run.id + '\n' +
     safeWorkflowText(run.templateName) + ' v' + run.templateVersion + ' • ' +
     run.stepCount + ' steps • started ' + run.startedAt,
-  ).join('\\n\\n').slice(0, 3900);
+  ).join('\n\n').slice(0, 3900);
 }
 
 export async function handleStage4SlashCommand(interaction: ChatInputCommandInteraction): Promise<boolean> {
