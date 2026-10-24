@@ -341,12 +341,12 @@ async function showPanel(interaction: PanelSettingsInteraction, panelId: string)
   const lines = panel.buttons.length
     ? panel.buttons.map((item, index) =>
         (index + 1) + '. ' + (item.emoji ? item.emoji + ' ' : '') + '**' + item.label + '** → ' +
-        (item.targetType === 'form' ? 'Form `' + item.formId + '` v' + item.formVersion : config.departments[item.departmentId]?.name ?? 'Missing department') +
-        (item.tagId ? ' · tag `' + item.tagId + '`' : '') + ' · ' + item.style +
-        (item.allowedRoleIds.length ? ' · restricted' : '') +
-        (item.confirmationMessage ? ' · confirmation' : ''),
+        (item.targetType === 'form' ? translate(settings.locale, 'settings.customPanel.detail.formTargetLine', { formId: item.formId, version: item.formVersion }) : config.departments[item.departmentId]?.name ?? translate(settings.locale, 'settings.customPanel.detail.missingDepartment')) +
+        (item.tagId ? ' · ' + translate(settings.locale, 'settings.customPanel.detail.tagLabel') + ' `' + item.tagId + '`' : '') + ' · ' + item.style +
+        (item.allowedRoleIds.length ? ' · ' + translate(settings.locale, 'settings.customPanel.detail.restricted') : '') +
+        (item.confirmationMessage ? ' · ' + translate(settings.locale, 'settings.customPanel.detail.confirmation') : ''),
       ).join('\n')
-    : 'No buttons yet. Add a department or a saved form button below.';
+    : translate(settings.locale, 'settings.customPanel.detail.noButtons');
   const status = panel.publishedMessageId
     ? translate(settings.locale, 'settings.customPanel.detail.statusPublished', { channel: '<#' + panel.publishedChannelId + '>' }) +
       (panelDraftDiffers(panel) ? ' • **' + translate(settings.locale, 'settings.customPanel.detail.unpublished') + '**' : ' • ' + translate(settings.locale, 'settings.customPanel.detail.upToDate'))
