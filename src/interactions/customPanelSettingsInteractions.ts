@@ -637,7 +637,7 @@ async function showFormTagPicker(
       await audit(interaction, 'CUSTOM_PANEL_BUTTON_RETARGETED', 'Changed button "' + updated.label + '" to form ' + form.id + ' version ' + form.version + '.');
       await showButtonDetail(interaction, panelId, updated.id);
     } else {
-      await interaction.showModal(addFormButtonModal((await getAdvancedSettings(guild.id)).locale, panelId, form.id, form.tagId, form.name));
+      await interaction.showModal(addFormButtonModal((await getAdvancedSettings(interaction.guild!.id)).locale, panelId, form.id, form.tagId, form.name));
     }
     return;
   }
