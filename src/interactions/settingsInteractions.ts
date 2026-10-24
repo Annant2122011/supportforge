@@ -1950,37 +1950,38 @@ async function showRecoveryCandidates(
     return;
   }
 
+  const settings = await getAdvancedSettings(guild.id);
   const all = await listTicketRecoveryCandidates(guild.id, source);
   const pages = Math.max(1, Math.ceil(all.length / RECOVERY_PAGE_SIZE));
   const page = Math.min(Math.max(1, requestedPage), pages);
   const candidates = all.slice((page - 1) * RECOVERY_PAGE_SIZE, page * RECOVERY_PAGE_SIZE);
   const native = source === 'discord_native';
   const rows: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>> = [];
-  const select = recoverySelect(candidates, source, (await getAdvancedSettings(guild.id)).locale);
+  const select = recoverySelect(candidates, source, settings.locale);
   if (select) rows.push(select);
   if (pages > 1) {
     rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-      recoveryButton('sf:settings:recovery:' + (native ? 'channels' : 'review') + ':page:' + (page - 1), 'Previous', ButtonStyle.Secondary, '◀️', page <= 1),
-      recoveryButton('sf:settings:recovery:' + (native ? 'channels' : 'review') + ':page:' + (page + 1), 'Next', ButtonStyle.Secondary, '▶️', page >= pages),
-      recoveryButton('sf:settings:repair:back', 'Repair System', ButtonStyle.Secondary, '↩️'),
+      recoveryButton('sf:settings:recovery:' + (native ? 'channels' : 'review') + ':page:' + (page - 1), translate(settings.locale, 'settings.common.previous'), ButtonStyle.Secondary, '◀️', page <= 1),
+      recoveryButton('sf:settings:recovery:' + (native ? 'channels' : 'review') + ':page:' + (page + 1), translate(settings.locale, 'settings.common.next'), ButtonStyle.Secondary, '▶️', page >= pages),
+      recoveryButton('sf:settings:repair:back', translate(settings.locale, 'settings.diagnostics.repair'), ButtonStyle.Secondary, '↩️'),
     ));
   } else {
     rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-      recoveryButton('sf:settings:repair:back', 'Repair System', ButtonStyle.Secondary, '↩️'),
+      recoveryButton('sf:settings:repair:back', translate(settings.locale, 'settings.diagnostics.repair'), ButtonStyle.Secondary, '↩️'),
     ));
   }
 
   const lines = candidates.map((item) =>
-    '• **Ticket #' + item.ticketNumber + '** • ' + item.messageCount + ' archived message(s) • original channel ID: ' + item.originalChannelId +
-    (item.accidentalAnswer === 'yes' ? ' • **marked accidental, ready to restore**' : ''),
+    translate(settings.locale, 'settings.recovery.ticketLine', { number: item.ticketNumber, messages: item.messageCount, channelId: item.originalChannelId }) +
+    (item.accidentalAnswer === 'yes' ? translate(settings.locale, 'settings.recovery.accidentalReady') : ''),
   );
   const description = native
-    ? (all.length ? 'Native Discord deletions only. These records never enter the ticket-button accidental-deletion review.\\n\\n' : 'No native Discord channel deletions are currently available for restoration.\\n\\n')
-    : (all.length ? 'Ticket-button deletions only. Choose a record to answer the question or restore a ticket already marked as accidental.\\n\\n' : 'No ticket-button deletions are awaiting review or accidental-deletion recovery.\\n\\n');
+    ? (all.length ? translate(settings.locale, 'settings.recovery.nativeIntro') + '\\n\\n' : translate(settings.locale, 'settings.recovery.noNative') + '\\n\\n')
+    : (all.length ? translate(settings.locale, 'settings.recovery.ticketIntro') + '\\n\\n' : translate(settings.locale, 'settings.recovery.noTicket') + '\\n\\n');
   const embed = await recoveryEmbed(
     guild,
-    native ? '♻️ Restore Channel' : '🛡️ Ticket Deletion Review',
-    description + (lines.length ? lines.join('\n') : 'Nothing to display on this page.') + '\n\nPage ' + page + ' / ' + pages,
+    native ? '♻️ ' + translate(settings.locale, 'settings.recovery.listNativeTitle') : '🛡️ ' + translate(settings.locale, 'settings.recovery.listReviewTitle'),
+    description + (lines.length ? lines.join('\n') : translate(settings.locale, 'settings.recovery.nothingThisPage')) + '\n\n' + translate(settings.locale, 'settings.recovery.page', { page, pages }),
   );
   await interaction.editReply({ content: '', embeds: [embed], components: rows });
 }
