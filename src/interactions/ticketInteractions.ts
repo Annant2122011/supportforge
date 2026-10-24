@@ -5167,7 +5167,7 @@ function quickReplyPickerFilterSummary(
 }
 
 async function getQuickReplyTicketContext(interaction: QuickReplyInteraction) {
-  if (!interaction.guild || !interaction.guildId || !interaction.channel || !('send' in interaction.channel)) {
+  if (!interaction.guild || !interaction.guildId || !interaction.channelId || !interaction.channel || !('send' in interaction.channel)) {
     throw new Error('Quick replies require a server ticket channel or private ticket thread.');
   }
   const ticket = await getPersistedTicket(interaction.channelId);
@@ -5338,7 +5338,7 @@ async function showQuickReplyFilterModal(
     return;
   }
   const settings = session.locale;
-  const field = (id: string, label: string, maxLength: number, value?: string) => {
+  const field = (id: string, label: TranslationKey, maxLength: number, value?: string) => {
     const input = new TextInputBuilder()
       .setCustomId(id)
       .setLabel(translate(settings, label).slice(0, 45))
