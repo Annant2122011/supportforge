@@ -65,6 +65,7 @@ import type { TranslationKey } from '../i18n/locales/en-US';
 import { ensureDepartmentCategory } from '../services/departmentCategoryService';
 import { endTicketVoiceMode, startTicketVoiceMode, syncTicketVoiceParticipants } from '../services/voiceModeService';
 import { getUserFlagCount, isTicketCreationRestricted, recordReport } from '../services/reportService';
+import { getQuickReply, listQuickReplies, renderQuickReply } from '../services/quickReplyService';
 import { getKnowledgeArticle, recordKnowledgeArticleShare } from '../services/knowledgeBaseService';
 
 import {
@@ -5080,6 +5081,124 @@ async function handleTicketVoiceJoin(interaction: ButtonInteraction | ChatInputC
   );
 }
 
+type QuickReplyInteraction = ButtonInteraction | StringSelectMenuInteraction;
+
+async function getQuickReplyTicketContext(interaction: QuickReplyInteraction) {
+  if (!interaction.guild || !interaction.guildId || !interaction.channel || !('send' in interaction.channel)) {
+    throw new Error('Quick replies require a server ticket channel or private ticket thread.');
+  }
+  const ticket = await getPersistedTicket(interaction.channelId);
+  if (!ticket || ticket.guildId !== interaction.guildId || ticket.channelId !== interaction.channelId ||
+      ticket.deletedAt || !['open', 'claimed', 'pending', 'reopened'].includes(ticket.status)) {
+    throw new Error('Quick replies are available only in an active managed ticket.');
+  }
+
+  const config = await getGuildConfig(interaction.guildId);
+  const member = interaction.member;
+  const roleIds = !member ? [] : Array.isArray(member.roles)
+    ? member.roles
+    : member.roles.cache.map((role) => role.id);
+  const isAdmin = Boolean(
+    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild),
+  );
+  const department = ticket.departmentId ? config.departments[ticket.departmentId] : undefined;
+  const isTicketStaff = Boolean(department?.staffRoleId && roleIds.includes(department.staffRoleId));
+  if (!isAdmin && !isTicketStaff) {
+    throw new Error('Only the staff role configured for this ticket department or a server administrator can send quick replies.');
+  }
+
+  return {
+    guild: interaction.guild,
+    channel: interaction.channel as TextChannel | ThreadChannel,
+    ticket,
+    config,
+    access: { isAdmin, roleIds },
+    department,
+  };
+}
+
+async function showQuickReplySelector(interaction: ButtonInteraction): Promise<void> {
+  if (!(await safeDeferReply(interaction))) return;
+  try {
+    const context = await getQuickReplyTicketContext(interaction);
+    const replies = await listQuickReplies(
+      interaction.guildId!,
+      context.access,
+    );
+    if (!replies.length) {
+      await interaction.editReply('No enabled quick replies are available to your role. An administrator can configure them with /supportforge quick-reply save.');
+      return;
+    }
+
+    const options = replies.slice(0, 25).map((reply) => ({
+      label: reply.name.slice(0, 100),
+      value: reply.id,
+      description: (reply.category + ' • ' + (reply.tags.join(', ') || 'no tags')).slice(0, 100),
+    }));
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId('ticket:quick-reply:select')
+      .setPlaceholder('Choose a saved response')
+      .setMinValues(1)
+      .setMaxValues(1)
+      .addOptions(options);
+    const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu);
+    await interaction.editReply({
+      content: 'Choose a quick reply to send into this ticket. The text is rendered with current ticket details; automatic mentions are disabled.',
+      components: [row],
+    });
+  } catch (error) {
+    await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : 'Quick replies are temporarily unavailable.');
+  }
+}
+
+async function handleQuickReplySelection(interaction: StringSelectMenuInteraction): Promise<void> {
+  if (!(await safeDeferReply(interaction))) return;
+  try {
+    const context = await getQuickReplyTicketContext(interaction);
+    const replyId = interaction.values[0];
+    if (!replyId) throw new Error('Choose one quick reply from the current list.');
+    const reply = await getQuickReply(interaction.guildId!, replyId, context.access);
+    if (!reply || !reply.enabled) {
+      throw new Error('That quick reply is no longer enabled or available to your role. Open the selector again.');
+    }
+
+    const owner = context.ticket.ownerId
+      ? await context.guild.members.fetch(context.ticket.ownerId).catch(() => null)
+      : null;
+    const staff = await context.guild.members.fetch(interaction.user.id).catch(() => null);
+    const rendered = renderQuickReply(reply, {
+      user: owner?.displayName ?? 'customer',
+      username: owner?.user.username ?? 'customer',
+      ticketId: context.ticket.id,
+      ticketNumber: context.ticket.ticketNumber ?? context.ticket.id.slice(0, 8),
+      department: context.department?.name ?? context.ticket.departmentId ?? 'Support',
+      priority: context.ticket.priority ?? 'normal',
+      staff: staff?.displayName ?? interaction.user.username,
+    });
+
+    await context.channel.send({ content: rendered, allowedMentions: { parse: [] } });
+    if (context.config.supportCategoryId) {
+      try {
+        await logTicketEvent(context.guild, context.config.supportCategoryId, {
+          ticketNumber: context.ticket.ticketNumber ?? context.ticket.id,
+          ticketChannelId: context.ticket.channelId,
+          event: 'QUICK_REPLY_SENT',
+          actorId: interaction.user.id,
+          actor: interaction.user.tag,
+          actorName: interaction.user.tag,
+          detail: 'Sent quick reply ' + reply.id + ' version ' + reply.version + ' from the ticket panel.',
+        });
+      } catch {
+        console.warn('Quick reply was sent, but its ticket audit notification failed.');
+      }
+    }
+    await interaction.editReply('Sent quick reply "' + reply.name + '". Automatic mentions are disabled; the ticket remains open.');
+  } catch (error) {
+    await interaction.editReply(error instanceof Error ? error.message.slice(0, 1900) : 'Quick reply could not be sent safely.');
+  }
+}
+
 async function handlePanelButton(
   interaction: ButtonInteraction,
 ): Promise<void> {
@@ -5449,6 +5568,11 @@ async function handlePanelButton(
   }
   if (id === 'ticket:panel:history') {
     await showTicketHistory(interaction);
+    return;
+  }
+
+  if (id === 'ticket:panel:quick-reply') {
+    await showQuickReplySelector(interaction);
     return;
   }
 
@@ -6543,6 +6667,10 @@ export async function handleTicketInteraction(
     }
 
     if (interaction.isStringSelectMenu()) {
+      if (interaction.customId === 'ticket:quick-reply:select') {
+        await handleQuickReplySelection(interaction);
+        return;
+      }
       if (routingComponentRoute === 'department-select') {
         await changeTicketDepartment(interaction);
         return;
