@@ -39,6 +39,13 @@ import {
   saveWorkflowTemplate,
   setWorkflowTemplateEnabled,
 } from '../services/workflowTemplateService';
+import {
+  WorkflowExecutionFailure,
+  listWorkflowRunsForTicket,
+  resumeWorkflowRun,
+  runWorkflowForTicket,
+  type WorkflowExecutionDetails,
+} from '../services/workflowExecutionService';
 
 interface Access {
   isAdmin: boolean;
@@ -106,6 +113,37 @@ async function requireTicketInCurrentChannel(interaction: ChatInputCommandIntera
 
 function accessDenied(action: string): Error {
   return new Error('You need ' + action + ' to use this command.');
+}
+
+function safeWorkflowText(value: string): string {
+  return value.split(String.fromCharCode(96)).join('').replace(/[*_~|<>@]/g, '').replace(/\\s+/g, ' ').slice(0, 100);
+}
+
+function formatWorkflowRun(details: WorkflowExecutionDetails): string {
+  const run = details.run;
+  const steps = details.steps.map((step) =>
+    (step.stepIndex + 1) + '. ' + safeWorkflowText(step.actionType) + ': ' + step.status +
+      (step.errorCode ? ' (' + safeWorkflowText(step.errorCode) + ')' : ''),
+  );
+  return [
+    'Workflow run: ' + run.status,
+    'Template: ' + safeWorkflowText(run.templateName) + ' v' + run.templateVersion,
+    'Run ID: ' + run.id,
+    'Ticket ID: ' + run.ticketId,
+    'Steps: ' + run.stepCount,
+    steps.length ? steps.join('\\n') : 'No workflow steps were recorded.',
+  ].join('\\n').slice(0, 3900);
+}
+
+function formatWorkflowRunList(
+  runs: Awaited<ReturnType<typeof listWorkflowRunsForTicket>>,
+): string {
+  if (!runs.length) return 'No workflow runs are recorded for this ticket.';
+  return runs.map((run) =>
+    run.status + ' • ' + run.id + '\\n' +
+    safeWorkflowText(run.templateName) + ' v' + run.templateVersion + ' • ' +
+    run.stepCount + ' steps • started ' + run.startedAt,
+  ).join('\\n\\n').slice(0, 3900);
 }
 
 export async function handleStage4SlashCommand(interaction: ChatInputCommandInteraction): Promise<boolean> {
@@ -541,6 +579,49 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
 
     if (group === 'workflow') {
       if (!access.isAdmin) throw accessDenied('Manage Server or Administrator permission');
+
+      if (subcommand === 'execute') {
+        const confirmation = interaction.options.getBoolean('confirm', true);
+        if (!confirmation) throw new Error('Execution was not confirmed. No workflow action was run.');
+        const ticket = await requireTicketInCurrentChannel(interaction);
+        const channel = requireTextChannel(interaction);
+        const details = await runWorkflowForTicket({
+          guild: interaction.guild!,
+          channel,
+          ticketId: ticket.id,
+          templateId: interaction.options.getString('template-id', true).trim(),
+          actorId,
+          interactionId: interaction.id,
+          confirmation,
+        });
+        await interaction.editReply(formatWorkflowRun(details));
+        return true;
+      }
+
+      if (subcommand === 'resume') {
+        const confirmation = interaction.options.getBoolean('confirm', true);
+        if (!confirmation) throw new Error('Resume was not confirmed. No workflow action was run.');
+        const ticket = await requireTicketInCurrentChannel(interaction);
+        const channel = requireTextChannel(interaction);
+        const details = await resumeWorkflowRun({
+          guild: interaction.guild!,
+          channel,
+          ticketId: ticket.id,
+          runId: interaction.options.getString('run-id', true).trim(),
+          actorId,
+          confirmation,
+        });
+        await interaction.editReply(formatWorkflowRun(details));
+        return true;
+      }
+
+      if (subcommand === 'runs') {
+        const ticket = await requireTicketInCurrentChannel(interaction, false);
+        const runs = await listWorkflowRunsForTicket(guildId, ticket.id, 10);
+        await interaction.editReply(formatWorkflowRunList(runs));
+        return true;
+      }
+
       if (subcommand === 'list') {
         const templates = await listWorkflowTemplates(guildId);
         await interaction.editReply(templates.length
@@ -561,7 +642,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           : 'No revision history is recorded for this workflow template.';
         await interaction.editReply({
           embeds: [new EmbedBuilder().setTitle('Workflow Template Revision History').setDescription(description)
-            .setFooter({ text: 'Catalogue history only. Workflow execution is not enabled.' })],
+            .setFooter({ text: 'Immutable history • manual execution only • no automatic triggers' })],
         });
         return true;
       }
@@ -580,7 +661,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
           action: 'WORKFLOW_TEMPLATE_SAVED', actorId, actorName: interaction.user.tag,
           detail: 'Saved validated workflow template ' + item.id + ' version ' + item.version + '; execution remains disabled.',
         });
-        await interaction.editReply('Saved validated workflow template "' + item.name + '" v' + item.version + '. It remains non-executable; no ticket action was run.');
+        await interaction.editReply('Saved validated workflow template "' + item.name + '" v' + item.version + '. Preview it, enable the reviewed version, then use /supportforge workflow execute inside an active ticket. Department reassignment remains blocked until channel-visibility reconciliation is supported.');
         return true;
       }
       if (subcommand === 'restore-revision') {
@@ -605,7 +686,7 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         const preview = await previewWorkflowTemplateById(guildId, interaction.options.getString('template-id', true).trim());
         await interaction.editReply({
           embeds: [new EmbedBuilder().setTitle('Workflow template safety preview')
-            .setDescription('Executable: **no**\nConditions: ' + preview.conditionCount + '\nActions: ' + preview.actionCount + '\n\n' + preview.warnings.map((warning) => '• ' + warning).join('\n').slice(0, 3500))],
+            .setDescription('Manual execution supported: **' + (preview.executable ? 'yes' : 'no') + '**\\nAutomatic execution: **no**\\nConditions: ' + preview.conditionCount + '\\nActions: ' + preview.actionCount + '\\n\\n' + preview.warnings.map((warning) => '• ' + warning).join('\\n').slice(0, 3400))],
         });
         return true;
       }
@@ -619,9 +700,9 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
         );
         if (config.supportCategoryId) await logSettingsEvent(interaction.guild!, config.supportCategoryId, {
           action: 'WORKFLOW_TEMPLATE_CATALOGUE_TOGGLE', actorId, actorName: interaction.user.tag,
-          detail: 'Set workflow template ' + item.id + ' enabled=' + item.enabled + ' at version ' + item.version + '. Execution is still not implemented.',
+          detail: 'Set workflow template ' + item.id + ' enabled=' + item.enabled + ' at version ' + item.version + '. Manual execution still requires explicit admin confirmation; automatic triggers remain disabled.',
         });
-        await interaction.editReply('Workflow template catalogue entry is now ' + (item.enabled ? 'enabled' : 'disabled') + ' at version ' + item.version + '. Automatic execution remains disabled.');
+        await interaction.editReply('Workflow template is now ' + (item.enabled ? 'enabled for manual execution' : 'disabled') + ' at version ' + item.version + '. It never runs automatically. Use /supportforge workflow preview before execution.');
         return true;
       }
       if (subcommand === 'delete') {
@@ -642,6 +723,10 @@ export async function handleStage4SlashCommand(interaction: ChatInputCommandInte
       }
     }
   } catch (error) {
+    if (error instanceof WorkflowExecutionFailure) {
+      await interaction.editReply(formatWorkflowRun(error.details)).catch(() => undefined);
+      return true;
+    }
     const message = error instanceof Error ? error.message : 'Stage 4 command failed safely. Please retry later.';
     await interaction.editReply(message.slice(0, 1900)).catch(() => undefined);
     return true;
