@@ -86,3 +86,18 @@ test('only medium and high confidence Knowledge Base results receive direct-shar
   assert.equal(isKnowledgeShareableConfidence('medium'), true);
   assert.equal(isKnowledgeShareableConfidence('low'), false);
 });
+
+
+test('knowledge search finds exact terms inside long article bodies, including non-English tokens', () => {
+  const bodyTokens = new Set(normalizeKnowledgeText('The customer must submit a chargeback evidence packet. बंगाली সহায়তা ফেরত নীতি').split(' ').filter((token) => token.length > 1));
+  const result = scoreKnowledgeCandidate('chargeback evidence', {
+    title: 'Account support', summary: 'General account help', category: 'General', tags: ['account'], bodyTokens,
+  });
+  assert.ok(result.score >= 0.5, 'a complete body-token match should be offered');
+  assert.equal(shouldOfferKnowledgeResult(result), true);
+  const nonEnglish = scoreKnowledgeCandidate('বাংলা ফেরত', {
+    title: 'Account support', summary: 'General account help', category: 'General', tags: ['account'], bodyTokens,
+  });
+  assert.ok(nonEnglish.score >= 0.5, 'Unicode body tokens should be searchable without English stemming');
+  assert.equal(shouldOfferKnowledgeResult(nonEnglish), true);
+});
