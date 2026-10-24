@@ -1058,6 +1058,12 @@ export const data =
             .addStringOption((option) => option.setName('template-id').setDescription('Workflow template ID, including deleted templates').setRequired(true).setMaxLength(36)),
         )
         .addSubcommand((subcommand) =>
+          subcommand.setName('restore-revision').setDescription('Restore a historical template revision as a new disabled version (admin only)')
+            .addStringOption((option) => option.setName('template-id').setDescription('Workflow template ID, including soft-deleted templates').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('revision').setDescription('Historical revision number from workflow history').setRequired(true).setMinValue(1))
+            .addIntegerOption((option) => option.setName('expected-version').setDescription('Current record version, including a deleted tombstone version').setRequired(true).setMinValue(1)),
+        )
+        .addSubcommand((subcommand) =>
           subcommand.setName('delete').setDescription('Delete a template catalogue entry using its current version (admin only)')
             .addStringOption((option) => option.setName('template-id').setDescription('Template ID').setRequired(true).setMaxLength(36))
             .addIntegerOption((option) => option.setName('version').setDescription('Current version').setRequired(true).setMinValue(1))
