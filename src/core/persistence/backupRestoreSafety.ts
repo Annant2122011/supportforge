@@ -13,6 +13,56 @@ export interface PostgresBackupManifest {
 const LABEL_ALLOW = /(test|testing|staging|sandbox|restore|nonprod)/i;
 const LABEL_DENY = /(^|[^a-z])(prod|production|main|live)([^a-z]|$)/i;
 
+interface PostgresDatabaseIdentity {
+  host: string;
+  port: string;
+  database: string;
+}
+
+function parsePostgresDatabaseIdentity(value: string): PostgresDatabaseIdentity {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error('A configured PostgreSQL URL could not be validated. Restore was not started.');
+  }
+  if (parsed.protocol !== 'postgres:' && parsed.protocol !== 'postgresql:') {
+    throw new Error('A configured database URL is not PostgreSQL. Restore was not started.');
+  }
+  const database = decodeURIComponent(parsed.pathname.replace(/^\\/+/, '')).trim();
+  if (!parsed.hostname || !database) {
+    throw new Error('A configured PostgreSQL URL is missing its host or database name. Restore was not started.');
+  }
+  return {
+    host: parsed.hostname.toLocaleLowerCase('en-US'),
+    port: parsed.port || '5432',
+    database: database.toLocaleLowerCase('en-US'),
+  };
+}
+
+/**
+ * Fail closed if a restore target is also configured as the bot's active DB.
+ * The caller must pass the existing DATABASE_URL values before switching them
+ * to the restore target. Credentials are never included in thrown errors.
+ */
+export function assertRestoreTargetDistinctFromConfiguredDatabase(
+  targetUrl: string,
+  configuredDatabaseUrls: readonly (string | undefined)[],
+): void {
+  const target = parsePostgresDatabaseIdentity(targetUrl);
+  for (const configuredUrl of configuredDatabaseUrls) {
+    if (configuredUrl === undefined || !configuredUrl.trim()) continue;
+    const configured = parsePostgresDatabaseIdentity(configuredUrl);
+    if (
+      target.host === configured.host &&
+      target.port === configured.port &&
+      target.database === configured.database
+    ) {
+      throw new Error('Restore target matches a database configured for the running bot. Restore was not started.');
+    }
+  }
+}
+
 export function isAllowedRestoreTargetLabel(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   const label = value.trim();
