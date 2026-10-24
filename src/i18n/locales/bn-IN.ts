@@ -716,6 +716,11 @@ const bnIN: Record<TranslationKey, string> = {
   'settings.recovery.page': "পৃষ্ঠা {page} / {pages}",
   'settings.recovery.ticketLine': "• **টিকিট #{number}** • {messages}টি সংরক্ষিত বার্তা • মূল চ্যানেল ID: {channelId}",
   'settings.recovery.accidentalReady': " • **ভুলবশত মুছে ফেলা হিসেবে চিহ্নিত, পুনরুদ্ধারের জন্য প্রস্তুত**",
+  'settings.recovery.listNativeTitle': "চ্যানেল পুনরুদ্ধার",
+  'settings.recovery.listReviewTitle': "টিকিট মুছে ফেলার পর্যালোচনা",
+  'settings.recovery.recordMissingTitle': "পুনরুদ্ধারের রেকর্ড আর উপলভ্য নয়",
+  'settings.recovery.recordMissingDescription': "পুনরুদ্ধারের তালিকা রিফ্রেশ করুন। রেকর্ডটি ইতিমধ্যে পুনরুদ্ধার বা পর্যালোচনা হয়ে থাকতে পারে।",
+  'settings.recovery.backToList': "তালিকায় ফিরে যান",
 };
 
 export default bnIN;
