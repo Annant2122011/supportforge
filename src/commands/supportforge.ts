@@ -58,6 +58,13 @@ import {
   updateQuickReply,
 } from '../services/knowledgeBaseService';
 import {
+  getRelatedTicketLink,
+  linkRelatedTickets,
+  listRelatedTicketLinks,
+  resolveRelatedTicketReference,
+  unlinkRelatedTicket,
+} from '../services/relatedTicketService';
+import {
   deleteSupportSlaPolicy,
   evaluateTicketSla,
   getCsatSummary,
@@ -849,6 +856,30 @@ export const data =
             .setName('summary')
             .setDescription('Show privacy-aware customer satisfaction results (admin only)')
             .addIntegerOption((option) => option.setName('days').setDescription('Reporting window in days').setRequired(false).setMinValue(1).setMaxValue(366)),
+        ),
+    )
+
+    // ─────────────────────────────────────────────
+    // RELATED TICKETS
+    // ─────────────────────────────────────────────
+
+    .addSubcommandGroup((group) =>
+      group
+        .setName('related')
+        .setDescription('Link related tickets without copying private ticket content')
+        .addSubcommand((subcommand) =>
+          subcommand.setName('link').setDescription('Link two tickets in this server (staff must cover both departments)')
+            .addStringOption((option) => option.setName('ticket-id').setDescription('First durable ticket ID or channel ID').setRequired(true).setMaxLength(100))
+            .addStringOption((option) => option.setName('related-ticket-id').setDescription('Second durable ticket ID or channel ID').setRequired(true).setMaxLength(100))
+            .addStringOption((option) => option.setName('note').setDescription('Short reason for linking (optional)').setRequired(false).setMaxLength(300)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('list').setDescription('List related tickets you are authorized to see')
+            .addStringOption((option) => option.setName('ticket-id').setDescription('Durable ticket ID or channel ID').setRequired(true).setMaxLength(100)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('unlink').setDescription('Remove a related-ticket link while retaining its audit history')
+            .addStringOption((option) => option.setName('link-id').setDescription('Link ID from the related-ticket list').setRequired(true).setMaxLength(36)),
         ),
     )
 
@@ -2140,6 +2171,96 @@ export async function execute(
   }
 
   try {
+    if (group === 'related') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        const action = subcommand;
+        const admin = isAdminLike(interaction);
+        const staffDepartments = await accessibleStaffDepartments(interaction);
+        const departmentIdsFor = (departments: Array<string | null>): boolean =>
+          departments.every((id) => Boolean(id && staffDepartments.includes(id)));
+
+        if (action === 'link') {
+          const left = await resolveRelatedTicketReference(guild.id, interaction.options.getString('ticket-id', true));
+          const right = await resolveRelatedTicketReference(guild.id, interaction.options.getString('related-ticket-id', true));
+          if (!admin && !departmentIdsFor([left.departmentId, right.departmentId])) {
+            throw new Error('To link two tickets, your configured staff roles must cover both ticket departments, or you must have Manage Server.');
+          }
+          const result = await linkRelatedTickets({
+            guildId: guild.id,
+            ticketAId: left.id,
+            ticketBId: right.id,
+            actorId: interaction.user.id,
+            note: interaction.options.getString('note') ?? '',
+          });
+          await auditProductSettingsAction(
+            interaction,
+            result.created ? 'RELATED_TICKET_LINKED' : 'RELATED_TICKET_LINK_ALREADY_EXISTS',
+            (result.created ? 'Linked' : 'Confirmed existing link between') + ' tickets ' +
+              result.link.ticketA.id + ' and ' + result.link.ticketB.id + '. Link ID ' + result.link.id + '.',
+          );
+          await interaction.editReply(
+            (result.created ? '✅ Related tickets linked.' : 'ℹ️ These tickets were already linked.') +
+            '\n**Link ID:** `' + result.link.id + '`\n' +
+            '**Ticket A:** ' + (result.link.ticketA.ticketNumber ? '#' + result.link.ticketA.ticketNumber : result.link.ticketA.id) + '\n' +
+            '**Ticket B:** ' + (result.link.ticketB.ticketNumber ? '#' + result.link.ticketB.ticketNumber : result.link.ticketB.id) +
+            (result.link.note ? '\n**Note:** ' + result.link.note : ''),
+          );
+          return;
+        }
+
+        if (action === 'list') {
+          const ticket = await resolveRelatedTicketReference(guild.id, interaction.options.getString('ticket-id', true));
+          if (!admin && (!ticket.departmentId || !staffDepartments.includes(ticket.departmentId))) {
+            throw new Error('Only staff assigned to this ticket department or a server administrator can list its related-ticket links.');
+          }
+          const links = await listRelatedTicketLinks(guild.id, ticket.id);
+          const visible = admin
+            ? links
+            : links.filter((link) => {
+                const other = link.ticketA.id === ticket.id ? link.ticketB : link.ticketA;
+                return Boolean(other.departmentId && staffDepartments.includes(other.departmentId));
+              });
+          const lines = visible.map((link) => {
+            const other = link.ticketA.id === ticket.id ? link.ticketB : link.ticketA;
+            return '• **' + (other.ticketNumber ? '#' + other.ticketNumber : other.id) + '** · ' + other.status +
+              (other.deleted ? ' · deleted record' : '') +
+              ' · channel <#' + other.channelId + '>\nLink ID: `' + link.id + '`' +
+              (link.note ? '\nNote: ' + link.note : '');
+          });
+          await interaction.editReply(
+            '**Related tickets for ' + (ticket.ticketNumber ? '#' + ticket.ticketNumber : ticket.id) + '**\n\n' +
+            (lines.length ? lines.join('\n\n').slice(0, 3000) : 'No related tickets are visible to your staff roles.') +
+            (!admin && visible.length < links.length ? '\n\nSome links were hidden because your roles do not cover the other ticket department.' : '') +
+            '\n\nUse `/supportforge related unlink` with a Link ID to remove a relationship. Link records retain removal metadata.',
+          );
+          return;
+        }
+
+        if (action === 'unlink') {
+          const linkId = interaction.options.getString('link-id', true).trim();
+          const link = await getRelatedTicketLink(guild.id, linkId);
+          if (!link) throw new Error('Active related-ticket link was not found in this server.');
+          if (!admin && !departmentIdsFor([link.ticketA.departmentId, link.ticketB.departmentId])) {
+            throw new Error('To unlink two tickets, your configured staff roles must cover both departments, or you must have Manage Server.');
+          }
+          const removed = await unlinkRelatedTicket(guild.id, linkId, interaction.user.id);
+          if (!removed) throw new Error('The related-ticket link changed before removal. Refresh the list and retry.');
+          await auditProductSettingsAction(
+            interaction,
+            'RELATED_TICKET_UNLINKED',
+            'Removed related-ticket link ' + link.id + ' between tickets ' + link.ticketA.id + ' and ' + link.ticketB.id + '.',
+          );
+          await interaction.editReply('✅ Related-ticket link removed. The link record and actor/time of removal remain in Neon.');
+          return;
+        }
+        await interaction.editReply('Unsupported related-ticket action.');
+      } catch (error) {
+        await interaction.editReply('❌ ' + (error instanceof Error ? error.message : 'Related-ticket operation failed safely.'));
+      }
+      return;
+    }
+
     if (group === 'knowledge') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
