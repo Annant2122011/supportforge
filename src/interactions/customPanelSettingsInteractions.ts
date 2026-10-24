@@ -465,9 +465,10 @@ async function showDepartmentPicker(
   page = 0,
   retargetButtonId?: string,
 ): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   const departments = Object.values((await getGuildConfig(interaction.guild!.id)).departments)
     .sort((a, b) => a.name.localeCompare(b.name));
-  if (!departments.length) throw new Error('Create a department in Settings → Tags / Departments first.');
+  if (!departments.length) throw new Error(translate(settings.locale, 'settings.customPanel.department.noDepartments'));
   const pageCount = Math.max(1, Math.ceil(departments.length / PAGE_SIZE));
   const safePage = Math.min(Math.max(page, 0), pageCount - 1);
   const visible = departments.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
@@ -476,11 +477,11 @@ async function showDepartmentPicker(
     : PREFIX + 'department-pick:' + panelId + ':' + safePage;
   const components: PanelComponents = [
     selectRow(new StringSelectMenuBuilder().setCustomId(selectId)
-      .setPlaceholder('Choose the target department')
+      .setPlaceholder(translate(settings.locale, 'settings.customPanel.department.choosePlaceholder'))
       .addOptions(visible.map((department) => ({
         label: department.name.slice(0, 100),
         value: department.id,
-        description: Object.keys(department.tags ?? {}).length + ' tag(s)',
+        description: translate(settings.locale, 'settings.customPanel.department.tagCount', { count: Object.keys(department.tags ?? {}).length }),
       })))),
   ];
   if (pageCount > 1) {
@@ -489,13 +490,13 @@ async function showDepartmentPicker(
         retargetButtonId
           ? PREFIX + 'retarget-department:' + panelId + ':' + retargetButtonId + ':' + (safePage - 1)
           : PREFIX + 'add-department:' + panelId + ':' + (safePage - 1),
-        'Previous', ButtonStyle.Secondary, '⬅️', safePage === 0,
+        translate(settings.locale, 'settings.customPanel.home.previous'), ButtonStyle.Secondary, '⬅️', safePage === 0,
       ),
       makeButton(
         retargetButtonId
           ? PREFIX + 'retarget-department:' + panelId + ':' + retargetButtonId + ':' + (safePage + 1)
           : PREFIX + 'add-department:' + panelId + ':' + (safePage + 1),
-        'Next', ButtonStyle.Secondary, '➡️', safePage >= pageCount - 1,
+        translate(settings.locale, 'settings.customPanel.home.next'), ButtonStyle.Secondary, '➡️', safePage >= pageCount - 1,
       ),
     ));
   }
@@ -503,16 +504,14 @@ async function showDepartmentPicker(
     retargetButtonId
       ? PREFIX + 'button:' + panelId + ':' + retargetButtonId
       : PREFIX + 'buttons:' + panelId,
-    'Cancel', ButtonStyle.Secondary, '↩️',
+    translate(settings.locale, 'common.cancel'), ButtonStyle.Secondary, '↩️',
   )));
   await render(
     interaction,
-    retargetButtonId ? 'Change Button Target • Department' : 'Add Department Button',
-    'Choose an existing department. ' +
-      (retargetButtonId
-        ? 'The button ID will rotate when the target changes, invalidating buttons from the previous target after you re-publish.'
-        : 'You can optionally pin a tag or let customers choose one when they click the published button.') +
-      '\nPage ' + (safePage + 1) + ' / ' + pageCount,
+    translate(settings.locale, retargetButtonId ? 'settings.customPanel.department.retargetTitle' : 'settings.customPanel.department.title'),
+    translate(settings.locale, 'settings.customPanel.department.pageDescription') +
+      (retargetButtonId ? ' ' + translate(settings.locale, 'settings.customPanel.department.changeNote') : '') +
+      '\n' + translate(settings.locale, 'settings.customPanel.department.page', { page: safePage + 1, pages: pageCount }),
     components,
   );
 }
