@@ -1053,15 +1053,27 @@ async function showTeamSettings(interaction: ButtonInteraction): Promise<void> {
   const max = settings.ticketDefaults.maxClaimedModerators;
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('👥 Team & Voice')
-      .setDescription('A ticket may be assisted by multiple moderators at the same time. The same limit controls the private voice room: **customer + configured moderator capacity**.')
+      .setTitle('👥 ' + translate(settings.locale, 'settings.team.title'))
+      .setDescription(translate(settings.locale, 'settings.team.description'))
       .addFields(
-        { name: 'Maximum simultaneous moderators', value: '**' + max + '**', inline: true },
-        { name: 'Voice capacity', value: '**' + (max + 1) + '** people', inline: true },
+        {
+          name: translate(settings.locale, 'settings.team.field.maxModerators'),
+          value: '**' + max + '**',
+          inline: true,
+        },
+        {
+          name: translate(settings.locale, 'settings.team.field.voiceCapacity'),
+          value: '**' + translate(settings.locale, 'settings.team.value.people', { count: max + 1 }) + '**',
+          inline: true,
+        },
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:team:edit').setLabel('Set Moderator Limit').setEmoji('👥').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('sf:settings:team:edit')
+        .setLabel(translate(settings.locale, 'settings.team.action.setModeratorLimit'))
+        .setEmoji('👥')
+        .setStyle(ButtonStyle.Primary),
       backButton(),
     ),
   ]);
@@ -1224,15 +1236,29 @@ async function showReportSubcategorySelector(
 
 async function showDefaults(interaction: ButtonInteraction): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
+  const priorityKeys: Record<TicketPriority, TranslationKey> = {
+    low: 'priority.low',
+    normal: 'priority.normal',
+    high: 'priority.high',
+    urgent: 'priority.urgent',
+    critical: 'priority.critical',
+  };
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🎟️ Ticket Defaults')
-      .setDescription('Defaults are applied automatically when a new ticket is created.')
-      .addFields({ name: 'Default priority', value: `⚡ **${settings.ticketDefaults.priority}**` }),
+      .setTitle('🎟️ ' + translate(settings.locale, 'settings.defaults.title'))
+      .setDescription(translate(settings.locale, 'settings.defaults.description'))
+      .addFields({
+        name: translate(settings.locale, 'settings.defaults.field.priority'),
+        value: '⚡ **' + translate(settings.locale, priorityKeys[settings.ticketDefaults.priority]) + '**',
+      }),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:defaults:edit').setLabel('Change Default Priority').setEmoji('⚡').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('sf:settings:defaults:edit')
+        .setLabel(translate(settings.locale, 'settings.defaults.action.changePriority'))
+        .setEmoji('⚡')
+        .setStyle(ButtonStyle.Primary),
       backButton(),
     ),
   ]);
@@ -1514,18 +1540,33 @@ async function showDepartments(interaction: SettingsViewInteraction): Promise<vo
 
 async function showRetention(interaction: ButtonInteraction): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
+  const retentionValue = (days: number) => days === 0
+    ? translate(settings.locale, 'settings.value.noTimer')
+    : translate(settings.locale, 'settings.value.days', { count: days });
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🧹 Retention')
-      .setDescription('Set how long closed and archived tickets remain before deletion approval. **0 means no configured timer; the one-year maximum retention policy still applies.**')
+      .setTitle('🧹 ' + translate(settings.locale, 'settings.retention.title'))
+      .setDescription(translate(settings.locale, 'settings.retention.description'))
       .addFields(
-        { name: 'Closed', value: settings.retention.closedDays === 0 ? 'No timer • 365-day maximum' : settings.retention.closedDays + ' days', inline: true },
-        { name: 'Archived', value: settings.retention.archiveDays === 0 ? 'No timer • 365-day maximum' : settings.retention.archiveDays + ' days', inline: true },
+        {
+          name: translate(settings.locale, 'settings.retention.field.closed'),
+          value: retentionValue(settings.retention.closedDays),
+          inline: true,
+        },
+        {
+          name: translate(settings.locale, 'settings.retention.field.archived'),
+          value: retentionValue(settings.retention.archiveDays),
+          inline: true,
+        },
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:retention:edit').setLabel('Edit Retention').setEmoji('🕒').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('sf:settings:retention:edit')
+        .setLabel(translate(settings.locale, 'settings.retention.action.edit'))
+        .setEmoji('🕒')
+        .setStyle(ButtonStyle.Primary),
       backButton(),
     ),
   ]);
@@ -1538,40 +1579,53 @@ async function showInactivitySettings(interaction: SettingsViewInteraction, noti
   const defaultRoleIds = settings.inactivity.exemptRoleIds.filter((roleId) => guild.roles.cache.has(roleId));
   const roleSelector = new RoleSelectMenuBuilder()
     .setCustomId('sf:settings:inactivity:exempt-roles')
-    .setPlaceholder('Select roles exempt from inactivity closure')
+    .setPlaceholder(translate(settings.locale, 'settings.inactivity.roleSelectPlaceholder').slice(0, 150))
     .setMinValues(0)
     .setMaxValues(25);
   if (defaultRoleIds.length) roleSelector.setDefaultRoles(...defaultRoleIds);
 
   const roleNames = settings.inactivity.exemptRoleIds
     .map((roleId) => guild.roles.cache.get(roleId)?.name ?? roleId)
-    .join(', ') || 'None';
+    .join(', ') || translate(settings.locale, 'common.none');
   const departmentNames = settings.inactivity.exemptDepartmentIds
     .map((departmentId) => config.departments[departmentId]?.name ?? departmentId)
-    .join(', ') || 'None';
+    .join(', ') || translate(settings.locale, 'common.none');
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('⏳ Ticket Inactivity Automation')
+      .setTitle('⏳ ' + translate(settings.locale, 'settings.inactivity.title'))
       .setDescription(
         (notice ? notice + '\n\n' : '') +
-        'When enabled, active tickets with no recorded activity receive a visible warning. If nobody replies during the grace period, ResolveX creates or reuses a transcript and closes the ticket. Any new activity resets the warning. The scheduler and deadlines survive restarts.\n\n' +
-        '**Status:** ' + (settings.inactivity.enabled ? '🟢 Enabled' : '⚪ Disabled') + '\n' +
-        '**Warn after:** ' + settings.inactivity.idleHours + ' hours without activity\n' +
-        '**Grace after warning:** ' + settings.inactivity.graceHours + ' hours\n' +
-        '**Exempt roles:** ' + roleNames + '\n' +
-        '**Exempt departments:** ' + departmentNames + '\n\n' +
-        'A selected role exempts tickets whose owner or assigned staff holds that role. Department exemptions apply to every ticket in that department. An exemption takes effect immediately and clears any existing warning for the affected ticket.'
+        translate(settings.locale, 'settings.inactivity.description') + '\n\n' +
+        '**' + translate(settings.locale, 'settings.inactivity.status') + ':** ' +
+        (settings.inactivity.enabled
+          ? '🟢 ' + translate(settings.locale, 'common.enabled')
+          : '⚪ ' + translate(settings.locale, 'common.disabled')) + '\n' +
+        '**' + translate(settings.locale, 'settings.inactivity.label.warnAfter') + ':** ' +
+        settings.inactivity.idleHours + ' ' + translate(settings.locale, 'settings.value.days', { count: settings.inactivity.idleHours }) + '\n' +
+        '**' + translate(settings.locale, 'settings.inactivity.label.graceAfter') + ':** ' +
+        settings.inactivity.graceHours + ' ' + translate(settings.locale, 'settings.value.days', { count: settings.inactivity.graceHours }) + '\n' +
+        '**' + translate(settings.locale, 'settings.inactivity.label.exemptRoles') + ':** ' + roleNames + '\n' +
+        '**' + translate(settings.locale, 'settings.inactivity.label.exemptDepartments') + ':** ' + departmentNames + '\n\n' +
+        translate(settings.locale, 'settings.inactivity.exemptionHelp')
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId('sf:settings:inactivity:' + (settings.inactivity.enabled ? 'disable' : 'enable'))
-        .setLabel(settings.inactivity.enabled ? 'Disable Automation' : 'Enable Automation')
+        .setLabel(translate(settings.locale, settings.inactivity.enabled ? 'settings.inactivity.action.disable' : 'settings.inactivity.action.enable'))
         .setEmoji(settings.inactivity.enabled ? '⏸️' : '▶️')
         .setStyle(settings.inactivity.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('sf:settings:inactivity:edit').setLabel('Edit Thresholds').setEmoji('🕒').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('sf:settings:inactivity:departments').setLabel('Edit Departments').setEmoji('🗂️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('sf:settings:inactivity:edit')
+        .setLabel(translate(settings.locale, 'settings.inactivity.action.editThresholds'))
+        .setEmoji('🕒')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('sf:settings:inactivity:departments')
+        .setLabel(translate(settings.locale, 'settings.inactivity.action.editDepartments'))
+        .setEmoji('🗂️')
+        .setStyle(ButtonStyle.Secondary),
       backButton(),
     ),
     new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(roleSelector),
