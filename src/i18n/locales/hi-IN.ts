@@ -26,6 +26,8 @@ const hiIN: Record<TranslationKey, string> = {
   'settings.dashboard.field.serverTheme': "सर्वर थीम",
   'settings.dashboard.field.configurationSnapshot': "कॉन्फ़िगरेशन सारांश",
   'settings.value.noTimer': "कोई टाइमर नहीं (अधिकतम 365 दिन)",
+  'settings.value.days': "{count} दिन",
+  'settings.value.noneSuffix': " (कोई नहीं)",
   'settings.value.configured': "कॉन्फ़िगर किया गया",
   'settings.value.notConfigured': "कॉन्फ़िगर नहीं किया गया",
   'settings.value.panelBudget': "{lines} पंक्तियाँ • {cap} संदेश सीमा",
