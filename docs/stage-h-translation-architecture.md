@@ -1,6 +1,6 @@
 # Stage H: Translation and Localization Architecture
 
-**Status:** H1 translation core implemented on `main`; H2 language controls and initial surface integration in progress  
+**Status:** H1 core and initial H2 coverage implemented on the consolidated feature branch; final Settings/report coverage and live acceptance remain open  
 **Baseline:** Stages A–G integrated into main at e1988a1a0cc5efc698a870215ba7c902c7ddeeba  
 **Persistence:** Existing Neon/PostgreSQL-backed advanced-settings JSON document; no SQL migration  
 **Compatibility:** Existing /supportforge command root, IDs, event names, internal symbols and legacy persisted documents remain unchanged.
@@ -17,11 +17,11 @@ The canonical source language is English (United States). Part 1 provides the tr
 
 1. Create a registry of supported locale tags: en-US, hi-IN, and bn-IN; normalise legacy/malformed stored locale values to en-US.
 2. Define the canonical typed TranslationKey vocabulary in the English catalog.
-3. Add partial Hindi and Bengali dictionaries. Each key falls back individually to English, so a partial translation cannot produce a blank label.
+3. Maintain complete Hindi and Bengali dictionaries with the same typed keys as English. Missing keys fail TypeScript build rather than silently showing English or blank UI.
 4. Implement translate(locale, key, params) with one-pass, non-recursive placeholder substitution. Missing parameters remain visible as {parameter} rather than silently deleting information.
 5. Add locale-aware number/date formatting wrappers backed by JavaScript Intl, with deterministic fallback behavior and invalid-date checks.
 6. Store a per-server locale preference in the existing versioned JSON settings document, defaulting to en-US, preserving all other server settings and avoiding a SQL migration.
-7. Add regression tests for key typing/catalog completeness, locale fallback, partial dictionary fallback, safe interpolation, date/number formatting, and settings normalization.
+7. Add regression tests for full catalog coverage in every supported locale, invalid-locale normalization, safe interpolation, date/number formatting, and settings normalization.
 8. Keep the rollout opt-in: existing handlers remain in English until individually wired or H2 migrates the user-facing surfaces.
 
 ### H2 — Locale controls and end-to-end coverage (active increment)
@@ -37,8 +37,8 @@ The canonical source language is English (United States). Part 1 provides the tr
 
 - src/i18n/localeRegistry.ts: supported locales, type guard, safe resolver.
 - src/i18n/locales/en-US.ts: canonical catalog and source of the TranslationKey type.
-- src/i18n/locales/hi-IN.ts and bn-IN.ts: partial, typed overlays.
-- src/i18n/translationService.ts: translation, per-key fallback, safe interpolation, date and number formatting.
+- src/i18n/locales/hi-IN.ts and bn-IN.ts: complete typed translations for every canonical key.
+- src/i18n/translationService.ts: strict translation lookup, safe interpolation, date and number formatting.
 - src/services/advancedSettingsService.ts: durable guild locale preference, loaded through the existing Neon-backed JSON document service.
 - tests/translationService.test.ts: pure deterministic unit tests independent of Discord network access.
 
@@ -51,7 +51,7 @@ The guild setting is a simple supported-locale tag and defaults to en-US. Existi
 ## Quality and safety requirements
 
 - Every key in the English source catalog is present and non-empty.
-- Partial dictionaries deliberately fall back key-by-key to English.
+- Every supported locale must define a non-empty translation for every English catalog key. Build-time types and catalog-coverage tests enforce this; translation lookup throws if a new missing key is somehow introduced at runtime.
 - Interpolation replaces placeholders once only, so parameter content containing braces is not interpreted as a second template.
 - Missing parameters remain visible for debugging and are tested.
 - Unknown locale values resolve safely to en-US.
@@ -65,7 +65,7 @@ The guild setting is a simple supported-locale tag and defaults to en-US. Existi
 ### H1
 - [x] Build, unit tests and PostgreSQL verification pass in CI before the H1 merge.
 - [x] Unknown/legacy locale values render English and do not stop startup.
-- [x] Partial catalogs never return missing text when an English key exists.
+- [x] English, Hindi and Bengali catalogs have complete key coverage; a missing translation fails verification instead of falling back to English.
 - [x] Parameter values are substituted literally and only once.
 - [x] Date/number output uses the requested supported locale.
 - [x] New locale preference is defaulted and persisted through the existing JSON document without SQL changes.
@@ -74,5 +74,5 @@ The guild setting is a simple supported-locale tag and defaults to en-US. Existi
 - [x] Every locale can be selected through both Settings dashboard buttons and slash commands.
 - [x] Ticket intake/creation, support-hours restriction, lifecycle outcomes/announcements, close confirmation, priority confirmation, and common expired/invalid form responses use the selected guild locale.
 - [x] Equivalent button and slash-command lifecycle confirmations reuse the same localized status/priority vocabulary.
-- [x] Automated tests cover command/button capability parity, localized status/priority/form copy, interpolation and fallback.
-- [ ] Finish localization of the remaining Settings pages, panel previews and selected report surfaces; then complete non-production Discord guild acceptance for each supported locale.
+- [x] Automated tests cover catalog completeness for every supported locale, command/button capability parity, localized status/priority/form copy and safe interpolation.
+- [ ] Finish detailed Settings subpages, public-panel previews and selected report surfaces; then complete non-production Discord guild acceptance for each supported locale. The Settings dashboard defaults and built-in navigation labels are now localized; custom per-server labels remain unchanged.
