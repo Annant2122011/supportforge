@@ -114,12 +114,16 @@ SELECT
     WHERE guild_id = $1 AND deleted_at IS NULL
       AND status IN ('open', 'claimed', 'pending', 'reopened')) AS oldest_active_created_at,
   (SELECT COUNT(*) FROM resolved_in_period) AS first_resolved_tickets,
-  (SELECT COUNT(*) FROM ticket_events
-    WHERE guild_id = $1 AND event_type = 'ticket.closed'
-      AND created_at >= $2::timestamptz AND created_at < $3::timestamptz) AS close_actions,
-  (SELECT COUNT(DISTINCT ticket_id) FROM ticket_events
-    WHERE guild_id = $1 AND event_type = 'ticket.reopened'
-      AND created_at >= $2::timestamptz AND created_at < $3::timestamptz) AS reopened_tickets,
+  (SELECT COUNT(*) FROM ticket_events AS e
+    INNER JOIN tickets AS t ON t.id = e.ticket_id
+    WHERE e.guild_id = $1 AND t.guild_id = $1 AND t.deleted_at IS NULL
+      AND e.event_type = 'ticket.closed'
+      AND e.created_at >= $2::timestamptz AND e.created_at < $3::timestamptz) AS close_actions,
+  (SELECT COUNT(DISTINCT e.ticket_id) FROM ticket_events AS e
+    INNER JOIN tickets AS t ON t.id = e.ticket_id
+    WHERE e.guild_id = $1 AND t.guild_id = $1 AND t.deleted_at IS NULL
+      AND e.event_type = 'ticket.reopened'
+      AND e.created_at >= $2::timestamptz AND e.created_at < $3::timestamptz) AS reopened_tickets,
   (SELECT COUNT(DISTINCT r.ticket_id)
     FROM resolved_in_period AS r
     WHERE EXISTS (
