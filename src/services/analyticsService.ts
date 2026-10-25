@@ -63,7 +63,8 @@ export async function getGuildAnalyticsSummary(
 }
 
 export function parseAnalyticsPeriod(value: string | null | undefined): AnalyticsPeriodDays {
+  if (value === undefined || value === null || value === '7d') return 7;
   if (value === '30d') return 30;
   if (value === '90d') return 90;
-  return 7;
+  throw new Error('Analytics period must be 7d, 30d, or 90d.');
 }
