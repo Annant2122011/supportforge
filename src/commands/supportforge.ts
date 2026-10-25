@@ -78,6 +78,8 @@ import {
   updateCustomPanel,
 } from '../services/panelBuilderService';
 import { requestGitHubDeployment } from '../services/updateService';
+import { getGuildAnalyticsSummary, parseAnalyticsPeriod } from '../services/analyticsService';
+import { buildAnalyticsEmbed } from '../interactions/analyticsPresentation';
 
 import {
   ensureSettingsChannel,
@@ -768,6 +770,23 @@ export const data =
       'Manage ResolvX and support tickets',
     )
     .setDMPermission(false)
+
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('analytics')
+        .setDescription('View operational ticket metrics')
+        .addStringOption((option) =>
+          option
+            .setName('period')
+            .setDescription('Rolling UTC reporting window')
+            .setRequired(false)
+            .addChoices(
+              { name: 'Last 7 days', value: '7d' },
+              { name: 'Last 30 days', value: '30d' },
+              { name: 'Last 90 days', value: '90d' },
+            ),
+        ),
+    )
 
     // ─────────────────────────────────────────────
     // SETUP
@@ -1764,7 +1783,7 @@ export async function execute(
   // Administrative commands
   if (
     (!group &&
-      (subcommand === 'setup' || subcommand === 'restore')) ||
+      (subcommand === 'setup' || subcommand === 'restore' || subcommand === 'analytics')) ||
     group === 'category' ||
     group === 'premium' ||
     group === 'form' ||
@@ -1782,6 +1801,14 @@ export async function execute(
   }
 
   try {
+    if (subcommand === 'analytics' && !group) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const period = parseAnalyticsPeriod(interaction.options.getString('period'));
+      const summary = await getGuildAnalyticsSummary(guild.id, period);
+      await interaction.editReply({ embeds: [buildAnalyticsEmbed(summary)] });
+      return;
+    }
+
     if (group === 'audit') {
       await handleAuditSlashCommand(interaction);
       return;
