@@ -51,6 +51,7 @@ const SETTINGS_DASHBOARD_BUTTONS: Record<SettingsDashboardButtonKey, {
   tags: { customId: 'sf:settings:tags', label: 'Tags / Departments', style: ButtonStyle.Secondary, emoji: '🏷️' },
   usecases: { customId: 'sf:settings:usecases', label: 'Use Cases', style: ButtonStyle.Secondary, emoji: '🧩' },
   reports: { customId: 'sf:settings:reports', label: 'Safety & Reports', style: ButtonStyle.Secondary, emoji: '🚩' },
+  analytics: { customId: 'sf:settings:analytics', label: 'Ticket Analytics', style: ButtonStyle.Primary, emoji: '📊' },
   retention: { customId: 'sf:settings:retention', label: 'Retention', style: ButtonStyle.Secondary, emoji: '🧹' },
   inactivity: { customId: 'sf:settings:inactivity', label: 'Inactivity Automation', style: ButtonStyle.Primary, emoji: '⏳' },
   appearance: { customId: 'sf:settings:appearance', label: 'Public Panel', style: ButtonStyle.Secondary, emoji: '🎨' },
