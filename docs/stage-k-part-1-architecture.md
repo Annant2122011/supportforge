@@ -65,7 +65,7 @@ All report periods are rolling windows of 7 × 24, 30 × 24 or 90 × 24 hours en
 - Every live-ticket aggregate filters to the guild and excludes records with deleted_at set.
 - Current backlog is computed from persisted status, not Discord channel permissions.
 - Message-event aggregation uses only ticket.message.received payloads whose messageAuthorType is exactly customer or staff. Unknown or missing attribution is not guessed.
-- First response is measured from the customer's first recorded message, not from ticket creation. This metric uses only tickets created within the selected window.
+- First response is measured from the original message timestamps recorded in event payloads, not from the later database-write time, and starts at the customer's first recorded message rather than ticket creation. This metric uses only tickets created within the selected window; events without a valid source timestamp are excluded.
 - First-resolution uses the earliest durable close event per ticket, preventing a later re-close from double-counting a ticket as newly resolved.
 - SQL is aggregate-only; it does not read or return message bodies, attachment URLs, or transcript contents.
 - The Settings dashboard and slash command must independently enforce Manage Server or Administrator authorization.
