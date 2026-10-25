@@ -478,7 +478,7 @@ const MIGRATIONS: readonly PostgresMigration[] = [
           ON ticket_recovery_replay_items (original_message_id);
       `);
     },
-  },,
+  },
   {
     id: 12,
     name: 'add_analytics_query_indexes',
