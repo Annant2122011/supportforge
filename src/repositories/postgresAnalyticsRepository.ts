@@ -82,6 +82,7 @@ first_closure AS (
   FROM ticket_events AS e
   INNER JOIN tickets AS t ON t.id = e.ticket_id
   WHERE e.guild_id = $1
+    AND t.guild_id = $1
     AND e.event_type = 'ticket.closed'
     AND t.deleted_at IS NULL
   GROUP BY e.ticket_id
