@@ -131,3 +131,13 @@ Stage G Part 1 centralizes ticket lifecycle authorization, makes closed/archived
 ## Stage G Part 2: Ticket inactivity automation
 
 Stage G Part 2 adds opt-in, per-server inactivity warnings and automatic closure with a grace period. It uses durable PostgreSQL activity metadata, recovers warning state after restarts, requires transcript delivery, and atomically rejects closure if activity changes. The default is disabled; administrators can manage it with the Settings dashboard's **Inactivity Automation** controls or `/supportforge settings inactivity`. See [the Stage G Part 2 design and acceptance checklist](docs/stage-g-part-2-inactivity.md).
+
+## Stage K · Part 1: operational analytics foundation
+
+Stage K is split into two reviewable parts. Part 1 adds a Neon/PostgreSQL aggregate repository, validated rolling UTC report windows, guild-level queue and ticket outcome metrics, first-response sample coverage, a shared Discord report presentation, and the initial tests. The reporting paths are designed for administrator/Manage Server access and must use the same definitions whether opened from the Settings dashboard or slash command.
+
+Use the administrator-only /supportforge analytics command with the optional period choice (7, 30 or 90 days), or open **Settings → Ticket Analytics** and select a reporting window. The report distinguishes period activity from the current backlog and shows exact UTC boundaries. It excludes deleted tickets and excludes unknown author attribution from response-time samples instead of guessing.
+
+Part 2 is reserved for department and staff breakdowns, period-over-period trends, validated CSV export, and data coverage diagnostics. SLA compliance and customer satisfaction will only be added when their source data is authoritative and durable. Architecture, metric definitions and acceptance criteria: [Stage K Part 1](docs/stage-k-part-1-architecture.md).
+
+The branch must pass the build, automated tests and PostgreSQL database verification, then receive live acceptance in a non-production Discord test server before production rollout.
