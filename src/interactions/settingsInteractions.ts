@@ -644,6 +644,7 @@ const SETTINGS_LAYOUT_LABELS: Record<SettingsDashboardButtonKey, string> = {
   'support-hours': 'Support Hours',
   'ticket-workspace': 'Ticket Workspace',
   inactivity: 'Inactivity Automation',
+  analytics: 'Ticket Analytics',
 };
 
 const SETTINGS_LAYOUT_DEFAULT_EMOJIS: Record<SettingsDashboardButtonKey, string> = {
@@ -651,7 +652,7 @@ const SETTINGS_LAYOUT_DEFAULT_EMOJIS: Record<SettingsDashboardButtonKey, string>
   retention: '🧹', appearance: '🎨', storage: '🗄️', rules: '🛡️', repair: '🛠️',
   team: '👥', manual: '📖', forms: '🧾', refresh: '🔄', reset: '🚨', theme: '🌈',
   premium: '💎', panels: '🧱', 'dashboard-builder': '🧰', 'support-hours': '🕒', 'ticket-workspace': '🧵',
-  inactivity: '⏳',
+  inactivity: '⏳', analytics: '📊',
 };
 
 function effectiveSettingsLayoutLabel(
