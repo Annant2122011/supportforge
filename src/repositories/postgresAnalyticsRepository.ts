@@ -49,27 +49,31 @@ WITH period_tickets AS (
     AND t.created_at < $3::timestamptz
 ),
 first_customer_message AS (
-  SELECT e.ticket_id, MIN(e.created_at) AS first_customer_at
+  SELECT e.ticket_id, MIN((e.payload->>'messageTimestamp')::timestamptz) AS first_customer_at
   FROM ticket_events AS e
   INNER JOIN period_tickets AS t ON t.id = e.ticket_id
   WHERE e.guild_id = $1
     AND e.event_type = 'ticket.message.received'
     AND e.payload->>'messageAuthorType' = 'customer'
-    AND e.created_at >= t.created_at
+    AND e.payload->>'messageTimestamp' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
+    AND (e.payload->>'messageTimestamp')::timestamptz >= t.created_at
+    AND (e.payload->>'messageTimestamp')::timestamptz < $3::timestamptz
     AND e.created_at < $3::timestamptz
   GROUP BY e.ticket_id
 ),
 first_staff_response AS (
   SELECT c.ticket_id,
          c.first_customer_at,
-         MIN(e.created_at) AS first_staff_at
+         MIN((e.payload->>'messageTimestamp')::timestamptz) AS first_staff_at
   FROM first_customer_message AS c
   INNER JOIN ticket_events AS e
     ON e.ticket_id = c.ticket_id
    AND e.guild_id = $1
    AND e.event_type = 'ticket.message.received'
    AND e.payload->>'messageAuthorType' = 'staff'
-   AND e.created_at > c.first_customer_at
+   AND e.payload->>'messageTimestamp' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
+   AND (e.payload->>'messageTimestamp')::timestamptz > c.first_customer_at
+   AND (e.payload->>'messageTimestamp')::timestamptz < $3::timestamptz
    AND e.created_at < $3::timestamptz
   GROUP BY c.ticket_id, c.first_customer_at
 ),
