@@ -81,6 +81,7 @@ test('analytics report uses a rolling UTC window and computes reopen rate', asyn
     '2026-10-25T12:00:00.000Z',
   ]);
   assert.match(calls[0]?.sql ?? '', /messageAuthorType/);
+  assert.match(calls[0]?.sql ?? '', /messageTimestamp/);
   assert.match(calls[0]?.sql ?? '', /deleted_at IS NULL/);
 });
 
