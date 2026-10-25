@@ -5,6 +5,7 @@ import type { DatabaseExecutor } from '../src/core/persistence/database';
 import { PostgresAnalyticsRepository } from '../src/repositories/postgresAnalyticsRepository';
 import {
   getGuildAnalyticsSummary,
+  parseAnalyticsPeriod,
   type AnalyticsPeriodDays,
 } from '../src/services/analyticsService';
 
@@ -140,4 +141,14 @@ test('invalid aggregate numeric values are normalized instead of leaking NaN', a
   assert.equal(result.ticketsCreated, 0);
   assert.equal(result.avgFirstResponseMinutes, null);
   assert.equal(result.avgResolutionMinutes, null);
+});
+
+
+test('analytics period parser defaults only when omitted and rejects unknown labels', () => {
+  assert.equal(parseAnalyticsPeriod(undefined), 7);
+  assert.equal(parseAnalyticsPeriod(null), 7);
+  assert.equal(parseAnalyticsPeriod('7d'), 7);
+  assert.equal(parseAnalyticsPeriod('30d'), 30);
+  assert.equal(parseAnalyticsPeriod('90d'), 90);
+  assert.throws(() => parseAnalyticsPeriod('365d'), /period must be 7d, 30d, or 90d/);
 });
