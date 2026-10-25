@@ -1493,7 +1493,7 @@ This is not required for initial Discord product-market validation.
 
 ## F-042 — Staff Performance Analytics
 
-**Status:** `PLANNED`  
+**Status:** `PARTIAL`  
 **Priority:** `P2`
 
 Potential metrics:
@@ -1515,7 +1515,7 @@ Metrics should be treated as operational signals, not as simplistic rankings. A 
 
 ## F-043 — Department Analytics
 
-**Status:** `PLANNED`  
+**Status:** `PARTIAL`  
 **Priority:** `P2`
 
 Possible reports:
@@ -1530,6 +1530,10 @@ Possible reports:
 - satisfaction
 - reopening rate
 - backlog
+
+### Stage K implementation checkpoint
+
+The initial guild-level operational reporting foundation is being implemented in Stage K Part 1. It covers ticket volume, current backlog, urgency, first-response sample coverage, first-resolution time and reopening signals from durable PostgreSQL ticket/event records. This does not yet complete the full staff/departments analytics roadmap above: department and staff breakdowns, trend comparisons, export, authoritative SLA compliance and durable CSAT reporting remain in Stage K Part 2 or dependent stages. See [Stage K Part 1 architecture and metric definitions](docs/stage-k-part-1-architecture.md).
 
 ---
 
