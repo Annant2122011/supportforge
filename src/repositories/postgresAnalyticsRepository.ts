@@ -39,7 +39,7 @@ export interface AnalyticsRollup {
   avgResolutionMinutes: number | null;
 }
 
-const ANALYTICS_ROLLUP_SQL = \`
+const ANALYTICS_ROLLUP_SQL = `
 WITH period_tickets AS (
   SELECT t.id, t.created_at
   FROM tickets AS t
@@ -139,7 +139,7 @@ SELECT
     FROM first_staff_response AS r) AS avg_first_response_minutes,
   (SELECT AVG(EXTRACT(EPOCH FROM (r.first_closed_at - r.created_at)) / 60.0)
     FROM resolved_in_period AS r) AS avg_resolution_minutes
-\`;
+`;
 
 function toCount(value: string | number): number {
   const parsed = typeof value === 'number' ? value : Number(value);
