@@ -56,6 +56,7 @@ first_customer_message AS (
     AND e.event_type = 'ticket.message.received'
     AND e.payload->>'messageAuthorType' = 'customer'
     AND e.created_at >= t.created_at
+    AND e.created_at < $3::timestamptz
   GROUP BY e.ticket_id
 ),
 first_staff_response AS (
@@ -69,6 +70,7 @@ first_staff_response AS (
    AND e.event_type = 'ticket.message.received'
    AND e.payload->>'messageAuthorType' = 'staff'
    AND e.created_at > c.first_customer_at
+   AND e.created_at < $3::timestamptz
   GROUP BY c.ticket_id, c.first_customer_at
 ),
 first_closure AS (
