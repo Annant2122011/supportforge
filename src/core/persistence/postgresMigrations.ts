@@ -478,7 +478,24 @@ const MIGRATIONS: readonly PostgresMigration[] = [
           ON ticket_recovery_replay_items (original_message_id);
       `);
     },
-  },
+  },,
+  {
+    id: 12,
+    name: 'add_analytics_query_indexes',
+    up: async (db) => {
+      await db.query(`
+        CREATE INDEX IF NOT EXISTS idx_tickets_guild_created_live
+          ON tickets (guild_id, created_at)
+          WHERE deleted_at IS NULL;
+
+        CREATE INDEX IF NOT EXISTS idx_ticket_events_guild_type_created
+          ON ticket_events (guild_id, event_type, created_at);
+
+        CREATE INDEX IF NOT EXISTS idx_ticket_events_ticket_type_created
+          ON ticket_events (ticket_id, event_type, created_at);
+      `);
+    },
+  }
 ];
 export async function runPostgresMigrations(
   db: TransactionExecutor,
