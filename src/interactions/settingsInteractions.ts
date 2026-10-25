@@ -95,6 +95,8 @@ import {
   runRetentionSweepForGuild,
 } from '../services/ticketRetentionService';
 import { clearTicketInactivityWarningsForGuild } from '../services/ticketInactivityService';
+import { getGuildAnalyticsSummary, parseAnalyticsPeriod } from '../services/analyticsService';
+import { buildAnalyticsEmbed, buildAnalyticsPeriodButtons } from './analyticsPresentation';
 
 import {
   ensureContainer,
@@ -2021,6 +2023,40 @@ export async function handleSettingsInteraction(
   }
 
   const guild = interaction.guild;
+
+  if (interaction.isButton() && (
+    interaction.customId === 'sf:settings:analytics' ||
+    interaction.customId.startsWith('sf:settings:analytics:')
+  )) {
+    const periodKey = interaction.customId === 'sf:settings:analytics'
+      ? '7d'
+      : interaction.customId.slice('sf:settings:analytics:'.length);
+    if (periodKey !== '7d' && periodKey !== '30d' && periodKey !== '90d') {
+      await reject(interaction, '❌ That analytics reporting window is not supported.');
+      return true;
+    }
+
+    try {
+      if (interaction.customId === 'sf:settings:analytics') {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      } else {
+        await interaction.deferUpdate();
+      }
+      const summary = await getGuildAnalyticsSummary(guild.id, parseAnalyticsPeriod(periodKey));
+      await interaction.editReply({
+        embeds: [buildAnalyticsEmbed(summary)],
+        components: buildAnalyticsPeriodButtons(),
+      });
+    } catch (error) {
+      console.error('Ticket analytics view failed for guild ' + guild.id + ':', error);
+      await interaction.editReply({
+        content: '❌ Analytics could not be loaded from the database. Please try again later.',
+        embeds: [],
+        components: [],
+      }).catch(() => undefined);
+    }
+    return true;
+  }
 
   if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('sf:settings:recovery:')) {
     return await handleTicketRecoveryInteraction(interaction);
