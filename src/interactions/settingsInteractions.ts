@@ -187,7 +187,7 @@ function findPriorityRole(
   configuredRoleId?: string,
 ) {
   // A matching display name is not ownership proof. Only the saved role ID
-  // identifies a ResolvX-managed priority role.
+  // identifies a QueryFixr-managed priority role.
   if (!configuredRoleId) return undefined;
   const configured = guild.roles.cache.get(configuredRoleId);
   return configured && !configured.managed ? configured : undefined;
@@ -283,7 +283,7 @@ async function showPriorityRules(interaction: ButtonInteraction): Promise<void> 
     new EmbedBuilder()
       .setTitle('🎨 ' + translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'settings.priorityRules.title'))
       .setDescription(
-        'Priority roles are optional server rules. **Nothing is created automatically.** Choose a priority to create its role, or delete an existing ResolvX priority role. ResolvX will not fail the whole rule operation just because Discord refuses a role-hierarchy reorder.',
+        'Priority roles are optional server rules. **Nothing is created automatically.** Choose a priority to create its role, or delete an existing QueryFixr priority role. QueryFixr will not fail the whole rule operation just because Discord refuses a role-hierarchy reorder.',
       )
       .addFields({
         name: 'Current priority rules',
@@ -308,7 +308,7 @@ async function createPriorityRole(interaction: ButtonInteraction, priority: Tick
   if (!botMember?.permissions.has(PermissionFlagsBits.ManageRoles)) {
     await reject(
       interaction,
-      '❌ ResolvX needs **Manage Roles** to create priority roles. Discord does not allow a bot to grant itself that permission.',
+      '❌ QueryFixr needs **Manage Roles** to create priority roles. Discord does not allow a bot to grant itself that permission.',
     );
     return;
   }
@@ -338,12 +338,12 @@ async function createPriorityRole(interaction: ButtonInteraction, priority: Tick
   try {
     const definition = PRIORITY_ROLE_DEFINITIONS[priority];
     const role = await interaction.guild!.roles.create({
-      name: 'ResolvX • ' + definition.label + ' Tickets',
+      name: 'QueryFixr • ' + definition.label + ' Tickets',
       colors: {
         primaryColor: definition.color,
       },
       mentionable: false,
-      reason: 'ResolvX administrator-created priority rule',
+      reason: 'QueryFixr administrator-created priority rule',
     });
 
     await updateAdvancedSettings(interaction.guild!.id, (settings) => {
@@ -383,7 +383,7 @@ async function createPriorityRole(interaction: ButtonInteraction, priority: Tick
   } catch (error) {
     console.error('❌ Priority role creation failed:', error);
     await interaction.editReply(
-      '❌ ResolvX could not create that priority role. Check that the bot can Manage Roles and that its role is above the target role.',
+      '❌ QueryFixr could not create that priority role. Check that the bot can Manage Roles and that its role is above the target role.',
     );
   }
 }
@@ -417,7 +417,7 @@ async function deletePriorityRole(
       await interaction.editReply(
         'ℹ️ No ' +
           priorityRoleLabel(priority) +
-          ' priority role exists. The stale ResolvX configuration was cleared.',
+          ' priority role exists. The stale QueryFixr configuration was cleared.',
       );
       await auditSettingsAction(
         interaction.guild!,
@@ -442,14 +442,14 @@ async function deletePriorityRole(
           ' because Discord role hierarchy/permissions do not permit the bot to manage it.',
       );
       await interaction.editReply(
-        '❌ Discord will not let ResolvX delete ' +
+        '❌ Discord will not let QueryFixr delete ' +
           role.toString() +
-          '. Move the ResolvX bot role above this role and ensure it has **Manage Roles**, then try again.',
+          '. Move the QueryFixr bot role above this role and ensure it has **Manage Roles**, then try again.',
       );
       return;
     }
 
-    await role.delete('ResolvX administrator deleted priority rule role');
+    await role.delete('QueryFixr administrator deleted priority rule role');
 
     await updateAdvancedSettings(interaction.guild!.id, (current) => {
       delete current.priorityRoles[priority];
@@ -473,7 +473,7 @@ async function deletePriorityRole(
   } catch (error) {
     console.error('❌ Priority role deletion failed:', error);
     await interaction.editReply(
-      '❌ ResolvX could not delete that priority role. Discord may be preventing the bot from managing it because of the role hierarchy.',
+      '❌ QueryFixr could not delete that priority role. Discord may be preventing the bot from managing it because of the role hierarchy.',
     );
   }
 }
@@ -2224,7 +2224,7 @@ export async function handleSettingsInteraction(
     (interaction.customId.startsWith('sf:settings:'))
   ) {
     if (!isSettingsChannel(interaction)) {
-      await reject(interaction, '❌ ResolvX settings can only be used from the ResolvX settings channel.');
+      await reject(interaction, '❌ QueryFixr settings can only be used from the QueryFixr settings channel.');
       return true;
     }
 
@@ -2237,7 +2237,7 @@ export async function handleSettingsInteraction(
         interaction,
         manualAction
           ? '❌ The Staff Manual is available to configured department staff or administrators.'
-          : '❌ You need **Manage Server** or **Administrator** to change ResolvX settings.',
+          : '❌ You need **Manage Server** or **Administrator** to change QueryFixr settings.',
       );
       return true;
     }
@@ -2849,9 +2849,9 @@ export async function handleSettingsInteraction(
     if (id === SETTINGS_LAYOUT_PREFIX + ':reset-order') {
       await interaction.deferUpdate();
       await updateAdvancedSettings(guild.id, (settings) => {
-        settings.settingsDashboard.title = '⚙️ ResolvX Settings';
+        settings.settingsDashboard.title = '⚙️ QueryFixr Settings';
         settings.settingsDashboard.description = 'Configure your server’s ticket system, support panels and retention policies.';
-        settings.settingsDashboard.footer = 'ResolvX • Settings Dashboard';
+        settings.settingsDashboard.footer = 'QueryFixr • Settings Dashboard';
         settings.settingsDashboard.buttonOrder = [...SETTINGS_DASHBOARD_BUTTON_KEYS];
         settings.settingsDashboard.buttonCustomizations = {};
       });
@@ -3619,14 +3619,14 @@ export async function handleSettingsInteraction(
         const restoreMode = id !== 'sf:settings:setup';
         const result = await runSupportForgeSetup(guild, restoreMode);
         await interaction.editReply(
-          '✅ **ResolvX ' + (restoreMode ? 'restored' : 'setup/repair completed') + ' successfully.**\n\n' +
+          '✅ **QueryFixr ' + (restoreMode ? 'restored' : 'setup/repair completed') + ' successfully.**\n\n' +
           'Container: <#' + result.supportCategoryId + '>\n' +
           'Department categories: **' + result.departmentCount + '**\n' +
           (result.legacyOpenCategoryId ? 'Legacy Open bucket: <#' + result.legacyOpenCategoryId + '>\n' : '') +
           'The support panel, audit channel, Settings, transcripts, and department categories were checked and repaired.'
         );
       } catch (error) {
-        await interaction.editReply('❌ ResolvX could not complete setup/restore: ' + (error instanceof Error ? error.message : 'Unknown error.'));
+        await interaction.editReply('❌ QueryFixr could not complete setup/restore: ' + (error instanceof Error ? error.message : 'Unknown error.'));
       }
       return true;
     }
@@ -3647,7 +3647,7 @@ export async function handleSettingsInteraction(
               .setColor(repairThemeColor)
               .setTitle('🛡️ Restore & Update • Complete')
               .setDescription(
-                'The existing PostgreSQL-backed configuration and ticket records were retained. ResolvX has reconciled its managed categories, core channels, settings, transcript archive, audit panel, support panel, and department categories.\n\n' +
+                'The existing PostgreSQL-backed configuration and ticket records were retained. QueryFixr has reconciled its managed categories, core channels, settings, transcript archive, audit panel, support panel, and department categories.\n\n' +
                 'Recovered missing ticket records from surviving channel metadata: **' + result.recoveredTickets + '**.\n\n' +
                 (deployment.requested
                   ? '🚀 **Code deployment queued.** ' + deployment.reason
@@ -3658,7 +3658,7 @@ export async function handleSettingsInteraction(
           ],
           components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
         });
-        await auditSettingsAction(guild, interaction, 'RESTORE_AND_UPDATE', 'Reconciled ResolvX infrastructure; deployment requested=' + deployment.requested + '; recovered ticket records=' + result.recoveredTickets + '.');
+        await auditSettingsAction(guild, interaction, 'RESTORE_AND_UPDATE', 'Reconciled QueryFixr infrastructure; deployment requested=' + deployment.requested + '; recovered ticket records=' + result.recoveredTickets + '.');
       } catch (error) {
         console.error('❌ Restore & Update failed:', error);
         await interaction.editReply('❌ Restore & Update stopped before completion: ' + (error instanceof Error ? error.message : 'Unknown error. Existing database records were not intentionally reset.'));
@@ -3676,8 +3676,8 @@ export async function handleSettingsInteraction(
             new EmbedBuilder()
               .setTitle('✅ Normal Repair Complete')
               .setDescription(
-                'ResolvX infrastructure has been checked and repaired where required.' +
-                (recoveredTickets ? '\n\nRecovered **' + recoveredTickets + '** missing durable ticket record(s) from existing ticket-channel metadata.' : '\n\nAll existing ResolvX ticket channels already had durable records.'),
+                'QueryFixr infrastructure has been checked and repaired where required.' +
+                (recoveredTickets ? '\n\nRecovered **' + recoveredTickets + '** missing durable ticket record(s) from existing ticket-channel metadata.' : '\n\nAll existing QueryFixr ticket channels already had durable records.'),
               ),
           ],
           components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
@@ -4152,8 +4152,8 @@ export async function handleSettingsInteraction(
         : null;
       if (category?.type === ChannelType.GuildCategory) {
         await category.edit({
-          name: ('ResolvX.' + name).slice(0, 100),
-          reason: 'ResolvX department rename',
+          name: ('QueryFixr.' + name).slice(0, 100),
+          reason: 'QueryFixr department rename',
         });
       }
       await updateGuildConfig(guild.id, (current) => {
@@ -4351,11 +4351,11 @@ export async function handleSettingsInteraction(
          * interaction which opened this modal. Therefore the ephemeral
          * @original response is not a safe place to send the final result.
          * Use a webhook follow-up instead, which is independent of the
-         * deleted ResolvX channel.
+         * deleted QueryFixr channel.
          */
         await interaction.editReply({
           content:
-            '⏳ **ResolvX reset is being completed.** All ResolvX-managed infrastructure and stored data are being removed. The final confirmation will be sent separately after the destructive operation finishes.',
+            '⏳ **QueryFixr reset is being completed.** All QueryFixr-managed infrastructure and stored data are being removed. The final confirmation will be sent separately after the destructive operation finishes.',
         });
 
         const resetResult = await performFactoryReset(
@@ -4379,8 +4379,8 @@ export async function handleSettingsInteraction(
 
           await interaction.editReply({
             content:
-              '⚠️ **ResolvX reset was only partially completed.**\n' +
-              'Some managed resources could not be deleted, so ResolvX preserved its state for a safe retry.\n\n' +
+              '⚠️ **QueryFixr reset was only partially completed.**\n' +
+              'Some managed resources could not be deleted, so QueryFixr preserved its state for a safe retry.\n\n' +
               (failures || 'No detailed failure information was returned.') +
               (resetResult.failed.length > 5
                 ? '\n\n…and ' +
@@ -4402,7 +4402,7 @@ export async function handleSettingsInteraction(
          */
         await interaction.user.send({
           content:
-            '✅ ResolvX has been completely reset. All ResolvX-managed messages, channels, categories, and stored data were deleted.',
+            '✅ QueryFixr has been completely reset. All QueryFixr-managed messages, channels, categories, and stored data were deleted.',
         }).catch((deliveryError) => {
           console.warn(
             '⚠️ Factory reset completed, but the completion DM could not be delivered:',
@@ -4410,7 +4410,7 @@ export async function handleSettingsInteraction(
           );
         });
       } catch (error) {
-        console.error('❌ ResolvX factory reset failed:', error);
+        console.error('❌ QueryFixr factory reset failed:', error);
 
         await interaction.editReply({
           content:
@@ -4522,7 +4522,7 @@ export async function handleSettingsInteraction(
         embeds: [new EmbedBuilder().setTitle('✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.appearance.savedTitle')).setDescription(translate((await getAdvancedSettings(guild.id)).locale, 'settings.appearance.savedDescription'))],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
-      await auditSettingsAction(guild, interaction, 'APPEARANCE_CHANGED', 'Updated the ResolvX panel appearance.');
+      await auditSettingsAction(guild, interaction, 'APPEARANCE_CHANGED', 'Updated the QueryFixr panel appearance.');
       return true;
     }
   }
