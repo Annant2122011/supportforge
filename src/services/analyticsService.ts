@@ -24,6 +24,7 @@ export async function getGuildAnalyticsSummary(
   periodDays: AnalyticsPeriodDays,
   now = new Date(),
   repository = new PostgresAnalyticsRepository(),
+  filters: import('../repositories/postgresAnalyticsRepository').AnalyticsFilters = {},
 ): Promise<GuildAnalyticsSummary> {
   if (!guildId.trim()) {
     throw new Error('A guild ID is required to generate analytics.');
@@ -43,6 +44,7 @@ export async function getGuildAnalyticsSummary(
     guildId,
     periodStartAt,
     periodEndAt,
+    filters,
   );
 
   const reopenRatePercent = rollup.firstResolvedTickets > 0
