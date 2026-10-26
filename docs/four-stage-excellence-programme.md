@@ -115,3 +115,9 @@ Knowledge Base and quick replies are persistent, permission-safe and usable with
 - Updated `src/services/advancedSettingsService.ts` so only exact default appearance/dashboard titles and footers are eligible for migration; custom descriptions, tag content and button customizations are preserved.
 - Added regression coverage in `tests/managedBrandDefaults.test.ts`.
 - Automated validation and real-guild acceptance must still be reported separately after CI runs.
+
+## Integration snapshot — 2026-10-26
+
+The authoritative review path is `main` → `integration/stage-g-acceptance` → PR #34 → PR #39. PR #34 has been merged into the non-production acceptance branch at `353de4d83c73bf9b1f19960e4dd8b3e4e9ede05b` after the synthetic merge-ref build, 200 tests and disposable PostgreSQL verification passed. PR #39 is being integrated with the fuller Stage I/J implementation kept and the Unicode combining-mark fix preserved.
+
+Stage G remains unaccepted until controlled Discord scenarios and the isolated non-production Neon backup/restore drill are recorded. Do not merge this branch into `main` before those checks are complete and release approval is explicit; main pushes trigger the production deploy workflow.

@@ -95,3 +95,9 @@ The following must remain separate report fields:
 5. Deployment and post-deploy health result.
 
 Do not infer one status from another. In particular, green CI does not prove live Discord acceptance or recoverability of a Neon backup.
+
+## Integration snapshot — 2026-10-26
+
+PR #34 is merged into the non-production `integration/stage-g-acceptance` branch at `353de4d83c73bf9b1f19960e4dd8b3e4e9ede05b`. Its synthetic merge-ref CI passed the build, 200 tests (zero failures), and disposable PostgreSQL verification. PR #39 is being resolved on top of that merged base; the exact combined branch must pass CI before it is merged into the acceptance branch.
+
+The acceptance branch is not production-approved. Stage G has not been accepted in a real Discord test guild, and the isolated non-production Neon backup/restore drill remains unperformed. The repository automatically deploys pushes to `main`, so do not merge the acceptance branch to `main` until those gates are separately recorded as passed and release approval is explicit.

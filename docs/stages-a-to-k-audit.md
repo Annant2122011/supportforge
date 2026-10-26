@@ -131,3 +131,10 @@ The latest successful consolidated head `da848096e0feefb44424d8008683d9fbd39adf3
 ## Completion rule
 
 Do not mark a stage “complete” solely because a service file exists or one CI run passed. A stage is release-ready when its feature scope is present in the integrated branch, the schema is migrated, the interaction paths and authorization are covered by tests, the exact combined commit passes CI, and the relevant external acceptance checks are recorded.
+
+## Integration snapshot — 2026-10-26
+
+- PR #34 is merged into `integration/stage-g-acceptance` at `353de4d83c73bf9b1f19960e4dd8b3e4e9ede05b`; exact synthetic merge-ref CI passed 200 tests, build and disposable PostgreSQL verification.
+- PR #39’s overlap with work already present on `main` was reconciled by preserving the complete, more advanced Stage I/J implementations, keeping the Unicode `\p{M}` combining-mark preservation in knowledge-search normalization, and retaining the consolidated Stage K analytics and migrations.
+- Stage G still needs controlled non-production Discord acceptance and a restore drill against an empty, isolated non-production Neon target. Neither test-guild acceptance nor Neon recovery can be inferred from CI.
+- This branch is an acceptance branch, not a production release. A push to `main` triggers deployment and migrations; do not merge to `main` until the external acceptance gates are recorded and release approval is explicit.
