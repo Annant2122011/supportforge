@@ -86,11 +86,11 @@ async function ensurePrivateThreadParent(
 ): Promise<TextChannel> {
   const config = await getGuildConfig(guild.id);
   if (!config.supportCategoryId) {
-    throw new Error('SupportForge setup must be completed before private-thread tickets can be created.');
+    throw new Error('QueryFixr setup must be completed before private-thread tickets can be created.');
   }
   const category = guild.channels.cache.get(config.supportCategoryId);
   if (category?.type !== ChannelType.GuildCategory) {
-    throw new Error('The SupportForge category is missing. Run /supportforge repair before opening a private-thread ticket.');
+    throw new Error('The QueryFixr category is missing. Run /supportforge repair before opening a private-thread ticket.');
   }
   const bot = guild.members.me;
   if (!bot) throw new Error('The bot member could not be resolved for private-thread setup.');
@@ -283,7 +283,7 @@ export async function refreshPrivateThreadPanel(
     const recent = await thread.messages.fetch({ limit: 100 }).catch(() => null);
     panel = recent?.find((message) =>
       message.author.id === thread.client.user?.id &&
-      message.embeds.some((embed) => ['🎫 QueryFixr Ticket #' + ticket.ticketNumber, '🎫 ResolvX Ticket #' + ticket.ticketNumber, '🎫 ResolveX Ticket #' + ticket.ticketNumber, '🎫 SupportForge Ticket #' + ticket.ticketNumber].includes(embed.title ?? '')),
+      message.embeds.some((embed) => ['🎫 QueryFixr Ticket #' + ticket.ticketNumber, '🎫 QueryFixr Ticket #' + ticket.ticketNumber, '🎫 QueryFixr Ticket #' + ticket.ticketNumber, '🎫 SupportForge Ticket #' + ticket.ticketNumber].includes(embed.title ?? '')),
     ) ?? null;
   }
   if (panel) {
