@@ -54,9 +54,9 @@ export interface FlagRule {
 export const SETTINGS_DASHBOARD_BUTTON_KEYS = [
   // Core ticket experience first, then routing and server policy.
   'panel', 'panels', 'forms', 'defaults', 'tags',
-  'usecases', 'support-hours', 'ticket-workspace', 'inactivity', 'analytics', 'reports', 'language',
-  // Appearance/team operations, then recovery and administration.
-  'team', 'retention', 'appearance', 'theme', 'dashboard-builder',
+  'usecases', 'support-hours', 'ticket-workspace', 'inactivity', 'reports',
+  // Analytics and server-wide preferences sit together, before appearance and maintenance.
+  'analytics', 'language', 'team', 'retention', 'appearance', 'theme', 'dashboard-builder',
   'storage', 'rules', 'repair', 'premium', 'manual',
   'refresh', 'reset',
 ] as const;
