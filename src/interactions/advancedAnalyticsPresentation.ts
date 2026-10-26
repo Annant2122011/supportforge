@@ -7,6 +7,7 @@ import {
 
 import type { AdvancedAnalyticsReport } from '../services/advancedAnalyticsService';
 import { buildAnalyticsEmbed } from './analyticsPresentation';
+import { applyQueryFixrBranding, QUERYFIXR_ACCENT_COLOR, queryFixrFooter } from './brandPresentation';
 
 export type AnalyticsView = 'overview' | 'departments' | 'staff' | 'tags' | 'trends';
 export const ANALYTICS_PAGE_SIZE = 10;
@@ -210,14 +211,33 @@ export function analyticsItemCount(report: AdvancedAnalyticsReport, view: Analyt
   return 1;
 }
 
-export function buildAdvancedAnalyticsEmbed(report: AdvancedAnalyticsReport, view: AnalyticsView = 'overview', page = 0): EmbedBuilder {
+export function buildAdvancedAnalyticsEmbed(
+  report: AdvancedAnalyticsReport,
+  view: AnalyticsView = 'overview',
+  page = 0,
+  themeColor = QUERYFIXR_ACCENT_COLOR,
+): EmbedBuilder {
+  let embed: EmbedBuilder;
   switch (view) {
-    case 'departments': return departments(report, page);
-    case 'staff': return staffView(report, page);
-    case 'tags': return tagsView(report, page);
-    case 'trends': return trendsView(report);
-    default: return overview(report);
+    case 'departments': embed = departments(report, page); break;
+    case 'staff': embed = staffView(report, page); break;
+    case 'tags': embed = tagsView(report, page); break;
+    case 'trends': embed = trendsView(report); break;
+    default: embed = overview(report); break;
   }
+
+  const labels: Record<AnalyticsView, string> = {
+    overview: 'Overview',
+    departments: 'Department Analytics',
+    staff: 'Staff Workload',
+    tags: 'Tag Analytics',
+    trends: 'Ticket Trends',
+  };
+  const existingFooter = (embed.toJSON().footer?.text ?? '')
+    .replace(/^QueryFixr • Analytics • /, '')
+    .slice(0, 300);
+  return applyQueryFixrBranding(embed, labels[view], themeColor)
+    .setFooter({ text: queryFixrFooter('Analytics · ' + labels[view], existingFooter || 'Operational metrics') });
 }
 
 function viewButton(view: AnalyticsView, active: AnalyticsView, period: number): ButtonBuilder {
