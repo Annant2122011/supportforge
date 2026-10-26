@@ -405,7 +405,7 @@ async function ensureContainer(guild: Guild) {
 
   if (!bot) {
     throw new Error(
-      'ResolvX bot member could not be resolved.',
+      'QueryFixr bot member could not be resolved.',
     );
   }
 
@@ -437,7 +437,7 @@ async function ensureContainer(guild: Guild) {
           ViewChannel: true,
           ReadMessageHistory: true,
           SendMessages: false,
-        }, { reason: 'Repair ResolvX container permissions' });
+        }, { reason: 'Repair QueryFixr container permissions' });
       }
       if (!containerOverwriteMatches(channel, bot.id, botAllow, [])) {
         await channel.permissionOverwrites.edit(bot.id, {
@@ -448,7 +448,7 @@ async function ensureContainer(guild: Guild) {
           ManageMessages: true,
           EmbedLinks: true,
           AttachFiles: true,
-        }, { reason: 'Allow ResolvX to manage its container' });
+        }, { reason: 'Allow QueryFixr to manage its container' });
       }
       return channel;
     }
@@ -507,7 +507,7 @@ async function ensureTranscriptChannel(
 
   if (!bot) {
     throw new Error(
-      'ResolvX bot member could not be resolved.',
+      'QueryFixr bot member could not be resolved.',
     );
   }
 
@@ -532,12 +532,12 @@ async function ensureTranscriptChannel(
         parentId,
         `${TRANSCRIPT_TOPIC} guild=${guild.id}`,
         transcriptChannelOverwrites(guild, bot.id, staffRoleIds),
-        'Repair ResolvX transcript channel parent, topic and access',
+        'Repair QueryFixr transcript channel parent, topic and access',
       );
 
       await ensureChannelPurposeMessage(
         saved,
-        'This private channel is the ResolvX transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
+        'This private channel is the QueryFixr transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
       );
       return saved;
     }
@@ -559,7 +559,7 @@ async function ensureTranscriptChannel(
       parentId,
       `${TRANSCRIPT_TOPIC} guild=${guild.id}`,
       transcriptChannelOverwrites(guild, bot.id, staffRoleIds),
-      'Repair recovered ResolvX transcript channel parent, topic and access',
+      'Repair recovered QueryFixr transcript channel parent, topic and access',
     );
 
     await updateGuildConfig(
@@ -572,7 +572,7 @@ async function ensureTranscriptChannel(
 
     await ensureChannelPurposeMessage(
       existing,
-      'This private channel is the ResolvX transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
+      'This private channel is the QueryFixr transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
     );
 
     return existing;
@@ -626,7 +626,7 @@ async function ensureTranscriptChannel(
 
   await ensureChannelPurposeMessage(
     channel,
-    'This private channel is the ResolvX transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
+    'This private channel is the QueryFixr transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
   );
 
   return channel;
@@ -643,7 +643,7 @@ export async function ensurePanelChannel(
 
   if (!bot) {
     throw new Error(
-      'ResolvX bot member could not be resolved.',
+      'QueryFixr bot member could not be resolved.',
     );
   }
 
@@ -660,14 +660,14 @@ export async function ensurePanelChannel(
         parentId,
         `${PANEL_TOPIC} guild=${guild.id}`,
         panelChannelOverwrites(guild, bot.id),
-        'Repair ResolvX panel channel parent, topic and access',
+        'Repair QueryFixr panel channel parent, topic and access',
       );
       return saved;
     }
   }
 
   /*
-   * A channel name is not ownership proof. Recover a previous ResolvX
+   * A channel name is not ownership proof. Recover a previous QueryFixr
    * panel only from its managed topic; otherwise create a new panel channel.
    */
   const existing = guild.channels.cache.find(
@@ -684,7 +684,7 @@ export async function ensurePanelChannel(
       parentId,
       `${PANEL_TOPIC} guild=${guild.id}`,
       panelChannelOverwrites(guild, bot.id),
-      'Repair recovered ResolvX panel channel parent, topic and access',
+      'Repair recovered QueryFixr panel channel parent, topic and access',
     );
 
     await updateGuildConfig(
@@ -853,7 +853,7 @@ export const data =
   new SlashCommandBuilder()
     .setName('supportforge')
     .setDescription(
-      'Manage ResolvX and support tickets',
+      'Manage QueryFixr and support tickets',
     )
     .setDMPermission(false)
 
@@ -920,7 +920,7 @@ export const data =
       subcommand
         .setName('setup')
         .setDescription(
-          'Create or repair the ResolvX system',
+          'Create or repair the QueryFixr system',
         ),
     )
 
@@ -928,7 +928,7 @@ export const data =
       subcommand
         .setName('restore')
         .setDescription(
-          'Restore ResolvX after accidental deletion',
+          'Restore QueryFixr after accidental deletion',
         ),
     )
 
@@ -1651,7 +1651,7 @@ export const data =
     .addSubcommandGroup((group) =>
       group
         .setName('settings')
-        .setDescription('Manage ResolvX settings from slash commands')
+        .setDescription('Manage QueryFixr settings from slash commands')
         .addSubcommand((subcommand) =>
           subcommand.setName('overview').setDescription('Show a Settings overview and current configuration'),
         )
@@ -1670,7 +1670,7 @@ export const data =
         .addSubcommand((subcommand) =>
           subcommand
             .setName('theme')
-            .setDescription('View or change this server’s ResolvX color theme')
+            .setDescription('View or change this server’s QueryFixr color theme')
             .addStringOption((option) => option.setName('action').setDescription('Show the current theme or set a new one').setRequired(true).addChoices(
               { name: 'Show current theme', value: 'show' },
               { name: 'Set server theme', value: 'set' },
@@ -1816,7 +1816,7 @@ export const data =
         .addSubcommand((subcommand) =>
           subcommand
             .setName('priority-role')
-            .setDescription('Create or delete a ResolvX-managed priority role')
+            .setDescription('Create or delete a QueryFixr-managed priority role')
             .addStringOption((option) => option.setName('action').setDescription('Role action').setRequired(true).addChoices(
               { name: 'Show current roles', value: 'status' },
               { name: 'Create role', value: 'create' },
@@ -1830,7 +1830,7 @@ export const data =
         .addSubcommand((subcommand) =>
           subcommand
             .setName('repair')
-            .setDescription('Repair ResolvX infrastructure')
+            .setDescription('Repair QueryFixr infrastructure')
             .addStringOption((option) => option.setName('mode').setDescription('Repair mode').setRequired(true).addChoices(
               { name: 'Normal infrastructure repair', value: 'normal' },
               { name: 'Closed/Archive storage repair', value: 'storage' },
@@ -1910,7 +1910,7 @@ export const data =
         .addSubcommand((subcommand) =>
           subcommand
             .setName('reset')
-            .setDescription('Factory-reset ResolvX after typed confirmation')
+            .setDescription('Factory-reset QueryFixr after typed confirmation')
             .addStringOption((option) => option.setName('confirmation').setDescription('Type DELETE SUPPORT FORGE exactly').setRequired(true).setMinLength(20).setMaxLength(20))
             .addBooleanOption((option) => option.setName('accumulate-audit').setDescription('Keep individual audit events for future summaries').setRequired(true)),
         ),
@@ -2127,7 +2127,7 @@ export async function runSupportForgeSetup(
     guild,
     supportCategory.id,
     restoreMode ? 'SUPPORTFORGE_RESTORED' : 'SETUP_COMPLETED',
-    (restoreMode ? 'ResolvX restore completed.' : 'ResolvX setup/repair completed.') +
+    (restoreMode ? 'QueryFixr restore completed.' : 'QueryFixr setup/repair completed.') +
       ' Support Forge=' + supportCategory.id +
       '; Open=' + (legacyOpenCategory?.id ?? 'not-created') +
       '; departments=' + Object.keys(config.departments).length + '.',
@@ -2227,7 +2227,7 @@ export async function execute(
     }
     if (!allowedDepartmentStaff) {
       await interaction.reply({
-        content: '❌ You need **Manage Server** or **Administrator** to use ResolvX settings. The Staff Manual is also available to configured department staff.',
+        content: '❌ You need **Manage Server** or **Administrator** to use QueryFixr settings. The Staff Manual is also available to configured department staff.',
         flags: MessageFlags.Ephemeral,
       });
       return;
@@ -2328,7 +2328,7 @@ export async function execute(
                 'Negative (1–2): **' + summary.negativeCount + '**\n\n' +
                 'Only aggregate counts are shown. Comments and individual customers are not exposed in this report.',
               )
-              .setFooter({ text: 'ResolvX • CSAT definitions: positive >=4, neutral 3, negative <=2' })],
+              .setFooter({ text: 'QueryFixr • CSAT definitions: positive >=4, neutral 3, negative <=2' })],
           });
           return;
         }
@@ -2696,7 +2696,7 @@ export async function execute(
               ' · ' + panel.buttons.length + ' button(s)',
             ).join('\n')
           : 'No custom panels have been created. Use `/supportforge panel create` to build the first one.';
-        const embed = new EmbedBuilder().setColor(themeColor).setTitle('ResolvX • Custom Panels').setDescription(description.slice(0, 4096)).setFooter({ text: panels.length + ' saved panel(s) • ordered buttons persist in Neon' });
+        const embed = new EmbedBuilder().setColor(themeColor).setTitle('QueryFixr • Custom Panels').setDescription(description.slice(0, 4096)).setFooter({ text: panels.length + ' saved panel(s) • ordered buttons persist in Neon' });
         if (panels.length > 25) embed.addFields({ name: 'More panels', value: 'Showing the first 25 of ' + panels.length + ' panels. Use Show with a panel ID to inspect an individual panel.' });
         await interaction.editReply({ embeds: [embed] });
         return;
@@ -2879,7 +2879,7 @@ export async function execute(
           : '⚠️ **Discord restore completed; code deployment was not queued.** ' + deployment.reason);
       }
       await interaction.editReply(
-        (restoreMode ? '✅ **ResolvX restored successfully.**' : '✅ **ResolvX setup complete.**') +
+        (restoreMode ? '✅ **QueryFixr restored successfully.**' : '✅ **QueryFixr setup complete.**') +
         '\n\n📁 Container: <#' + result.supportCategoryId + '>\n' +
         '📂 Department categories: **' + result.departmentCount + '**\n' +
         (result.legacyOpenCategoryId ? '🟢 Legacy Open bucket: <#' + result.legacyOpenCategoryId + '>\n' : '') +
@@ -3061,7 +3061,7 @@ export async function execute(
         return;
       }
       await interaction.editReply(
-        '**ResolvX Departments · Page ' + requestedPage + ' / ' + pages.length + '**\n\n' +
+        '**QueryFixr Departments · Page ' + requestedPage + ' / ' + pages.length + '**\n\n' +
         pages[requestedPage - 1],
       );
       return;
@@ -3577,12 +3577,12 @@ export async function execute(
 
     await interaction.reply({
       content:
-        '❌ Unsupported ResolvX command.',
+        '❌ Unsupported QueryFixr command.',
       flags: MessageFlags.Ephemeral,
     });
   } catch (error) {
     console.error(
-      '❌ ResolvX command failed:',
+      '❌ QueryFixr command failed:',
       error,
     );
 
