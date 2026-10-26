@@ -1,6 +1,7 @@
 
 import {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
@@ -132,6 +133,9 @@ import {
   updateCustomPanel,
 } from '../services/panelBuilderService';
 import { requestGitHubDeployment } from '../services/updateService';
+import { parseAnalyticsPeriod } from '../services/analyticsService';
+import { getAdvancedAnalyticsReport, buildAdvancedAnalyticsCsv, parseAnalyticsFilters } from '../services/advancedAnalyticsService';
+import { buildAdvancedAnalyticsEmbed, buildAdvancedAnalyticsComponents, type AnalyticsView } from '../interactions/advancedAnalyticsPresentation';
 
 import {
   ensureSettingsChannel,
@@ -852,6 +856,61 @@ export const data =
       'Manage ResolvX and support tickets',
     )
     .setDMPermission(false)
+
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('analytics')
+        .setDescription('View operational ticket analytics and export aggregate data')
+        .addStringOption((option) => option
+          .setName('period')
+          .setDescription('UTC reporting window')
+          .setRequired(false)
+          .addChoices(
+            { name: 'Last 7 days', value: '7d' },
+            { name: 'Last 30 days', value: '30d' },
+            { name: 'Last 90 days', value: '90d' },
+          ))
+        .addStringOption((option) => option
+          .setName('view')
+          .setDescription('Analytics view or bounded CSV export')
+          .setRequired(false)
+          .addChoices(
+            { name: 'Overview and comparisons', value: 'overview' },
+            { name: 'Departments', value: 'departments' },
+            { name: 'Staff workload', value: 'staff' },
+            { name: 'Tags', value: 'tags' },
+            { name: 'Trends', value: 'trends' },
+            { name: 'Export aggregate CSV', value: 'csv' },
+          ))
+        .addStringOption((option) => option
+          .setName('department-id')
+          .setDescription('Optional department ID filter')
+          .setRequired(false)
+          .setMaxLength(64))
+        .addStringOption((option) => option
+          .setName('tag-id')
+          .setDescription('Optional tag ID filter')
+          .setRequired(false)
+          .setMaxLength(64))
+        .addStringOption((option) => option
+          .setName('priority')
+          .setDescription('Optional priority filter')
+          .setRequired(false)
+          .addChoices(
+            { name: 'Low', value: 'low' }, { name: 'Normal', value: 'normal' },
+            { name: 'High', value: 'high' }, { name: 'Urgent', value: 'urgent' },
+            { name: 'Critical', value: 'critical' },
+          ))
+        .addStringOption((option) => option
+          .setName('status')
+          .setDescription('Optional current status filter')
+          .setRequired(false)
+          .addChoices(
+            { name: 'Open', value: 'open' }, { name: 'Claimed', value: 'claimed' },
+            { name: 'Pending', value: 'pending' }, { name: 'Reopened', value: 'reopened' },
+            { name: 'Closed', value: 'closed' }, { name: 'Archived', value: 'archived' },
+          )),
+    )
 
     // ─────────────────────────────────────────────
     // SETUP
@@ -2178,7 +2237,7 @@ export async function execute(
   // Administrative commands
   if (
     (!group &&
-      (subcommand === 'setup' || subcommand === 'restore')) ||
+      (subcommand === 'setup' || subcommand === 'restore' || subcommand === 'analytics')) ||
     group === 'category' ||
     group === 'premium' ||
     group === 'form' ||
@@ -2203,6 +2262,33 @@ export async function execute(
 
   try {
     if (await handleStage4SlashCommand(interaction)) return;
+
+    if (subcommand === 'analytics' && !group) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const period = parseAnalyticsPeriod(interaction.options.getString('period'));
+      const viewValue = interaction.options.getString('view') ?? 'overview';
+      const filters = parseAnalyticsFilters({
+        departmentId: interaction.options.getString('department-id'),
+        tagId: interaction.options.getString('tag-id'),
+        priority: interaction.options.getString('priority'),
+        status: interaction.options.getString('status'),
+      });
+      const report = await getAdvancedAnalyticsReport(guild.id, period, filters);
+      if (viewValue === 'csv') {
+        const csv = buildAdvancedAnalyticsCsv(report);
+        await interaction.editReply({
+          content: '✅ QueryFixr analytics export is ready. This bounded CSV contains aggregate operational data only; ticket messages and transcripts are never exported.',
+          files: [new AttachmentBuilder(Buffer.from(csv, 'utf8'), { name: 'queryfixr-analytics-' + period + 'd.csv' })],
+        });
+        return;
+      }
+      const view = viewValue as AnalyticsView;
+      await interaction.editReply({
+        embeds: [buildAdvancedAnalyticsEmbed(report, view)],
+        components: buildAdvancedAnalyticsComponents(report, view, 0),
+      });
+      return;
+    }
 
     if (group === 'feedback') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
