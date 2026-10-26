@@ -2,6 +2,8 @@ import 'dotenv/config';
 
 import { migratePostgres } from '../src/core/persistence/migrationRunner';
 import { getPostgresPool, closePostgresDatabase } from '../src/core/persistence/postgresDatabase';
+import { PostgresAnalyticsRepository } from '../src/repositories/postgresAnalyticsRepository';
+import { PostgresAdvancedAnalyticsRepository } from '../src/repositories/postgresAdvancedAnalyticsRepository';
 
 async function main(): Promise<void> {
   await migratePostgres();
@@ -174,6 +176,31 @@ async function main(): Promise<void> {
   console.log(`Stale processing records: ${invalidProcessing.rows[0]?.count ?? '0'}`);
   console.log(`Recovery replay segments: ${counts[17].rows[0]?.count ?? '0'}`);
   console.log(`Quick Reply send intents / usage events: ${counts[18].rows[0]?.count ?? '0'} / ${counts[19].rows[0]?.count ?? '0'}`);
+  // Exercise Stage K's SQL against the migrated schema, not only mock executors.
+  // The synthetic guild ID is used for read-only queries; these checks never mutate production data.
+  const analyticsGuildId = 'queryfixr-stage-k-analytics-verification';
+  const analyticsEnd = new Date();
+  const analyticsStart = new Date(analyticsEnd.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const startAt = analyticsStart.toISOString();
+  const endAt = analyticsEnd.toISOString();
+  const filters = {
+    departmentId: 'verification-department',
+    tagId: 'verification-tag',
+    priority: 'urgent' as const,
+    status: 'open' as const,
+  };
+  const analyticsRepository = new PostgresAnalyticsRepository(pool);
+  const advancedAnalyticsRepository = new PostgresAdvancedAnalyticsRepository(pool);
+  await Promise.all([
+    analyticsRepository.getGuildRollup(analyticsGuildId, startAt, endAt, filters),
+    advancedAnalyticsRepository.getDepartmentBreakdown(analyticsGuildId, startAt, endAt, filters),
+    advancedAnalyticsRepository.getStaffBreakdown(analyticsGuildId, startAt, endAt, filters),
+    advancedAnalyticsRepository.getTagBreakdown(analyticsGuildId, startAt, endAt, filters),
+    advancedAnalyticsRepository.getDailyTrends(analyticsGuildId, startAt, endAt, filters),
+    advancedAnalyticsRepository.getDataCoverage(analyticsGuildId, startAt, endAt, filters),
+  ]);
+
+  console.log('Analytics query smoke tests: 6 passed against PostgreSQL.');
   console.log('✅ Required tables, referential integrity, and active outbox lease state verified.');
 }
 
