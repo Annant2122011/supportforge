@@ -13,9 +13,13 @@ QueryFixr is a Discord-first support ticket system. It uses Neon PostgreSQL as t
 - A separate per-server Settings-channel dashboard builder for branding, navigation order, button labels and emojis, with a disabled preview that always retains recovery and reset controls.
 - Ticket message archives and recovery workflows for supported Discord channel/ticket deletion cases.
 - Settings dashboard with server-specific themes and button-based configuration flows.
+- PostgreSQL-backed Knowledge Base articles with revisions, weighted search, role/visibility checks, feedback and contextual suggestions.
+- Versioned quick replies with allowlisted placeholders, mention-safe sends, related-ticket links, and explicitly executed safe workflow templates.
+- Operational analytics for 7/30/90-day windows, departments, staff workload, tags, trends, filters and bounded aggregate-only CSV export.
+- Branded HTML transcripts with responsive mobile layout, UTC timestamp labeling and print/PDF styling.
 - GitHub Actions CI plus an optional server-side systemd self-update watchdog.
 
-Some roadmap areas remain partial: Stage E supports department and pinned-form workflows, while a general-purpose user-defined workflow graph remains future scope. Actual Discord permissions, role selects, publishing and confirmation interactions still require live test-guild acceptance before calling the product production-complete. See [the Stage A–E audit](docs/stages-a-to-e-audit.md) and [FEATURES.md](FEATURES.md).
+Stages A–K have substantial implementation on the consolidated candidate, but code presence and green CI are not the same as production acceptance. The general-purpose user-defined workflow graph remains future scope. Real Discord permissions, publishing, locale behavior, private-thread actions and recovery still need controlled test-guild acceptance, followed by a restore drill into an isolated non-production Neon database. See the [cross-stage A–K audit](docs/stages-a-to-k-audit.md), [FEATURES.md](FEATURES.md), and [interaction parity contract](docs/interaction-parity.md).
 
 ## Product excellence programme
 
@@ -97,6 +101,7 @@ Settings-channel customization is stored separately from the public ticket panel
 - [Stage H localization architecture](docs/stage-h-translation-architecture.md)
 - [Stage K Part 1 architecture](docs/stage-k-part-1-architecture.md)
 - [Stage K Part 2 architecture](docs/stage-k-part-2-architecture.md)
+- [Stage A–K consolidated release review](docs/stages-a-to-k-audit.md)
 
 
 The Build and QueryFixr CI workflows run the TypeScript build, automated tests, and PostgreSQL verification. Stage H Part 2 adds locale controls and localized ticket/form interactions while using the existing advanced-settings document and Neon/PostgreSQL provider. Green CI is necessary but not sufficient for production readiness. Verify slash-command registration, dashboard interactions, locale persistence, permissions, and translated rendering in a non-production Discord guild before promotion.
