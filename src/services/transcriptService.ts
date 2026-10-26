@@ -8,6 +8,7 @@ import {
 
 const MAX_MESSAGES = 10000;
 const PAGE_SIZE = 100;
+const QUERYFIXR_LOGO_URL = 'https://i.ibb.co/p6VGzczV/HTcx0584-Os-Oe-YAj-O5qp61-x5-PHKm89.png';
 
 /* -------------------------------------------------------------------------- */
 /*                              HTML UTILITIES                                */
@@ -27,6 +28,7 @@ function formatDate(date: Date): string {
     date.toLocaleString('en-IN', {
       dateStyle: 'medium',
       timeStyle: 'medium',
+      timeZone: 'UTC',
     }),
   );
 }
@@ -656,7 +658,7 @@ export async function generateTranscript(
 <html lang="en">
 <head>
 
-<meta charset="utf-8">
+<meta charset="utf-8">\n<meta name="theme-color" content="#5865f2">\n<meta name="color-scheme" content="light">\n<link rel="icon" href="${QUERYFIXR_LOGO_URL}" type="image/png">
 
 <meta
   name="viewport"
@@ -726,23 +728,75 @@ body {
 }
 
 .header {
-  padding: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 28px 32px;
   background:
-    linear-gradient(
-      135deg,
-      #5865f2,
-      #4752c4
-    );
+    radial-gradient(circle at 88% 0%, rgba(255, 255, 255, 0.22), transparent 34%),
+    linear-gradient(135deg, #5865f2 0%, #4752c4 58%, #303b91 100%);
   color: white;
 }
 
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 14px;
+}
+
+.brand-logo {
+  display: block;
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+  padding: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.36);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.12);
+  object-fit: contain;
+}
+
+.brand-copy {
+  min-width: 0;
+}
+
+.brand-name {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  opacity: 0.88;
+}
+
 .header h1 {
-  margin: 0 0 8px;
-  font-size: 28px;
+  margin: 0 0 6px;
+  font-size: clamp(22px, 3vw, 30px);
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+  overflow-wrap: anywhere;
 }
 
 .header-subtitle {
-  opacity: 0.9;
+  max-width: 560px;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 13px;
+}
+
+.archive-stamp {
+  flex: 0 0 auto;
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.36);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.12);
+  color: white;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .summary {
@@ -1064,6 +1118,52 @@ code {
   font-size: 11px;
 }
 
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  body {
+    padding: 0;
+    background: white;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .container {
+    width: 100%;
+    overflow: visible;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .header {
+    padding: 18px 20px;
+  }
+
+  .summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding: 16px 0;
+  }
+
+  .card,
+  .message,
+  .discord-embed,
+  .attachment {
+    break-inside: avoid;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .footer {
+    margin-top: 16px;
+  }
+}
+
 @media (
   max-width: 650px
 ) {
@@ -1077,7 +1177,27 @@ code {
   }
 
   .header {
+    align-items: flex-start;
     padding: 22px;
+  }
+
+  .brand-logo {
+    width: 42px;
+    height: 42px;
+    flex-basis: 42px;
+    border-radius: 12px;
+  }
+
+  .brand-lockup {
+    gap: 10px;
+  }
+
+  .archive-stamp {
+    display: none;
+  }
+
+  .header h1 {
+    font-size: 22px;
   }
 
   .summary {
@@ -1113,15 +1233,16 @@ code {
 
   <header class="header">
 
-    <h1>
-      🎫 QueryFixr Ticket #${escapeHtml(
-        options.ticketNumber,
-      )}
-    </h1>
-
-    <div class="header-subtitle">
-      Complete support conversation transcript
+    <div class="brand-lockup">
+      <img class="brand-logo" src="${QUERYFIXR_LOGO_URL}" alt="QueryFixr logo">
+      <div class="brand-copy">
+        <div class="brand-name">QueryFixr · Support Archive</div>
+        <h1>Ticket #${escapeHtml(options.ticketNumber)}</h1>
+        <div class="header-subtitle">Complete support conversation transcript · All timestamps in UTC</div>
+      </div>
     </div>
+
+    <div class="archive-stamp">Read-only archive</div>
 
   </header>
 
@@ -1230,7 +1351,7 @@ code {
     <strong>
       QueryFixr
     </strong>
-    · Advanced Discord Support System
+    · Professional Support Operations
   </footer>
 
 </div>
