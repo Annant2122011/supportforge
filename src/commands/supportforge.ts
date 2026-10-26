@@ -153,7 +153,7 @@ import {
   getTicketStatus,
 } from '../services/ticketStateService';
 
-const SUPPORT_CATEGORY_NAME = 'Support Forge';
+const SUPPORT_CATEGORY_NAME = 'QueryFixr Support';
 const PANEL_CHANNEL_NAME = 'support-panel';
 const PANEL_TOPIC = 'supportforge:panel';
 const TRANSCRIPT_NAME = '📄 support-transcripts';
