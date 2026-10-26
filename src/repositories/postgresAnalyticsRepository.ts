@@ -3,6 +3,16 @@ import type { QueryResultRow } from 'pg';
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
 import type { DatabaseExecutor } from '../core/persistence/database';
 
+export type AnalyticsFilterStatus = 'open' | 'claimed' | 'pending' | 'reopened' | 'closed' | 'archived';
+export type AnalyticsFilterPriority = 'low' | 'normal' | 'high' | 'urgent' | 'critical';
+
+export interface AnalyticsFilters {
+  departmentId?: string;
+  tagId?: string;
+  priority?: AnalyticsFilterPriority;
+  status?: AnalyticsFilterStatus;
+}
+
 export interface AnalyticsRollupRow extends QueryResultRow {
   tickets_created: string | number;
   active_tickets: string | number;
@@ -40,12 +50,20 @@ export interface AnalyticsRollup {
 }
 
 const ANALYTICS_ROLLUP_SQL = `
-WITH period_tickets AS (
-  SELECT t.id, t.created_at
+WITH filtered_tickets AS (
+  SELECT t.*
   FROM tickets AS t
   WHERE t.guild_id = $1
     AND t.deleted_at IS NULL
-    AND t.created_at >= $2::timestamptz
+    AND ($4::text IS NULL OR t.department_id = $4)
+    AND ($5::text IS NULL OR LOWER(COALESCE(t.priority, 'normal')) = $5)
+    AND ($6::text IS NULL OR t.status = $6)
+    AND ($7::text IS NULL OR t.tag_id = $7)
+),
+period_tickets AS (
+  SELECT t.id, t.created_at
+  FROM filtered_tickets AS t
+  WHERE t.created_at >= $2::timestamptz
     AND t.created_at < $3::timestamptz
 ),
 first_customer_message AS (
@@ -80,7 +98,7 @@ first_staff_response AS (
 first_closure AS (
   SELECT e.ticket_id, MIN(e.created_at) AS first_closed_at
   FROM ticket_events AS e
-  INNER JOIN tickets AS t ON t.id = e.ticket_id
+  INNER JOIN filtered_tickets AS t ON t.id = e.ticket_id
   WHERE e.guild_id = $1
     AND t.guild_id = $1
     AND e.event_type = 'ticket.closed'
@@ -90,7 +108,7 @@ first_closure AS (
 resolved_in_period AS (
   SELECT f.ticket_id, f.first_closed_at, t.created_at
   FROM first_closure AS f
-  INNER JOIN tickets AS t ON t.id = f.ticket_id
+  INNER JOIN filtered_tickets AS t ON t.id = f.ticket_id
   WHERE f.first_closed_at >= $2::timestamptz
     AND f.first_closed_at < $3::timestamptz
     AND t.guild_id = $1
@@ -98,30 +116,30 @@ resolved_in_period AS (
 )
 SELECT
   (SELECT COUNT(*) FROM period_tickets) AS tickets_created,
-  (SELECT COUNT(*) FROM tickets
+  (SELECT COUNT(*) FROM filtered_tickets
     WHERE guild_id = $1 AND deleted_at IS NULL
       AND status IN ('open', 'claimed', 'pending', 'reopened')) AS active_tickets,
-  (SELECT COUNT(*) FROM tickets
+  (SELECT COUNT(*) FROM filtered_tickets
     WHERE guild_id = $1 AND deleted_at IS NULL AND status IN ('open', 'reopened')) AS open_tickets,
-  (SELECT COUNT(*) FROM tickets
+  (SELECT COUNT(*) FROM filtered_tickets
     WHERE guild_id = $1 AND deleted_at IS NULL AND status = 'claimed') AS claimed_tickets,
-  (SELECT COUNT(*) FROM tickets
+  (SELECT COUNT(*) FROM filtered_tickets
     WHERE guild_id = $1 AND deleted_at IS NULL AND status = 'pending') AS pending_tickets,
-  (SELECT COUNT(*) FROM tickets
+  (SELECT COUNT(*) FROM filtered_tickets
     WHERE guild_id = $1 AND deleted_at IS NULL
       AND status IN ('open', 'claimed', 'pending', 'reopened')
       AND LOWER(COALESCE(priority, 'normal')) IN ('urgent', 'critical')) AS urgent_or_critical_tickets,
-  (SELECT MIN(created_at) FROM tickets
+  (SELECT MIN(created_at) FROM filtered_tickets
     WHERE guild_id = $1 AND deleted_at IS NULL
       AND status IN ('open', 'claimed', 'pending', 'reopened')) AS oldest_active_created_at,
   (SELECT COUNT(*) FROM resolved_in_period) AS first_resolved_tickets,
   (SELECT COUNT(*) FROM ticket_events AS e
-    INNER JOIN tickets AS t ON t.id = e.ticket_id
+    INNER JOIN filtered_tickets AS t ON t.id = e.ticket_id
     WHERE e.guild_id = $1 AND t.guild_id = $1 AND t.deleted_at IS NULL
       AND e.event_type = 'ticket.closed'
       AND e.created_at >= $2::timestamptz AND e.created_at < $3::timestamptz) AS close_actions,
   (SELECT COUNT(DISTINCT e.ticket_id) FROM ticket_events AS e
-    INNER JOIN tickets AS t ON t.id = e.ticket_id
+    INNER JOIN filtered_tickets AS t ON t.id = e.ticket_id
     WHERE e.guild_id = $1 AND t.guild_id = $1 AND t.deleted_at IS NULL
       AND e.event_type = 'ticket.reopened'
       AND e.created_at >= $2::timestamptz AND e.created_at < $3::timestamptz) AS reopened_tickets,
@@ -170,10 +188,11 @@ export class PostgresAnalyticsRepository {
     guildId: string,
     startAt: string,
     endAt: string,
+    filters: AnalyticsFilters = {},
   ): Promise<AnalyticsRollup> {
     const result = await this.executor.query<AnalyticsRollupRow>(
       ANALYTICS_ROLLUP_SQL,
-      [guildId, startAt, endAt],
+      [guildId, startAt, endAt, filters.departmentId ?? null, filters.priority ?? null, filters.status ?? null, filters.tagId ?? null],
     );
     const row = result.rows[0];
     if (!row) {
