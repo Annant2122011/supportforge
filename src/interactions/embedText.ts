@@ -17,7 +17,7 @@ export function truncateDiscordText(
   if (input.length <= maximumLength) return input;
 
   const suffix = notice.length <= maximumLength ? notice : '';
-  const budget = maximumLength - suffix.length;
+  const budget = Math.max(0, maximumLength - suffix.length - (suffix.length > 0 ? 1 : 0));
   let output = '';
   for (const character of input) {
     if (output.length + character.length > budget) break;
@@ -37,7 +37,7 @@ export function composeDiscordDescription(
   maximumLength = 4096,
 ): string {
   return truncateDiscordText(
-    sections.filter((section) => section.length > 0).join('\n\n'),
+    sections.filter((section) => section.trim().length > 0).map((section) => section.trim()).join('\n\n'),
     maximumLength,
   );
 }
