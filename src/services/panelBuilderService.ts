@@ -399,7 +399,7 @@ export async function createCustomPanel(
     name,
     title: boundedText(input.title, 'Panel title', 256),
     description: boundedText(input.description, 'Panel description', 4000, true),
-    footer: input.footer === undefined ? 'ResolvX • Customer Support' : boundedText(input.footer, 'Panel footer', 2048, true),
+    footer: input.footer === undefined ? 'QueryFixr • Customer Support' : boundedText(input.footer, 'Panel footer', 2048, true),
     color: normalizePanelColor(input.color),
     iconUrl: normalizePanelUrl(input.iconUrl, 'Panel icon URL'),
     thumbnailUrl: normalizePanelUrl(input.thumbnailUrl, 'Thumbnail URL'),
