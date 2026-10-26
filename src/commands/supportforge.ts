@@ -2134,7 +2134,7 @@ export async function execute(
             .setDescription(
               'Ticket: <#' + evaluation.channelId + '>\nStatus: **' + evaluation.status + '**\nPolicy: ' + evaluation.policy.id + ' (version ' + evaluation.policy.version + ')\n\n' +
               '**First response**\n' + fmt(evaluation.firstResponse) + '\n\n' +
-              '**Claim**\\n' + fmt(evaluation.claim) + '\\n\\n' +
+              '**Claim**\n' + fmt(evaluation.claim) + '\n\n' +
               '**Resolution**\n' + fmt(evaluation.resolution) + '\n\n' +
               (evaluation.warning ? 'Warning: ' + evaluation.warning : 'No active SLA warning.'),
             )
