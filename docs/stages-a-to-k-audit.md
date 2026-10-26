@@ -14,7 +14,7 @@ There are three distinct statuses and they must not be conflated:
 2. **CI verified:** automated build/tests/PostgreSQL checks passed on the exact commit.
 3. **Accepted for release:** combined branch integration, authorized non-production Discord acceptance, and a restore drill against an isolated non-production Neon target have passed.
 
-The candidate combines Stage 1–4 recovery/knowledge/productivity/localization work with Stage K analytics. The claim-SLA target has now been ported into PR #39 alongside its service/domain logic, slash-command configuration, migration 21, regression tests and PostgreSQL schema verification. The last previously verified analytics head passed 251 tests and all six analytics SQL smoke paths; the claim-SLA extension needs CI on the exact current head before it can be called verified. Code integration is not release acceptance.
+The candidate combines Stage 1–4 recovery/knowledge/productivity/localization work with Stage K analytics. The claim-SLA target has now been ported into PR #39 alongside its service/domain logic, slash-command configuration, migration 21, regression tests and PostgreSQL schema verification. An earlier analytics-only head passed 251 tests and all six analytics SQL smoke paths; the final consolidated head must pass the full suite and PostgreSQL verifier after the claim/resolution-clock integration and base refresh. Code integration and green CI remain distinct from release acceptance.
 
 ## Implementation completed after the initial audit
 
