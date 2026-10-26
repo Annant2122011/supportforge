@@ -973,8 +973,6 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
-];
-
   {
     id: 20,
     name: 'add_analytics_query_indexes',
@@ -992,6 +990,8 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+];
+
 /** Latest migration identifier required by this application version. */
 export const CURRENT_POSTGRES_MIGRATION_ID = MIGRATIONS[MIGRATIONS.length - 1]!.id;
 
