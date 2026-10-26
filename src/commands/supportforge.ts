@@ -137,6 +137,7 @@ import { parseAnalyticsPeriod } from '../services/analyticsService';
 import { getAdvancedAnalyticsReport, buildAdvancedAnalyticsCsv, parseAnalyticsFilters } from '../services/advancedAnalyticsService';
 import { buildAdvancedAnalyticsEmbed, buildAdvancedAnalyticsComponents, type AnalyticsView } from '../interactions/advancedAnalyticsPresentation';
 import { applyQueryFixrBranding } from '../interactions/brandPresentation';
+import { composeDiscordDescription, truncateDiscordText } from '../interactions/embedText';
 
 import {
   ensureSettingsChannel,
@@ -386,15 +387,21 @@ export async function buildPanelEmbed(
         : '')
     : 'No ticket departments configured.';
 
+  // Reserve space for routing, pagination and the privacy note even when an
+  // administrator has saved unusually long panel copy or department labels.
+  const panelCopy = truncateDiscordText(settings.appearance.panelDescription, 1600);
+  const safeDepartmentLines = truncateDiscordText(lines, 1900);
+  const description = composeDiscordDescription([
+    `Welcome to **${guild.name}** support.`,
+    panelCopy,
+    safeDepartmentLines,
+    '🔒 Tickets are visible only to the ticket owner, assigned support staff, and administrators.',
+  ], 4096);
+
   return applyQueryFixrBranding(new EmbedBuilder(), 'Support Center', getThemeColor(config.theme))
-    .setTitle(settings.appearance.panelTitle)
-    .setDescription(
-      `Welcome to **${guild.name}** support.\n\n` +
-        settings.appearance.panelDescription + '\n\n' +
-        `${lines}\n\n` +
-        `🔒 Tickets are visible only to the ticket owner, assigned support staff, and administrators.`,
-    )
-    .setFooter({ text: settings.appearance.panelFooter })
+    .setTitle(truncateDiscordText(settings.appearance.panelTitle, 256))
+    .setDescription(description)
+    .setFooter({ text: truncateDiscordText(settings.appearance.panelFooter, 2048) })
     .setTimestamp();
 }
 
