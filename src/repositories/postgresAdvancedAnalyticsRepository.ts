@@ -414,7 +414,7 @@ LEFT JOIN created AS c USING (day)
 LEFT JOIN resolved AS r USING (day)
 ORDER BY days.day`;
 
-const DATA_COVERAGE_SQL = 'WITH ' + FILTERED_TICKETS_CTE + String.raw§,
+const DATA_COVERAGE_SQL = 'WITH ' + FILTERED_TICKETS_CTE + String.raw`,
 period_tickets AS (
   SELECT * FROM filtered_tickets WHERE created_at >= $2::timestamptz AND created_at < $3::timestamptz
 )
@@ -449,7 +449,7 @@ SELECT
     WHERE e.guild_id = $1
       AND e.event_type IN ('ticket.status_changed', 'ticket.claimed', 'ticket.unclaimed',
         'ticket.pending', 'ticket.resumed', 'ticket.closed', 'ticket.reopened', 'ticket.archived')
-      AND e.created_at >= $2::timestamptz AND e.created_at < $3::timestamptz) AS lifecycle_events§;
+      AND e.created_at >= $2::timestamptz AND e.created_at < $3::timestamptz) AS lifecycle_events`;
 
 export class PostgresAdvancedAnalyticsRepository {
   public constructor(private readonly executor: DatabaseExecutor = getPostgresPool()) {}
