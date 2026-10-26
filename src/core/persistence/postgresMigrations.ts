@@ -990,6 +990,26 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+  {
+    id: 21,
+    name: 'extend_sla_policies_with_claim_target',
+    up: async (db) => {
+      await db.query(`
+        ALTER TABLE support_sla_policies
+          ADD COLUMN IF NOT EXISTS claim_minutes INTEGER NOT NULL DEFAULT 60;
+        ALTER TABLE support_sla_policies
+          DROP CONSTRAINT IF EXISTS support_sla_policies_claim_minutes_check;
+        ALTER TABLE support_sla_policies
+          ADD CONSTRAINT support_sla_policies_claim_minutes_check
+          CHECK (claim_minutes BETWEEN 1 AND 43200);
+        ALTER TABLE support_sla_alerts
+          DROP CONSTRAINT IF EXISTS support_sla_alerts_target_type_check;
+        ALTER TABLE support_sla_alerts
+          ADD CONSTRAINT support_sla_alerts_target_type_check
+          CHECK (target_type IN ('first_response','claim','resolution'));
+      `);
+    },
+  },
 ];
 
 /** Latest migration identifier required by this application version. */
