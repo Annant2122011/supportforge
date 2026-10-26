@@ -14,11 +14,11 @@ There are three distinct statuses and they must not be conflated:
 2. **CI verified:** automated build/tests/PostgreSQL checks passed on the exact commit.
 3. **Accepted for release:** combined branch integration, authorized non-production Discord acceptance, and a restore drill against an isolated non-production Neon target have passed.
 
-The candidate now combines the Stage 1–4 recovery/knowledge/productivity/localization work with Stage K analytics. The three statuses remain distinct: code integration is not release acceptance. The last verified head passed the build, 251 automated tests and all six PostgreSQL analytics query smoke paths; the latest presentation regression tests are being verified on the current head.
+The candidate combines Stage 1–4 recovery/knowledge/productivity/localization work with Stage K analytics. The claim-SLA target has now been ported into PR #39 alongside its service/domain logic, slash-command configuration, migration 21, regression tests and PostgreSQL schema verification. The last previously verified analytics head passed 251 tests and all six analytics SQL smoke paths; the claim-SLA extension needs CI on the exact current head before it can be called verified. Code integration is not release acceptance.
 
 ## Implementation completed after the initial audit
 
-- Integrated the Stage K analytics service, repositories, embed presentation, slash-command and Settings entry points into the Stage 1–4 consolidated branch. Migration 20 adds query indexes after the existing migration IDs 1–19; IDs were not renumbered.
+- Integrated the Stage K analytics service, repositories, embed presentation, slash-command and Settings entry points into the Stage 1–4 consolidated branch. Migration 20 adds query indexes after existing migration IDs 1–19; migration 21 adds the claim-SLA target and permits claim-warning/breach records without renumbering earlier migrations.
 - Added query-level PostgreSQL smoke checks for six analytics queries to the CI verifier. On verified commit `c0013dbd25a08a369d62e1db9cb9bf02e8cd98a9`, CI reported **251 tests passed / 0 failed / 0 skipped**, successful build, and six analytics query paths passed against disposable PostgreSQL.
 - Added a shared QueryFixr embed-branding helper and applied it to the Settings dashboard, primary ticket panel, analytics, private-thread history and destructive-deletion confirmation. Branding uses the server theme where appropriate and keeps deletion visibly dangerous.
 - Upgraded exported transcript HTML with the QueryFixr mark, a polished gradient header, responsive mobile treatment, UTC-labelled timestamps, and print/PDF layout.
@@ -47,9 +47,9 @@ The candidate now combines the Stage 1–4 recovery/knowledge/productivity/local
 
 ### P0 — Integration state is easy to misread
 
-The Stage K work was originally developed on PR #40, while the consolidated Stage 1–4 work lives on PR #39's stacked feature branch. This candidate now ports the analytics services, presentation, command/Settings entry points, SQL smoke tests and indexes into the Stage 4 branch using a new migration ID 20, preserving the existing SLA/CSAT and recovery migration sequence. PR #39 remains a draft and PR #40 remains separate; do not merge both independently without reconciling their shared K changes.
+The Stage K work was originally developed on PR #40, while the consolidated Stage 1–4 work lives on PR #39's stacked feature branch. The candidate ports the analytics services, presentation, command/Settings entry points, SQL smoke tests and indexes into the Stage 4 branch using migration ID 20, preserving earlier SLA/CSAT and recovery migration IDs. PR #40 is closed as a superseded duplicate. The early claim-SLA extension uses migration ID 21; do not integrate the original PR #40 independently.
 
-**Correction applied:** PR #39 is now titled and described as the consolidated A–K candidate and remains a draft. CI on the exact candidate head is required after each final edit; preserve the predecessor chain and do not merge the original Stage K PR #40 separately without reconciling duplicate analytics changes.
+**Correction applied:** PR #39 is the consolidated A–K candidate and remains a draft. PR #40 has been closed as a duplicate candidate; its analytics patch is represented in PR #39 and must not be merged independently. CI on the exact candidate head is required after final edits; preserve the predecessor chain.
 
 ### Closed in candidate — Stage I/J schema and interaction wiring
 
