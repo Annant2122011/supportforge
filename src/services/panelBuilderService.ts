@@ -19,6 +19,7 @@ import {
 } from './configService';
 import { listTicketForms, type TicketFormVersion } from './ticketFormService';
 import { translate } from '../i18n/translationService';
+import { truncateDiscordText } from '../interactions/embedText';
 
 export interface CustomPanelInput {
   name: string;
@@ -312,11 +313,11 @@ export function buildCustomPanelEmbed(
   const color = view.color ? Number.parseInt(view.color, 16) : themeColor;
   const embed = new EmbedBuilder()
     .setColor(color)
-    .setTitle(view.title)
-    .setDescription(view.description || translate(locale, 'panelBuilder.fallback.description'))
-    .setFooter({ text: view.footer || translate(locale, 'panelBuilder.fallback.footer') })
+    .setTitle(truncateDiscordText(view.title, 256))
+    .setDescription(truncateDiscordText(view.description || translate(locale, 'panelBuilder.fallback.description'), 3400))
+    .setFooter({ text: truncateDiscordText(view.footer || translate(locale, 'panelBuilder.fallback.footer'), 512) })
     .setAuthor({
-      name: guildName + ' • ' + translate(locale, 'panelBuilder.authorSuffix'),
+      name: truncateDiscordText(guildName + ' • ' + translate(locale, 'panelBuilder.authorSuffix'), 200),
       ...(view.iconUrl ? { iconURL: view.iconUrl } : {}),
     })
     .setTimestamp(new Date(panel.updatedAt));
