@@ -22,7 +22,7 @@ import { setChannelTopic } from './discordChannelService';
 import { translate, type TranslationKey } from '../i18n/translationService';
 
 const SETTINGS_TOPIC_PREFIX = 'supportforge:settings';
-const SETTINGS_TITLE = '⚙️ ResolvX Settings';
+const SETTINGS_TITLE = '⚙️ QueryFixr Settings';
 
 function settingsButton(
   customId: string,
@@ -52,6 +52,7 @@ const SETTINGS_DASHBOARD_BUTTONS: Record<SettingsDashboardButtonKey, {
   tags: { customId: 'sf:settings:tags', label: 'Tags / Departments', style: ButtonStyle.Secondary, emoji: '🏷️' },
   usecases: { customId: 'sf:settings:usecases', label: 'Use Cases', style: ButtonStyle.Secondary, emoji: '🧩' },
   reports: { customId: 'sf:settings:reports', label: 'Safety & Reports', style: ButtonStyle.Secondary, emoji: '🚩' },
+  analytics: { customId: 'sf:settings:analytics', label: 'Analytics', style: ButtonStyle.Primary, emoji: '📊' },
   retention: { customId: 'sf:settings:retention', label: 'Retention', style: ButtonStyle.Secondary, emoji: '🧹' },
   inactivity: { customId: 'sf:settings:inactivity', label: 'Inactivity Automation', style: ButtonStyle.Primary, emoji: '⏳' },
   language: { customId: 'sf:settings:language', label: 'Server Language', style: ButtonStyle.Primary, emoji: '🌐' },
@@ -78,6 +79,7 @@ const SETTINGS_LABEL_KEYS: Record<SettingsDashboardButtonKey, TranslationKey> = 
   tags: 'settings.nav.tags',
   usecases: 'settings.nav.usecases',
   reports: 'settings.nav.reports',
+  analytics: 'settings.nav.analytics',
   retention: 'settings.nav.retention',
   inactivity: 'settings.nav.inactivity',
   language: 'settings.nav.language',
@@ -137,13 +139,13 @@ export async function ensureSettingsChannel(
   const bot = guild.members.me;
 
   if (!bot) {
-    throw new Error('ResolvX bot member could not be resolved.');
+    throw new Error('QueryFixr bot member could not be resolved.');
   }
 
   const parent = guild.channels.cache.get(parentId);
   if (parent?.type !== ChannelType.GuildCategory) {
     throw new Error(
-      'ResolvX Settings destination category does not exist or is not a category.',
+      'QueryFixr Settings destination category does not exist or is not a category.',
     );
   }
 
@@ -199,10 +201,10 @@ export async function ensureSettingsChannel(
   await setChannelTopic(
     channel.id,
     SETTINGS_TOPIC_PREFIX + ' guild=' + guild.id,
-    'ResolvX settings channel metadata normalization',
+    'QueryFixr settings channel metadata normalization',
   ).catch((error) => {
     throw new Error(
-      'ResolvX Settings channel metadata could not be repaired.',
+      'QueryFixr Settings channel metadata could not be repaired.',
       { cause: error },
     );
   });
@@ -260,7 +262,7 @@ export async function ensureSettingsChannel(
   const currentSettings = await getAdvancedSettings(guild.id);
 
   const purposeMessage =
-    'This private channel is ResolvX’s administrative control center. Use the buttons here to configure tickets, routing tags/departments, retention, appearance, storage, rules, roles, repairs, and other server-level ResolvX settings.';
+    'This private channel is QueryFixr’s administrative control center. Use the buttons here to configure tickets, routing tags/departments, retention, appearance, storage, rules, roles, repairs, and other server-level QueryFixr settings.';
 
   await ensureChannelPurposeMessage(channel, purposeMessage);
 
@@ -273,7 +275,7 @@ export async function ensureSettingsChannel(
         guild,
         config.supportCategoryId,
         'CHANNEL_CREATED',
-        'Created ResolvX Settings channel ' + channel.name + ' (' + channel.id + ').',
+        'Created QueryFixr Settings channel ' + channel.name + ' (' + channel.id + ').',
       ).catch(() => undefined);
     }
   }
@@ -423,7 +425,7 @@ export function buildSettingsDashboardEmbed(
     )
     .setFooter({
       // Stable suffix lets cleanup find this dashboard when a server customizes its visible footer.
-      text: (settings.settingsDashboard.footer || 'Settings for this server').slice(0, 1600) + ' • ResolvX Settings Dashboard • ' + themeInfo.label + ' theme',
+      text: (settings.settingsDashboard.footer || 'Settings for this server').slice(0, 1600) + ' • QueryFixr Settings Dashboard • ' + themeInfo.label + ' theme',
     })
     .setTimestamp();
 }
@@ -439,10 +441,13 @@ function isSettingsDashboardMessage(message: {
 
   return message.embeds.some(
     (embed) =>
+      embed.footer?.text?.includes('QueryFixr Settings Dashboard') ||
       embed.footer?.text?.includes('ResolvX Settings Dashboard') ||
+      embed.footer?.text?.includes('ResolveX Settings Dashboard') ||
       embed.footer?.text?.includes('SupportForge Settings Dashboard') ||
       embed.title === SETTINGS_TITLE ||
       embed.title === '⚙️ SupportForge Settings' ||
+      embed.footer?.text?.startsWith('QueryFixr • Advanced Ticket Configuration') ||
       embed.footer?.text?.startsWith('ResolvX • Advanced Ticket Configuration') ||
       embed.footer?.text?.startsWith('SupportForge • Advanced Ticket Configuration'),
   );
@@ -461,8 +466,8 @@ function isSettingsPurposeMessage(
   return message.author.id === botId &&
     message.embeds.some(
       (embed) =>
-        ((embed.title === '📝 ResolvX Channel Purpose' &&
-          embed.footer?.text === 'ResolvX • Channel Purpose') ||
+        (((embed.title === '📝 QueryFixr Channel Purpose' || embed.title === '📝 ResolvX Channel Purpose') &&
+          (embed.footer?.text === 'QueryFixr • Channel Purpose' || embed.footer?.text === 'ResolvX • Channel Purpose')) ||
           (embed.title === '📝 SupportForge Channel Purpose' &&
           embed.footer?.text === 'SupportForge • Channel Purpose')),
     );
@@ -474,7 +479,8 @@ function isLegacySmallSettingsDashboard(message: {
   return message.embeds.some(
     (embed) =>
       (embed.title === SETTINGS_TITLE || embed.title === '⚙️ SupportForge Settings') &&
-      (embed.footer?.text?.startsWith('ResolvX • Select a section to configure it') ||
+      (embed.footer?.text?.startsWith('QueryFixr • Select a section to configure it') ||
+        embed.footer?.text?.startsWith('ResolvX • Select a section to configure it') ||
         embed.footer?.text?.startsWith('SupportForge • Select a section to configure it')),
   );
 }
@@ -588,7 +594,7 @@ export async function refreshSettingsChannel(guild: Guild): Promise<void> {
  * that leaves the administrative UI stranded above newer content.
  *
  * Keep the channel-purpose message because it explains what the channel is
- * for. Remove ResolvX's old dashboard messages, then post one fresh
+ * for. Remove QueryFixr's old dashboard messages, then post one fresh
  * dashboard at the bottom. User-authored messages are never deleted here.
  */
 export async function restoreSettingsChannelToBottom(guild: Guild): Promise<void> {
@@ -604,7 +610,7 @@ export async function restoreSettingsChannelToBottom(guild: Guild): Promise<void
    * and recreated the panel, which made the live Settings panel appear to
    * vanish when the user clicked its navigation controls.
    *
-   * Keep the newest real dashboard intact, remove only ResolvX's
+   * Keep the newest real dashboard intact, remove only QueryFixr's
    * temporary/sub-view messages, and create a dashboard only when one is
    * genuinely missing. User-authored messages are never touched here.
    */
@@ -631,7 +637,7 @@ export async function restoreSettingsChannelToBottom(guild: Guild): Promise<void
   );
 
   /*
-   * Only ResolvX-authored transient messages are cleared. The current
+   * Only QueryFixr-authored transient messages are cleared. The current
    * dashboard remains the same Discord message, preserving its buttons,
    * position and message identity.
    */
@@ -681,6 +687,6 @@ export async function restoreSettingsChannelToBottom(guild: Guild): Promise<void
   await pruneSettingsHistory(channel);
 
   console.log(
-    `📌 Restored ResolvX Settings navigation without deleting the live dashboard: ${channel.id}`,
+    `📌 Restored QueryFixr Settings navigation without deleting the live dashboard: ${channel.id}`,
   );
 }
