@@ -1,6 +1,6 @@
 # Stage H: Translation and Localization Architecture
 
-**Status:** Part 1 implementation in progress  
+**Status:** H1 translation core implemented and merged; H2 locale controls and end-to-end localization remain incomplete  
 **Baseline:** Stages A–G integrated into main at e1988a1a0cc5efc698a870215ba7c902c7ddeeba  
 **Persistence:** Existing Neon/PostgreSQL-backed advanced-settings JSON document; no SQL migration  
 **Compatibility:** Existing /supportforge command root, IDs, event names, internal symbols and legacy persisted documents remain unchanged.
