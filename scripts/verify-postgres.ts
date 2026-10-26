@@ -176,6 +176,26 @@ async function main(): Promise<void> {
   console.log(`Stale processing records: ${invalidProcessing.rows[0]?.count ?? '0'}`);
   console.log(`Recovery replay segments: ${counts[17].rows[0]?.count ?? '0'}`);
   console.log(`Quick Reply send intents / usage events: ${counts[18].rows[0]?.count ?? '0'} / ${counts[19].rows[0]?.count ?? '0'}`);
+  const claimSlaSchema = await pool.query<{ claim_column: boolean; claim_target: boolean }>(`
+    SELECT
+      EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema=current_schema()
+          AND table_name='support_sla_policies'
+          AND column_name='claim_minutes'
+      ) AS claim_column,
+      EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid='support_sla_alerts'::regclass
+          AND conname='support_sla_alerts_target_type_check'
+          AND pg_get_constraintdef(oid) ILIKE '%claim%'
+      ) AS claim_target
+  `);
+  if (!claimSlaSchema.rows[0]?.claim_column || !claimSlaSchema.rows[0]?.claim_target) {
+    throw new Error('Claim SLA migration is incomplete: the claim target column or alert constraint is missing.');
+  }
+  console.log('Claim SLA policy column and alert target constraint: verified.');
+
   // Exercise Stage K's SQL against the migrated schema, not only mock executors.
   // The synthetic guild ID is used for read-only queries; these checks never mutate production data.
   const analyticsGuildId = 'queryfixr-stage-k-analytics-verification';
