@@ -12,6 +12,13 @@ test('knowledge search normalization is Unicode-aware and stable', () => {
   assert.equal(normalizeKnowledgeText('HINDI भुगतान'), 'hindi भुगतान');
 });
 
+test('normalization preserves combining marks and accented words across writing systems', () => {
+  assert.equal(normalizeKnowledgeText('  HINDI भुगतान  '), 'hindi भुगतान');
+  assert.equal(normalizeKnowledgeText('বাংলা বেতন'), 'বাংলা বেতন');
+  assert.equal(normalizeKnowledgeText('Cafe\u0301 policy'), 'café policy');
+  assert.equal(normalizeKnowledgeText('PAYMENT—भुगतान!!'), 'payment भुगतान');
+});
+
 test('exact title and tags outrank weaker title/summary similarity', () => {
   const exact = scoreKnowledgeCandidate('refund policy', {
     title: 'Refund Policy',
