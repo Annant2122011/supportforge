@@ -1,6 +1,6 @@
-# ResolvX
+# QueryFixr
 
-ResolvX is a Discord-first support ticket system. It uses Neon PostgreSQL as the live durable store and keeps Discord interactions on the same validated ticket-creation and lifecycle services regardless of whether the action starts from a slash command or a button.
+QueryFixr is a Discord-first support ticket system. It uses Neon PostgreSQL as the live durable store and keeps Discord interactions on the same validated ticket-creation and lifecycle services regardless of whether the action starts from a slash command or a button.
 
 ## Current capabilities
 
@@ -80,10 +80,11 @@ Settings-channel customization is stored separately from the public ticket panel
 
 ## Verification and rollout
 
-The Build and ResolvX CI workflows run the TypeScript build, automated tests, and database verification. Keep PR #12 open until its final checks pass and live acceptance has been completed. Deploy to a test guild and non-production bot first. Do not merge or deploy a production build solely because a CI workflow is green.
+The Build and QueryFixr CI workflows run the TypeScript build, automated tests, and database verification. PR #12 was merged for the earlier A–E implementation; it is not the current release gate. Deploy to a test guild and non-production bot first. Do not merge or deploy a production build solely because a CI workflow is green.
 The Build and SupportForge CI workflows run the TypeScript build, automated tests, and database verification. Stages A–G remain an open, stacked pull-request chain; PR #17 contains the consolidated source review and UI polish. Use a test guild and non-production bot before promotion. Do not merge or deploy a production build solely because a CI workflow is green.
 
 - [Stage A–E inspection](docs/stages-a-to-e-audit.md)
+- [Stages A–K audit and release gaps](docs/stages-a-to-k-audit.md)
 - [Ticket archive and recovery behavior](docs/recovery-archive.md)
 - [Slash-command and button parity](docs/interaction-parity.md)
 - [Restore and deployment guide](docs/restore-and-deploy.md)
@@ -114,7 +115,7 @@ The schedule engine handles daylight-saving gaps and repeated local times determ
 
 ### Part 2: private-thread ticket workspaces
 
-Select the workspace mode using **Settings → Ticket Workspace** or `/supportforge settings ticket-workspace`. It applies only to newly opened tickets. Existing dedicated text-channel tickets remain unchanged. In private-thread mode, ResolveX lazily creates a department-specific parent text channel and opens each new ticket as a private thread under it. The ticket owner is explicitly added; configured department staff and administrators can access tickets through Discord's private-thread permissions. The bot needs permission to view the parent, create/manage private threads, send messages in threads, and read message history. Each department should have a valid staff role configured before enabling this mode.
+Select the workspace mode using **Settings → Ticket Workspace** or `/supportforge settings ticket-workspace`. It applies only to newly opened tickets. Existing dedicated text-channel tickets remain unchanged. In private-thread mode, QueryFixr lazily creates a department-specific parent text channel and opens each new ticket as a private thread under it. The ticket owner is explicitly added; configured department staff and administrators can access tickets through Discord's private-thread permissions. The bot needs permission to view the parent, create/manage private threads, send messages in threads, and read message history. Each department should have a valid staff role configured before enabling this mode.
 
 The private-thread controls support the normal ticket lifecycle (claim, unclaim, pending, resume, close, reopen and archive), along with participant add/remove, staff reassignment, priority, internal notes and staff history. The matching slash-command routes are available inside the private thread as well as the button controls. User-selection actions are bound to the initiating user and exact thread so stale or cross-thread controls fail closed.
 
