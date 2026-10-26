@@ -14,6 +14,10 @@ async function main(): Promise<void> {
     'ticket_events',
     'outbox_events',
     'app_documents',
+    'support_sla_policies',
+    'support_csat_responses',
+    'support_sla_alerts',
+    'ticket_recovery_replay_segments',
   ];
 
   for (const table of requiredTables) {
@@ -32,7 +36,30 @@ async function main(): Promise<void> {
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM ticket_events'),
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM outbox_events'),
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM app_documents'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_sla_policies'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_csat_responses'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_sla_alerts'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM ticket_recovery_replay_segments'),
   ]);
+
+  const claimSlaSchema = await pool.query<{ claim_column: boolean; claim_target: boolean }>(`
+    SELECT
+      EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema=current_schema()
+          AND table_name='support_sla_policies'
+          AND column_name='claim_minutes'
+      ) AS claim_column,
+      EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid='support_sla_alerts'::regclass
+          AND conname='support_sla_alerts_target_type_check'
+          AND pg_get_constraintdef(oid) ILIKE '%claim%'
+      ) AS claim_target
+  `);
+  if (!claimSlaSchema.rows[0]?.claim_column || !claimSlaSchema.rows[0]?.claim_target) {
+    throw new Error('Claim SLA migration is incomplete: the claim target column or alert constraint is missing.');
+  }
 
   const orphanEvents = await pool.query<{ count: string }>(
     'SELECT COUNT(*)::text AS count FROM ticket_events e LEFT JOIN tickets t ON t.id = e.ticket_id WHERE t.id IS NULL',
@@ -61,9 +88,14 @@ async function main(): Promise<void> {
   console.log(`Ticket events: ${counts[1].rows[0]?.count ?? '0'}`);
   console.log(`Outbox events: ${counts[2].rows[0]?.count ?? '0'}`);
   console.log(`Application documents: ${counts[3].rows[0]?.count ?? '0'}`);
+  console.log(`SLA policies: ${counts[4].rows[0]?.count ?? '0'}`);
+  console.log(`CSAT responses: ${counts[5].rows[0]?.count ?? '0'}`);
+  console.log(`SLA alert records: ${counts[6].rows[0]?.count ?? '0'}`);
+  console.log(`Recovery replay segments: ${counts[7].rows[0]?.count ?? '0'}`);
   console.log(`Orphan events: ${orphanEvents.rows[0]?.count ?? '0'}`);
   console.log(`Orphan outbox records: ${orphanOutbox.rows[0]?.count ?? '0'}`);
   console.log(`Stale processing records: ${invalidProcessing.rows[0]?.count ?? '0'}`);
+  console.log('Claim SLA policy column and alert target constraint: verified.');
   console.log('✅ Required tables, referential integrity, and active outbox lease state verified.');
 }
 

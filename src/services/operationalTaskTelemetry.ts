@@ -7,6 +7,7 @@ export type OperationalTaskId =
   | 'ticket-form-cache-refresh'
   | 'ticket-form-submission-recovery'
   | 'ticket-archive-backfill'
+  | 'ticket-sla-monitor'
   | 'startup-reconciliation'
   | 'developer-audit-reconciliation';
 
@@ -90,6 +91,13 @@ const DEFINITIONS: Record<OperationalTaskId, OperationalTaskDefinition> = {
     staleAfterMs: 5 * 60_000,
     intervalHint: 'about every 60 seconds',
     remedy: 'Inspect pending/failed form submissions and ticket reconstruction logs; retain answers and status until recovery is verified.',
+  },
+  'ticket-sla-monitor': {
+    label: 'SLA warning and breach monitor',
+    scope: 'guild',
+    staleAfterMs: 15 * 60_000,
+    intervalHint: 'about every 5 minutes',
+    remedy: 'Inspect matching SLA policies, ticket lifecycle events and the SLA alert ledger. Repeat alerts are deduplicated by policy version and ticket cycle.',
   },
   'ticket-archive-backfill': {
     label: 'Ticket archive backfill',

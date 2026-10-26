@@ -39,6 +39,7 @@ import { ensureDefaultChannelPurpose, invalidateChannelPurposeCache } from './se
 
 import { startTicketRetentionScheduler } from './services/ticketRetentionService';
 import { startTicketInactivityScheduler } from './services/ticketInactivityService';
+import { startSupportSlaMonitor } from './services/supportOperationsService';
 import { clearTicketRenameState } from './services/ticketPanelService';
 import { clearVoiceTopicRetryState } from './services/voiceModeService';
 import { removeLegacyCustomCommands } from './services/advancedSettingsService';
@@ -166,6 +167,7 @@ client.once('clientReady', (readyClient) => {
   }
   startTicketRetentionScheduler(client);
   startTicketInactivityScheduler(client);
+  startSupportSlaMonitor(client);
   startTicketFormCacheRefresh();
   startTicketFormSubmissionRecovery(client);
   startAuditDailySummaryScheduler(client);
