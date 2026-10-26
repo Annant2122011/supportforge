@@ -20,6 +20,7 @@ import { ensureChannelPurposeMessage } from './channelPurposeService';
 import { logSystemEvent } from './auditLogService';
 import { setChannelTopic } from './discordChannelService';
 import { translate, type TranslationKey } from '../i18n/translationService';
+import { applyQueryFixrBranding } from '../interactions/brandPresentation';
 
 const SETTINGS_TOPIC_PREFIX = 'supportforge:settings';
 const SETTINGS_TITLE = '⚙️ QueryFixr Settings';
@@ -318,13 +319,12 @@ export function buildSettingsDashboardEmbed(
   };
   const priorityLabel = translate(settings.locale, priorityLabels[settings.ticketDefaults.priority]);
 
-  return new EmbedBuilder()
+  return applyQueryFixrBranding(new EmbedBuilder(), 'Support Control Center', getThemeColor(theme))
     .setTitle(
       !settings.settingsDashboard.title || settings.settingsDashboard.title === SETTINGS_TITLE
         ? '⚙️ ' + translate(settings.locale, 'settings.title')
         : settings.settingsDashboard.title,
     )
-    .setColor(getThemeColor(theme))
     .setDescription(
       ((
         settings.settingsDashboard.description === ('Configure your server' + String.fromCharCode(0x2019) + 's ticket system, support panels and retention policies.')
