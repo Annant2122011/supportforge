@@ -53,7 +53,7 @@ async function ensureStorageCategoryPermissions(
       ViewChannel: false,
       SendMessages: false,
       ReadMessageHistory: false,
-    }, { reason: 'Repair ResolvX private storage category permissions' });
+    }, { reason: 'Repair QueryFixr private storage category permissions' });
   }
 
   if (!overwriteHasExpectedState(category, botId, botAllow, [])) {
@@ -65,7 +65,7 @@ async function ensureStorageCategoryPermissions(
       ManageMessages: true,
       EmbedLinks: true,
       AttachFiles: true,
-    }, { reason: 'Allow ResolvX to manage its storage category' });
+    }, { reason: 'Allow QueryFixr to manage its storage category' });
   }
 }
 
@@ -90,7 +90,7 @@ async function ensureBucket(
   ) {
     const bot = guild.members.me;
     if (!bot) {
-      throw new Error('ResolvX bot member could not be resolved.');
+      throw new Error('QueryFixr bot member could not be resolved.');
     }
 
     await ensureStorageCategoryPermissions(savedChannel, bot.id);
@@ -99,7 +99,7 @@ async function ensureBucket(
 
   /*
    * Display names are not ownership proof. If the persisted category ID is
-   * missing or invalid, create a new ResolvX storage bucket rather than
+   * missing or invalid, create a new QueryFixr storage bucket rather than
    * adopting an unrelated category with the same name.
    */
   const existingManagedBuckets = [...guild.channels.cache.values()]
@@ -114,13 +114,13 @@ async function ensureBucket(
   /*
    * A matching display name is still unsafe to adopt. Keep a deterministic
    * suffix for genuinely new buckets, based only on previously provisioned
-   * ResolvX buckets that are still identifiable by name + bot overwrite.
+   * QueryFixr buckets that are still identifiable by name + bot overwrite.
    */
   const suffix = existingManagedBuckets.length + 1;
   const bot = guild.members.me;
 
   if (!bot) {
-    throw new Error('ResolvX bot member could not be resolved.');
+    throw new Error('QueryFixr bot member could not be resolved.');
   }
 
   const category = await guild.channels.create({
@@ -162,7 +162,7 @@ async function ensureBucket(
       guild,
       config.supportCategoryId,
       'CATEGORY_CREATED',
-      `Created ResolvX storage category ${category.name} (${category.id}) for ${key.replace('CategoryId', '')} tickets.`,
+      `Created QueryFixr storage category ${category.name} (${category.id}) for ${key.replace('CategoryId', '')} tickets.`,
     ).catch(() => undefined);
   }
 
@@ -172,7 +172,7 @@ async function ensureBucket(
 export async function ensureClosedCategory(
   guild: Guild,
 ): Promise<CategoryChannel> {
-  return ensureBucket(guild, 'ResolvX • Closed', 'closedCategoryId');
+  return ensureBucket(guild, 'QueryFixr • Closed', 'closedCategoryId');
 }
 
 
@@ -193,7 +193,7 @@ export async function ensureOpenCategory(
   ) {
     const bot = guild.members.me;
     if (!bot) {
-      throw new Error('ResolvX bot member could not be resolved.');
+      throw new Error('QueryFixr bot member could not be resolved.');
     }
 
     await ensureStorageCategoryPermissions(saved, bot.id);
@@ -202,7 +202,7 @@ export async function ensureOpenCategory(
 
   /*
    * A category's name is not ownership proof. Only a persisted ID can identify
-   * an existing ResolvX Open bucket; otherwise create a new managed one.
+   * an existing QueryFixr Open bucket; otherwise create a new managed one.
    * Discord allows duplicate category names, so there is no need to adopt an
    * unrelated category or manufacture a suffix based on unrelated resources.
    */
@@ -211,7 +211,7 @@ export async function ensureOpenCategory(
   const bot = guild.members.me;
 
   if (!bot) {
-    throw new Error('ResolvX bot member could not be resolved.');
+    throw new Error('QueryFixr bot member could not be resolved.');
   }
 
   const category = await guild.channels.create({
@@ -239,7 +239,7 @@ export async function ensureOpenCategory(
         ],
       },
     ],
-    reason: 'ResolvX open ticket category provisioning',
+    reason: 'QueryFixr open ticket category provisioning',
   });
 
   await updateGuildConfig(guild.id, (current) => {
@@ -265,7 +265,7 @@ export async function ensureOpenCategory(
 export async function ensureArchiveCategory(
   guild: Guild,
 ): Promise<CategoryChannel> {
-  return ensureBucket(guild, 'ResolvX • Archive', 'archiveCategoryId');
+  return ensureBucket(guild, 'QueryFixr • Archive', 'archiveCategoryId');
 }
 
 export async function moveTicketToCategory(
@@ -277,7 +277,7 @@ export async function moveTicketToCategory(
   await setChannelParent(
     channel.id,
     category.id,
-    'ResolvX ticket storage transition',
+    'QueryFixr ticket storage transition',
   );
 }
 
@@ -290,11 +290,11 @@ const OPTIONAL_STATUS_CATEGORY_CONFIG: Record<
 > = {
   claimed: {
     setting: 'claimedCategoryId',
-    name: 'ResolvX.Claimed tickets',
+    name: 'QueryFixr.Claimed tickets',
   },
   pending: {
     setting: 'pendingCategoryId',
-    name: 'ResolvX.Pending tickets',
+    name: 'QueryFixr.Pending tickets',
   },
 };
 
@@ -308,7 +308,7 @@ export async function ensureOptionalStatusCategory(
   const bot = guild.members.me;
 
   if (!bot) {
-    throw new Error('ResolvX bot member could not be resolved.');
+    throw new Error('QueryFixr bot member could not be resolved.');
   }
 
   const saved = savedId
@@ -324,13 +324,13 @@ export async function ensureOptionalStatusCategory(
   }
 
   /*
-   * Optional status categories are ResolvX-owned infrastructure too.
+   * Optional status categories are QueryFixr-owned infrastructure too.
    * Reusing an unrelated category based solely on its display name could
    * expose private tickets to the wrong users.
    */
   /*
    * The visible category name is not ownership proof. A missing persisted ID
-   * means ResolvX must create a fresh optional-status bucket.
+   * means QueryFixr must create a fresh optional-status bucket.
    */
   const existingNames = [...guild.channels.cache.values()]
     .filter(
@@ -370,7 +370,7 @@ export async function ensureOptionalStatusCategory(
         ],
       },
     ],
-    reason: 'ResolvX optional ticket status category',
+    reason: 'QueryFixr optional ticket status category',
   });
 
   await updateAdvancedSettings(guild.id, (current) => {
