@@ -6,7 +6,7 @@ import { getPostgresPool } from '../core/persistence/postgresDatabase';
 import { logTicketEvent } from './auditLogService';
 import { getGuildConfig } from './configService';
 import { runTrackedOperationalTask } from './operationalTaskTelemetry';
-import { evaluateSlaTarget, findFirstClaimAt, isValidSlaScope, type SlaLifecycleEvent, type SlaTargetResult } from '../core/domain/supportSla';
+import { evaluateSlaTarget, findFirstClaimAt, findFirstResolutionAt, isValidSlaScope, type SlaLifecycleEvent, type SlaTargetResult } from '../core/domain/supportSla';
 import { normalizeCsatResponse } from '../core/domain/csatPolicy';
 import { getPersistedTicket, getPersistedTicketById } from './ticketPersistenceService';
 
@@ -235,11 +235,9 @@ export async function evaluateTicketSla(
   const reopenedEvents = events.filter((event) => event.type === 'ticket.reopened' || event.payload?.to === 'reopened');
   const latestReopen = reopenedEvents[reopenedEvents.length - 1]?.occurredAt;
   const resolutionStartedAt = latestReopen ?? ticket.createdAt;
-  const resolvedEvent = [...events].reverse().find((event) =>
-    (event.type === 'ticket.closed' || event.type === 'ticket.archived') &&
-    Date.parse(event.occurredAt) >= Date.parse(resolutionStartedAt),
-  );
-  const resolvedAt = ['closed', 'archived'].includes(ticket.status) ? resolvedEvent?.occurredAt ?? null : null;
+  const resolvedAt = ['closed', 'archived'].includes(ticket.status)
+    ? findFirstResolutionAt(events, resolutionStartedAt)
+    : null;
 
   const firstResponse = evaluateSlaTarget({
     clockKind: 'first-response',
