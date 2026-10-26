@@ -2301,7 +2301,7 @@ export async function handleSettingsInteraction(
     interaction.customId.startsWith('sf:settings:analytics:')
   )) {
     const customId = interaction.customId;
-    const locale = (await getAdvancedSettings(guild.id)).locale;
+    let locale = 'en-US';
     let periodKey = '7d';
     let view: AnalyticsView = 'overview';
     let page = 0;
@@ -2338,6 +2338,7 @@ export async function handleSettingsInteraction(
       } else {
         await interaction.deferUpdate();
       }
+      locale = (await getAdvancedSettings(guild.id)).locale;
       const period = parseAnalyticsPeriod(periodKey);
       const report = await getAdvancedAnalyticsReport(guild.id, period);
       if (exportCsv) {
