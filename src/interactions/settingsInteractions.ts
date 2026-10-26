@@ -2347,7 +2347,7 @@ export async function handleSettingsInteraction(
         });
       } else {
         await interaction.editReply({
-          embeds: [buildAdvancedAnalyticsEmbed(report, view, page)],
+          embeds: [buildAdvancedAnalyticsEmbed(report, view, page, getThemeColor((await getGuildConfig(guild.id)).theme))],
           components: buildAdvancedAnalyticsComponents(report, view, page),
         });
       }
