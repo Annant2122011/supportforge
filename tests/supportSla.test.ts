@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { evaluateSlaTarget, isValidSlaScope, type SlaLifecycleEvent } from '../src/core/domain/supportSla';
+import { evaluateSlaTarget, findFirstClaimAt, isValidSlaScope, type SlaLifecycleEvent } from '../src/core/domain/supportSla';
 
 const start = '2026-10-23T10:00:00.000Z';
 
@@ -73,6 +73,35 @@ test('resolution SLA clock resets at the latest reopen and then pauses on pendin
   assert.equal(result.elapsedMinutes, 15);
   assert.equal(result.pausedMinutes, 15);
   assert.equal(result.progress, 'paused');
+});
+
+test('claim SLA uses the first valid persisted claim transition and completes at that timestamp', () => {
+  const lifecycle = events(
+    ['ticket.status_changed', '2026-10-23T09:59:00.000Z', { from: 'open', to: 'claimed' }],
+    ['ticket.status_changed', '2026-10-23T10:18:00.000Z', { from: 'open', to: 'claimed' }],
+    ['ticket.status_changed', '2026-10-23T10:25:00.000Z', { from: 'open', to: 'claimed' }],
+  );
+  const claimedAt = findFirstClaimAt(lifecycle, start);
+  assert.equal(claimedAt, '2026-10-23T10:18:00.000Z');
+  const completed = evaluateSlaTarget(input({
+    clockKind: 'claim',
+    completedAt: claimedAt,
+    observedAt: '2026-10-23T11:00:00.000Z',
+    targetMinutes: 30,
+    events: lifecycle,
+  }));
+  assert.equal(completed.progress, 'met');
+  assert.equal(completed.elapsedMinutes, 18);
+  assert.equal(completed.remainingMinutes, 12);
+
+  const overdue = evaluateSlaTarget(input({
+    clockKind: 'claim',
+    observedAt: '2026-10-23T10:31:00.000Z',
+    targetMinutes: 30,
+  }));
+  assert.equal(overdue.progress, 'breached');
+  assert.equal(overdue.elapsedMinutes, 31);
+  assert.equal(findFirstClaimAt(events(['ticket.status_changed', '2026-10-23T10:10:00.000Z', { to: 'open' }]), start), null);
 });
 
 test('invalid dates and scopes are handled safely', () => {
