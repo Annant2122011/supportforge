@@ -26,7 +26,7 @@ export function truncateDiscordText(
   output = output.trimEnd();
   if (suffix) {
     const separator = output && !/\s$/.test(output) ? ' ' : '';
-    return (output + separator + suffix).slice(0, maximumLength);
+    return output + separator + suffix;
   }
   return output;
 }
