@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonInteraction,
   ButtonStyle,
@@ -108,6 +109,9 @@ import {
   runRetentionSweepForGuild,
 } from '../services/ticketRetentionService';
 import { clearTicketInactivityWarningsForGuild } from '../services/ticketInactivityService';
+import { parseAnalyticsPeriod } from '../services/analyticsService';
+import { getAdvancedAnalyticsReport, buildAdvancedAnalyticsCsv } from '../services/advancedAnalyticsService';
+import { buildAdvancedAnalyticsComponents, buildAdvancedAnalyticsEmbed, type AnalyticsView } from './advancedAnalyticsPresentation';
 
 import {
   ensureContainer,
@@ -2289,6 +2293,74 @@ export async function handleSettingsInteraction(
     return true;
   }
 
+
+  if (interaction.isButton() && (
+    interaction.customId === 'sf:settings:analytics' ||
+    interaction.customId.startsWith('sf:settings:analytics:')
+  )) {
+    const customId = interaction.customId;
+    let periodKey = '7d';
+    let view: AnalyticsView = 'overview';
+    let page = 0;
+    let exportCsv = false;
+    const parts = customId.split(':');
+
+    if (customId === 'sf:settings:analytics') {
+      // Open the analytics report from the persistent Settings dashboard.
+    } else if (['7d', '30d', '90d'].includes(parts[3] ?? '')) {
+      periodKey = parts[3]!;
+    } else if (parts[3] === 'view') {
+      view = (parts[4] ?? 'overview') as AnalyticsView;
+      periodKey = parts[5] ?? '7d';
+      page = Number(parts[6] ?? 0);
+    } else if (parts[3] === 'page') {
+      view = (parts[4] ?? 'overview') as AnalyticsView;
+      periodKey = parts[5] ?? '7d';
+      page = Number(parts[6] ?? 0);
+    } else if (parts[3] === 'export') {
+      periodKey = parts[4] ?? '7d';
+      exportCsv = true;
+    }
+
+    if (!['7d', '30d', '90d'].includes(periodKey) ||
+        !['overview', 'departments', 'staff', 'tags', 'trends'].includes(view) ||
+        !Number.isInteger(page) || page < 0 || page > 100) {
+      await reject(interaction, '❌ That analytics view or reporting window is not supported.');
+      return true;
+    }
+
+    try {
+      if (customId === 'sf:settings:analytics') {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      } else {
+        await interaction.deferUpdate();
+      }
+      const period = parseAnalyticsPeriod(periodKey);
+      const report = await getAdvancedAnalyticsReport(guild.id, period);
+      if (exportCsv) {
+        const csv = buildAdvancedAnalyticsCsv(report);
+        await interaction.editReply({
+          content: '✅ QueryFixr analytics export is ready. This bounded file contains aggregate operational data only, not message bodies or transcripts.',
+          embeds: [],
+          components: [],
+          files: [new AttachmentBuilder(Buffer.from(csv, 'utf8'), { name: 'queryfixr-analytics-' + period + 'd.csv' })],
+        });
+      } else {
+        await interaction.editReply({
+          embeds: [buildAdvancedAnalyticsEmbed(report, view, page)],
+          components: buildAdvancedAnalyticsComponents(report, view, page),
+        });
+      }
+    } catch (error) {
+      console.error('QueryFixr analytics view failed for guild ' + guild.id + ':', error);
+      await interaction.editReply({
+        content: '❌ Analytics could not be loaded from the database. Please try again later.',
+        embeds: [],
+        components: [],
+      }).catch(() => undefined);
+    }
+    return true;
+  }
 
   if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('sf:settings:recovery:')) {
     return await handleTicketRecoveryInteraction(interaction);
