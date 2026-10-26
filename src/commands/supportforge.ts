@@ -78,8 +78,10 @@ import {
   updateCustomPanel,
 } from '../services/panelBuilderService';
 import { requestGitHubDeployment } from '../services/updateService';
-import { getGuildAnalyticsSummary, parseAnalyticsPeriod } from '../services/analyticsService';
-import { buildAnalyticsEmbed } from '../interactions/analyticsPresentation';
+import { AttachmentBuilder } from 'discord.js';
+import { parseAnalyticsPeriod } from '../services/analyticsService';
+import { getAdvancedAnalyticsReport, buildAdvancedAnalyticsCsv, parseAnalyticsFilters } from '../services/advancedAnalyticsService';
+import { buildAdvancedAnalyticsEmbed, buildAdvancedAnalyticsComponents, type AnalyticsView } from '../interactions/advancedAnalyticsPresentation';
 
 import {
   ensureSettingsChannel,
@@ -784,6 +786,42 @@ export const data =
               { name: 'Last 7 days', value: '7d' },
               { name: 'Last 30 days', value: '30d' },
               { name: 'Last 90 days', value: '90d' },
+            ),
+        )
+        .addStringOption((option) =>
+          option
+            .setName('view')
+            .setDescription('Choose an analytics view or CSV export')
+            .setRequired(false)
+            .addChoices(
+              { name: 'Overview and comparisons', value: 'overview' },
+              { name: 'Department breakdown', value: 'departments' },
+              { name: 'Staff workload', value: 'staff' },
+              { name: 'Tag distribution', value: 'tags' },
+              { name: 'Time trends', value: 'trends' },
+              { name: 'Download CSV', value: 'csv' },
+            ),
+        )
+        .addStringOption((option) =>
+          option.setName('department-id').setDescription('Optional department ID filter').setRequired(false).setMaxLength(64),
+        )
+        .addStringOption((option) =>
+          option.setName('tag-id').setDescription('Optional tag ID filter').setRequired(false).setMaxLength(64),
+        )
+        .addStringOption((option) =>
+          option.setName('priority').setDescription('Optional ticket priority filter').setRequired(false)
+            .addChoices(
+              { name: 'Low', value: 'low' }, { name: 'Normal', value: 'normal' },
+              { name: 'High', value: 'high' }, { name: 'Urgent', value: 'urgent' },
+              { name: 'Critical', value: 'critical' },
+            ),
+        )
+        .addStringOption((option) =>
+          option.setName('status').setDescription('Optional current ticket status filter').setRequired(false)
+            .addChoices(
+              { name: 'Open', value: 'open' }, { name: 'Claimed', value: 'claimed' },
+              { name: 'Pending', value: 'pending' }, { name: 'Reopened', value: 'reopened' },
+              { name: 'Closed', value: 'closed' }, { name: 'Archived', value: 'archived' },
             ),
         ),
     )
@@ -1804,8 +1842,27 @@ export async function execute(
     if (subcommand === 'analytics' && !group) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const period = parseAnalyticsPeriod(interaction.options.getString('period'));
-      const summary = await getGuildAnalyticsSummary(guild.id, period);
-      await interaction.editReply({ embeds: [buildAnalyticsEmbed(summary)] });
+      const viewValue = interaction.options.getString('view') ?? 'overview';
+      const filters = parseAnalyticsFilters({
+        departmentId: interaction.options.getString('department-id'),
+        tagId: interaction.options.getString('tag-id'),
+        priority: interaction.options.getString('priority'),
+        status: interaction.options.getString('status'),
+      });
+      const report = await getAdvancedAnalyticsReport(guild.id, period, filters);
+      if (viewValue === 'csv') {
+        const csv = buildAdvancedAnalyticsCsv(report);
+        await interaction.editReply({
+          content: '✅ Analytics CSV generated. It contains aggregate operational data only; message bodies and transcript content are never exported.',
+          files: [new AttachmentBuilder(Buffer.from(csv, 'utf8'), { name: 'queryfixr-analytics-' + period + 'd.csv' })],
+        });
+        return;
+      }
+      const view = viewValue as AnalyticsView;
+      await interaction.editReply({
+        embeds: [buildAdvancedAnalyticsEmbed(report, view)],
+        components: buildAdvancedAnalyticsComponents(report, view, 0),
+      });
       return;
     }
 
