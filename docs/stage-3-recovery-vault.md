@@ -28,10 +28,10 @@
 - Utilities and guard validations are implemented. No authorized isolated Neon backup/restore drill has been performed, so operational recoverability remains **unverified**.
 
 ### 4. Ticket metrics, SLA and CSAT
-- Persistent SLA policies support guild-wide and department/priority-specific scope, first-response and resolution targets, a warning ratio, and pause-while-pending behaviour.
+- Persistent SLA policies support guild-wide and department/priority-specific scope, first-response, claim, and resolution targets, a warning ratio, and pause-while-pending behaviour. Claim time stops only on the earliest durable `ticket.status_changed` event whose target status is `claimed` (or a recognized `ticket.claimed` event); missing claim attribution is not guessed from the current ticket status.
 - Resolution timing starts a new cycle after reopen. Alert records are de-duplicated by ticket/policy/target/severity/policy version/lifecycle cycle. Large-guild scans rotate a bounded cursor; SLA policies are deactivated rather than physically deleted so alert history remains.
 - The supervised SLA worker reports through Stage 2's operational task telemetry. A sweep with per-ticket evaluation failures is recorded as failed rather than falsely healthy, while processing continues for other guilds and durable successful alerts remain deduplicated.
-- `/supportforge diagnostics sla-list`, `sla-set`, `sla-delete`, `sla-check`, and `metrics` expose administration and ticket/aggregate reporting. The optional `/supportforge feedback rate` flow and aggregate `feedback summary` use per-ticket/user duplicate-vote protection.
+- `/supportforge diagnostics sla-list`, `sla-set`, `sla-delete`, `sla-check`, and `metrics` expose administration and ticket/aggregate reporting. `sla-set` accepts an optional `claim-minutes` target (default 60 minutes); `sla-list` and `sla-check` show the claim clock, and the monitor persists de-duplicated claim warnings/breaches alongside first-response and resolution alerts. The optional `/supportforge feedback rate` flow and aggregate `feedback summary` use per-ticket/user duplicate-vote protection.
 - Automated calculations and schema tests are present. Live timing, load, permissions and alert delivery in a real Discord test guild remain unverified.
 
 ### Recovery segment ledger — current increment
@@ -61,7 +61,7 @@
 ## Remaining risk-based work
 1. Run the non-production Discord acceptance checklist for native deletion, accidental/intentional ticket-button deletion, concurrent restore clicks, restore restart windows, long histories, missing members/channels and unavailable attachments.
 2. Create a backup from a disposable source, restore it into a newly created empty Neon branch/database, then record checksum, schema migration level, core row counts, orphan checks and application smoke-test evidence.
-3. Exercise SLA cursor rotation over multiple batches, pause/resume across pending/reopen cycles, concurrent policy edits, repeated worker failures and notification rate limits in CI/test guild.
+3. Exercise SLA cursor rotation over multiple batches, claim transitions and missing legacy attribution, pause/resume across pending/reopen cycles, concurrent policy edits, repeated worker failures and notification rate limits in CI/test guild.
 4. Stress backup file size, restore duration, archive volume and operational metrics on a disposable environment.
 5. Continue Stage H2 locale completion for the remaining Settings pages, panel previews and selected reports under the Stage 1/2 release gate.
 
