@@ -14,12 +14,12 @@ There are three distinct statuses and they must not be conflated:
 2. **CI verified:** automated build/tests/PostgreSQL checks passed on the exact commit.
 3. **Accepted for release:** combined branch integration, authorized non-production Discord acceptance, and a restore drill against an isolated non-production Neon target have passed.
 
-The candidate combines Stage 1–4 recovery/knowledge/productivity/localization work with Stage K analytics. The claim-SLA target has now been ported into PR #39 alongside its service/domain logic, slash-command configuration, migration 21, regression tests and PostgreSQL schema verification. An earlier analytics-only head passed 251 tests and all six analytics SQL smoke paths; the final consolidated head must pass the full suite and PostgreSQL verifier after the claim/resolution-clock integration and base refresh. Code integration and green CI remain distinct from release acceptance.
+The candidate combines Stage 1–4 recovery/knowledge/productivity/localization work with Stage K analytics. PR #39 now contains the claim-target SLA extension and the resolution-clock completion fix for durable `ticket.status_changed` payloads. Exact refreshed head `da848096e0feefb44424d8008683d9fbd39adf33` passed TypeScript build, **255 tests / 0 failed / 0 skipped**, PostgreSQL verification, the claim-SLA schema check, and all six analytics SQL smoke paths. Code integration and green CI remain distinct from release acceptance.
 
 ## Implementation completed after the initial audit
 
 - Integrated the Stage K analytics service, repositories, embed presentation, slash-command and Settings entry points into the Stage 1–4 consolidated branch. Migration 20 adds query indexes after existing migration IDs 1–19; migration 21 adds the claim-SLA target and permits claim-warning/breach records without renumbering earlier migrations.
-- Completed the Stage 3 early SLA hardening in both stacked PRs: the configurable claim target and its regression/schema checks are present, and resolution completion now recognizes the actual persisted event shape (`ticket.status_changed` with `payload.to` equal to `closed` or `archived`). The new regression test confirms that a prior close before a reopen does not complete the next resolution cycle.
+- Completed the Stage 3 early SLA hardening in both stacked PRs: configurable claim targets and regression/schema checks are present, and resolution completion recognizes the persisted event shape (`ticket.status_changed` with `payload.to` equal to `closed` or `archived`). Regression tests confirm a previous close before a reopen cannot complete the next resolution cycle.
 - Added query-level PostgreSQL smoke checks for six analytics queries to the CI verifier. On verified commit `c0013dbd25a08a369d62e1db9cb9bf02e8cd98a9`, CI reported **251 tests passed / 0 failed / 0 skipped**, successful build, and six analytics query paths passed against disposable PostgreSQL.
 - Added a shared QueryFixr embed-branding helper and applied it to the Settings dashboard, primary ticket panel, analytics, private-thread history and destructive-deletion confirmation. Branding uses the server theme where appropriate and keeps deletion visibly dangerous.
 - Upgraded exported transcript HTML with the QueryFixr mark, a polished gradient header, responsive mobile treatment, UTC-labelled timestamps, and print/PDF layout.
@@ -126,7 +126,7 @@ The following pass separates what is now implemented from what still needs produ
 
 ### Latest automated evidence
 
-The analytics embed/theme regression tests are included. The latest successful source-and-test head passed **253 tests / 0 failed / 0 skipped**, with the TypeScript build and disposable PostgreSQL verification successful and all six analytics query smoke paths passing. The exact documentation-updated head must also remain green before merge.
+The latest successful consolidated head `da848096e0feefb44424d8008683d9fbd39adf33` passed **255 tests / 0 failed / 0 skipped**, the TypeScript build, disposable PostgreSQL verification, claim-SLA schema/constraint checks and all six analytics query smoke paths. PR #34's current head `2f8a798753147deea93b047f50f9cc8c92f8a008` separately passed **196 tests / 0 failed**, build and PostgreSQL verification.
 
 ## Completion rule
 
