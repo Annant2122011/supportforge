@@ -22,7 +22,7 @@ test('analytics dashboards localize content without changing stable component ID
  assert.match(hi.description??'',/रिपोर्टिंग अवधि/);
  const enRows=buildAdvancedAnalyticsComponents(report,'departments',0,'en-US');
  const hiRows=buildAdvancedAnalyticsComponents(report,'departments',0,'hi-IN');
- assert.equal(enRows[0]!.components[0]!.toJSON().label,'Last 7 days');
+ assert.equal(enRows[0]!.components[0]!.toJSON().label,'7 days');
  assert.equal(hiRows[0]!.components[0]!.toJSON().label,'7 दिन');
  assert.equal(enRows[0]!.components[0]!.toJSON().custom_id,hiRows[0]!.components[0]!.toJSON().custom_id);
  assert.equal(enRows[1]!.components[0]!.toJSON().label,'Overview');
