@@ -7,7 +7,7 @@ export interface SlaLifecycleEvent {
 }
 
 export interface SlaTargetInput {
-  clockKind?: 'first-response' | 'resolution';
+  clockKind?: 'first-response' | 'claim' | 'resolution';
   startedAt: string;
   observedAt: string;
   completedAt?: string | null;
@@ -146,6 +146,29 @@ export function evaluateSlaTarget(input: SlaTargetInput): SlaTargetResult {
     startedAt: new Date(safeStart).toISOString(),
     completedAt: input.completedAt ?? null,
   };
+}
+
+/**
+ * Resolve the earliest trustworthy staff-claim transition after ticket creation.
+ * A missing lifecycle event is intentionally treated as unknown, not guessed from
+ * the ticket's current status or last-updated timestamp.
+ */
+export function findFirstClaimAt(
+  events: readonly SlaLifecycleEvent[],
+  startedAt: string,
+): string | null {
+  const startMs = timestamp(startedAt);
+  if (startMs === null) return null;
+  const claim = events
+    .map((event) => ({ event, at: timestamp(event.occurredAt) }))
+    .filter((entry): entry is { event: SlaLifecycleEvent; at: number } =>
+      entry.at !== null &&
+      entry.at >= startMs &&
+      (entry.event.type === 'ticket.claimed' ||
+        (entry.event.type === 'ticket.status_changed' && entry.event.payload?.to === 'claimed')),
+    )
+    .sort((a, b) => a.at - b.at)[0];
+  return claim?.event.occurredAt ?? null;
 }
 
 export function isValidSlaScope(departmentId: string, priority: string): boolean {
