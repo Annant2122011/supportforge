@@ -171,6 +171,31 @@ export function findFirstClaimAt(
   return claim?.event.occurredAt ?? null;
 }
 
+/**
+ * Finds the first durable close/archive transition in the specified SLA cycle.
+ * The persisted event schema stores these as ticket.status_changed with a target
+ * status in payload.to; explicit historical names remain accepted for old records.
+ */
+export function findFirstResolutionAt(
+  events: readonly SlaLifecycleEvent[],
+  cycleStartedAt: string,
+): string | null {
+  const cycleStartMs = timestamp(cycleStartedAt);
+  if (cycleStartMs === null) return null;
+  const resolution = events
+    .map((event) => ({ event, at: timestamp(event.occurredAt) }))
+    .filter((entry): entry is { event: SlaLifecycleEvent; at: number } =>
+      entry.at !== null &&
+      entry.at >= cycleStartMs &&
+      (entry.event.type === 'ticket.closed' ||
+        entry.event.type === 'ticket.archived' ||
+        (entry.event.type === 'ticket.status_changed' &&
+          (entry.event.payload?.to === 'closed' || entry.event.payload?.to === 'archived'))),
+    )
+    .sort((a, b) => a.at - b.at)[0];
+  return resolution?.event.occurredAt ?? null;
+}
+
 export function isValidSlaScope(departmentId: string, priority: string): boolean {
   return (departmentId === '*' || /^[a-zA-Z0-9_-]{1,80}$/.test(departmentId)) &&
     (priority === '*' || ['low', 'normal', 'high', 'urgent', 'critical'].includes(priority));
