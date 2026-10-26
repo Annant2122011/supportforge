@@ -1,7 +1,7 @@
 # Stage H: Translation and Localization Architecture
 
 **Status:** H1 core and initial H2 coverage implemented on the consolidated feature branch; final Settings/report coverage and live acceptance remain open  
-**Baseline:** Stages A–G integrated into main at e1988a1a0cc5efc698a870215ba7c902c7ddeeba  
+**Baseline:** Stage A–G and the Stage 1–4 consolidation are tracked in stacked review branches; final integration and external acceptance gates remain.  
 **Persistence:** Existing Neon/PostgreSQL-backed advanced-settings JSON document; no SQL migration  
 **Compatibility:** Existing /supportforge command root, IDs, event names, internal symbols and legacy persisted documents remain unchanged.
 
@@ -76,7 +76,7 @@ The guild setting is a simple supported-locale tag and defaults to en-US. Existi
 - [x] Equivalent button and slash-command lifecycle confirmations reuse the same localized status/priority vocabulary.
 - [x] Automated tests cover catalog completeness for every supported locale, command/button capability parity, localized status/priority/form copy and safe interpolation.
 - [x] Quick and detailed Staff Manual content is present in English, Hindi, and Bengali catalogs and is rendered through the selected locale.
-- [x] The English, Hindi, and Bengali catalogs each contain the same 1049 unique keys, including the previously missing Bengali use-case labels and the additional Stage H form-settings, report-flow, report-rule, and custom-panel copy. The historical baseline at `f4515d6d69adb62f78d1f31ca7e73cd584c6fcef` passed [ResolvX CI #40106837586](https://github.com/Annant2122011/supportforge/actions/runs/40106837586); that older run is not evidence for the latest candidate.
+- [x] The English, Hindi, and Bengali catalogs each contain the same 1049 unique keys, including the previously missing Bengali use-case labels and the additional Stage H form-settings, report-flow, report-rule, and custom-panel copy. The historical baseline at `f4515d6d69adb62f78d1f31ca7e73cd584c6fcef` passed [QueryFixr CI #40106837586](https://github.com/Annant2122011/supportforge/actions/runs/40106837586); that older run is not evidence for the latest candidate.
 - [x] Localize custom-panel fallback/author/preview copy, ticket-form settings and modal/detail copy, report category/subcategory selection and review, plus report-rule/category slash-command output. Regression tests cover the localization adapter and localized panel fallbacks.
 - [x] Consolidated implementation head `1afce9199e612736745f7264e92337c657b904b4` passed both CI verification jobs: TypeScript build passed, 228/228 tests passed, zero skipped, and the PostgreSQL verification suite passed ([run A](https://github.com/Annant2122011/supportforge/actions/runs/40122028940), [run B](https://github.com/Annant2122011/supportforge/actions/runs/40122025777)). Documentation-only follow-up changes do not alter that tested source.
 - [ ] Complete non-production Discord guild acceptance for each supported locale. Custom server-authored labels, category names, role names, and panel-authored copy remain unchanged.
