@@ -1,7 +1,7 @@
-# QueryFixr Stages A–K Audit
+# QueryFixr Stages A–K Audit and Consolidated Release Review
 
 **Audit date:** 2026-10-26  
-**Audited baseline:** `stage-k-part-1-analytics-foundation` at `2554bb58421a336f09b41c25b3bc8deeef4b1455`  
+**Audited baseline:** consolidated Stage A–K candidate on `feature/stage-4-complete-consolidated`; see current branch head in PR #39  
 **Review scope:** Source-tree and migration inspection, stage/design documentation, current PR graph, automated verification evidence, end-to-end completeness, and staff/customer-facing presentation.
 
 ## Executive result
@@ -14,7 +14,7 @@ There are three distinct statuses and they must not be conflated:
 2. **CI verified:** automated build/tests/PostgreSQL checks passed on the exact commit.
 3. **Accepted for release:** combined branch integration, authorized non-production Discord acceptance, and a restore drill against an isolated non-production Neon target have passed.
 
-The branch satisfies the second item for its included scope. It does not yet satisfy the third item, and Stages H–J have integration gaps in this branch.
+The candidate now combines the Stage 1–4 recovery/knowledge/productivity/localization work with Stage K analytics. The three statuses remain distinct: code integration is not release acceptance, and the final combined head must pass CI after these integrations.
 
 ## Stage-by-stage findings
 
@@ -27,28 +27,24 @@ The branch satisfies the second item for its included scope. It does not yet sat
 | **E — Panels and Settings builder** | **Useful builder implemented; known scope limits** | Multiple configurable panels, target selection, draft/publish behavior, stale-button protection, and a separately configurable Settings dashboard are documented and tested. | General-purpose user-defined workflow graphs are not in the current Stage E scope. Native icon uploads and a freeform canvas are also not present; Discord component row/count limits still apply. Validate publish compensation, role checks, retarget/cancel and cleanup failure in a real guild. |
 | **F — Support hours and private-thread workspaces** | **Implemented foundation; live acceptance pending** | IANA timezone policies, scoped/inherited schedules, repeated/skipped DST-time handling, intake enforcement and a private-thread workspace mode with lifecycle controls. | Holiday calendars and ad hoc exception dates are explicitly outside the current support-hours slice. Verify opening/closing boundaries, DST transitions, thread membership, staff/owner access, archive/lock behavior and recovery in a test guild. |
 | **G — Permissions, closure and inactivity** | **Implemented with documented limits; acceptance pending** | Shared lifecycle authorization, closed-ticket access restrictions, transcript-before-close sequencing, restart-safe opt-in inactivity warnings/grace periods and a compare-before-close guard. | The inactivity scan's 1,000-message cap is a deliberate fail-safe and can pause auto-close for high-volume tickets. Exercise transcript permission loss, role membership lookup failure, restart during grace, concurrent manual close/reopen, late-arriving activity and private-thread behavior in a test guild. |
-| **H — Translation and localization** | **H1 core implemented; H2 incomplete in the audited release path** | Typed locale registry, English canonical catalog, partial Hindi/Bengali overlays, per-key fallback, safe interpolation, locale-aware formatting and guild locale persistence exist. | Locale selection controls and broad end-to-end localization are still in open draft work. Most bot surfaces remain English; Settings, panel previews, forms, lifecycle outcomes and reports need coverage plus parity and Discord length-limit tests. Do not describe Stage H as fully complete until H2 is integrated and accepted. |
-| **I — Knowledge Base** | **Service/search foundation exists, but is not end-to-end usable in this branch** | Knowledge search normalization and a PostgreSQL-oriented Knowledge Base service module exist. The Unicode combining-mark regression is fixed and covered by the search tests. | The audited migration registry ends at migration 12 and does not create the tables referenced by the Knowledge Base service. The current command/Settings interaction handlers do not expose the service, and there is no dedicated Knowledge Base service integration test in this branch. An open consolidated Stage 4 draft contains related migration/UI work, but it is not integrated into this baseline. Treat I as incomplete until schema, authorization, commands/buttons, audit events and tests arrive together. |
-| **J — Quick replies and safe workflows** | **Not complete in this branch** | A quick-reply service core with bounded fields, allowlisted placeholders, role scoping and version counters is present. | Its `quick_replies` table is not created by the audited migration chain, no current command/Settings interaction path invokes the service, and dedicated service/DB tests are absent. The general rule-based automation engine remains marked Future in the feature registry. The separate Stage 4 draft describes additional work but must not be treated as merged or released. Include mention-safe sending, immutable revision history, expected-version protection, authorization, auditing and parity before acceptance. |
+| **H — Translation and localization** | **H1 + initial H2 integrated; coverage still partial** | Typed locale registry, complete English/Hindi/Bengali catalogs, server-language control, localized Settings navigation and selected ticket/form/panel/reply surfaces. Locale-aware formatting and safe interpolation are covered. | Remaining detailed subpage, custom-panel shell, and report/category copy needs parity and Discord-length testing; supported locales need live-guild review. Do not claim every surface is localized yet. |
+| **I — Knowledge Base** | **Integrated in the consolidated candidate; acceptance pending** | PostgreSQL article/revision/synonym/usage/feedback schema, deterministic Unicode-aware search, draft/publish/archive, role/visibility gates, revision history, feedback, metrics and contextual ticket suggestions/share operations are included with slash-command routes and tests. | Verify all schemas and access boundaries in the exact combined CI head, extend button/Settings parity where article workflows expose controls, and validate with representative guild roles. Semantic/RAG search remains future scope. |
+| **J — Quick replies and safe workflows** | **Integrated safe productivity slice; automated rules remain future** | PostgreSQL quick replies, versioned/deletion history, allowlisted placeholders, role scoping, mention-safe send-intent reconciliation, aggregate usage reporting, related-ticket links, and safe versioned workflow templates with explicit manual execution are included with tests. | Verify idempotent delivery recovery and slash/button parity in the exact combined head. Arbitrary executable code and fully automatic trigger-driven rules are intentionally not included; keep that separate in the roadmap. |
 | **K — Operational analytics** | **Implemented in Parts 1–2; test-guild acceptance pending** | Guild-scoped PostgreSQL rollups, current backlog/priority, response and resolution measures, reopen signals, department/staff/tag views, daily/weekly trends, equal-period comparison, source-event coverage, validated filters and bounded formula-neutralized CSV export. The branch includes query-level PostgreSQL smoke tests. | SLA compliance and CSAT are correctly excluded because complete authoritative SLA history and a durable rating source are not available. Do not manufacture these values from status or message counts. Verify the Settings and slash-command views against real server data, permissions, pagination and export in a test guild. |
 
 ## Verified defects, inconsistencies and release risks
 
 ### P0 — Integration state is easy to misread
 
-The Stage K PR is open and unmerged. The current branch is not the same tree as every open draft in the repository. In particular, the localization follow-up and the consolidated Knowledge Base/productivity/workflow work are separate draft pull requests with their own dependency chain. Their code or acceptance notes cannot be assumed to be available in the Stage K branch simply because the files or feature names exist somewhere in the repository.
+The Stage K work was originally developed on PR #40, while the consolidated Stage 1–4 work lives on PR #39's stacked feature branch. This candidate now ports the analytics services, presentation, command/Settings entry points, SQL smoke tests and indexes into the Stage 4 branch using a new migration ID 20, preserving the existing SLA/CSAT and recovery migration sequence. PR #39 remains a draft and PR #40 remains separate; do not merge both independently without reconciling their shared K changes.
 
-**Correction:** release notes and status reports must describe the audited commit, not the collection of all open branches. Before final integration, reconcile the Stage K branch with the Stage 1–4 stack and rerun CI on the exact combined head. Preserve the documented dependency order for the stacked Stage 1–4 work; do not merge a downstream draft alone.
+**Correction:** release notes must describe the exact combined head. Rerun build, tests and PostgreSQL verification on this consolidated candidate; after it passes, update PR #39's description to identify it as the combined Stage A–K candidate. Keep the predecessor dependency chain intact and do not merge a downstream draft alone.
 
-### P1 — Stage I/J service modules do not match the current schema and UI
+### Closed in candidate — Stage I/J schema and interaction wiring
 
-On the audited branch, `src/services/knowledgeBaseService.ts` queries Knowledge Base article/revision/synonym/usage/feedback tables, while `src/services/quickReplyService.ts` queries `quick_replies`. The migration registry on this branch does not define those tables. The current slash-command and Settings interaction modules also have no entry point that calls these services.
+The consolidated candidate includes the Stage 4 migrations and service/command integration for Knowledge Base, quick replies, related tickets and safe workflow templates. Stage K analytics query indexes are now migration 20, after Stage 4 migrations 14–19 and recovery replay segments migration 13. The PostgreSQL verifier already checks the Stage 4 tables; six Stage K analytics query paths were added to the verifier. These changes still require a passing run on the exact new head and live permission/delivery acceptance.
 
-This is not merely a missing polish pass: wiring a handler to either service before its migrations land will cause database failures.
-
-**Correction required:** integrate the staged schema and interaction work as one coherent dependency chain. Then add migration-verifier assertions and service/DB tests, verify guild and role isolation, ensure send actions suppress unsolicited mentions, and confirm that every supported action can complete through both the slash-command and button paths. Do not copy selected migrations without reconciling the earlier recovery migration in the staged branch.
-
-### P1 — Stage H status overstates completion if it says “complete”
+### P1 — Stage H remains partial until all user-facing copy is covered
 
 H1 is the reusable localization core; H2 is the user-facing rollout. The persisted locale preference and dictionaries do not mean ticket intake, validation errors, lifecycle actions, Settings, previews and reports are already translated. The H2 follow-up remains unmerged.
 
@@ -56,7 +52,7 @@ H1 is the reusable localization core; H2 is the user-facing rollout. The persist
 
 ### P1 — Product identity is inconsistent
 
-The audited source and documents still contain an obsolete product label in numerous bot messages, Settings titles, defaults and feature documentation, while newer analytics export names already use the QueryFixr label. That inconsistency will make a polished release look like a mixture of different products.
+User-visible defaults, major command/Settings responses, locale dictionaries, README and feature-registry text now use QueryFixr. A small number of legacy-name references remain deliberately for identifying old persisted/default UI so older dashboards can be upgraded without being duplicated or deleting user content.
 
 **Correction required:** run a dedicated, compatibility-aware branding pass across user-visible text, defaults, manuals, embeds, logs presented to operators, documentation, application metadata and assets. Preserve stable command identifiers, database keys, component IDs and stored data during the rename; migrate display defaults without overwriting custom server values. Do not perform an unsafe blind text replacement over internal identifiers.
 
@@ -68,10 +64,10 @@ The audit records repeatedly state that live Discord test-guild acceptance has n
 
 ### P2 — Documentation has stale and inconsistent claims
 
-- The README still contains a historical instruction to keep PR #12 open even though that PR is merged.
-- The Stage H architecture document still labels the H1 work “in progress” despite the H1 core being merged.
-- The feature registry describes the Knowledge Base and search as “infrastructure required” while service/search scaffolding is present. The accurate state is **partial and not wired end-to-end on this branch**, not “nothing exists.”
-- The feature registry calls the rule-based automation engine Future; that remains accurate for this baseline and should not be upgraded based on a separate draft's description.
+- README now links the Stage A–K audit, Stage H and Stage K architecture documents, and removes the stale PR #12 instruction.
+- Stage H architecture status now distinguishes integrated H1/initial H2 from remaining localization coverage and live acceptance.
+- Knowledge Base/search status has been corrected to acknowledge the end-to-end service/UI/schema candidate.
+- The fully automatic trigger-driven workflow engine remains Future; the current workflow template slice is reviewed and manually executed, not silently automated.
 
 These documentation mismatches are corrected in the same audit series where safe to do so.
 
@@ -79,7 +75,7 @@ These documentation mismatches are corrected in the same audit series where safe
 
 | Area | Audit result | Required gate |
 |---|---|---|
-| Build and test | Successful on the recorded Stage K head: 161 tests passed, 0 failed, 0 skipped. | Re-run after every integration or source change. |
+| Build and test | The earlier Stage K-only head passed 161 tests; this consolidated candidate has additional Stage 4 tests, analytics tests and brand-presentation tests. | Require build and the full test suite to pass on the exact new candidate head. |
 | PostgreSQL SQL | Six analytics query paths execute against the CI PostgreSQL service. | Add verification for Knowledge Base, quick replies and staged recovery tables when integrated. |
 | Tenant isolation | Main repositories/services use guild-scoped predicates in reviewed paths. | Add adversarial tests for every new table and every staff/public visibility boundary. |
 | Slash/button parity | There is a parity contract for the main ticket/settings operations. | Extend it to every Knowledge Base, quick-reply, localization, analytics and workflow operation before calling those stages complete. |
@@ -90,13 +86,12 @@ These documentation mismatches are corrected in the same audit series where safe
 
 ## Recommended integration and acceptance order
 
-1. **Freeze the audit baseline** and keep production data untouched.
-2. **Reconcile the open branch graph**: review the required Stage 1–4 dependency chain and the independent Stage K PR; ensure the final integration has no duplicate or missing migration IDs and every PR is tested on the combined head.
-3. **Complete H2 and I/J end-to-end**: locale controls/surfaces; Knowledge Base and quick-reply schemas, actions, authorization, auditing, revision protection and button/slash parity; safe workflow catalog with allowlisted actions only.
-4. **Run CI on the exact integrated commit**: TypeScript build, full tests, and PostgreSQL migration, integrity and query verification.
-5. **Perform non-production Discord acceptance**: run the documented Stage A–K scenarios using the intended permissions and a non-production bot/guild. Record each result rather than marking the whole stage “done” from a successful startup.
-6. **Perform an isolated Neon restore drill** and verify row counts, schema version, settings, ticket/event/outbox associations and recovery records.
-7. **Only then** approve a production rollout. Keep SLA and CSAT unreported until their authoritative data sources and acceptance criteria exist.
+1. **Keep production data untouched.** All implementation and verification uses disposable CI PostgreSQL until the separate acceptance gates are authorized.
+2. **Run CI on this exact combined commit:** TypeScript build, all unit/integration tests, PostgreSQL migrations, referential integrity, Knowledge Base search triggers, recovery constraints and all six analytics SQL paths.
+3. **Reconcile PRs:** PR #39 now contains the consolidated candidate; PR #40 contains the original independent Stage K diff. Review the combined diff and avoid merging the duplicate K changes separately. Preserve the Stage 1–4 predecessor chain.
+4. **Perform non-production Discord acceptance** for A–K, including locale selection, KB role visibility, quick-reply idempotent sending, analytics filter/export permissions, support-hours/DST, private threads, recovery, forms and panel publish/cancel/failure cases.
+5. **Perform an isolated Neon restore drill** and verify row counts, schema version, settings, tickets/events/outbox, Stage 4 data and recovery ledgers.
+6. **Only then** approve production rollout. SLA and CSAT dashboards are present in the Stage 3 branch but need authoritative policy evaluation, timed alerting and customer-rating acceptance before their results should be considered production-trustworthy.
 
 ## Professional appearance improvements
 
