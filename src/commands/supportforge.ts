@@ -1675,6 +1675,7 @@ export const data =
               { name: 'Critical', value: 'critical' },
             ))
             .addIntegerOption((option) => option.setName('first-response-minutes').setDescription('Target minutes for first human response').setRequired(true).setMinValue(1).setMaxValue(43200))
+            .addIntegerOption((option) => option.setName('claim-minutes').setDescription('Target minutes for staff to claim the ticket (default 60)').setRequired(false).setMinValue(1).setMaxValue(43200))
             .addIntegerOption((option) => option.setName('resolution-minutes').setDescription('Target minutes to resolve a ticket').setRequired(true).setMinValue(1).setMaxValue(43200))
             .addBooleanOption((option) => option.setName('pause-while-pending').setDescription('Pause both clocks while status is Pending (default true)').setRequired(false))
             .addNumberOption((option) => option.setName('warning-ratio').setDescription('Warning fraction of target, from 0.5 to 0.99 (default 0.8)').setRequired(false).setMinValue(0.5).setMaxValue(0.99)),
@@ -2057,7 +2058,7 @@ export async function execute(
         const description = policies.length
           ? policies.slice(0, 18).map((policy) =>
               '**' + policy.id + '** • department: ' + policy.departmentId + ' • priority: **' + policy.priority + '**\n' +
-              'First response: ' + policy.firstResponseMinutes + ' min • resolution: ' + policy.resolutionMinutes + ' min • pending pauses: ' + (policy.pauseWhilePending ? 'yes' : 'no') +
+              'First response: ' + policy.firstResponseMinutes + ' min • claim: ' + policy.claimMinutes + ' min • resolution: ' + policy.resolutionMinutes + ' min • pending pauses: ' + (policy.pauseWhilePending ? 'yes' : 'no') +
               ' • warning: ' + Math.round(policy.warningRatio * 100) + '% • ' + (policy.enabled ? 'enabled' : 'disabled') +
               ' • version ' + policy.version,
             ).join('\n\n')
@@ -2077,6 +2078,7 @@ export async function execute(
             departmentId: interaction.options.getString('department-id'),
             priority: (interaction.options.getString('priority') ?? '*') as '*' | 'low' | 'normal' | 'high' | 'urgent' | 'critical',
             firstResponseMinutes: interaction.options.getInteger('first-response-minutes', true),
+            claimMinutes: interaction.options.getInteger('claim-minutes') ?? 60,
             resolutionMinutes: interaction.options.getInteger('resolution-minutes', true),
             pauseWhilePending: interaction.options.getBoolean('pause-while-pending') ?? true,
             warningRatio: interaction.options.getNumber('warning-ratio') ?? 0.8,
@@ -2090,10 +2092,10 @@ export async function execute(
             action: 'SUPPORT_SLA_POLICY_SAVED',
             actorId: interaction.user.id,
             actorName: interaction.user.tag,
-            detail: 'Saved SLA policy ' + policy.id + ' for department=' + policy.departmentId + ', priority=' + policy.priority + ', first-response=' + policy.firstResponseMinutes + 'm, resolution=' + policy.resolutionMinutes + 'm, pending-pauses=' + policy.pauseWhilePending + ', version=' + policy.version + '.',
+            detail: 'Saved SLA policy ' + policy.id + ' for department=' + policy.departmentId + ', priority=' + policy.priority + ', first-response=' + policy.firstResponseMinutes + 'm, claim=' + policy.claimMinutes + 'm, resolution=' + policy.resolutionMinutes + 'm, pending-pauses=' + policy.pauseWhilePending + ', version=' + policy.version + '.', 
           });
         }
-        await interaction.editReply('Saved SLA policy ' + policy.id + ' (version ' + policy.version + '). First response: ' + policy.firstResponseMinutes + ' minutes; resolution: ' + policy.resolutionMinutes + ' minutes; pending pause: ' + policy.pauseWhilePending + '.');
+        await interaction.editReply('Saved SLA policy ' + policy.id + ' (version ' + policy.version + '). First response: ' + policy.firstResponseMinutes + ' minutes; claim: ' + policy.claimMinutes + ' minutes; resolution: ' + policy.resolutionMinutes + ' minutes; pending pause: ' + policy.pauseWhilePending + '.');
         return;
       }
 
@@ -2121,7 +2123,7 @@ export async function execute(
         const ticketId = interaction.options.getString('ticket-id', true).trim();
         const evaluation = await evaluateTicketSla(guild.id, ticketId);
         const config = await getGuildConfig(guild.id);
-        if (!evaluation.policy || !evaluation.firstResponse || !evaluation.resolution) {
+        if (!evaluation.policy || !evaluation.firstResponse || !evaluation.claim || !evaluation.resolution) {
           await interaction.editReply(evaluation.warning ?? 'No SLA policy applies to this ticket.');
           return;
         }
