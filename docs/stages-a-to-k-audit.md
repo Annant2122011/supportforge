@@ -14,7 +14,18 @@ There are three distinct statuses and they must not be conflated:
 2. **CI verified:** automated build/tests/PostgreSQL checks passed on the exact commit.
 3. **Accepted for release:** combined branch integration, authorized non-production Discord acceptance, and a restore drill against an isolated non-production Neon target have passed.
 
-The candidate now combines the Stage 1–4 recovery/knowledge/productivity/localization work with Stage K analytics. The three statuses remain distinct: code integration is not release acceptance, and the final combined head must pass CI after these integrations.
+The candidate now combines the Stage 1–4 recovery/knowledge/productivity/localization work with Stage K analytics. The three statuses remain distinct: code integration is not release acceptance. The last verified head passed the build, 251 automated tests and all six PostgreSQL analytics query smoke paths; the latest presentation regression tests are being verified on the current head.
+
+## Implementation completed after the initial audit
+
+- Integrated the Stage K analytics service, repositories, embed presentation, slash-command and Settings entry points into the Stage 1–4 consolidated branch. Migration 20 adds query indexes after the existing migration IDs 1–19; IDs were not renumbered.
+- Added query-level PostgreSQL smoke checks for six analytics queries to the CI verifier. On verified commit `c0013dbd25a08a369d62e1db9cb9bf02e8cd98a9`, CI reported **251 tests passed / 0 failed / 0 skipped**, successful build, and six analytics query paths passed against disposable PostgreSQL.
+- Added a shared QueryFixr embed-branding helper and applied it to the Settings dashboard, primary ticket panel, analytics, private-thread history and destructive-deletion confirmation. Branding uses the server theme where appropriate and keeps deletion visibly dangerous.
+- Upgraded exported transcript HTML with the QueryFixr mark, a polished gradient header, responsive mobile treatment, UTC-labelled timestamps, and print/PDF layout.
+- Added a shared bounded-text helper and tests so overlong persisted panel copy is visibly shortened instead of causing a Discord embed edit to fail. Custom text itself is not silently rewritten.
+- Reordered Settings navigation into workflow/operations groups and placed the Analytics entry beside operational controls; the reset action remains a distinct danger-styled control.
+- Performed a compatibility-aware label pass across commands, transcripts, ticket storage, private-thread flows, locale dictionaries and documentation. Exact managed defaults can be upgraded while old bot-authored panel/Settings markers remain recognizable for cleanup/recovery; custom server-authored copy is preserved.
+- Added direct regression tests for analytics branding and theme colors. Those two tests plus the final documentation refresh require CI on the latest head before their result is stated as verified.
 
 ## Stage-by-stage findings
 
@@ -38,7 +49,7 @@ The candidate now combines the Stage 1–4 recovery/knowledge/productivity/local
 
 The Stage K work was originally developed on PR #40, while the consolidated Stage 1–4 work lives on PR #39's stacked feature branch. This candidate now ports the analytics services, presentation, command/Settings entry points, SQL smoke tests and indexes into the Stage 4 branch using a new migration ID 20, preserving the existing SLA/CSAT and recovery migration sequence. PR #39 remains a draft and PR #40 remains separate; do not merge both independently without reconciling their shared K changes.
 
-**Correction:** release notes must describe the exact combined head. Rerun build, tests and PostgreSQL verification on this consolidated candidate; after it passes, update PR #39's description to identify it as the combined Stage A–K candidate. Keep the predecessor dependency chain intact and do not merge a downstream draft alone.
+**Correction applied:** PR #39 is now titled and described as the consolidated A–K candidate and remains a draft. CI on the exact candidate head is required after each final edit; preserve the predecessor chain and do not merge the original Stage K PR #40 separately without reconciling duplicate analytics changes.
 
 ### Closed in candidate — Stage I/J schema and interaction wiring
 
@@ -46,15 +57,15 @@ The consolidated candidate includes the Stage 4 migrations and service/command i
 
 ### P1 — Stage H remains partial until all user-facing copy is covered
 
-H1 is the reusable localization core; H2 is the user-facing rollout. The persisted locale preference and dictionaries do not mean ticket intake, validation errors, lifecycle actions, Settings, previews and reports are already translated. The H2 follow-up remains unmerged.
+H1 is the reusable localization core; initial H2 controls and several user-facing surfaces are now integrated in this candidate. The persisted locale preference and dictionaries still do not mean every ticket intake, validation error, lifecycle action, custom-panel builder, report rule and detailed Settings subpage is localized.
 
-**Correction:** report H as **H1 implemented, H2 pending integration and acceptance** until the actual user-facing surfaces are localized and tested.
+**Correction applied:** report H as **H1 + initial H2 integrated; broader copy coverage and live acceptance remain**. Do not call the full localization stage complete until all supported surfaces pass locale and Discord length-limit tests.
 
 ### P1 — Product identity is inconsistent
 
-User-visible defaults, major command/Settings responses, locale dictionaries, README and feature-registry text now use QueryFixr. A small number of legacy-name references remain deliberately for identifying old persisted/default UI so older dashboards can be upgraded without being duplicated or deleting user content.
+User-visible defaults, major command and Settings responses, locale dictionaries, ticket panels, private-thread history/deletion views, transcript exports, README and feature-registry text now use QueryFixr. Remaining old-name strings in the reviewed critical services are intentional compatibility matches for historical panels/Settings messages, not active product labels.
 
-**Correction required:** run a dedicated, compatibility-aware branding pass across user-visible text, defaults, manuals, embeds, logs presented to operators, documentation, application metadata and assets. Preserve stable command identifiers, database keys, component IDs and stored data during the rename; migrate display defaults without overwriting custom server values. Do not perform an unsafe blind text replacement over internal identifiers.
+**Correction applied:** the compatibility-aware branding pass is implemented across the primary customer/staff flows. It preserves stable command roots, component IDs, database keys, ticket records and administrator-authored text, while migrating exact managed defaults and retaining legacy marker detection. A repository-wide branding sweep should still be repeated after any new feature module is added.
 
 ### P1 — Stage completion is blocked by external acceptance
 
@@ -64,7 +75,7 @@ The audit records repeatedly state that live Discord test-guild acceptance has n
 
 ### P2 — Documentation has stale and inconsistent claims
 
-- README now links the Stage A–K audit, Stage H and Stage K architecture documents, and removes the stale PR #12 instruction.
+- README now presents the A–K candidate’s knowledge, productivity and analytics capabilities, links the cross-stage audit and architecture docs, and removes the stale PR #12 instruction.
 - Stage H architecture status now distinguishes integrated H1/initial H2 from remaining localization coverage and live acceptance.
 - Knowledge Base/search status has been corrected to acknowledge the end-to-end service/UI/schema candidate.
 - The fully automatic trigger-driven workflow engine remains Future; the current workflow template slice is reviewed and manually executed, not silently automated.
@@ -75,14 +86,14 @@ These documentation mismatches are corrected in the same audit series where safe
 
 | Area | Audit result | Required gate |
 |---|---|---|
-| Build and test | The earlier Stage K-only head passed 161 tests; this consolidated candidate has additional Stage 4 tests, analytics tests and brand-presentation tests. | Require build and the full test suite to pass on the exact new candidate head. |
-| PostgreSQL SQL | Six analytics query paths execute against the CI PostgreSQL service. | Add verification for Knowledge Base, quick replies and staged recovery tables when integrated. |
+| Build and test | The verified pre-final-style head passed 251/251 tests, 0 skipped, with a successful TypeScript build. New analytics-presentation tests and the documentation refresh are on the current unverified head. | Require the full build/test run to pass on the newest exact candidate SHA before calling this edit verified. |
+| PostgreSQL SQL | The verifier checks Stage 3 recovery segments, Stage 4 Knowledge Base/quick reply/related-ticket/workflow tables and six Stage K analytics queries against disposable PostgreSQL. | Add failure-injection and real restore acceptance in a new isolated non-production Neon target. |
 | Tenant isolation | Main repositories/services use guild-scoped predicates in reviewed paths. | Add adversarial tests for every new table and every staff/public visibility boundary. |
 | Slash/button parity | There is a parity contract for the main ticket/settings operations. | Extend it to every Knowledge Base, quick-reply, localization, analytics and workflow operation before calling those stages complete. |
 | Failure recovery | Durable outbox, reconciliation and staged recovery foundations exist. | Fault-inject Discord/API/database failures; confirm safe retries and useful operator diagnostics. |
 | Security/privacy | Analytics avoids exporting ticket body/transcript content and neutralizes spreadsheet formula starts. | Re-check role-gated article access, mention suppression, export limits, logs, retention and transcript permissions during live acceptance. |
 | Backups | CI verifies a disposable PostgreSQL schema. | Restore a verified backup into a newly created isolated non-production Neon target and record schema/data checksums. |
-| Brand/accessibility | Visual controls exist but labels/defaults still contain mixed product identity. | One consistent QueryFixr identity, readable labels, sensible contrast, mobile-friendly compact layouts and clear error/empty states. |
+| Brand/accessibility | The primary user-facing flows use QueryFixr branding, server theme accents, branded responsive/printable transcripts, grouped Settings navigation and explicit Discord text-budget protection. Historical-marker compatibility remains deliberate. | Continue live checks for color/contrast, long translations, stale controls, empty states and permissions; retain legacy marker support until migration/cleanup is proven. |
 
 ## Recommended integration and acceptance order
 
