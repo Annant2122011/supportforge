@@ -30,6 +30,21 @@ test('Settings dashboard layout preserves server order while retaining every bui
   assert.equal(rows.every((row) => row.components.length > 0 && row.components.length <= 5), true);
 });
 
+test('default Settings layout groups navigation and leaves destructive reset at the end', () => {
+  const rows = buildSettingsDashboardComponents();
+  const ids = rows.map((row) => row.components.map((button) => button.data.custom_id as string));
+  assert.deepEqual(ids[0], [
+    'sf:settings:panel',
+    'sf:settings:panels:home',
+    'sf:settings:forms:home',
+    'sf:settings:defaults',
+    'sf:settings:tags',
+  ]);
+  assert.equal(ids[2]?.[0], 'sf:settings:analytics');
+  assert.equal(ids.at(-1)?.at(-1), 'sf:settings:reset');
+  assert.equal(rows.at(-1)?.components.find((button) => button.data.custom_id === 'sf:settings:reset')?.data.style, ButtonStyle.Danger);
+});
+
 test('Settings dashboard preview disables every action without removing controls', () => {
   const partial = {
     settingsDashboard: {
@@ -145,4 +160,36 @@ test('Settings layout migration groups the untouched legacy default but preserve
   assert.deepEqual(migratedCustom.slice(0, customOrder.length), customOrder);
   assert.equal(migratedCustom.length, SETTINGS_DASHBOARD_BUTTON_KEYS.length);
   assert.equal(new Set(migratedCustom).size, SETTINGS_DASHBOARD_BUTTON_KEYS.length);
+});
+
+
+test('Settings dashboard localizes built-in copy while preserving per-server custom text', () => {
+  const defaultDescription = 'Configure your server' + String.fromCharCode(0x2019) +
+    's ticket system, support panels and retention policies.';
+  const partial = {
+    locale: 'hi-IN',
+    settingsDashboard: {
+      title: '⚙️ ResolvX Settings',
+      description: defaultDescription,
+      footer: 'Settings for this server',
+    },
+    priorityRoles: {},
+    retention: { closedDays: 0, archiveDays: 7 },
+    statusCategories: { claimedCategoryId: null, pendingCategoryId: null },
+    panelActivity: { enabled: true, visualLineBudget: 18, messageBudget: 12, minimumMessagesBeforeMove: 6 },
+    ticketDefaults: { priority: 'normal', maxClaimedModerators: 2 },
+    inactivity: { enabled: true, idleHours: 72, graceHours: 24, generation: 1 },
+    ticketWorkspace: { mode: 'private-threads' },
+    appearance: { panelTitle: 'Support center', panelDescription: 'Open a support ticket.', panelFooter: 'ResolveX' },
+  } as unknown as AdvancedGuildSettings;
+
+  const embed = buildSettingsDashboardEmbed(partial, 3, 8, 'midnight').toJSON();
+  assert.ok(embed.title?.includes('सेटिंग्स'));
+  assert.ok(embed.description?.includes('अपने सर्वर'));
+  assert.equal(embed.description?.includes('Configure your server'), false);
+  assert.ok(embed.fields?.some((field) =>
+    field.name === '⏳ निष्क्रियता स्वचालन' &&
+    field.value.includes('चालू') &&
+    field.value.includes('72'),
+  ));
 });

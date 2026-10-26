@@ -123,7 +123,7 @@ const DEFAULT_CONFIG: GuildConfig = {
 let state: ConfigFile | null = null;
 let writeQueue: Promise<void> = Promise.resolve();
 
-const CANONICAL_CUSTOM_PANEL_FOOTER = 'ResolvX • Customer Support';
+const CANONICAL_CUSTOM_PANEL_FOOTER = 'QueryFixr • Customer Support';
 
 /**
  * Upgrade only a known application-owned default footer. Every other panel
@@ -236,7 +236,7 @@ async function loadState(): Promise<ConfigFile> {
       Array.isArray(persisted.guilds)
     ) {
       throw new Error(
-        'ResolvX database configuration document is malformed. Existing data was not overwritten.',
+        'QueryFixr database configuration document is malformed. Existing data was not overwritten.',
       );
     }
     const normalizedGuilds = normalizeLegacyManagedPanelFooters(persisted.guilds as Record<string, GuildConfig>);
@@ -330,7 +330,7 @@ export async function getGuildConfig(guildId: string): Promise<GuildConfig> {
       name: typeof candidate.name === 'string' ? candidate.name : 'Custom Panel',
       title: typeof candidate.title === 'string' ? candidate.title : 'Customer Support',
       description: typeof candidate.description === 'string' ? candidate.description : '',
-      footer: typeof candidate.footer === 'string' ? candidate.footer : 'ResolvX • Customer Support',
+      footer: typeof candidate.footer === 'string' ? normalizeManagedBrandDefault(candidate.footer, CANONICAL_CUSTOM_PANEL_FOOTER) as string : CANONICAL_CUSTOM_PANEL_FOOTER,
       color: typeof candidate.color === 'string' ? candidate.color : null,
       iconUrl,
       thumbnailUrl: typeof candidate.thumbnailUrl === 'string' ? candidate.thumbnailUrl : null,

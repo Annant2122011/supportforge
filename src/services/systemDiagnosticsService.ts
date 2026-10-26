@@ -833,7 +833,7 @@ export function buildSystemDiagnosticsEmbed(
   const embed = new EmbedBuilder()
     .setColor(color)
     .setTitle(
-      (report.mode === 'setup-doctor' ? '🩺 ResolveX Setup Doctor' : '🛡️ ResolveX System Health') +
+      (report.mode === 'setup-doctor' ? '🩺 QueryFixr Setup Doctor' : '🛡️ QueryFixr System Health') +
       (pageCount > 1 ? ' • Page ' + page + '/' + pageCount : ''),
     )
     .setDescription(

@@ -14,11 +14,12 @@ import {
   type AdvancedGuildSettings,
 } from '../src/services/advancedSettingsService';
 
-const CURRENT_DEFAULT = 'ResolvX • Customer Support';
+const CURRENT_DEFAULT = 'QueryFixr • Customer Support';
 
 test('managed brand migration updates only an exact historical default', () => {
   assert.equal(normalizeManagedBrandDefault('SupportForge • Customer Support', CURRENT_DEFAULT), CURRENT_DEFAULT);
   assert.equal(normalizeManagedBrandDefault('ResolveX • Customer Support', CURRENT_DEFAULT), CURRENT_DEFAULT);
+  assert.equal(normalizeManagedBrandDefault('QueryFixr • Customer Support', CURRENT_DEFAULT), CURRENT_DEFAULT);
   assert.equal(normalizeManagedBrandDefault('SUPPORTFORGE • Customer Support', CURRENT_DEFAULT), CURRENT_DEFAULT);
   assert.equal(normalizeManagedBrandDefault(CURRENT_DEFAULT, CURRENT_DEFAULT), CURRENT_DEFAULT);
 });
@@ -83,8 +84,8 @@ test('guild configuration migration updates only known default panel footers', (
 
   const migrated = normalizeLegacyManagedPanelFooters(original);
   const defaultFooterPanel = migrated.guild!.customPanels.defaultFooter!;
-  assert.equal(defaultFooterPanel.footer, 'ResolvX • Customer Support');
-  assert.equal(defaultFooterPanel.publishedConfig?.footer, 'ResolvX • Customer Support');
+  assert.equal(defaultFooterPanel.footer, 'QueryFixr • Customer Support');
+  assert.equal(defaultFooterPanel.publishedConfig?.footer, 'QueryFixr • Customer Support');
   assert.equal(defaultFooterPanel.title, 'SupportForge Custom Title');
   assert.equal(defaultFooterPanel.description, 'Keep SupportForge instructions');
   assert.equal(defaultFooterPanel.buttons[0]?.label, 'SupportForge button');
@@ -124,10 +125,10 @@ test('advanced settings migration updates exact managed defaults but preserves c
   } as unknown as Record<string, AdvancedGuildSettings>;
 
   const migrated = normalizeLegacyManagedSettingsDefaults(original);
-  assert.equal(migrated.guild!.appearance.panelTitle, '🎫 ResolvX Support Center');
+  assert.equal(migrated.guild!.appearance.panelTitle, '🎫 QueryFixr Support Center');
   assert.equal(migrated.guild!.appearance.panelDescription, 'Instructions for SupportForge users');
   assert.equal(migrated.guild!.appearance.panelFooter, 'My SupportForge footer');
-  assert.equal(migrated.guild!.settingsDashboard.title, '⚙️ ResolvX Settings');
+  assert.equal(migrated.guild!.settingsDashboard.title, '⚙️ QueryFixr Settings');
   assert.equal(migrated.guild!.settingsDashboard.description, 'Custom SupportForge dashboard description');
   assert.equal(migrated.guild!.settingsDashboard.footer, 'SupportForge custom dashboard footer');
   assert.equal(migrated.guild!.settingsDashboard.buttonCustomizations.forms?.label, 'SupportForge Forms');

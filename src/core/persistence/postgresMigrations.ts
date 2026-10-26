@@ -569,6 +569,428 @@ const MIGRATIONS: readonly PostgresMigration[] = [
     },
   },
   {
+    id: 14,
+    name: 'add_knowledge_base_quick_replies_and_safe_workflow_catalog',
+    up: async (db) => {
+      await db.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_guild_id_unique
+          ON tickets (guild_id,id);
+
+        CREATE TABLE IF NOT EXISTS knowledge_base_articles (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          slug TEXT NOT NULL,
+          title TEXT NOT NULL CHECK (length(title) BETWEEN 3 AND 160),
+          summary TEXT NOT NULL DEFAULT '' CHECK (length(summary) <= 500),
+          body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 20000),
+          category TEXT NOT NULL DEFAULT 'General' CHECK (length(category) BETWEEN 1 AND 80),
+          tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','published','archived')),
+          visibility TEXT NOT NULL DEFAULT 'public' CHECK (visibility IN ('public','staff')),
+          allowed_role_ids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          search_vector TSVECTOR NOT NULL DEFAULT ''::TSVECTOR,
+          revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+          created_by TEXT NOT NULL,
+          updated_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          published_at TIMESTAMPTZ,
+          archived_at TIMESTAMPTZ,
+          UNIQUE (guild_id,slug)
+        );
+        CREATE OR REPLACE FUNCTION resolvx_refresh_knowledge_search_vector() RETURNS TRIGGER
+        LANGUAGE plpgsql AS $search$
+        BEGIN
+          NEW.search_vector :=
+            setweight(to_tsvector('english', COALESCE(NEW.title,'')), 'A') ||
+            setweight(to_tsvector('english', COALESCE(NEW.category,'')), 'A') ||
+            setweight(to_tsvector('english', COALESCE(array_to_string(NEW.tags,' '),'')), 'B') ||
+            setweight(to_tsvector('english', COALESCE(NEW.summary,'')), 'B') ||
+            setweight(to_tsvector('english', COALESCE(NEW.body,'')), 'C');
+          RETURN NEW;
+        END;
+        $search$;
+
+        DROP TRIGGER IF EXISTS trg_knowledge_base_search_vector ON knowledge_base_articles;
+        CREATE TRIGGER trg_knowledge_base_search_vector
+          BEFORE INSERT OR UPDATE OF title,summary,body,category,tags ON knowledge_base_articles
+          FOR EACH ROW EXECUTE FUNCTION resolvx_refresh_knowledge_search_vector();
+
+        CREATE INDEX IF NOT EXISTS idx_knowledge_base_articles_search
+          ON knowledge_base_articles USING GIN (search_vector);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_base_articles_browse
+          ON knowledge_base_articles (guild_id,status,category,updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_base_articles_tags
+          ON knowledge_base_articles USING GIN (tags);
+
+        CREATE TABLE IF NOT EXISTS knowledge_base_article_revisions (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          article_id TEXT NOT NULL REFERENCES knowledge_base_articles(id) ON DELETE CASCADE,
+          revision INTEGER NOT NULL CHECK (revision > 0),
+          title TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          body TEXT NOT NULL,
+          category TEXT NOT NULL,
+          tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          status TEXT NOT NULL CHECK (status IN ('draft','published','archived')),
+          visibility TEXT NOT NULL CHECK (visibility IN ('public','staff')),
+          allowed_role_ids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          changed_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (article_id,revision)
+        );
+        CREATE INDEX IF NOT EXISTS idx_knowledge_base_revisions_article
+          ON knowledge_base_article_revisions (article_id,revision DESC);
+
+        CREATE TABLE IF NOT EXISTS knowledge_base_synonyms (
+          guild_id TEXT NOT NULL,
+          term TEXT NOT NULL,
+          normalized_term TEXT NOT NULL,
+          synonyms TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          updated_by TEXT NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (guild_id,normalized_term),
+          CHECK (length(normalized_term) BETWEEN 1 AND 80),
+          CHECK (cardinality(synonyms) <= 20)
+        );
+
+        CREATE TABLE IF NOT EXISTS knowledge_base_usage (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          article_id TEXT NOT NULL REFERENCES knowledge_base_articles(id) ON DELETE CASCADE,
+          actor_id TEXT,
+          event_type TEXT NOT NULL CHECK (event_type IN ('search_result','view','shared')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_knowledge_base_usage_article_time
+          ON knowledge_base_usage (guild_id,article_id,created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS knowledge_base_article_feedback (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          article_id TEXT NOT NULL REFERENCES knowledge_base_articles(id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL,
+          helpful BOOLEAN NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (guild_id,article_id,user_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_knowledge_base_feedback_article
+          ON knowledge_base_article_feedback (guild_id,article_id,helpful);
+
+        CREATE TABLE IF NOT EXISTS quick_replies (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          name TEXT NOT NULL CHECK (length(name) BETWEEN 2 AND 80),
+          normalized_name TEXT NOT NULL,
+          body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 1800),
+          category TEXT NOT NULL DEFAULT 'General' CHECK (length(category) BETWEEN 1 AND 80),
+          tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          allowed_role_ids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          enabled BOOLEAN NOT NULL DEFAULT TRUE,
+          version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+          created_by TEXT NOT NULL,
+          updated_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (guild_id,normalized_name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_quick_replies_guild_enabled
+          ON quick_replies (guild_id,enabled,category,name);
+
+        CREATE TABLE IF NOT EXISTS workflow_templates (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          name TEXT NOT NULL CHECK (length(name) BETWEEN 2 AND 80),
+          definition JSONB NOT NULL DEFAULT '{}'::JSONB,
+          enabled BOOLEAN NOT NULL DEFAULT FALSE,
+          version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+          created_by TEXT NOT NULL,
+          updated_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (guild_id,name)
+        );
+
+        CREATE TABLE IF NOT EXISTS related_ticket_links (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          left_ticket_id TEXT NOT NULL,
+          right_ticket_id TEXT NOT NULL,
+          linked_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          CHECK (left_ticket_id <> right_ticket_id),
+          UNIQUE (guild_id,left_ticket_id,right_ticket_id),
+          FOREIGN KEY (guild_id,left_ticket_id) REFERENCES tickets(guild_id,id) ON DELETE CASCADE,
+          FOREIGN KEY (guild_id,right_ticket_id) REFERENCES tickets(guild_id,id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_related_ticket_links_right
+          ON related_ticket_links (guild_id,right_ticket_id);
+      `);
+    },
+  },
+  {
+    id: 15,
+    name: 'preserve_quick_reply_and_workflow_template_revisions',
+    up: async (db) => {
+      await db.query(`
+        ALTER TABLE quick_replies ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+        ALTER TABLE workflow_templates ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+
+        ALTER TABLE quick_replies DROP CONSTRAINT IF EXISTS quick_replies_guild_id_normalized_name_key;
+        ALTER TABLE workflow_templates DROP CONSTRAINT IF EXISTS workflow_templates_guild_id_name_key;
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_quick_replies_active_name
+          ON quick_replies (guild_id,normalized_name) WHERE deleted_at IS NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_templates_active_name
+          ON workflow_templates (guild_id,LOWER(name)) WHERE deleted_at IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_workflow_templates_guild_active
+          ON workflow_templates (guild_id,updated_at DESC) WHERE deleted_at IS NULL;
+
+        CREATE TABLE IF NOT EXISTS quick_reply_revisions (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          quick_reply_id TEXT NOT NULL REFERENCES quick_replies(id) ON DELETE RESTRICT,
+          version INTEGER NOT NULL CHECK (version > 0),
+          name TEXT NOT NULL,
+          body TEXT NOT NULL,
+          category TEXT NOT NULL,
+          tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          allowed_role_ids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+          enabled BOOLEAN NOT NULL,
+          operation TEXT NOT NULL CHECK (operation IN ('created','updated','deleted','baseline')),
+          changed_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (quick_reply_id,version)
+        );
+        CREATE INDEX IF NOT EXISTS idx_quick_reply_revisions_history
+          ON quick_reply_revisions (guild_id,quick_reply_id,version DESC);
+
+        CREATE TABLE IF NOT EXISTS workflow_template_revisions (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          template_id TEXT NOT NULL REFERENCES workflow_templates(id) ON DELETE RESTRICT,
+          version INTEGER NOT NULL CHECK (version > 0),
+          name TEXT NOT NULL,
+          definition JSONB NOT NULL,
+          enabled BOOLEAN NOT NULL,
+          deleted BOOLEAN NOT NULL DEFAULT FALSE,
+          operation TEXT NOT NULL CHECK (operation IN ('created','updated','enabled','disabled','deleted','baseline')),
+          changed_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (template_id,version)
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflow_template_revisions_history
+          ON workflow_template_revisions (guild_id,template_id,version DESC);
+
+        INSERT INTO quick_reply_revisions
+          (id,guild_id,quick_reply_id,version,name,body,category,tags,allowed_role_ids,enabled,operation,changed_by,created_at)
+        SELECT md5('quick-reply:' || id || ':' || version),guild_id,id,version,name,body,category,tags,allowed_role_ids,enabled,'baseline',updated_by,updated_at
+        FROM quick_replies
+        ON CONFLICT (quick_reply_id,version) DO NOTHING;
+
+        INSERT INTO workflow_template_revisions
+          (id,guild_id,template_id,version,name,definition,enabled,deleted,operation,changed_by,created_at)
+        SELECT md5('workflow-template:' || id || ':' || version),guild_id,id,version,name,definition,enabled,FALSE,'baseline',updated_by,updated_at
+        FROM workflow_templates
+        ON CONFLICT (template_id,version) DO NOTHING;
+      `);
+    },
+  },
+  {
+    id: 16,
+    name: 'record_explicit_quick_reply_and_workflow_restore_operations',
+    up: async (db) => {
+      await db.query(`
+        ALTER TABLE quick_reply_revisions
+          DROP CONSTRAINT IF EXISTS quick_reply_revisions_operation_check;
+        ALTER TABLE quick_reply_revisions
+          ADD CONSTRAINT quick_reply_revisions_operation_check
+          CHECK (operation IN ('created','updated','deleted','baseline','restored'));
+
+        ALTER TABLE workflow_template_revisions
+          DROP CONSTRAINT IF EXISTS workflow_template_revisions_operation_check;
+        ALTER TABLE workflow_template_revisions
+          ADD CONSTRAINT workflow_template_revisions_operation_check
+          CHECK (operation IN ('created','updated','enabled','disabled','deleted','baseline','restored'));
+      `);
+    },
+  },
+
+  {
+    id: 17,
+    name: 'add_audited_manual_workflow_execution_ledger',
+    up: async (db) => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS workflow_execution_runs (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          ticket_id TEXT NOT NULL,
+          channel_id TEXT NOT NULL,
+          template_id TEXT NOT NULL REFERENCES workflow_templates(id) ON DELETE RESTRICT,
+          template_version INTEGER NOT NULL CHECK (template_version > 0),
+          template_name TEXT NOT NULL,
+          requested_by TEXT NOT NULL,
+          interaction_id TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('running','completed','failed','needs_review','not_matched')),
+          definition JSONB NOT NULL,
+          condition_evaluation JSONB NOT NULL DEFAULT '{}'::JSONB,
+          current_step_index INTEGER,
+          result JSONB NOT NULL DEFAULT '{}'::JSONB,
+          started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          finished_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (guild_id,interaction_id),
+          FOREIGN KEY (guild_id,ticket_id) REFERENCES tickets(guild_id,id) ON DELETE RESTRICT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_workflow_execution_runs_ticket_time
+          ON workflow_execution_runs (guild_id,ticket_id,created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_workflow_execution_runs_status
+          ON workflow_execution_runs (guild_id,status,updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS workflow_execution_steps (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          run_id TEXT NOT NULL REFERENCES workflow_execution_runs(id) ON DELETE RESTRICT,
+          step_index INTEGER NOT NULL CHECK (step_index >= 0),
+          action_type TEXT NOT NULL CHECK (action_type IN ('assign_department','set_priority','add_tag','send_quick_reply')),
+          action_value TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('pending','running','completed','failed','needs_review')),
+          attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+          marker TEXT,
+          destination_message_id TEXT,
+          result JSONB NOT NULL DEFAULT '{}'::JSONB,
+          error_code TEXT,
+          started_at TIMESTAMPTZ,
+          completed_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (run_id,step_index),
+          UNIQUE (marker)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_workflow_execution_steps_run
+          ON workflow_execution_steps (run_id,step_index);
+        CREATE INDEX IF NOT EXISTS idx_workflow_execution_steps_recovery
+          ON workflow_execution_steps (guild_id,status,updated_at DESC);
+      `);
+    },
+  },
+
+  {
+    id: 18,
+    name: 'add_idempotent_quick_reply_delivery_and_usage_metrics',
+    up: async (db) => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS quick_reply_send_intents (
+          interaction_id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          quick_reply_id TEXT NOT NULL REFERENCES quick_replies(id) ON DELETE RESTRICT,
+          ticket_id TEXT NOT NULL,
+          channel_id TEXT NOT NULL,
+          actor_id TEXT NOT NULL,
+          marker TEXT NOT NULL UNIQUE,
+          status TEXT NOT NULL CHECK (status IN ('pending','completed','uncertain')),
+          discord_message_id TEXT,
+          error_class TEXT,
+          started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          completed_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          FOREIGN KEY (guild_id,ticket_id) REFERENCES tickets(guild_id,id) ON DELETE RESTRICT,
+          CHECK (
+            (status = 'completed' AND discord_message_id IS NOT NULL AND completed_at IS NOT NULL)
+            OR status <> 'completed'
+          )
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_quick_reply_send_intents_ticket
+          ON quick_reply_send_intents (guild_id,ticket_id,created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_quick_reply_send_intents_status
+          ON quick_reply_send_intents (guild_id,status,updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS quick_reply_usage_events (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          quick_reply_id TEXT NOT NULL REFERENCES quick_replies(id) ON DELETE RESTRICT,
+          send_intent_id TEXT NOT NULL UNIQUE
+            REFERENCES quick_reply_send_intents(interaction_id) ON DELETE RESTRICT,
+          event_type TEXT NOT NULL CHECK (event_type = 'sent'),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_quick_reply_usage_metrics
+          ON quick_reply_usage_events (guild_id,quick_reply_id,created_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_quick_replies_active_category_name
+          ON quick_replies (guild_id,LOWER(category),LOWER(name))
+          WHERE deleted_at IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_quick_replies_active_tags
+          ON quick_replies USING GIN (tags)
+          WHERE deleted_at IS NULL;
+      `);
+    },
+  },
+  {
+    id: 19,
+    name: 'add_locale_neutral_knowledge_search_vector',
+    up: async (db) => {
+      await db.query(`
+        ALTER TABLE knowledge_base_articles
+          ADD COLUMN IF NOT EXISTS simple_search_vector TSVECTOR NOT NULL DEFAULT ''::TSVECTOR;
+
+        CREATE OR REPLACE FUNCTION resolvx_refresh_knowledge_search_vector() RETURNS TRIGGER
+        LANGUAGE plpgsql AS $search$
+        BEGIN
+          NEW.search_vector :=
+            setweight(to_tsvector('english', COALESCE(NEW.title,'')), 'A') ||
+            setweight(to_tsvector('english', COALESCE(NEW.category,'')), 'A') ||
+            setweight(to_tsvector('english', COALESCE(array_to_string(NEW.tags,' '),'')), 'B') ||
+            setweight(to_tsvector('english', COALESCE(NEW.summary,'')), 'B') ||
+            setweight(to_tsvector('english', COALESCE(NEW.body,'')), 'C');
+          NEW.simple_search_vector :=
+            setweight(to_tsvector('simple', COALESCE(NEW.title,'')), 'A') ||
+            setweight(to_tsvector('simple', COALESCE(NEW.category,'')), 'A') ||
+            setweight(to_tsvector('simple', COALESCE(array_to_string(NEW.tags,' '),'')), 'B') ||
+            setweight(to_tsvector('simple', COALESCE(NEW.summary,'')), 'B') ||
+            setweight(to_tsvector('simple', COALESCE(NEW.body,'')), 'C');
+          RETURN NEW;
+        END;
+        $search$;
+
+        UPDATE knowledge_base_articles
+          SET simple_search_vector =
+            setweight(to_tsvector('simple', COALESCE(title,'')), 'A') ||
+            setweight(to_tsvector('simple', COALESCE(category,'')), 'A') ||
+            setweight(to_tsvector('simple', COALESCE(array_to_string(tags,' '),'')), 'B') ||
+            setweight(to_tsvector('simple', COALESCE(summary,'')), 'B') ||
+            setweight(to_tsvector('simple', COALESCE(body,'')), 'C');
+
+        CREATE INDEX IF NOT EXISTS idx_knowledge_base_articles_simple_search
+          ON knowledge_base_articles USING GIN (simple_search_vector);
+      `);
+    },
+  },
+  {
+    id: 20,
+    name: 'add_analytics_query_indexes',
+    up: async (db) => {
+      await db.query(`
+        CREATE INDEX IF NOT EXISTS idx_tickets_guild_created_live
+          ON tickets (guild_id, created_at)
+          WHERE deleted_at IS NULL;
+
+        CREATE INDEX IF NOT EXISTS idx_ticket_events_guild_type_created
+          ON ticket_events (guild_id, event_type, created_at);
+
+        CREATE INDEX IF NOT EXISTS idx_ticket_events_ticket_type_created
+          ON ticket_events (ticket_id, event_type, created_at);
+      `);
+    },
+  },
+  {
     id: 21,
     name: 'extend_sla_policies_with_claim_target',
     up: async (db) => {
@@ -631,7 +1053,7 @@ export async function runPostgresMigrations(
       }
 
       throw new Error(
-        `ResolvX PostgreSQL migration ${migration.id} (${migration.name}) failed. The migration marker was not recorded.`,
+        `QueryFixr PostgreSQL migration ${migration.id} (${migration.name}) failed. The migration marker was not recorded.`,
         { cause: error },
       );
     }

@@ -20,7 +20,7 @@ export async function recoverMissingTicketRecords(guild: Guild): Promise<number>
     const departmentId = getField(topic, 'department');
     const ticketNumber = getField(topic, 'number');
     if (!ownerId || !departmentId || !ticketNumber || !/^\d{1,12}$/.test(ticketNumber)) {
-      console.warn('Skipping durable ticket recovery for malformed ResolvX topic on channel ' + channel.id + '.');
+      console.warn('Skipping durable ticket recovery for malformed QueryFixr topic on channel ' + channel.id + '.');
       continue;
     }
 

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { QueryResultRow } from 'pg';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
-import { normalizeKnowledgeText, scoreKnowledgeCandidate, shouldOfferKnowledgeResult, type KnowledgeConfidence } from '../core/domain/knowledgeSearch';
+import { buildKnowledgeSearchExpression, expandKnowledgeQueries, normalizeKnowledgeText, scoreKnowledgeCandidate, shouldOfferKnowledgeResult, type KnowledgeConfidence } from '../core/domain/knowledgeSearch';
 
 export type KnowledgeArticleStatus = 'draft' | 'published' | 'archived';
 export type KnowledgeVisibility = 'public' | 'staff';
@@ -275,10 +275,16 @@ async function recordKnowledgeUsage(
   actorId: string | null,
   eventType: 'search_result' | 'view' | 'shared',
 ): Promise<void> {
-  await getPostgresPool().query(
-    'INSERT INTO knowledge_base_usage (id,guild_id,article_id,actor_id,event_type) VALUES ($1,$2,$3,$4,$5)',
-    [randomUUID(),guildId,articleId,actorId,eventType],
-  );
+  try {
+    await getPostgresPool().query(
+      'INSERT INTO knowledge_base_usage (id,guild_id,article_id,actor_id,event_type) VALUES ($1,$2,$3,$4,$5)',
+      [randomUUID(),guildId,articleId,actorId,eventType],
+    );
+  } catch {
+    // Usage is telemetry, not part of the customer's search/view/share contract.
+    // Never log query text, article body, IDs, connection details or raw DB errors.
+    console.warn('Knowledge Base usage telemetry write failed; the primary action continues.');
+  }
 }
 
 export async function updateKnowledgeArticle(
@@ -475,43 +481,74 @@ export async function searchKnowledgeBase(
     throw new Error('Search must be between 2 and 200 characters.');
   }
   const pool = getPostgresPool();
-  const queryTokens = normalizedQuery.split(' ').filter(Boolean);
-  const synonymResult = await pool.query<QueryResultRow & { synonyms: string[] }>(
-    'SELECT synonyms FROM knowledge_base_synonyms WHERE guild_id=$1 AND normalized_term=ANY($2::text[])',
-    [guildId,queryTokens],
+  const synonymResult = await pool.query<QueryResultRow & { normalized_term: string; synonyms: string[] }>(
+    'SELECT normalized_term,synonyms FROM knowledge_base_synonyms WHERE guild_id=$1 ORDER BY normalized_term LIMIT 100',
+    [guildId],
   );
-  const synonyms = synonymResult.rows.flatMap((row) => Array.isArray(row.synonyms) ? row.synonyms : []);
-  const expandedQuery = [query.trim(), ...synonyms].join(' ').slice(0, 500);
+  const expandedQueries = expandKnowledgeQueries(query, synonymResult.rows.map((row) => ({
+    normalizedTerm: row.normalized_term,
+    synonyms: Array.isArray(row.synonyms) ? row.synonyms : [],
+  })));
+  const searchExpression = buildKnowledgeSearchExpression(expandedQueries);
   const permissionPredicate = 'guild_id=$1 AND status=\'published\' AND ' +
     '(visibility=\'public\' OR $3::boolean OR $4::boolean) AND ' +
     '(cardinality(allowed_role_ids)=0 OR allowed_role_ids && $5::text[] OR $3::boolean)';
-  const fts = await pool.query<KnowledgeArticleRow>(
+  const fts = await pool.query<KnowledgeArticleRow & { search_rank: number | string }>(
     'SELECT ' + ARTICLE_COLUMNS + ',ts_rank_cd(search_vector,websearch_to_tsquery(\'english\'::regconfig,$2)) AS search_rank ' +
       'FROM knowledge_base_articles WHERE ' + permissionPredicate + ' AND search_vector @@ websearch_to_tsquery(\'english\'::regconfig,$2) ' +
       'ORDER BY search_rank DESC,updated_at DESC LIMIT 50',
-    [guildId,expandedQuery,access.isAdmin,access.isStaff,access.roleIds],
+    [guildId, searchExpression, access.isAdmin, access.isStaff, access.roleIds],
+  );
+  // The English vector preserves stemming and weighted ranking for English.
+  // A second indexed "simple" vector provides exact, language-neutral token
+  // search for Hindi, Bengali and other scripts without limiting recall to the
+  // most recently edited articles during the fuzzy metadata fallback.
+  const simpleFts = await pool.query<KnowledgeArticleRow & { search_rank: number | string }>(
+    'SELECT ' + ARTICLE_COLUMNS + ',ts_rank_cd(simple_search_vector,websearch_to_tsquery(\'simple\'::regconfig,$2)) AS search_rank ' +
+      'FROM knowledge_base_articles WHERE ' + permissionPredicate + ' AND simple_search_vector @@ websearch_to_tsquery(\'simple\'::regconfig,$2) ' +
+      'ORDER BY search_rank DESC,updated_at DESC LIMIT 50',
+    [guildId, searchExpression, access.isAdmin, access.isStaff, access.roleIds],
   );
   const metadataCandidates = await pool.query<KnowledgeArticleRow>(
-    'SELECT ' + ARTICLE_COLUMNS + ' FROM knowledge_base_articles WHERE ' + permissionPredicate + ' ORDER BY updated_at DESC LIMIT 500',
-    [guildId,expandedQuery,access.isAdmin,access.isStaff,access.roleIds],
+    'SELECT ' + ARTICLE_COLUMNS + ' FROM knowledge_base_articles WHERE ' + permissionPredicate +
+      ' AND $2::text IS NOT NULL ORDER BY updated_at DESC LIMIT 500',
+    [guildId, searchExpression, access.isAdmin, access.isStaff, access.roleIds],
   );
-  const articleMap = new Map<string,{ row: KnowledgeArticleRow; score: number }>();
+  const articleMap = new Map<string, { row: KnowledgeArticleRow; score: number }>();
   for (const row of metadataCandidates.rows) {
     const article = fromRow(row);
     if (!canRead(article, access)) continue;
-    const scored = scoreKnowledgeCandidate(expandedQuery,{
-      title:article.title,summary:article.summary,category:article.category,tags:article.tags,
-    });
-    if (shouldOfferKnowledgeResult(scored)) articleMap.set(article.id,{row,score:scored.score});
+    const candidate = {
+      title: article.title,
+      summary: article.summary,
+      category: article.category,
+      tags: article.tags,
+      bodyTokens: new Set(normalizeKnowledgeText(article.body).split(' ').filter((token) => token.length > 1)),
+    };
+    const score = Math.max(
+      0,
+      ...expandedQueries.map((variant) => scoreKnowledgeCandidate(variant, candidate).score),
+    );
+    const confidence: KnowledgeConfidence = score >= 0.72 ? 'high' : score >= 0.48 ? 'medium' : 'low';
+    if (shouldOfferKnowledgeResult({ score, confidence })) {
+      articleMap.set(article.id, { row, score });
+    }
   }
-  for (const row of fts.rows) {
-    const article = fromRow(row);
-    if (!canRead(article, access)) continue;
-    const rawRank = Number(row.search_rank ?? 0);
-    const ftsScore = Math.min(0.99,0.48 + Math.max(0,rawRank) * 2.5);
-    const existing = articleMap.get(article.id);
-    articleMap.set(article.id,{row,score:Math.max(existing?.score ?? 0,ftsScore)});
-  }
+  const mergeFullTextResults = (
+    rows: Array<KnowledgeArticleRow & { search_rank: number | string }>,
+    baseScore: number,
+  ): void => {
+    for (const row of rows) {
+      const article = fromRow(row);
+      if (!canRead(article, access)) continue;
+      const rawRank = Number(row.search_rank ?? 0);
+      const score = Math.min(0.99, baseScore + Math.max(0, rawRank) * 2.5);
+      const existing = articleMap.get(article.id);
+      articleMap.set(article.id, { row, score: Math.max(existing?.score ?? 0, score) });
+    }
+  };
+  mergeFullTextResults(fts.rows, 0.48);
+  mergeFullTextResults(simpleFts.rows, 0.50);
   const results = [...articleMap.values()]
     .map(({row,score}) => ({
       id:row.id,title:row.title,summary:row.summary,category:row.category,
@@ -523,6 +560,19 @@ export async function searchKnowledgeBase(
     .slice(0,5);
   await Promise.all(results.map((article) => recordKnowledgeUsage(guildId,article.id,actorId,'search_result')));
   return results;
+}
+
+export async function recordKnowledgeArticleShare(
+  guildId: string,
+  articleId: string,
+  access: KnowledgeAccess,
+  actorId: string,
+): Promise<void> {
+  const article = await getKnowledgeArticle(guildId, articleId, access);
+  if (!article || article.status !== 'published') {
+    throw new Error('Published article not found.');
+  }
+  await recordKnowledgeUsage(guildId, article.id, actorId, 'shared');
 }
 
 export async function recordKnowledgeArticleFeedback(

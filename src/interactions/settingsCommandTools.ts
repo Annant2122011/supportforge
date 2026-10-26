@@ -106,7 +106,7 @@ export async function handleSettingsSlashCommand(
       const departments = Object.values(config.departments);
       const tagCount = departments.reduce((sum, department) => sum + Object.keys(department.tags ?? {}).length, 0);
       await interaction.editReply(
-        '**ResolvX Settings Overview**\n\n' +
+        '**QueryFixr Settings Overview**\n\n' +
         'Departments: **' + departments.length + '** · Tags: **' + tagCount + '**\n' +
         'Default priority: **' + settings.ticketDefaults.priority + '**\n' +
         'Simultaneous moderators: **' + settings.ticketDefaults.maxClaimedModerators + '**\n' +
@@ -143,7 +143,7 @@ export async function handleSettingsSlashCommand(
             { name: 'Current theme', value: '**' + activeTheme.label + '**\n' + activeTheme.description, inline: true },
             { name: 'Change it', value: 'Use /supportforge settings theme with action:set and choose a palette.', inline: true },
           )
-          .setFooter({ text: 'ResolvX • Server-specific appearance' })],
+          .setFooter({ text: 'QueryFixr • Server-specific appearance' })],
       });
       return;
     }
@@ -557,7 +557,7 @@ export async function handleSettingsSlashCommand(
         await refreshSettingsChannel(guild);
         audit('REPORT_INTAKE_CHANGED', 'Report intake ' + (enabled ? 'enabled' : 'disabled') + '.');
       }
-      await interaction.editReply('Safety reports are **' + (enabled ? 'Enabled' : 'Disabled') + '**.');
+      await interaction.editReply(translate(current.locale, enabled ? 'settings.reports.command.enabled' : 'settings.reports.command.disabled'));
       return;
     }
 
@@ -569,14 +569,14 @@ export async function handleSettingsSlashCommand(
         ? settings.reports.categories[requestedCategoryId]
         : undefined;
       if (requestedCategoryId && !selected) {
-        throw new Error('Report category not found. Run /supportforge settings report-categories without a category ID to list valid IDs.');
+        throw new Error(translate(settings.locale, 'settings.reports.error.categoryMissing') + ' Run /supportforge settings report-categories without a category ID to list valid IDs.');
       }
       const lines = (selected ? [selected] : categories).map((category) => {
         const subs = Object.values(category.subcategories);
         return category.emoji + ' **' + category.name + '** · ID: ' + category.id + '\n' +
-          (subs.length ? subs.map((sub) => '  • ' + sub.name + ' · ID: ' + sub.id).join('\n') : '  No subcategories configured.');
+          (subs.length ? subs.map((sub) => '  • ' + sub.name + ' · ID: ' + sub.id).join('\n') : '  ' + translate(settings.locale, 'settings.reports.value.noSubcategories'));
       });
-      const content = lines.join('\n\n') || 'No report categories are configured.';
+      const content = lines.join('\n\n') || translate(settings.locale, 'settings.reports.value.noCategories');
       const chunks: string[] = [];
       for (const line of content.split('\n')) {
         const current = chunks[chunks.length - 1];
@@ -585,8 +585,8 @@ export async function handleSettingsSlashCommand(
         else chunks.push(line);
       }
       const requestedPage = interaction.options.getInteger('page') ?? 1;
-      if (requestedPage > chunks.length) throw new Error('Page ' + requestedPage + ' does not exist. This result has ' + chunks.length + ' page(s).');
-      await interaction.editReply('**Report Categories' + (selected ? ' · ' + selected.name : '') + ' · Page ' + requestedPage + ' / ' + chunks.length + '**\n\n' + chunks[requestedPage - 1]);
+      if (!Number.isInteger(requestedPage) || requestedPage < 1 || requestedPage > chunks.length) throw new Error(translate(settings.locale, 'settings.reports.command.pageOutOfRange', { page: requestedPage, pages: chunks.length }));
+      await interaction.editReply('**' + translate(settings.locale, 'settings.reports.command.categoryListTitle') + (selected ? ' · ' + selected.name : '') + ' · ' + translate(settings.locale, 'settings.reports.selector.page', { page: requestedPage, pages: chunks.length }) + '**\n\n' + chunks[requestedPage - 1]);
       return;
     }
 
@@ -647,7 +647,7 @@ export async function handleSettingsSlashCommand(
       if (role && (role.managed || role.id === guild.roles.everyone.id)) throw new Error('Choose a normal server role, not @everyone or a managed integration role.');
       const staffRoleId = clearRole ? null : role?.id ?? department.staffRoleId;
       const category = department.categoryId ? guild.channels.cache.get(department.categoryId) : null;
-      if (category?.type === ChannelType.GuildCategory) await category.edit({ name: ('ResolvX.' + newName).slice(0, 100), reason: 'ResolvX department update from slash command' });
+      if (category?.type === ChannelType.GuildCategory) await category.edit({ name: ('QueryFixr.' + newName).slice(0, 100), reason: 'QueryFixr department update from slash command' });
       await updateGuildConfig(guild.id, (current) => {
         const item = current.departments[department.id];
         if (item) { item.name = newName; item.staffRoleId = staffRoleId; }
@@ -749,7 +749,7 @@ export async function handleSettingsSlashCommand(
     if (action === 'priority-role') {
       const mode = interaction.options.getString('action', true);
       if (mode !== 'status' && !interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
-        throw new Error('Creating or deleting ResolvX priority roles requires the Administrator permission.');
+        throw new Error('Creating or deleting QueryFixr priority roles requires the Administrator permission.');
       }
       const settings = await getAdvancedSettings(guild.id);
       if (mode === 'status') {
@@ -776,7 +776,7 @@ export async function handleSettingsSlashCommand(
           return;
         }
         const bot = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
-        if (!bot?.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('ResolvX needs Manage Roles to create priority roles.');
+        if (!bot?.permissions.has(PermissionFlagsBits.ManageRoles)) throw new Error('QueryFixr needs Manage Roles to create priority roles.');
         const roleMeta: Record<TicketPriority, { label: string; color: number }> = {
           low: { label: 'Low', color: 0x2ecc71 },
           normal: { label: 'Normal', color: 0xf1c40f },
@@ -786,10 +786,10 @@ export async function handleSettingsSlashCommand(
         };
         const meta = roleMeta[priority];
         const role = await guild.roles.create({
-          name: 'ResolvX • ' + meta.label + ' Tickets',
+          name: 'QueryFixr • ' + meta.label + ' Tickets',
           colors: { primaryColor: meta.color },
           mentionable: false,
-          reason: 'ResolvX priority role created through slash command',
+          reason: 'QueryFixr priority role created through slash command',
         });
         await updateAdvancedSettings(guild.id, (current) => { current.priorityRoles[priority] = role.id; });
         await enforcePriorityRoleHierarchy(guild);
@@ -806,9 +806,9 @@ export async function handleSettingsSlashCommand(
         }
         const bot = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
         if (!existing.editable || existing.managed || !bot?.permissions.has(PermissionFlagsBits.ManageRoles)) {
-          throw new Error('Discord will not let ResolvX delete that role. Move the bot role above it and ensure Manage Roles is granted.');
+          throw new Error('Discord will not let QueryFixr delete that role. Move the bot role above it and ensure Manage Roles is granted.');
         }
-        await existing.delete('ResolvX priority role removed through slash command');
+        await existing.delete('QueryFixr priority role removed through slash command');
         await updateAdvancedSettings(guild.id, (current) => { delete current.priorityRoles[priority]; });
         await enforcePriorityRoleHierarchy(guild);
         await refreshSettingsChannel(guild);
@@ -824,37 +824,37 @@ export async function handleSettingsSlashCommand(
       const categoryId = interaction.options.getString('category-id', true).trim();
       const settings = await getAdvancedSettings(guild.id);
       const category = settings.reports.categories[categoryId];
-      if (!category) throw new Error('Report category not found. Use Settings report controls to inspect configured categories.');
+      if (!category) throw new Error(translate(settings.locale, 'settings.reports.error.categoryMissing') + ' Use Settings report controls to inspect configured categories.');
       if (action === 'report-subcategory-add') {
         const name = interaction.options.getString('name', true).trim().replace(/\s+/g, ' ');
         const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);
-        if (!id) throw new Error('Subcategory name must contain letters or numbers.');
-        if (category.subcategories[id]) throw new Error('A report subcategory with that name already exists.');
+        if (!id) throw new Error(translate(settings.locale, 'settings.reports.error.subcategoryInvalid'));
+        if (category.subcategories[id]) throw new Error(translate(settings.locale, 'settings.reports.error.subcategoryExists'));
         const now = new Date().toISOString();
         await updateAdvancedSettings(guild.id, (current) => {
           const item = current.reports.categories[categoryId];
           if (item) item.subcategories[id] = { id, name, createdAt: now, updatedAt: now };
         });
         audit('REPORT_SUBCATEGORY_ADDED', 'Added ' + name + ' to report category ' + categoryId + '.');
-        await interaction.editReply('Added report subcategory **' + name + '** (' + id + ').');
+        await interaction.editReply(translate(settings.locale, 'settings.reports.command.subcategoryAdded', { name, id }));
       } else {
         const subId = interaction.options.getString('subcategory-id', true).trim();
         const sub = category.subcategories[subId];
-        if (!sub) throw new Error('Report subcategory not found.');
+        if (!sub) throw new Error(translate(settings.locale, 'settings.reports.error.subcategoryMissing'));
         if (action === 'report-subcategory-edit') {
           const name = interaction.options.getString('name', true).trim().replace(/\s+/g, ' ');
-          if (!name) throw new Error('Subcategory name cannot be empty.');
+          if (!name) throw new Error(translate(settings.locale, 'settings.reports.error.subcategoryEmpty'));
           await updateAdvancedSettings(guild.id, (current) => {
             const item = current.reports.categories[categoryId]?.subcategories[subId];
             if (item) { item.name = name; item.updatedAt = new Date().toISOString(); }
           });
           audit('REPORT_SUBCATEGORY_EDITED', 'Renamed subcategory ' + subId + ' to ' + name + '.');
-          await interaction.editReply('Renamed report subcategory to **' + name + '**.');
+          await interaction.editReply(translate(settings.locale, 'settings.reports.command.subcategoryRenamed', { name }));
         } else {
-          if (Object.keys(category.subcategories).length <= 1) throw new Error('Each report category must retain at least one subcategory.');
+          if (Object.keys(category.subcategories).length <= 1) throw new Error(translate(settings.locale, 'settings.reports.error.keepOneSubcategory'));
           await updateAdvancedSettings(guild.id, (current) => { const item = current.reports.categories[categoryId]; if (item) delete item.subcategories[subId]; });
           audit('REPORT_SUBCATEGORY_REMOVED', 'Removed subcategory ' + subId + ' from ' + categoryId + '.');
-          await interaction.editReply('Removed report subcategory **' + sub.name + '**.');
+          await interaction.editReply(translate(settings.locale, 'settings.reports.command.subcategoryRemoved', { name: sub.name }));
         }
       }
       await refreshSettingsChannel(guild);
@@ -878,7 +878,7 @@ export async function handleSettingsSlashCommand(
     if (action === 'manual') {
       const version = interaction.options.getString('version', true);
       await interaction.editReply(
-        '**ResolvX ' + (version === 'quick' ? 'Quick Manual' : 'Detailed Manual') + '**\n\n' +
+        '**QueryFixr ' + (version === 'quick' ? 'Quick Manual' : 'Detailed Manual') + '**\n\n' +
         'Use Claim to take ownership, Pending when waiting for a customer, Resume to return a pending ticket to open, and Close to generate the transcript and lock the ticket.\n\n' +
         'Administrators can configure departments, tags, retention, panel behavior, report safety, and forms using Settings buttons or slash commands.\n\n' +
         'For the full detailed guide, open Settings → Manual and choose the detailed version.'
@@ -890,7 +890,7 @@ export async function handleSettingsSlashCommand(
       const confirmation = interaction.options.getString('confirmation', true).trim().toUpperCase();
       if (confirmation !== 'DELETE SUPPORT FORGE') throw new Error('Confirmation must be exactly DELETE SUPPORT FORGE. Nothing was deleted.');
       const accumulate = interaction.options.getBoolean('accumulate-audit', true);
-      await interaction.editReply('ResolvX factory reset started. This is destructive and cannot be undone.');
+      await interaction.editReply('QueryFixr factory reset started. This is destructive and cannot be undone.');
       const result = await performFactoryReset(guild, accumulate);
       const failures = result.failed.slice(0, 8).map((failure) => '• ' + failure.name + ' (' + failure.id + '): ' + failure.error).join('\n');
       await interaction.followUp({

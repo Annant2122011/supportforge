@@ -237,16 +237,16 @@ export class TicketOutboxPublisher implements OutboxPublisher {
       const thread = fetched as ThreadChannel;
       const topic = projectDurableTicketTopic('', ticket);
       if (ticket.status === 'closed' || ticket.status === 'archived') {
-        if (!thread.archived) await thread.setArchived(true, 'ResolveX outbox closed-ticket reconciliation');
-        if (!thread.locked) await thread.setLocked(true, 'ResolveX outbox closed-ticket reconciliation');
+        if (!thread.archived) await thread.setArchived(true, 'QueryFixr outbox closed-ticket reconciliation');
+        if (!thread.locked) await thread.setLocked(true, 'QueryFixr outbox closed-ticket reconciliation');
         await refreshPrivateThreadPanel(thread, ticket, topic);
         // A missing panel may be recreated by sending a new message. Ensure
         // that such repair never leaves the durable closed ticket writable.
-        if (!thread.archived) await thread.setArchived(true, 'ResolveX outbox reassert closed ticket after panel refresh');
-        if (!thread.locked) await thread.setLocked(true, 'ResolveX outbox reassert closed ticket lock after panel refresh');
+        if (!thread.archived) await thread.setArchived(true, 'QueryFixr outbox reassert closed ticket after panel refresh');
+        if (!thread.locked) await thread.setLocked(true, 'QueryFixr outbox reassert closed ticket lock after panel refresh');
       } else {
-        if (thread.archived) await thread.setArchived(false, 'ResolveX outbox active-ticket reconciliation');
-        if (thread.locked) await thread.setLocked(false, 'ResolveX outbox active-ticket reconciliation');
+        if (thread.archived) await thread.setArchived(false, 'QueryFixr outbox active-ticket reconciliation');
+        if (thread.locked) await thread.setLocked(false, 'QueryFixr outbox active-ticket reconciliation');
         await refreshPrivateThreadPanel(thread, ticket, topic);
       }
       return;
@@ -291,7 +291,7 @@ export class TicketOutboxPublisher implements OutboxPublisher {
         if (voiceChannel?.type === ChannelType.GuildVoice) {
           try {
             await voiceChannel.delete(
-              'ResolvX outbox reconciliation: ticket is no longer claimed',
+              'QueryFixr outbox reconciliation: ticket is no longer claimed',
             );
           } catch (error) {
             if (!isUnknownChannel(error)) throw error;

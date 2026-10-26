@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +13,21 @@ import { migratePostgres } from '../src/core/persistence/migrationRunner';
 import { PostgresEventRepository } from '../src/repositories/postgresEventRepository';
 import { PostgresJsonDocumentRepository, importLegacyJsonDocuments } from '../src/repositories/jsonDocumentRepository';
 import { PostgresTicketRepository } from '../src/repositories/postgresTicketRepository';
+import {
+  deleteQuickReply,
+  getQuickReplyUsageMetrics,
+  listQuickReplies,
+  listQuickReplyRevisions,
+  saveQuickReply,
+  searchQuickRepliesPage,
+} from '../src/services/quickReplyService';
+import {
+  deleteWorkflowTemplate,
+  listWorkflowTemplates,
+  listWorkflowTemplateRevisions,
+  saveWorkflowTemplate,
+  setWorkflowTemplateEnabled,
+} from '../src/services/workflowTemplateService';
 import type { TicketRepositoryRecord } from '../src/repositories/ticketRepository';
 
 const hasPostgres =
@@ -519,6 +535,114 @@ test(
   },
 );
 
+test.after(async () => {
+  if (!postgresIntegrationEnabled) return;
+
+  try {
+    await getPostgresPool().query('TRUNCATE TABLE tickets CASCADE');
+  } finally {
+    await closePostgresDatabase();
+  }
+});
+
+
+test(
+  'quick replies preserve revisions, reject stale edits, and soft-delete with expected-version protection',
+  { skip: !postgresIntegrationEnabled },
+  async () => {
+    await migratePostgres();
+    const pool = getPostgresPool();
+    const guildId = 'postgres-quick-reply-' + randomUUID();
+    const actorId = 'postgres-test-admin';
+    try {
+      const created = await saveQuickReply(guildId, actorId, {
+        name: 'Billing update',
+        body: 'Your request is being reviewed.',
+        category: 'Billing',
+      });
+      assert.equal(created.version, 1);
+
+      const updated = await saveQuickReply(guildId, actorId, {
+        name: 'Billing update',
+        body: 'Your refund request is being reviewed.',
+        category: 'Billing',
+      }, 1);
+      assert.equal(updated.version, 2);
+      await assert.rejects(
+        () => saveQuickReply(guildId, actorId, {
+          name: 'Billing update',
+          body: 'Stale content must not overwrite the latest version.',
+        }, 1),
+        /changed since you opened it/,
+      );
+
+      const removed = await deleteQuickReply(guildId, 'Billing update', 2, actorId);
+      assert.equal(removed, true);
+      assert.deepEqual(await listQuickReplies(guildId, { isAdmin: true, roleIds: [] }), []);
+      const revisions = await listQuickReplyRevisions(guildId, created.id);
+      assert.deepEqual(revisions.map((item) => item.version), [3, 2, 1]);
+      assert.deepEqual(revisions.map((item) => item.operation), ['deleted', 'updated', 'created']);
+
+      const recreated = await saveQuickReply(guildId, actorId, {
+        name: 'Billing update',
+        body: 'This is a new active definition.',
+        category: 'Billing',
+      });
+      assert.notEqual(recreated.id, created.id);
+      assert.deepEqual(await listQuickReplies(guildId, { isAdmin: true, roleIds: [] }).then((items) => items.map((item) => item.id)), [recreated.id]);
+    } finally {
+      await pool.query('DELETE FROM quick_reply_revisions WHERE guild_id=$1', [guildId]);
+      await pool.query('DELETE FROM quick_replies WHERE guild_id=$1', [guildId]);
+    }
+  },
+);
+
+test(
+  'workflow templates preserve revisions through edits, enablement, stale writes, and soft deletion',
+  { skip: !postgresIntegrationEnabled },
+  async () => {
+    await migratePostgres();
+    const pool = getPostgresPool();
+    const guildId = 'postgres-workflow-' + randomUUID();
+    const actorId = 'postgres-test-admin';
+    const firstDefinition = {
+      conditions: [{ field: 'priority', equals: 'urgent' }],
+      actions: [{ type: 'set_priority', value: 'high' }],
+    };
+    const secondDefinition = {
+      conditions: [{ field: 'status', equals: 'open' }],
+      actions: [{ type: 'set_priority', value: 'critical' }],
+    };
+    try {
+      const created = await saveWorkflowTemplate(guildId, actorId, 'Urgent triage', firstDefinition);
+      assert.equal(created.version, 1);
+
+      const updated = await saveWorkflowTemplate(guildId, actorId, 'Urgent triage', secondDefinition, 1);
+      assert.equal(updated.version, 2);
+      await assert.rejects(
+        () => saveWorkflowTemplate(guildId, actorId, 'Urgent triage', firstDefinition, 1),
+        /changed since you opened it/,
+      );
+
+      const enabled = await setWorkflowTemplateEnabled(guildId, created.id, 2, true, actorId);
+      assert.equal(enabled.version, 3);
+      assert.equal(enabled.enabled, true);
+      const disabled = await setWorkflowTemplateEnabled(guildId, created.id, 3, false, actorId);
+      assert.equal(disabled.version, 4);
+      assert.equal(disabled.enabled, false);
+
+      assert.equal(await deleteWorkflowTemplate(guildId, created.id, 4, actorId), true);
+      assert.deepEqual(await listWorkflowTemplates(guildId), []);
+      const revisions = await listWorkflowTemplateRevisions(guildId, created.id);
+      assert.deepEqual(revisions.map((item) => item.version), [5, 4, 3, 2, 1]);
+      assert.deepEqual(revisions.map((item) => item.operation), ['deleted', 'disabled', 'enabled', 'updated', 'created']);
+      assert.equal(revisions[0]?.deleted, true);
+    } finally {
+      await pool.query('DELETE FROM workflow_template_revisions WHERE guild_id=$1', [guildId]);
+      await pool.query('DELETE FROM workflow_templates WHERE guild_id=$1', [guildId]);
+    }
+  },
+);
 
 test(
   'PostgreSQL durable recovery segment ledger preserves intent and completed Discord message identity',
@@ -600,12 +724,129 @@ test(
   },
 );
 
-test.after(async () => {
-  if (!postgresIntegrationEnabled) return;
 
-  try {
-    await getPostgresPool().query('TRUNCATE TABLE tickets CASCADE');
-  } finally {
-    await closePostgresDatabase();
-  }
-});
+test(
+  'PostgreSQL quick-reply search pages are server-filtered and delivery usage is idempotent',
+  { skip: !postgresIntegrationEnabled },
+  async () => {
+    await migratePostgres();
+    const pool = getPostgresPool();
+    const suffix = randomUUID();
+    const guildId = 'quick-reply-ledger-guild-' + suffix;
+    const ticketId = 'quick-reply-ledger-ticket-' + suffix;
+    const channelId = 'quick-reply-ledger-channel-' + suffix;
+    const ownerId = 'quick-reply-ledger-owner-' + suffix;
+    const ticket: TicketRepositoryRecord = {
+      id: ticketId,
+      guildId,
+      channelId,
+      ticketNumber: '91',
+      status: 'open',
+      departmentId: 'billing',
+      tagId: 'refund',
+      ownerId,
+      priority: 'normal',
+      claimedByIds: [],
+      participantIds: [ownerId],
+      metadata: {},
+      createdAt: '2026-10-24T12:00:00.000Z',
+      updatedAt: '2026-10-24T12:00:00.000Z',
+      deletedAt: null,
+      deletionReason: null,
+    };
+    const replyIds = [randomUUID(), randomUUID(), randomUUID()];
+    const interactionId = 'quick-reply-interaction-' + suffix;
+    const marker = 'quick-reply-marker-' + suffix;
+
+    await new PostgresTicketRepository(pool).create(ticket);
+    try {
+      const replies = [
+        { id: replyIds[0]!, name: 'Refund status', category: 'Billing', tags: ['refund','return'] },
+        { id: replyIds[1]!, name: 'Refund receipt', category: 'Billing', tags: ['receipt'] },
+        { id: replyIds[2]!, name: 'Password help', category: 'Technical', tags: ['account'] },
+      ];
+      for (const reply of replies) {
+        await pool.query(
+          'INSERT INTO quick_replies ' +
+            '(id,guild_id,name,normalized_name,body,category,tags,allowed_role_ids,enabled,version,created_by,updated_by) ' +
+            'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,TRUE,1,$9,$9)',
+          [
+            reply.id, guildId, reply.name, reply.name.toLocaleLowerCase('en-US'),
+            'Hello {username}, this is a safe test reply.', reply.category, reply.tags, [], 'integration-test',
+          ],
+        );
+      }
+
+      const page = await searchQuickRepliesPage(
+        guildId,
+        { isAdmin: false, roleIds: [] },
+        { query: 'refund', category: 'Billing', page: 1, pageSize: 1, enabledOnly: true },
+      );
+      assert.equal(page.total, 2);
+      assert.equal(page.page, 1);
+      assert.equal(page.pageCount, 2);
+      assert.equal(page.replies.length, 1);
+      assert.equal(page.replies[0]?.name, 'Refund status');
+
+      const exactTag = await searchQuickRepliesPage(
+        guildId,
+        { isAdmin: false, roleIds: [] },
+        { tag: 'refund', enabledOnly: true },
+      );
+      const substringTag = await searchQuickRepliesPage(
+        guildId,
+        { isAdmin: false, roleIds: [] },
+        { tag: 'fund', enabledOnly: true },
+      );
+      assert.equal(exactTag.total, 1);
+      assert.equal(exactTag.replies[0]?.id, replyIds[0]);
+      assert.equal(substringTag.total, 0);
+
+      await pool.query(
+        'INSERT INTO quick_reply_send_intents ' +
+          '(interaction_id,guild_id,quick_reply_id,ticket_id,channel_id,actor_id,marker,status) ' +
+          "VALUES ($1,$2,$3,$4,$5,$6,$7,'pending') ON CONFLICT (interaction_id) DO NOTHING",
+        [interactionId, guildId, replyIds[0], ticketId, channelId, 'integration-actor', marker],
+      );
+      await pool.query(
+        'INSERT INTO quick_reply_send_intents ' +
+          '(interaction_id,guild_id,quick_reply_id,ticket_id,channel_id,actor_id,marker,status) ' +
+          "VALUES ($1,$2,$3,$4,$5,$6,$7,'pending') ON CONFLICT (interaction_id) DO NOTHING",
+        [interactionId, guildId, replyIds[0], ticketId, channelId, 'integration-actor', marker],
+      );
+      await pool.query(
+        "UPDATE quick_reply_send_intents SET status='completed',discord_message_id=$2,completed_at=NOW() WHERE interaction_id=$1",
+        [interactionId, 'discord-message-' + suffix],
+      );
+      await pool.query(
+        "INSERT INTO quick_reply_usage_events (id,guild_id,quick_reply_id,send_intent_id,event_type) VALUES ($1,$2,$3,$4,'sent') ON CONFLICT (send_intent_id) DO NOTHING",
+        [randomUUID(), guildId, replyIds[0], interactionId],
+      );
+      await pool.query(
+        "INSERT INTO quick_reply_usage_events (id,guild_id,quick_reply_id,send_intent_id,event_type) VALUES ($1,$2,$3,$4,'sent') ON CONFLICT (send_intent_id) DO NOTHING",
+        [randomUUID(), guildId, replyIds[0], interactionId],
+      );
+      const intents = await pool.query(
+        'SELECT COUNT(*)::int AS count FROM quick_reply_send_intents WHERE guild_id=$1 AND interaction_id=$2',
+        [guildId, interactionId],
+      );
+      const usage = await pool.query(
+        'SELECT COUNT(*)::int AS count FROM quick_reply_usage_events WHERE guild_id=$1 AND send_intent_id=$2',
+        [guildId, interactionId],
+      );
+      assert.equal(intents.rows[0]?.count, 1);
+      assert.equal(usage.rows[0]?.count, 1);
+
+      const metrics = await getQuickReplyUsageMetrics(guildId, 30);
+      assert.equal(metrics.totalSends, 1);
+      assert.equal(metrics.replies[0]?.quickReplyId, replyIds[0]);
+      assert.equal(metrics.replies[0]?.sentCount, 1);
+    } finally {
+      await pool.query('DELETE FROM quick_reply_usage_events WHERE guild_id=$1', [guildId]);
+      await pool.query('DELETE FROM quick_reply_send_intents WHERE guild_id=$1', [guildId]);
+      await pool.query('DELETE FROM quick_reply_revisions WHERE guild_id=$1', [guildId]);
+      await pool.query('DELETE FROM quick_replies WHERE guild_id=$1', [guildId]);
+      await pool.query('DELETE FROM tickets WHERE guild_id=$1 AND id=$2', [guildId, ticketId]);
+    }
+  },
+);

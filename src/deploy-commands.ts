@@ -13,11 +13,11 @@ const rest = new REST({ version: '10' }).setToken(required('DISCORD_TOKEN'));
 async function deploy(): Promise<void> {
   const clientId = required('CLIENT_ID');
   const guildId = required('GUILD_ID');
-  console.log('🔄 Deploying ResolvX commands...');
+  console.log('🔄 Deploying QueryFixr commands...');
   await rest.put(Routes.applicationGuildCommands(clientId, guildId), {
     body: [data.toJSON()],
   });
-  console.log('✅ ResolvX command deployed.');
+  console.log('✅ QueryFixr command deployed.');
 }
 
 deploy().catch((error) => {

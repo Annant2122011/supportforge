@@ -5,6 +5,8 @@ export interface KnowledgeSearchCandidate {
   summary: string;
   category: string;
   tags: readonly string[];
+  /** Pre-normalized body tokens let the fallback search long articles without re-tokenizing for every synonym. */
+  bodyTokens?: ReadonlySet<string>;
 }
 
 export interface KnowledgeSearchScore {
@@ -20,7 +22,7 @@ export function normalizeKnowledgeText(value: string): string {
 }
 
 function tokens(value: string): string[] {
-  return normalizeKnowledgeText(value).split(' ').filter((token) => token.length > 1);
+  return normalizeKnowledgeText(value).split(' ').filter((token) => token.length > 1).slice(0, 12);
 }
 
 function editDistance(left: string, right: string): number {
@@ -46,7 +48,7 @@ function wordSimilarity(left: string, right: string): number {
   if (left === right) return 1;
   if (!left || !right) return 0;
   const largest = Math.max(left.length, right.length);
-  if (largest > 48) return 0;
+  if (largest > 32) return 0;
   return Math.max(0, 1 - editDistance(left, right) / largest);
 }
 
@@ -82,8 +84,15 @@ export function scoreKnowledgeCandidate(
   const categoryScore = tokenCoverage(queryTokens, normalizedCategory);
   const summaryScore = tokenCoverage(queryTokens, normalizedSummary);
 
-  let score = (titleScore * 0.58) + (tagScore * 0.21) + (categoryScore * 0.13) + (summaryScore * 0.08);
+  let score = (titleScore * 0.50) + (tagScore * 0.18) + (categoryScore * 0.10) + (summaryScore * 0.08);
   if (normalizedTags === normalizedQuery || normalizedCategory === normalizedQuery) score = Math.max(score, 0.88);
+  // Body search uses exact Unicode token coverage. It catches terms buried in long
+  // articles and non-English content without making fuzzy matching expensive over
+  // thousands of body tokens for every synonym variant.
+  const bodyCoverage = candidate.bodyTokens && queryTokens.length
+    ? queryTokens.filter((token) => candidate.bodyTokens!.has(token)).length / queryTokens.length
+    : 0;
+  score = Math.max(score, bodyCoverage * 0.56);
   score = Math.max(0, Math.min(1, Number(score.toFixed(4))));
   const confidence: KnowledgeConfidence = score >= 0.72 ? 'high' : score >= 0.48 ? 'medium' : 'low';
   return { score, confidence };
@@ -91,4 +100,56 @@ export function scoreKnowledgeCandidate(
 
 export function shouldOfferKnowledgeResult(score: KnowledgeSearchScore): boolean {
   return score.score >= 0.38;
+}
+
+
+/** Expand into independent search alternatives; never turn synonyms into a giant AND query. */
+export function expandKnowledgeQueries(
+  query: string,
+  mappings: readonly { normalizedTerm: string; synonyms: readonly string[] }[],
+  maximumVariants = 25,
+): string[] {
+  const normalizedQuery = normalizeKnowledgeText(query);
+  if (!normalizedQuery) return [];
+  const variants = new Set<string>([normalizedQuery]);
+  const boundedMaximum = Math.max(1, Math.min(50, Math.floor(maximumVariants)));
+  const paddedQuery = ' ' + normalizedQuery + ' ';
+
+  for (const mapping of mappings) {
+    if (variants.size >= boundedMaximum) break;
+    const term = normalizeKnowledgeText(mapping.normalizedTerm);
+    if (!term || !paddedQuery.includes(' ' + term + ' ')) continue;
+
+    for (const synonymInput of mapping.synonyms) {
+      const synonym = normalizeKnowledgeText(synonymInput);
+      if (!synonym || synonym === term) continue;
+      const next = (' ' + normalizedQuery + ' ').split(' ' + term + ' ').join(' ' + synonym + ' ').trim();
+      if (next && next !== normalizedQuery) variants.add(next);
+      if (variants.size >= boundedMaximum) break;
+    }
+  }
+  return [...variants];
+}
+
+/** Postgres websearch_to_tsquery interprets each variant as its own OR branch. */
+export function buildKnowledgeSearchExpression(variants: readonly string[]): string {
+  return variants
+    .map((variant) => normalizeKnowledgeText(variant))
+    .filter(Boolean)
+    .slice(0, 50)
+    .map((variant) => '(' + variant + ')')
+    .join(' OR ')
+    .slice(0, 1000);
+}
+
+/** Kept as a convenience for callers that need a safe search expression. */
+export function expandKnowledgeQuery(
+  query: string,
+  mappings: readonly { normalizedTerm: string; synonyms: readonly string[] }[],
+): string {
+  return buildKnowledgeSearchExpression(expandKnowledgeQueries(query, mappings));
+}
+
+export function isKnowledgeShareableConfidence(confidence: KnowledgeConfidence): boolean {
+  return confidence === 'high' || confidence === 'medium';
 }

@@ -47,12 +47,12 @@
 
 ### Latest exact-head evidence
 
-- Latest source/test head before the main-base retest: [CI run #40316499006](https://github.com/Annant2122011/supportforge/actions/runs/40316499006) for `2f8a798753147deea93b047f50f9cc8c92f8a008`, build passed, **196/196 tests**, zero failed, and disposable PostgreSQL verification passed, including claim-SLA schema/alert-constraint checks. Retargeting PR #34 to `main` exposed a pre-existing Unicode combining-mark regression in the main Knowledge Base normalizer; [PR #41](https://github.com/Annant2122011/supportforge/pull/41) fixed and merged that one-line issue. The updated main-base PR check must pass again before PR #34 is considered CI-verified.
+- Latest Stage 3 source/test head: [CI run #40316185689](https://github.com/Annant2122011/supportforge/actions/runs/40316185689) for `233a4b0964ddf95383c7d2c4c75e6d8db5cf57e2`, build passed, **196/196 tests**, zero failed, and disposable PostgreSQL verification passed, including claim-SLA schema/alert-constraint checks.
 
 | Acceptance gate | Result |
 |---|---|
-| Source and tests for recovery preview, replay markers, backup/restore safeguards, SLA, CSAT and durable segment ledger | Implemented; latest source/test CI passed on head 2f8a798; retest after the main-base fix is required |
-| Build/test against disposable PostgreSQL | **PASS on prior source/test head**: CI #40316499006, 196 tests, zero failed; DB schema/integrity and claim-SLA schema verification passed. New main-base merge-context CI is pending. |
+| Source and tests for recovery preview, replay markers, backup/restore safeguards, SLA, CSAT and durable segment ledger | Implemented; latest CI passed on head f16b73d |
+| Build/test against disposable PostgreSQL | **PASS**: CI #2389, 194 tests, zero skipped; DB schema/integrity verification passed |
 | Live Discord deletion/recovery/permissions/429/restart scenarios | **Blocked / not run** |
 | Isolated Neon backup and restore, including checksum/schema/row-count/application smoke test | **Blocked / not run** |
 | Real SLA alert timing and large-guild throughput | **Blocked / not run** |
@@ -67,7 +67,8 @@
 
 **Release rule:** green CI, a valid dump file and an empty-target restore script are not proof of an actual Neon restore drill. Report source review, CI, test-guild acceptance, database restore and deployment as separate outcomes.
 
-
 ## Safe integration and Stage G acceptance branch
 
-The staged merge and acceptance protocol is documented in [`pr34-pr39-stage-g-acceptance-architecture.md`](pr34-pr39-stage-g-acceptance-architecture.md) on the non-production `integration/stage-g-acceptance` branch. PR #34 must be validated against the latest `main` merge ref, merged first into that acceptance branch, and followed by PR #39. Direct merges to `main` are deferred because the repository's `deploy-server.yml` automatically deploys main pushes and runs migrations/restarts the service. Stage G is not accepted until controlled Discord tests and the isolated non-production Neon restore drill are recorded.
+PR #34 is merged into the non-production `integration/stage-g-acceptance` branch at `353de4d83c73bf9b1f19960e4dd8b3e4e9ede05b` after exact merge-ref CI passed. The staged merge design and detailed Stage G acceptance matrix are documented in [`pr34-pr39-stage-g-acceptance-architecture.md`](pr34-pr39-stage-g-acceptance-architecture.md).
+
+This is not production acceptance. Controlled Discord tests and a restore into a newly created, empty, isolated non-production Neon target remain mandatory. Do not merge the acceptance branch to `main` before those results are recorded, because a push to `main` triggers the production deployment workflow.

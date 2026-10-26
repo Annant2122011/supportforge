@@ -33,7 +33,7 @@ function participantOverwrites(
   staffRoleId?: string,
 ) {
   const botId = guild.members.me?.id;
-  if (!botId) throw new Error('ResolvX bot member could not be resolved.');
+  if (!botId) throw new Error('QueryFixr bot member could not be resolved.');
 
   const participantAllow = [
     PermissionFlagsBits.ViewChannel,
@@ -155,7 +155,7 @@ export async function startTicketVoiceMode(
     parent: ticketChannel.parentId ?? undefined,
     userLimit: settings.ticketDefaults.maxClaimedModerators + 1,
     permissionOverwrites: participantOverwrites(guild, ownerId, moderatorIds, staffRoleId),
-    reason: 'ResolvX private voice mode for ticket #' + number,
+    reason: 'QueryFixr private voice mode for ticket #' + number,
   }) as VoiceChannel;
 
   const voiceStartedAt = new Date().toISOString();
@@ -188,12 +188,12 @@ export async function startTicketVoiceMode(
     newTopic = await updateVoiceTopic(
       ticketChannel,
       newTopic,
-      'ResolvX voice mode metadata for ticket #' + number,
+      'QueryFixr voice mode metadata for ticket #' + number,
       true,
     );
   } catch (error) {
     await voiceChannel.delete(
-      'ResolvX rollback after voice metadata persistence failure',
+      'QueryFixr rollback after voice metadata persistence failure',
     ).catch((rollbackError) => {
       console.error(
         '❌ Voice mode rollback could not delete the newly created voice channel:',
@@ -262,17 +262,17 @@ export async function syncTicketVoiceParticipants(
       guild.roles.everyone.id,
       ...(staffRoleId ? [staffRoleId] : []),
     ]),
-    'Synchronize ResolvX voice participants',
+    'Synchronize QueryFixr voice participants',
   ).catch((error) => {
-    console.warn('⚠️ Could not synchronize ResolvX voice participants:', error);
+    console.warn('⚠️ Could not synchronize QueryFixr voice participants:', error);
   });
 
   await setChannelUserLimit(
     voiceChannel.id,
     settings.ticketDefaults.maxClaimedModerators + 1,
-    'Synchronize ResolvX voice capacity',
+    'Synchronize QueryFixr voice capacity',
   ).catch((error) => {
-    console.warn('⚠️ Could not synchronize ResolvX voice capacity:', error);
+    console.warn('⚠️ Could not synchronize QueryFixr voice capacity:', error);
   });
 }
 
@@ -300,10 +300,10 @@ export async function endTicketVoiceMode(
          * Never clear the recovery pointer when Discord refused the delete.
          * Keeping voice_channel_id in the ticket metadata allows a later
          * repair/retry to find the orphaned room instead of making it
-         * permanently invisible to ResolvX.
+         * permanently invisible to QueryFixr.
          */
         console.warn(
-          '⚠️ Could not delete ResolvX voice channel ' + voiceId + ':',
+          '⚠️ Could not delete QueryFixr voice channel ' + voiceId + ':',
           error,
         );
         throw new Error(
@@ -317,7 +317,7 @@ export async function endTicketVoiceMode(
        * successful cleanup and clear the stale pointer.
        */
       console.warn(
-        '⚠️ ResolvX voice channel ' + voiceId + ' was already missing; clearing stale voice metadata.',
+        '⚠️ QueryFixr voice channel ' + voiceId + ' was already missing; clearing stale voice metadata.',
       );
     }
   }

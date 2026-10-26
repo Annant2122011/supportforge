@@ -1,7 +1,7 @@
 # Stage 1 and Stage 2 — Definition, Evidence and Acceptance Matrix
 
-**Snapshot date:** 2026-10-23  
-**Current review order:** PR #33 → PR #31 → PR #32 → PR #34 → PR #36  
+**Snapshot date:** 2026-10-24  
+**Current review order:** PR #33 → PR #31 → PR #32 → PR #34 → PR #39  
 **Production persistence:** Neon PostgreSQL. No SQLite migration or production data switch is part of these stages.
 
 ## Status language
@@ -67,6 +67,23 @@
 ### Current Stage 2 decision
 **Source and recorded CI evidence: substantial. Stage exit criteria: not yet met.** PR #32 remains an open draft stacked on PR #31. It must only be reviewed after #33 and #31 are integrated in order. The automated check does not establish production Neon connectivity, backup recovery or actual Discord permissions.
 
+## Re-audit update — 2026-10-24
+
+### Current branch/PR truth
+
+- PR #33 (baseline cleanup), #31 (Stage 1), #32 (Stage 2), #34 (Stage 3), and #39 (consolidated Stage 4) are the intended ordered review chain. PR #36 is an older alternate Stage 4 candidate and is not the current consolidation target. All remain open drafts; do not merge them out of order.
+- PR #33's recorded CI passed on its cleanup head. PR #31 CI #2052 passed 138/138 tests; PR #32 CI #2065 passed 172/172 tests. These are the recorded commit-level results, not live acceptance.
+- Stage 3's recovery/restore/SLA and durable replay-segment ledger passed [CI #2396](https://github.com/Annant2122011/supportforge/actions/runs/40054056156) on head `d5245a8dcefc213a74c6469e56234357350ecc6c`: build passed, 194/194 tests, zero skipped, disposable PostgreSQL passed.
+- The earlier consolidated Stage 4 head `6faf61c73d49e73b6771200209ef1858474ad377` passed [CI #2815](https://github.com/Annant2122011/supportforge/actions/runs/40102848466) (217/217 tests, zero skipped, disposable PostgreSQL verification). A later localization edit exposed eight missing Bengali preset keys; those were fixed. Corrected source head `f4515d6d69adb62f78d1f31ca7e73cd584c6fcef` passed [CI #40106837586](https://github.com/Annant2122011/supportforge/actions/runs/40106837586), and the current documentation follow-up head `cef3db21f400cf3ff0c7b020dce578eabd0314b9` passed [CI #40106944902](https://github.com/Annant2122011/supportforge/actions/runs/40106944902): build passed, 220/220 tests, zero skipped, and disposable PostgreSQL verification passed. This is automated verification only, not live test-guild or Neon restore acceptance.
+- Stage H enforces 352 complete keys across English, Hindi and Bengali, with placeholder-parity tests; the eight newly introduced Bengali preset labels were added and verified in the corrected-head CI. The Settings dashboard, Support Hours, Ticket Workspace, Storage, Staff Manual picker, Repair and other selected Settings/report/panel-preview built-in copy are localized. Detailed manual content is present and wired; remaining custom-panel builder shell copy, other detailed subpage copy, fuller report rule/category content and live locale acceptance remain open. Live Discord acceptance and an isolated non-production Neon backup/restore drill remain not run. Therefore neither Stage 1 nor Stage 2 is production-accepted.
+
+### Stage 3/4 refinements included on the feature stack
+
+- Recovery restore refuses to target a database matching the running bot's configured PostgreSQL URLs; malformed configured URLs fail closed.
+- SLA partial-sweep errors are reported as failed operational task telemetry instead of being counted as successful; other guilds continue processing.
+- Quick replies/workflow templates retain immutable revision ledgers and use version-checked soft deletion. The PostgreSQL verifier now checks those ledger tables and referential integrity.
+- Workflow templates now support admin-confirmed manual execution and safe resume through the durable PostgreSQL run/step ledger. Automatic triggers remain disabled. Department reassignment is rejected by the current executor until category and Discord role-permission reconciliation is safely integrated. Test-guild validation is still outstanding.
+
 ## Cross-stage release gate
 
 The following must remain separate report fields:
@@ -78,3 +95,9 @@ The following must remain separate report fields:
 5. Deployment and post-deploy health result.
 
 Do not infer one status from another. In particular, green CI does not prove live Discord acceptance or recoverability of a Neon backup.
+
+## Integration snapshot — 2026-10-26
+
+PR #34 is merged into the non-production `integration/stage-g-acceptance` branch at `353de4d83c73bf9b1f19960e4dd8b3e4e9ede05b`. Its synthetic merge-ref CI passed the build, 200 tests (zero failures), and disposable PostgreSQL verification. PR #39 is being resolved on top of that merged base; the exact combined branch must pass CI before it is merged into the acceptance branch.
+
+The acceptance branch is not production-approved. Stage G has not been accepted in a real Discord test guild, and the isolated non-production Neon backup/restore drill remains unperformed. The repository automatically deploys pushes to `main`, so do not merge the acceptance branch to `main` until those gates are separately recorded as passed and release approval is explicit.

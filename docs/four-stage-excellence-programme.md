@@ -1,13 +1,15 @@
 # ResolveX Four-Stage Product Excellence Programme
 
-**Status:** Stage 3 implementation started; Stage 1/2 remain unmerged draft PRs pending ordered review and live acceptance  
+**Status:** Consolidated Stage 4 source-code head `3d3dae5d07e06cd47989b8c2e283943a66fcf01f` passed [CI #2739](https://github.com/Annant2122011/supportforge/actions/runs/40101705001) (216/216 tests, zero skips, disposable PostgreSQL passed). Later commits update acceptance documentation only. Live Discord acceptance and isolated Neon restore remain not run.  
 **Product surface:** Discord-first ResolveX  
 **Production persistence:** Neon PostgreSQL; SQLite is not an allowed live provider  
 **Delivery policy:** Small, reviewable commits and pull requests. No production deployment is implied by source changes or green CI.
 
 This programme groups the requested product improvements into four delivery stages. It is separate from the existing master roadmap labels A–R. Each programme stage is split into narrow implementation increments; it is not one enormous feature branch.
 
-**Current incremental status:** [Stage 3 Recovery Vault implementation and acceptance gaps](stage-3-recovery-vault.md).
+**Current incremental status:** [Stage 3 Recovery Vault implementation and acceptance gaps](stage-3-recovery-vault.md) and [Stage 4 Knowledge Base/productivity candidate](stage-4-knowledge-base-productivity.md).
+
+**Stage 1/2 acceptance evidence:** [Definitions, evidence and outstanding gates](stage-1-2-definition-and-acceptance-matrix.md).
 
 ## Non-negotiable engineering rules
 
@@ -88,7 +90,7 @@ Recovery has passed destructive-scenario testing in a non-production guild; Neon
 2. **KB-to-ticket integration:** relevant article suggestions for customers or support staff, a controlled way to share articles and a clear fallback to ordinary ticket support. Low-confidence matches must not block human support.
 3. **Stage J quick replies:** reusable, permission-controlled staff responses with placeholders, category/tag organization, safe validation and usage reporting. Keep canned replies distinct from full KB articles.
 4. **Ticket productivity:** related-ticket linking, safe duplicate detection, configurable ticket templates and well-audited workflow automation built on existing domain services.
-5. **Workflow expansion:** extend the current department/form target catalog only after defining safe conditions, action validation, versioning, preview, audit and rollback. No arbitrary workflow graph may bypass authorization or the ticket lifecycle.
+5. **Workflow execution:** reviewed templates support explicit admin-confirmed `/supportforge workflow execute`, `/workflow resume` and `/workflow runs` commands against an active ticket. Actions are allowlisted and recorded in a durable PostgreSQL step ledger; no automatic triggers run. Department reassignment stays blocked until ticket category and Discord role-permission reconciliation can be safely reused.
 6. **Transcript access improvements:** searchable/archive navigation, clear retention status, permission checks and reliable attachment references, respecting the Recovery Vault contract.
 7. **Expanded quality programme:** broad regression suites, realistic failure injection, command-registration checks, performance tests and documented acceptance for supported Discord workspace modes.
 8. **Deployment and ecosystem readiness:** consistent release process, operator docs, secure webhook/API boundaries and a web dashboard/API only after the Discord-first workflows and multi-tenant authorization model are stable.
@@ -98,6 +100,14 @@ Recovery has passed destructive-scenario testing in a non-production guild; Neon
 
 Knowledge Base and quick replies are persistent, permission-safe and usable without AI; workflow execution is audited and recoverable; support metrics have documented definitions; transcripts obey retention/access rules; and release readiness is evidenced through CI and controlled acceptance.
 
+## Consolidated acceptance status — 2026-10-24
+
+- **Stage 1:** configuration-safety and acceptance evidence are documented; historical CI #2052 passed 138 tests. Live Discord acceptance and an isolated Neon backup/restore drill remain outstanding. This is not production-accepted.
+- **Stage 2:** Setup Doctor, health diagnostics and safe configuration-history flows are implemented on the stacked branch; historical CI #2065 passed 172 tests. Real test-guild repair/re-check and isolated Neon restore acceptance remain outstanding. This is not production-accepted.
+- **Stage 3:** recovery/restore safeguards, durable replay ledger, SLA and CSAT work passed its recorded branch CI #2396 (194/194 tests, zero skips, disposable PostgreSQL verification). Live recovery/destructive scenarios, large-guild SLA testing, and the isolated Neon restore drill remain unrun.
+- **Stage 4:** consolidated candidate source head `f4515d6d69adb62f78d1f31ca7e73cd584c6fcef` passed [CI #40106837586](https://github.com/Annant2122011/supportforge/actions/runs/40106837586): build passed, 220/220 tests, zero skipped, disposable PostgreSQL verification passed. The documentation follow-up head `cef3db21f400cf3ff0c7b020dce578eabd0314b9` also passed [CI #40106944902](https://github.com/Annant2122011/supportforge/actions/runs/40106944902) with 220 tests, zero skipped and PostgreSQL verification. The missing Bengali preset labels were fixed; all three catalogs now have 352 matching keys. Stage I's deterministic Knowledge Base and contextual ticket suggestions are present; Stage J's quick-reply picker/filtering, aggregate metrics and durable send-intent/reconciliation are present.
+- **PR/release state:** PRs #31, #32, #34 and #39 remain open drafts in the required chain; #39 targets Stage 3. No test-guild acceptance, live Neon restore, or production deployment is claimed. Keep the chain in order: #33 → #31 → #32 → #34 → #39.
+
 ## Current Stage 1 implementation log
 
 - Added `src/core/domain/managedBrandDefaults.ts` to restrict branding migration to exact known built-in defaults.
@@ -105,3 +115,9 @@ Knowledge Base and quick replies are persistent, permission-safe and usable with
 - Updated `src/services/advancedSettingsService.ts` so only exact default appearance/dashboard titles and footers are eligible for migration; custom descriptions, tag content and button customizations are preserved.
 - Added regression coverage in `tests/managedBrandDefaults.test.ts`.
 - Automated validation and real-guild acceptance must still be reported separately after CI runs.
+
+## Integration snapshot — 2026-10-26
+
+The authoritative review path is `main` → `integration/stage-g-acceptance` → PR #34 → PR #39. PR #34 has been merged into the non-production acceptance branch at `353de4d83c73bf9b1f19960e4dd8b3e4e9ede05b` after the synthetic merge-ref build, 200 tests and disposable PostgreSQL verification passed. PR #39 is being integrated with the fuller Stage I/J implementation kept and the Unicode combining-mark fix preserved.
+
+Stage G remains unaccepted until controlled Discord scenarios and the isolated non-production Neon backup/restore drill are recorded. Do not merge this branch into `main` before those checks are complete and release approval is explicit; main pushes trigger the production deploy workflow.
