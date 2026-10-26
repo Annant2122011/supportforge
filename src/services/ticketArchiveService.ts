@@ -25,6 +25,7 @@ import {
 } from './ticketPersistenceService';
 import { getField, isTicketTopic, removeField, setField } from './ticketStateService';
 import { refreshTicketPanel } from './ticketPanelService';
+import { runTrackedOperationalTask } from './operationalTaskTelemetry';
 
 const ARCHIVE_PAGE_SIZE = 100;
 const DEFAULT_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -441,7 +442,7 @@ export async function startTicketArchiveBackfill(client: { guilds: { cache: Map<
     if (running) return;
     running = true;
     try {
-      await backfillTicketArchiveBatch(client);
+      await runTrackedOperationalTask('ticket-archive-backfill', null, () => backfillTicketArchiveBatch(client));
     } catch (error) {
       console.warn('ResolvX ticket archive backfill will retry:', error instanceof Error ? error.message : 'unknown error');
     } finally {

@@ -61,6 +61,7 @@ import { initializePersistence } from './core/persistence/provider';
 import { initializeSupportHoursService } from './services/supportHoursService';
 import { startOutboxProcessor } from './core/events/outboxProcessor';
 import { TicketOutboxPublisher } from './services/ticketOutboxPublisher';
+import { recordDiscordRateLimit } from './services/discordRateLimitTelemetry';
 import { configureDiscordChannelRest } from './services/discordChannelService';
 import { refreshActiveTicketFormCache, startTicketFormCacheRefresh, startTicketFormSubmissionRecovery } from './services/ticketFormService';
 import {
@@ -70,6 +71,7 @@ import {
   recordTicketChannelDeleted,
   startTicketArchiveBackfill,
 } from './services/ticketArchiveService';
+import { recordOperationalTaskFailed, recordOperationalTaskSkipped, recordOperationalTaskStarted, recordOperationalTaskSucceeded, runTrackedOperationalTask } from './services/operationalTaskTelemetry';
 
 const token = process.env.DISCORD_TOKEN;
 
@@ -130,6 +132,14 @@ configureDiscordChannelRest(client.rest, (data) => {
   manager._add?.(data, guild);
 });
 client.rest.on(RESTEvents.RateLimited, (rateLimit) => {
+  recordDiscordRateLimit({
+    method: rateLimit.method,
+    route: rateLimit.route,
+    scope: rateLimit.scope,
+    retryAfterMs: rateLimit.retryAfter,
+    global: rateLimit.global,
+    sublimitTimeoutMs: rateLimit.sublimitTimeout ?? null,
+  });
   console.warn(
     '⚠️ Discord REST rate limit: ' +
     'method=' + rateLimit.method +
@@ -186,9 +196,12 @@ client.once('clientReady', (readyClient) => {
           config.auditDevChannelId ||
           Object.keys(config.departments ?? {}).length > 0
         );
-        if (!previouslyConfigured) continue;
+        if (!previouslyConfigured) {
+          recordOperationalTaskSkipped('startup-reconciliation', guild.id, 'Guild has no previously configured ResolvX setup');
+          continue;
+        }
 
-        const result = await runSupportForgeRepair(guild);
+        const result = await runTrackedOperationalTask('startup-reconciliation', guild.id, () => runSupportForgeRepair(guild));
         console.info(
           '✅ ResolvX startup reconciliation completed for guild ' + guild.id +
           '; recovered ' + result.recoveredTickets + ' ticket record(s).',
@@ -217,7 +230,11 @@ client.once('clientReady', (readyClient) => {
             candidate.type === ChannelType.GuildText &&
             candidate.topic?.startsWith('supportforge:audit-dev'),
           );
-        if (!hasDeveloperSignal) continue;
+        if (!hasDeveloperSignal) {
+          recordOperationalTaskSkipped('developer-audit-reconciliation', guild.id, 'No developer-audit infrastructure is configured');
+          continue;
+        }
+        recordOperationalTaskStarted('developer-audit-reconciliation', guild.id);
 
         let developerChannel: GuildBasedChannel | null | undefined =
           config.auditDevChannelId
@@ -278,13 +295,16 @@ client.once('clientReady', (readyClient) => {
 
         if (parent?.type === ChannelType.GuildCategory) {
           await ensureAuditDeveloperInfrastructure(guild, parent.id);
+          recordOperationalTaskSucceeded('developer-audit-reconciliation', guild.id);
         } else {
+          recordOperationalTaskFailed('developer-audit-reconciliation', guild.id, new Error('Missing managed parent category'));
           console.warn(
             '⚠️ Developer Audit repair skipped for guild ' + guild.id +
             ': no valid ResolvX parent category was found. Run /supportforge setup to recreate it.',
           );
         }
       } catch (error) {
+        recordOperationalTaskFailed('developer-audit-reconciliation', guild.id, error);
         console.warn('⚠️ Developer Audit startup repair failed for guild ' + guild.id + ':', error);
       }
     }

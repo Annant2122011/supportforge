@@ -4,6 +4,7 @@ import { SqliteEventRepository } from '../../repositories/eventRepository';
 import { PostgresEventRepository } from '../../repositories/postgresEventRepository';
 import { MAX_OUTBOX_ATTEMPTS, type OutboxEvent } from './domainEvents';
 import { getDiscordRetryAfterMs } from '../../utils/discordRateLimit';
+import { runTrackedOperationalTask } from '../../services/operationalTaskTelemetry';
 
 const MAX_BATCH_SIZE = 100;
 const MAX_RETRY_DELAY_MS = 15 * 60_000;
@@ -190,7 +191,7 @@ export function startOutboxProcessor(
     if (running) return;
     running = true;
 
-    void processOutboxBatch(publisher)
+    void runTrackedOperationalTask('outbox-processor', null, () => processOutboxBatch(publisher))
       .catch((error) => {
         console.error('ResolvX outbox processor failed:', error);
       })
