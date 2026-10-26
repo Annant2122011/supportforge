@@ -39,6 +39,26 @@ export interface TagAnalyticsRow extends QueryResultRow {
   urgent_or_critical_tickets: string | number;
 }
 
+export interface DataCoverageRow extends QueryResultRow {
+  period_tickets: string | number;
+  created_event_tickets: string | number;
+  message_events: string | number;
+  attributed_message_events: string | number;
+  unknown_author_messages: string | number;
+  missing_timestamp_messages: string | number;
+  lifecycle_events: string | number;
+}
+
+export interface AnalyticsDataCoverage {
+  periodTickets: number;
+  ticketsWithCreatedEvent: number;
+  messageEvents: number;
+  attributedMessageEvents: number;
+  unknownAuthorMessages: number;
+  missingTimestampMessages: number;
+  lifecycleEvents: number;
+}
+
 export interface DailyAnalyticsRow extends QueryResultRow {
   day: string | Date;
   tickets_created: string | number;
@@ -394,6 +414,43 @@ LEFT JOIN created AS c USING (day)
 LEFT JOIN resolved AS r USING (day)
 ORDER BY days.day`;
 
+const DATA_COVERAGE_SQL = 'WITH ' + FILTERED_TICKETS_CTE + String.raw§,
+period_tickets AS (
+  SELECT * FROM filtered_tickets WHERE created_at >= $2::timestamptz AND created_at < $3::timestamptz
+)
+SELECT
+  (SELECT COUNT(*) FROM period_tickets) AS period_tickets,
+  (SELECT COUNT(DISTINCT e.ticket_id) FROM ticket_events AS e
+    INNER JOIN period_tickets AS t ON t.id = e.ticket_id
+    WHERE e.guild_id = $1 AND e.event_type = 'ticket.created'
+      AND e.created_at >= $2::timestamptz AND e.created_at < $3::timestamptz) AS created_event_tickets,
+  (SELECT COUNT(*) FROM ticket_events AS e
+    INNER JOIN period_tickets AS t ON t.id = e.ticket_id
+    WHERE e.guild_id = $1 AND e.event_type = 'ticket.message.received'
+      AND e.created_at >= $2::timestamptz AND e.created_at < $3::timestamptz) AS message_events,
+  (SELECT COUNT(*) FROM ticket_events AS e
+    INNER JOIN period_tickets AS t ON t.id = e.ticket_id
+    WHERE e.guild_id = $1 AND e.event_type = 'ticket.message.received'
+      AND e.payload->>'messageAuthorType' IN ('customer', 'staff')
+      AND e.payload->>'messageTimestamp' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
+      AND e.created_at >= $2::timestamptz AND e.created_at < $3::timestamptz) AS attributed_message_events,
+  (SELECT COUNT(*) FROM ticket_events AS e
+    INNER JOIN period_tickets AS t ON t.id = e.ticket_id
+    WHERE e.guild_id = $1 AND e.event_type = 'ticket.message.received'
+      AND COALESCE(e.payload->>'messageAuthorType', 'unknown') NOT IN ('customer', 'staff')
+      AND e.created_at >= $2::timestamptz AND e.created_at < $3::timestamptz) AS unknown_author_messages,
+  (SELECT COUNT(*) FROM ticket_events AS e
+    INNER JOIN period_tickets AS t ON t.id = e.ticket_id
+    WHERE e.guild_id = $1 AND e.event_type = 'ticket.message.received'
+      AND COALESCE(e.payload->>'messageTimestamp', '') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
+      AND e.created_at >= $2::timestamptz AND e.created_at < $3::timestamptz) AS missing_timestamp_messages,
+  (SELECT COUNT(*) FROM ticket_events AS e
+    INNER JOIN period_tickets AS t ON t.id = e.ticket_id
+    WHERE e.guild_id = $1
+      AND e.event_type IN ('ticket.status_changed', 'ticket.claimed', 'ticket.unclaimed',
+        'ticket.pending', 'ticket.resumed', 'ticket.closed', 'ticket.reopened', 'ticket.archived')
+      AND e.created_at >= $2::timestamptz AND e.created_at < $3::timestamptz) AS lifecycle_events§;
+
 export class PostgresAdvancedAnalyticsRepository {
   public constructor(private readonly executor: DatabaseExecutor = getPostgresPool()) {}
 
@@ -439,6 +496,29 @@ export class PostgresAdvancedAnalyticsRepository {
       firstResolvedTickets: toCount(row.first_resolved_tickets),
       urgentOrCriticalTickets: toCount(row.urgent_or_critical_tickets),
     }));
+  }
+
+  public async getDataCoverage(
+    guildId: string,
+    startAt: string,
+    endAt: string,
+    filters: AnalyticsFilters = {},
+  ): Promise<AnalyticsDataCoverage> {
+    const result = await this.executor.query<DataCoverageRow>(
+      DATA_COVERAGE_SQL,
+      parameters(guildId, startAt, endAt, filters) as string[],
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error('Analytics coverage query returned no aggregate row.');
+    return {
+      periodTickets: toCount(row.period_tickets),
+      ticketsWithCreatedEvent: toCount(row.created_event_tickets),
+      messageEvents: toCount(row.message_events),
+      attributedMessageEvents: toCount(row.attributed_message_events),
+      unknownAuthorMessages: toCount(row.unknown_author_messages),
+      missingTimestampMessages: toCount(row.missing_timestamp_messages),
+      lifecycleEvents: toCount(row.lifecycle_events),
+    };
   }
 
   public async getDailyTrends(guildId: string, startAt: string, endAt: string, filters: AnalyticsFilters = {}): Promise<DailyAnalytics[]> {
