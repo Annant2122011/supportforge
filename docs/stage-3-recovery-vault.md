@@ -5,8 +5,6 @@
 **Stack:** PR #34 → Stage 2 PR #32 → Stage 1 PR #31 → baseline cleanup PR #33  
 **Production persistence:** Neon PostgreSQL. The scripts use explicit connection variables; no production database operation or Discord deployment is implied by these source changes.
 
-**Stage 4 follow-on:** [Knowledge Base, related tickets, quick replies and safe workflows](stage-4-knowledge-base-productivity.md) are consolidated in Stage 4 PR #39, which is stacked on this Stage 3 branch.
-
 ## Implemented source scope
 
 ### 1. Recovery Vault and transparent recovery previews
@@ -30,10 +28,10 @@
 - Utilities and guard validations are implemented. No authorized isolated Neon backup/restore drill has been performed, so operational recoverability remains **unverified**.
 
 ### 4. Ticket metrics, SLA and CSAT
-- Persistent SLA policies support guild-wide and department/priority-specific scope, first-response and resolution targets, a warning ratio, and pause-while-pending behaviour.
+- Persistent SLA policies support guild-wide and department/priority-specific scope, first-response, claim, and resolution targets, a warning ratio, and pause-while-pending behaviour. Claim time stops only on the earliest durable `ticket.status_changed` event whose target status is `claimed` (or a recognized `ticket.claimed` event); missing claim attribution is not guessed from the current ticket status.
 - Resolution timing starts a new cycle after reopen. Alert records are de-duplicated by ticket/policy/target/severity/policy version/lifecycle cycle. Large-guild scans rotate a bounded cursor; SLA policies are deactivated rather than physically deleted so alert history remains.
 - The supervised SLA worker reports through Stage 2's operational task telemetry. A sweep with per-ticket evaluation failures is recorded as failed rather than falsely healthy, while processing continues for other guilds and durable successful alerts remain deduplicated.
-- `/supportforge diagnostics sla-list`, `sla-set`, `sla-delete`, `sla-check`, and `metrics` expose administration and ticket/aggregate reporting. The optional `/supportforge feedback rate` flow and aggregate `feedback summary` use per-ticket/user duplicate-vote protection.
+- `/supportforge diagnostics sla-list`, `sla-set`, `sla-delete`, `sla-check`, and `metrics` expose administration and ticket/aggregate reporting. `sla-set` accepts an optional `claim-minutes` target (default 60 minutes); `sla-list` and `sla-check` show the claim clock, and the monitor persists de-duplicated claim warnings/breaches alongside first-response and resolution alerts. The optional `/supportforge feedback rate` flow and aggregate `feedback summary` use per-ticket/user duplicate-vote protection.
 - Automated calculations and schema tests are present. Live timing, load, permissions and alert delivery in a real Discord test guild remain unverified.
 
 ### Recovery segment ledger — current increment
@@ -43,18 +41,18 @@
 - Added PostgreSQL migration 13 for durable per-segment send intent and reconciliation.
 - Expanded `db:verify` to require the new ledger table.
 - Added a PostgreSQL integration test for pending/completed segment state and stored Discord message identity, plus pure marker tests covering determinism and extraction.
-- The segment-ledger increment is included in the consolidated candidate, whose exact source head passed CI #2739 (216 tests, zero skips, disposable PostgreSQL verification).
+- CI must pass on this exact branch head before the increment is considered automated-verified.
 
 ## Automated evidence and Stage 1/2 re-audit
 
 ### Latest exact-head evidence
 
-- Original Stage 3 branch baseline: [CI #2396](https://github.com/Annant2122011/supportforge/actions/runs/40054056156) for `d5245a8dcefc213a74c6469e56234357350ecc6c`, build passed, **194/194 tests**, zero skipped, disposable PostgreSQL verification passed. The consolidated Stage 4 candidate also includes this recovery work and passed [CI #2739](https://github.com/Annant2122011/supportforge/actions/runs/40101705001): build passed, **216/216 tests**, zero skipped, disposable PostgreSQL verification passed.
+- Stage 3 exact updated head: [CI run #40314300653](https://github.com/Annant2122011/supportforge/actions/runs/40314300653) for `1097fb88b8a9d27ba9f73bb029ff224a7001e558`, build passed, **195/195 tests**, zero failed, and disposable PostgreSQL verification passed, including the new claim-SLA schema/alert-constraint checks.
 
 | Acceptance gate | Result |
 |---|---|
-| Source and tests for recovery preview, replay markers, backup/restore safeguards, SLA, CSAT and durable segment ledger | Implemented; latest exact-head CI #2396 passed on `d5245a8dcefc213a74c6469e56234357350ecc6c` |
-| Build/test against disposable PostgreSQL | **PASS**: [CI #2396](https://github.com/Annant2122011/supportforge/actions/runs/40054056156), 194/194 tests, zero skipped; DB schema/integrity verification passed |
+| Source and tests for recovery preview, replay markers, backup/restore safeguards, SLA, CSAT and durable segment ledger | Implemented; latest CI passed on head f16b73d |
+| Build/test against disposable PostgreSQL | **PASS**: CI #2389, 194 tests, zero skipped; DB schema/integrity verification passed |
 | Live Discord deletion/recovery/permissions/429/restart scenarios | **Blocked / not run** |
 | Isolated Neon backup and restore, including checksum/schema/row-count/application smoke test | **Blocked / not run** |
 | Real SLA alert timing and large-guild throughput | **Blocked / not run** |
@@ -63,8 +61,8 @@
 ## Remaining risk-based work
 1. Run the non-production Discord acceptance checklist for native deletion, accidental/intentional ticket-button deletion, concurrent restore clicks, restore restart windows, long histories, missing members/channels and unavailable attachments.
 2. Create a backup from a disposable source, restore it into a newly created empty Neon branch/database, then record checksum, schema migration level, core row counts, orphan checks and application smoke-test evidence.
-3. Exercise SLA cursor rotation over multiple batches, pause/resume across pending/reopen cycles, concurrent policy edits, repeated worker failures and notification rate limits in CI/test guild.
+3. Exercise SLA cursor rotation over multiple batches, claim transitions and missing legacy attribution, pause/resume across pending/reopen cycles, concurrent policy edits, repeated worker failures and notification rate limits in CI/test guild.
 4. Stress backup file size, restore duration, archive volume and operational metrics on a disposable environment.
-5. Continue Stage H2 locale completion for the remaining Settings pages, panel previews and selected reports under the Stage 1/2 release gate.
+5. Continue Stage H2 locale completion for the remaining Settings pages, panel previews and selected reports under the consolidated PR #39 release gate.
 
 **Release rule:** green CI, a valid dump file and an empty-target restore script are not proof of an actual Neon restore drill. Report source review, CI, test-guild acceptance, database restore and deployment as separate outcomes.
