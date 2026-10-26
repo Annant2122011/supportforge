@@ -1,6 +1,8 @@
-# ResolvX
+# QueryFixr
 
-ResolvX is a Discord-first support ticket system. It uses Neon PostgreSQL as the live durable store and keeps Discord interactions on the same validated ticket-creation and lifecycle services regardless of whether the action starts from a slash command or a button.
+**Queries Solved. Support Evolved.**
+
+QueryFixr is a Discord-first support ticket system. It uses Neon PostgreSQL as the live durable store and keeps Discord interactions on the same validated ticket-creation and lifecycle services regardless of whether the action starts from a slash command or a button.
 
 ## Current capabilities
 
@@ -91,7 +93,13 @@ Settings-channel customization is stored separately from the public ticket panel
 
 ## Verification and rollout
 
-The Build and ResolvX CI workflows run the TypeScript build, automated tests, and PostgreSQL verification. Stage H Part 2 adds locale controls and localized ticket/form interactions while using the existing advanced-settings document and Neon/PostgreSQL provider. Green CI is necessary but not sufficient for production readiness. Verify slash-command registration, dashboard interactions, locale persistence, permissions, and translated rendering in a non-production Discord guild before promotion.
+- [Cross-stage A–K audit](docs/stages-a-to-k-audit.md)
+- [Stage H localization architecture](docs/stage-h-translation-architecture.md)
+- [Stage K Part 1 architecture](docs/stage-k-part-1-architecture.md)
+- [Stage K Part 2 architecture](docs/stage-k-part-2-architecture.md)
+
+
+The Build and QueryFixr CI workflows run the TypeScript build, automated tests, and PostgreSQL verification. Stage H Part 2 adds locale controls and localized ticket/form interactions while using the existing advanced-settings document and Neon/PostgreSQL provider. Green CI is necessary but not sufficient for production readiness. Verify slash-command registration, dashboard interactions, locale persistence, permissions, and translated rendering in a non-production Discord guild before promotion.
 
 - [Stage A–E inspection](docs/stages-a-to-e-audit.md)
 - [Ticket archive and recovery behavior](docs/recovery-archive.md)
@@ -124,7 +132,7 @@ The schedule engine handles daylight-saving gaps and repeated local times determ
 
 ### Part 2: private-thread ticket workspaces
 
-Select the workspace mode using **Settings → Ticket Workspace** or `/supportforge settings ticket-workspace`. It applies only to newly opened tickets. Existing dedicated text-channel tickets remain unchanged. In private-thread mode, ResolveX lazily creates a department-specific parent text channel and opens each new ticket as a private thread under it. The ticket owner is explicitly added; configured department staff and administrators can access tickets through Discord's private-thread permissions. The bot needs permission to view the parent, create/manage private threads, send messages in threads, and read message history. Each department should have a valid staff role configured before enabling this mode.
+Select the workspace mode using **Settings → Ticket Workspace** or `/supportforge settings ticket-workspace`. It applies only to newly opened tickets. Existing dedicated text-channel tickets remain unchanged. In private-thread mode, QueryFixr lazily creates a department-specific parent text channel and opens each new ticket as a private thread under it. The ticket owner is explicitly added; configured department staff and administrators can access tickets through Discord's private-thread permissions. The bot needs permission to view the parent, create/manage private threads, send messages in threads, and read message history. Each department should have a valid staff role configured before enabling this mode.
 
 The private-thread controls support the normal ticket lifecycle (claim, unclaim, pending, resume, close, reopen and archive), along with participant add/remove, staff reassignment, priority, internal notes and staff history. The matching slash-command routes are available inside the private thread as well as the button controls. User-selection actions are bound to the initiating user and exact thread so stale or cross-thread controls fail closed.
 
@@ -141,3 +149,12 @@ Stage G Part 1 centralizes ticket lifecycle authorization, makes closed/archived
 ## Stage G Part 2: Ticket inactivity automation
 
 Stage G Part 2 adds opt-in, per-server inactivity warnings and automatic closure with a grace period. It uses durable PostgreSQL activity metadata, recovers warning state after restarts, requires transcript delivery, and atomically rejects closure if activity changes. The default is disabled; administrators can manage it with the Settings dashboard's **Inactivity Automation** controls or `/supportforge settings inactivity`. See [the Stage G Part 2 design and acceptance checklist](docs/stage-g-part-2-inactivity.md).
+
+
+## Stage K · Operational analytics
+
+QueryFixr includes PostgreSQL-backed operational analytics: backlog and priority snapshots, first-response and first-resolution measures, department/tag breakdowns, staff workload, daily/weekly trends, equal-period comparisons and coverage diagnostics. Analytics are available through `/supportforge analytics` and the Settings dashboard. Reports and CSV exports are bounded and aggregate-only; they do not export ticket messages or transcripts. The server's configured theme accent is used in analytics embeds. SLA compliance and customer satisfaction are shown only where their authoritative data sources support them.
+
+## Professional presentation
+
+Public panels, Settings, recovery views and analytics use a consistent QueryFixr brand identity, server theme accents, clear status/priority labels and explicit failure states. Discord's native component and embed constraints remain the actual layout limits; the bot does not pretend custom CSS can change Discord's client UI.
