@@ -11,6 +11,7 @@ import {
   type Guild,
 } from 'discord.js';
 import { getGuildConfig, type GuildConfig } from './configService';
+import { applyQueryFixrBranding } from '../interactions/brandPresentation';
 import { getPersistedTicketPriority, getPersistedTicketStatus } from './ticketPersistenceService';
 import type { TicketPriority } from './advancedSettingsService';
 import { setChannelName, setChannelTopic } from './discordChannelService';
@@ -60,8 +61,7 @@ export function buildTicketPanelEmbed(
   const archivedAt = getField(topic, 'archived_at');
   const ticketNumber = getField(topic, 'number') ?? 'Unknown';
 
-  return new EmbedBuilder()
-    .setColor(priorityColor(priority))
+  return applyQueryFixrBranding(new EmbedBuilder(), 'Ticket #' + ticketNumber, priorityColor(priority))
     .setTitle(`🎫 QueryFixr Ticket #${ticketNumber}`)
     .setDescription(
       `**${decodeSubject(getField(topic, 'subject'))}**\n\n` +
