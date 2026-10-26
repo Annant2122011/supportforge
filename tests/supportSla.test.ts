@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { evaluateSlaTarget, findFirstClaimAt, isValidSlaScope, type SlaLifecycleEvent } from '../src/core/domain/supportSla';
+import { evaluateSlaTarget, findFirstClaimAt, findFirstResolutionAt, isValidSlaScope, type SlaLifecycleEvent } from '../src/core/domain/supportSla';
 
 const start = '2026-10-23T10:00:00.000Z';
 
@@ -102,6 +102,18 @@ test('claim SLA uses the first valid persisted claim transition and completes at
   assert.equal(overdue.progress, 'breached');
   assert.equal(overdue.elapsedMinutes, 31);
   assert.equal(findFirstClaimAt(events(['ticket.status_changed', '2026-10-23T10:10:00.000Z', { to: 'open' }]), start), null);
+});
+
+test('resolution completion recognizes durable status-change payloads and isolates reopen cycles', () => {
+  const lifecycle = events(
+    ['ticket.status_changed', '2026-10-23T10:20:00.000Z', { from: 'open', to: 'closed' }],
+    ['ticket.status_changed', '2026-10-23T10:30:00.000Z', { from: 'closed', to: 'reopened' }],
+    ['ticket.status_changed', '2026-10-23T10:45:00.000Z', { from: 'reopened', to: 'closed' }],
+    ['ticket.status_changed', '2026-10-23T10:50:00.000Z', { from: 'closed', to: 'archived' }],
+  );
+  assert.equal(findFirstResolutionAt(lifecycle, start), '2026-10-23T10:20:00.000Z');
+  assert.equal(findFirstResolutionAt(lifecycle, '2026-10-23T10:30:00.000Z'), '2026-10-23T10:45:00.000Z');
+  assert.equal(findFirstResolutionAt(events(['ticket.status_changed', '2026-10-23T10:45:00.000Z', { to: 'pending' }]), start), null);
 });
 
 test('invalid dates and scopes are handled safely', () => {
