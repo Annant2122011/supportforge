@@ -101,6 +101,7 @@ Settings-channel customization is stored separately from the public ticket panel
 - [Stage H localization architecture](docs/stage-h-translation-architecture.md)
 - [Stage K Part 1 architecture](docs/stage-k-part-1-architecture.md)
 - [Stage K Part 2 architecture](docs/stage-k-part-2-architecture.md)
+- [Stage L SLA and queue operations architecture](docs/stage-l-architecture.md)
 
 
 The Build and QueryFixr CI workflows run the TypeScript build, automated tests, and PostgreSQL verification. Stage H includes locale controls and initial localized ticket/form interactions using the existing advanced-settings document and Neon/PostgreSQL provider. Copy coverage remains partial, and green CI is necessary but not sufficient for production readiness. Verify slash-command registration, dashboard interactions, locale persistence, permissions, long translated labels and rendering in a non-production Discord guild before promotion.
