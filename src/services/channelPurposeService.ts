@@ -4,6 +4,7 @@ import {
   type Guild,
   type TextChannel,
 } from 'discord.js';
+import { applyQueryFixrBranding } from '../interactions/brandPresentation';
 
 const PURPOSE_TITLE = '📝 QueryFixr Channel Purpose';
 const PURPOSE_FOOTER = 'QueryFixr • Channel Purpose';
@@ -141,7 +142,7 @@ export async function ensureChannelPurposeMessage(
       if (managedMarker && !isCurrentMarker) {
         await existing.edit({
           embeds: [
-            new EmbedBuilder()
+            applyQueryFixrBranding(new EmbedBuilder(), 'Server Operations')
               .setTitle(PURPOSE_TITLE)
               .setDescription(purpose)
               .setFooter({ text: PURPOSE_FOOTER })
@@ -153,7 +154,7 @@ export async function ensureChannelPurposeMessage(
       return;
     }
 
-    const embed = new EmbedBuilder()
+    const embed = applyQueryFixrBranding(new EmbedBuilder(), 'Server Operations')
       .setTitle(PURPOSE_TITLE)
       .setDescription(purpose)
       .setFooter({ text: PURPOSE_FOOTER })
