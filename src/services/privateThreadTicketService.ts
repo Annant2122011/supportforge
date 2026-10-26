@@ -385,8 +385,8 @@ async function ensurePrivateThreadCloseTranscript(
     }
 
     transcriptMessage = await destination.send({
-      content: '📄 Transcript for ticket **#' + (fresh.ticketNumber ?? 'unknown') + '**\\n' + marker +
-        '\\nTicket: <#' + thread.id + '>',
+      content: '📄 Transcript for ticket **#' + (fresh.ticketNumber ?? 'unknown') + '**\n' + marker +
+        '\nTicket: <#' + thread.id + '>',
       files: [transcript],
       allowedMentions: { parse: [] },
     });
