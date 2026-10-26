@@ -1292,8 +1292,10 @@ Automation must validate actions against permissions and current state.
 
 ## F-034 — SLA System
 
-**Status:** `PLANNED`  
+**Status:** `PARTIAL`  
 **Priority:** `P2`
+
+The Stage 3 foundation implements guild/department/priority policies and first-response, claim, and resolution clocks. Stage L completes business-time calculation, durable escalation/queue workflows, Settings parity, and release acceptance.
 
 ### SLA types
 
@@ -1332,8 +1334,10 @@ Resolution: 48 hr
 
 ## F-035 — SLA Pause / Resume
 
-**Status:** `PLANNED`  
+**Status:** `PARTIAL`  
 **Priority:** `P2`
+
+Pending pause/resume is implemented against durable lifecycle timestamps in the Stage 3 foundation. Stage L must finish per-clock policy semantics, missing/out-of-order history handling, business-time interactions, and live acceptance.
 
 Pending states may pause an SLA depending on policy.
 
@@ -1353,8 +1357,10 @@ The system must define exactly which clocks pause and which remain active.
 
 ## F-036 — SLA Warnings and Escalation
 
-**Status:** `PLANNED`  
+**Status:** `PARTIAL`  
 **Priority:** `P2`
+
+Warning/breach evaluation and de-duplicated alert records are present. Configurable supervisor routing, explicit escalation previews, acknowledgement/cooldown, durable delivery receipts, and safe optional reassignment remain Stage L scope.
 
 ### Example
 
@@ -1376,8 +1382,10 @@ Possible actions:
 
 ## F-037 — Business Hours
 
-**Status:** `PLANNED`  
+**Status:** `PARTIAL`  
 **Priority:** `P2`
+
+Stage F supplies timezone-aware support-hour policies for intake. SLA clocks still use wall-clock elapsed time; Stage L adds optional business-hours-aware SLA calculation on the shared calendar engine. Holiday calendars and one-off exception dates remain separate scope unless explicitly approved.
 
 QueryFixr should understand support calendars.
 
