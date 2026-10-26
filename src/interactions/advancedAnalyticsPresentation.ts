@@ -1,273 +1,123 @@
-import {
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  EmbedBuilder,
-} from 'discord.js';
-
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
 import type { AdvancedAnalyticsReport } from '../services/advancedAnalyticsService';
+import { translate, formatLocaleNumber, formatLocaleDate } from '../i18n/translationService';
+import type { TranslationKey } from '../i18n/locales/en-US';
 import { buildAnalyticsEmbed } from './analyticsPresentation';
 import { applyQueryFixrBranding, QUERYFIXR_ACCENT_COLOR, queryFixrFooter } from './brandPresentation';
-
-export type AnalyticsView = 'overview' | 'departments' | 'staff' | 'tags' | 'trends';
-export const ANALYTICS_PAGE_SIZE = 10;
-
-function count(value: number): string {
-  return value.toLocaleString('en-US');
+export type AnalyticsView='overview'|'departments'|'staff'|'tags'|'trends';
+export const ANALYTICS_PAGE_SIZE=10;
+function t(locale:string,key:TranslationKey,params:Readonly<Record<string,string|number|boolean|null|undefined>>={}):string{return translate(locale,key,params);}
+function count(locale:string,value:number):string{return formatLocaleNumber(locale,value);}
+function decimal(locale:string,value:number):string{return formatLocaleNumber(locale,value,{minimumFractionDigits:1,maximumFractionDigits:1});}
+function formatMinutes(locale:string,value:number|null):string {
+ if(value===null)return t(locale,'analytics.notEnoughData');
+ if(value<60)return t(locale,'analytics.minutes',{value:decimal(locale,value)});
+ if(value<1440)return t(locale,'analytics.hours',{value:decimal(locale,value/60)});
+ return t(locale,'analytics.days',{value:decimal(locale,value/1440)});
 }
-
-function formatMinutes(value: number | null): string {
-  if (value === null) return 'Not enough reliable data yet';
-  if (value < 60) return value.toFixed(1) + ' min';
-  if (value < 1440) return (value / 60).toFixed(1) + ' hr';
-  return (value / 1440).toFixed(1) + ' days';
+function utc(locale:string,value:string):string {
+ const date=new Date(value);if(!Number.isFinite(date.getTime()))throw new RangeError('Cannot format an invalid analytics timestamp.');
+ return formatLocaleDate(locale,date,{year:'numeric',month:'2-digit',day:'2-digit',timeZone:'UTC'})+' '+
+ new Intl.DateTimeFormat(locale,{hour:'2-digit',minute:'2-digit',hourCycle:'h23',timeZone:'UTC'}).format(date)+' UTC';
 }
-
-function utc(value: string): string {
-  return new Date(value).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+function utcDate(locale:string,value:string):string{return formatLocaleDate(locale,value,{year:'numeric',month:'2-digit',day:'2-digit',timeZone:'UTC'});}
+function changeLine(locale:string,label:string,v:{current:number|null;previous:number|null;changePercent:number|null}):string {
+ const current=v.current===null?t(locale,'analytics.advanced.na'):count(locale,v.current);
+ const previous=v.previous===null?t(locale,'analytics.advanced.na'):count(locale,v.previous);
+ const change=v.changePercent===null?t(locale,'analytics.advanced.changeUnavailable'):(v.changePercent>0?'+':'')+decimal(locale,v.changePercent)+'%';
+ return t(locale,'analytics.advanced.changeLine',{label,current,previous,change});
 }
-
-function changeLine(label: string, value: { current: number | null; previous: number | null; changePercent: number | null }): string {
-  const current = value.current === null ? 'n/a' : String(value.current);
-  const previous = value.previous === null ? 'n/a' : String(value.previous);
-  const change = value.changePercent === null
-    ? 'change unavailable'
-    : (value.changePercent > 0 ? '+' : '') + value.changePercent.toFixed(1) + '%';
-  return label + ': **' + current + '** vs **' + previous + '** (' + change + ')';
+function filterDescription(locale:string,report:AdvancedAnalyticsReport):string {
+ const filters:string[]=[];
+ if(report.filters.departmentId)filters.push(t(locale,'analytics.advanced.filter.department',{value:report.filters.departmentId}));
+ if(report.filters.tagId)filters.push(t(locale,'analytics.advanced.filter.tag',{value:report.filters.tagId}));
+ if(report.filters.priority)filters.push(t(locale,'analytics.advanced.filter.priority',{value:report.filters.priority}));
+ if(report.filters.status)filters.push(t(locale,'analytics.advanced.filter.status',{value:report.filters.status}));
+ return t(locale,'analytics.reportingWindow',{start:utc(locale,report.periodStartAt),end:utc(locale,report.periodEndAt)})+
+ '\n'+t(locale,'analytics.advanced.filters',{filters:filters.length?filters.join(' · '):t(locale,'analytics.advanced.filtersNone')})+
+ '\n'+t(locale,'analytics.advanced.snapshotNote');
 }
-
-function filterDescription(report: AdvancedAnalyticsReport): string {
-  const filters: string[] = [];
-  if (report.filters.departmentId) filters.push('department=' + report.filters.departmentId);
-  if (report.filters.tagId) filters.push('tag=' + report.filters.tagId);
-  if (report.filters.priority) filters.push('priority=' + report.filters.priority);
-  if (report.filters.status) filters.push('status=' + report.filters.status);
-  return '**Window:** ' + utc(report.periodStartAt) + ' to ' + utc(report.periodEndAt) +
-    '\n**Filters:** ' + (filters.length ? filters.join(' · ') : 'none') +
-    '\nCurrent queue status is a live snapshot; time-based totals use persisted events.';
+function overview(report:AdvancedAnalyticsReport,locale:string):EmbedBuilder {
+ return buildAnalyticsEmbed(report.summary,QUERYFIXR_ACCENT_COLOR,locale).setDescription(filterDescription(locale,report)).addFields(
+ {name:t(locale,'analytics.advanced.previousPeriod'),value:[
+ changeLine(locale,t(locale,'analytics.advanced.metric.created'),report.comparisons.ticketsCreated),
+ changeLine(locale,t(locale,'analytics.advanced.metric.firstResolved'),report.comparisons.firstResolvedTickets),
+ changeLine(locale,t(locale,'analytics.advanced.metric.closeActions'),report.comparisons.closeActions),
+ changeLine(locale,t(locale,'analytics.advanced.metric.reopened'),report.comparisons.reopenedTickets),
+ changeLine(locale,t(locale,'analytics.advanced.metric.avgFirstResponse'),report.comparisons.avgFirstResponseMinutes),
+ changeLine(locale,t(locale,'analytics.advanced.metric.avgResolution'),report.comparisons.avgResolutionMinutes),
+ changeLine(locale,t(locale,'analytics.advanced.metric.reopenRate'),report.comparisons.reopenRatePercent)].join('\n'),inline:false},
+ {name:t(locale,'analytics.advanced.sourceCoverage'),value:
+ t(locale,'analytics.advanced.coverage.cohort',{periodTickets:count(locale,report.coverage.periodTickets),createdEvents:count(locale,report.coverage.ticketsWithCreatedEvent)})+'\n'+
+ t(locale,'analytics.advanced.coverage.messages',{events:count(locale,report.coverage.messageEvents),attributed:count(locale,report.coverage.attributedMessageEvents),unknown:count(locale,report.coverage.unknownAuthorMessages)})+'\n'+
+ t(locale,'analytics.advanced.coverage.timestamps',{missing:count(locale,report.coverage.missingTimestampMessages),lifecycle:count(locale,report.coverage.lifecycleEvents)})+'\n'+
+ t(locale,'analytics.advanced.coverage.response',{coverage:report.firstResponseCoveragePercent===null?t(locale,'analytics.advanced.na'):decimal(locale,report.firstResponseCoveragePercent)+'%'}),inline:false});
 }
-
-function overview(report: AdvancedAnalyticsReport): EmbedBuilder {
-  return buildAnalyticsEmbed(report.summary)
-    .setDescription(filterDescription(report))
-    .addFields(
-      {
-        name: 'Previous equal-length period',
-        value: [
-          changeLine('Created', report.comparisons.ticketsCreated),
-          changeLine('First resolved', report.comparisons.firstResolvedTickets),
-          changeLine('Close actions', report.comparisons.closeActions),
-          changeLine('Reopened', report.comparisons.reopenedTickets),
-          changeLine('Average first response (minutes)', report.comparisons.avgFirstResponseMinutes),
-          changeLine('Average first-resolution time (minutes)', report.comparisons.avgResolutionMinutes),
-          changeLine('Reopen rate', report.comparisons.reopenRatePercent),
-        ].join('\n'),
-        inline: false,
-      },
-      {
-        name: 'Source-data coverage',
-        value:
-          'Tickets in cohort **' + count(report.coverage.periodTickets) + '** · Durable creation event **' +
-          count(report.coverage.ticketsWithCreatedEvent) + '**\nMessage events **' +
-          count(report.coverage.messageEvents) + '** · Attributed **' + count(report.coverage.attributedMessageEvents) +
-          '** · Unknown author **' + count(report.coverage.unknownAuthorMessages) + '**\n' +
-          'Missing/invalid timestamp **' + count(report.coverage.missingTimestampMessages) +
-          '** · Lifecycle events **' + count(report.coverage.lifecycleEvents) + '**\n' +
-          'First-response coverage: **' + (report.firstResponseCoveragePercent === null ? 'n/a' : report.firstResponseCoveragePercent.toFixed(1) + '%') + '**',
-        inline: false,
-      },
-    );
+function pageInfo(locale:string,page:number,length:number):string {
+ return t(locale,'analytics.advanced.pageInfo',{page:count(locale,Math.min(Math.max(page,0),Math.max(1,Math.ceil(length/ANALYTICS_PAGE_SIZE))-1)+1),pages:count(locale,Math.max(1,Math.ceil(length/ANALYTICS_PAGE_SIZE))),count:count(locale,length)});
 }
-
-function pageInfo(page: number, length: number): string {
-  const pages = Math.max(1, Math.ceil(length / ANALYTICS_PAGE_SIZE));
-  return 'Page ' + (Math.min(Math.max(page, 0), pages - 1) + 1) + '/' + pages + ' · ' + count(length) + ' rows';
+function departments(report:AdvancedAnalyticsReport,page:number,locale:string):EmbedBuilder {
+ const total=report.departments.length,pages=Math.max(1,Math.ceil(total/ANALYTICS_PAGE_SIZE)),idx=Math.min(Math.max(page,0),pages-1),subset=report.departments.slice(idx*ANALYTICS_PAGE_SIZE,(idx+1)*ANALYTICS_PAGE_SIZE);
+ const embed=new EmbedBuilder().setColor(0x5865f2).setTitle(t(locale,'analytics.advanced.department.title',{period:t(locale,'analytics.period',{days:count(locale,report.periodDays)})})).setDescription(filterDescription(locale,report)+'\n'+pageInfo(locale,idx,total));
+ if(!subset.length)embed.addFields({name:t(locale,'analytics.advanced.department.emptyTitle'),value:t(locale,'analytics.advanced.department.emptyDescription')});
+ else embed.addFields(subset.map(x=>({name:x.departmentName.slice(0,256),value:
+ t(locale,'analytics.advanced.department.createdLine',{created:count(locale,x.ticketsCreated),active:count(locale,x.activeTickets),resolved:count(locale,x.firstResolvedTickets)})+'\n'+
+ t(locale,'analytics.advanced.department.stateLine',{open:count(locale,x.openTickets),claimed:count(locale,x.claimedTickets),pending:count(locale,x.pendingTickets)})+'\n'+
+ t(locale,'analytics.advanced.department.riskLine',{urgent:count(locale,x.urgentOrCriticalTickets),reopened:count(locale,x.reopenedTickets)})+'\n'+
+ t(locale,'analytics.advanced.department.responseLine',{value:formatMinutes(locale,x.avgFirstResponseMinutes),samples:count(locale,x.firstResponseSamples),eligible:count(locale,x.firstResponseEligible)})+'\n'+
+ t(locale,'analytics.advanced.department.resolutionLine',{value:formatMinutes(locale,x.avgResolutionMinutes)}),inline:false})));
+ return embed.setFooter({text:t(locale,'analytics.advanced.department.footer',{pageInfo:pageInfo(locale,idx,total)})});
 }
-
-function departments(report: AdvancedAnalyticsReport, page: number): EmbedBuilder {
-  const total = report.departments.length;
-  const pages = Math.max(1, Math.ceil(total / ANALYTICS_PAGE_SIZE));
-  const index = Math.min(Math.max(page, 0), pages - 1);
-  const subset = report.departments.slice(index * ANALYTICS_PAGE_SIZE, (index + 1) * ANALYTICS_PAGE_SIZE);
-  const embed = new EmbedBuilder().setColor(0x5865f2)
-    .setTitle('🏢 Department Analytics · Last ' + report.periodDays + ' days')
-    .setDescription(filterDescription(report) + '\n' + pageInfo(index, total));
-  if (!subset.length) embed.addFields({ name: 'No department data', value: 'No matching tickets or durable events were found.' });
-  else embed.addFields(subset.map((item) => ({
-    name: item.departmentName.slice(0, 256),
-    value:
-      'Created **' + count(item.ticketsCreated) + '** · Active **' + count(item.activeTickets) +
-      '** · First resolved **' + count(item.firstResolvedTickets) + '**\n' +
-      'Open **' + count(item.openTickets) + '** · Claimed **' + count(item.claimedTickets) +
-      '** · Pending **' + count(item.pendingTickets) + '\n' +
-      'Urgent/critical **' + count(item.urgentOrCriticalTickets) + '** · Reopened **' + count(item.reopenedTickets) + '\n' +
-      'First response **' + formatMinutes(item.avgFirstResponseMinutes) + '** (' +
-      count(item.firstResponseSamples) + '/' + count(item.firstResponseEligible) + ' samples)\n' +
-      'Average first resolution **' + formatMinutes(item.avgResolutionMinutes) + '**',
-    inline: false,
-  })));
-  return embed.setFooter({ text: 'Metrics group tickets using their current department mapping. ' + pageInfo(index, total) });
+function staffView(report:AdvancedAnalyticsReport,page:number,locale:string):EmbedBuilder {
+ const total=report.staff.length,pages=Math.max(1,Math.ceil(total/ANALYTICS_PAGE_SIZE)),idx=Math.min(Math.max(page,0),pages-1),subset=report.staff.slice(idx*ANALYTICS_PAGE_SIZE,(idx+1)*ANALYTICS_PAGE_SIZE);
+ const embed=new EmbedBuilder().setColor(0x5865f2).setTitle(t(locale,'analytics.advanced.staff.title',{period:t(locale,'analytics.period',{days:count(locale,report.periodDays)})})).setDescription(filterDescription(locale,report)+'\n'+t(locale,'analytics.advanced.staff.description'));
+ if(!subset.length)embed.addFields({name:t(locale,'analytics.advanced.staff.emptyTitle'),value:t(locale,'analytics.advanced.staff.emptyDescription')});
+ else embed.addFields(subset.map(x=>({name:t(locale,'analytics.advanced.staff.id',{id:x.staffId}).slice(0,256),value:
+ t(locale,'analytics.advanced.staff.workloadLine',{active:count(locale,x.activeWorkload),claimed:count(locale,x.ticketsClaimed),closed:count(locale,x.ticketsClosed)})+'\n'+
+ t(locale,'analytics.advanced.staff.replyLine',{replies:count(locale,x.staffReplies),responses:count(locale,x.firstResponses),average:formatMinutes(locale,x.avgFirstResponseMinutes)}),inline:false})));
+ return embed.setFooter({text:t(locale,'analytics.advanced.staff.footer',{pageInfo:pageInfo(locale,idx,total)})});
 }
-
-function staffView(report: AdvancedAnalyticsReport, page: number): EmbedBuilder {
-  const total = report.staff.length;
-  const pages = Math.max(1, Math.ceil(total / ANALYTICS_PAGE_SIZE));
-  const index = Math.min(Math.max(page, 0), pages - 1);
-  const subset = report.staff.slice(index * ANALYTICS_PAGE_SIZE, (index + 1) * ANALYTICS_PAGE_SIZE);
-  const embed = new EmbedBuilder().setColor(0x5865f2)
-    .setTitle('👥 Staff Workload · Last ' + report.periodDays + ' days')
-    .setDescription(filterDescription(report) +
-      '\nThis is an operational workload view, **not a staff performance ranking**. Ticket complexity and role coverage differ.');
-  if (!subset.length) embed.addFields({ name: 'No attributable staff activity', value: 'No high-confidence staff claim, close, reply, first-response or active-workload records were found.' });
-  else embed.addFields(subset.map((item) => ({
-    name: ('Staff ID ' + item.staffId).slice(0, 256),
-    value:
-      'Active workload **' + count(item.activeWorkload) + '** · Claimed **' + count(item.ticketsClaimed) +
-      '** · Closed **' + count(item.ticketsClosed) + '**\n' +
-      'Replies **' + count(item.staffReplies) + '** · First responses **' + count(item.firstResponses) +
-      '** · Average first response **' + formatMinutes(item.avgFirstResponseMinutes) + '**',
-    inline: false,
-  })));
-  return embed.setFooter({ text: 'Only explicitly attributed, high-confidence staff actions are included. ' + pageInfo(index, total) });
+function tagsView(report:AdvancedAnalyticsReport,page:number,locale:string):EmbedBuilder {
+ const total=report.tags.length,pages=Math.max(1,Math.ceil(total/ANALYTICS_PAGE_SIZE)),idx=Math.min(Math.max(page,0),pages-1),subset=report.tags.slice(idx*ANALYTICS_PAGE_SIZE,(idx+1)*ANALYTICS_PAGE_SIZE);
+ const embed=new EmbedBuilder().setColor(0x5865f2).setTitle(t(locale,'analytics.advanced.tags.title',{period:t(locale,'analytics.period',{days:count(locale,report.periodDays)})})).setDescription(filterDescription(locale,report)+'\n'+pageInfo(locale,idx,total));
+ if(!subset.length)embed.addFields({name:t(locale,'analytics.advanced.tags.emptyTitle'),value:t(locale,'analytics.advanced.tags.emptyDescription')});
+ else embed.addFields(subset.map(x=>({name:x.tagName.slice(0,256),value:t(locale,'analytics.advanced.tags.metricsLine',{created:count(locale,x.ticketsCreated),active:count(locale,x.activeTickets),resolved:count(locale,x.firstResolvedTickets),urgent:count(locale,x.urgentOrCriticalTickets)}),inline:false})));
+ return embed.setFooter({text:t(locale,'analytics.advanced.tags.footer',{pageInfo:pageInfo(locale,idx,total)})});
 }
-
-function tagsView(report: AdvancedAnalyticsReport, page: number): EmbedBuilder {
-  const total = report.tags.length;
-  const pages = Math.max(1, Math.ceil(total / ANALYTICS_PAGE_SIZE));
-  const index = Math.min(Math.max(page, 0), pages - 1);
-  const subset = report.tags.slice(index * ANALYTICS_PAGE_SIZE, (index + 1) * ANALYTICS_PAGE_SIZE);
-  const embed = new EmbedBuilder().setColor(0x5865f2)
-    .setTitle('🏷️ Tag Analytics · Last ' + report.periodDays + ' days')
-    .setDescription(filterDescription(report) + '\n' + pageInfo(index, total));
-  if (!subset.length) embed.addFields({ name: 'No tag data', value: 'No matching ticket/tag records were found.' });
-  else embed.addFields(subset.map((item) => ({
-    name: item.tagName.slice(0, 256),
-    value: 'Created **' + count(item.ticketsCreated) + '** · Active **' + count(item.activeTickets) +
-      '** · First resolved **' + count(item.firstResolvedTickets) +
-      '** · Active urgent/critical **' + count(item.urgentOrCriticalTickets) + '**',
-    inline: false,
-  })));
-  return embed.setFooter({ text: pageInfo(index, total) + ' · Counts use the persisted tag mapping.' });
+interface TrendBucket{label:string;created:number;resolved:number;}
+function weekStart(day:string):string{const d=new Date(day+'T00:00:00.000Z');d.setUTCDate(d.getUTCDate()-((d.getUTCDay()+6)%7));return d.toISOString().slice(0,10);}
+function makeBuckets(rows:AdvancedAnalyticsReport['daily'],weekly:boolean):TrendBucket[]{
+ if(!weekly)return rows.map(r=>({label:r.day,created:r.ticketsCreated,resolved:r.firstResolvedTickets}));
+ const buckets=new Map<string,TrendBucket>();
+ for(const r of rows){const label=weekStart(r.day),current=buckets.get(label)??{label,created:0,resolved:0};current.created+=r.ticketsCreated;current.resolved+=r.firstResolvedTickets;buckets.set(label,current);}
+ return [...buckets.values()].sort((a,b)=>a.label.localeCompare(b.label));
 }
-
-interface TrendBucket {
-  label: string;
-  created: number;
-  resolved: number;
+function bar(value:number,peak:number):string{const n=peak>0?Math.min(12,Math.round(value/peak*12)):0;return n?'█'.repeat(n):'·';}
+function trendsView(report:AdvancedAnalyticsReport,locale:string):EmbedBuilder{
+ const weekly=report.periodDays>14,buckets=makeBuckets(report.daily,weekly),peak=Math.max(0,...buckets.map(x=>x.created),...buckets.map(x=>x.resolved));
+ const lines=buckets.map(x=>utcDate(locale,x.label)+'  C '+String(x.created).padStart(3,' ')+' '+bar(x.created,peak)+'  R '+String(x.resolved).padStart(3,' ')+' '+bar(x.resolved,peak));
+ const e=new EmbedBuilder().setColor(0x5865f2).setTitle(t(locale,'analytics.advanced.trends.title',{period:t(locale,'analytics.period',{days:count(locale,report.periodDays)})})).setDescription(filterDescription(locale,report)+'\n'+t(locale,weekly?'analytics.advanced.trends.weekly':'analytics.advanced.trends.daily')+'\n'+t(locale,'analytics.advanced.trends.legend')+'\n'+(lines.join('\n')||t(locale,'analytics.advanced.trends.noData'))).setFooter({text:t(locale,'analytics.advanced.trends.footer')});
+ return e.addFields({name:t(locale,'analytics.advanced.previousPeriod'),value:[changeLine(locale,t(locale,'analytics.advanced.metric.created'),report.comparisons.ticketsCreated),changeLine(locale,t(locale,'analytics.advanced.metric.firstResolved'),report.comparisons.firstResolvedTickets),changeLine(locale,t(locale,'analytics.advanced.metric.reopened'),report.comparisons.reopenedTickets)].join('\n')});
 }
-
-function weekStart(day: string): string {
-  const date = new Date(day + 'T00:00:00.000Z');
-  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
-  return date.toISOString().slice(0, 10);
+export function analyticsItemCount(report:AdvancedAnalyticsReport,view:AnalyticsView):number{if(view==='departments')return report.departments.length;if(view==='staff')return report.staff.length;if(view==='tags')return report.tags.length;if(view==='trends')return report.daily.length;return 1;}
+const VIEW_KEYS:Record<AnalyticsView,TranslationKey>={overview:'analytics.advanced.view.overview',departments:'analytics.advanced.view.departments',staff:'analytics.advanced.view.staff',tags:'analytics.advanced.view.tags',trends:'analytics.advanced.view.trends'};
+export function buildAdvancedAnalyticsEmbed(report:AdvancedAnalyticsReport,view:AnalyticsView='overview',page=0,themeColor=QUERYFIXR_ACCENT_COLOR,locale='en-US'):EmbedBuilder{
+ let embed:EmbedBuilder;switch(view){case 'departments':embed=departments(report,page,locale);break;case 'staff':embed=staffView(report,page,locale);break;case 'tags':embed=tagsView(report,page,locale);break;case 'trends':embed=trendsView(report,locale);break;default:embed=overview(report,locale);break;}
+ const label=t(locale,VIEW_KEYS[view]),existing=(embed.toJSON().footer?.text??'').replace(/^QueryFixr • Analytics • /,'').slice(0,300);
+ return applyQueryFixrBranding(embed,label,themeColor).setFooter({text:queryFixrFooter(t(locale,'analytics.advanced.footer.analytics'),existing||t(locale,'analytics.advanced.footer.metrics'))});
 }
-
-function makeBuckets(rows: AdvancedAnalyticsReport['daily'], weekly: boolean): TrendBucket[] {
-  if (!weekly) return rows.map((r) => ({ label: r.day, created: r.ticketsCreated, resolved: r.firstResolvedTickets }));
-  const buckets = new Map<string, TrendBucket>();
-  for (const row of rows) {
-    const label = weekStart(row.day);
-    const current = buckets.get(label) ?? { label, created: 0, resolved: 0 };
-    current.created += row.ticketsCreated;
-    current.resolved += row.firstResolvedTickets;
-    buckets.set(label, current);
-  }
-  return [...buckets.values()].sort((a, b) => a.label.localeCompare(b.label));
-}
-
-function bar(value: number, peak: number): string {
-  const length = peak > 0 ? Math.min(12, Math.round((value / peak) * 12)) : 0;
-  return length ? '█'.repeat(length) : '·';
-}
-
-function trendsView(report: AdvancedAnalyticsReport): EmbedBuilder {
-  const weekly = report.periodDays > 14;
-  const buckets = makeBuckets(report.daily, weekly);
-  const peak = Math.max(0, ...buckets.map((item) => item.created), ...buckets.map((item) => item.resolved));
-  const lines = buckets.map((item) =>
-    item.label + '  C ' + String(item.created).padStart(3, ' ') + ' ' + bar(item.created, peak) +
-    '  R ' + String(item.resolved).padStart(3, ' ') + ' ' + bar(item.resolved, peak),
-  );
-  const embed = new EmbedBuilder().setColor(0x5865f2)
-    .setTitle('📈 Ticket Trends · Last ' + report.periodDays + ' days')
-    .setDescription(filterDescription(report) + '\n' + (weekly ? 'Weekly UTC buckets' : 'Daily UTC buckets') +
-      '\nC = created · R = first resolved\n' + (lines.join('\n') || 'No data'))
-    .setFooter({ text: 'Bars are relative within this view. Observed values only; not a forecast.' });
-  return embed.addFields({
-    name: 'Previous equal-length period',
-    value: [
-      changeLine('Created', report.comparisons.ticketsCreated),
-      changeLine('First resolved', report.comparisons.firstResolvedTickets),
-      changeLine('Reopened', report.comparisons.reopenedTickets),
-    ].join('\n'),
-  });
-}
-
-export function analyticsItemCount(report: AdvancedAnalyticsReport, view: AnalyticsView): number {
-  if (view === 'departments') return report.departments.length;
-  if (view === 'staff') return report.staff.length;
-  if (view === 'tags') return report.tags.length;
-  if (view === 'trends') return report.daily.length;
-  return 1;
-}
-
-export function buildAdvancedAnalyticsEmbed(
-  report: AdvancedAnalyticsReport,
-  view: AnalyticsView = 'overview',
-  page = 0,
-  themeColor = QUERYFIXR_ACCENT_COLOR,
-): EmbedBuilder {
-  let embed: EmbedBuilder;
-  switch (view) {
-    case 'departments': embed = departments(report, page); break;
-    case 'staff': embed = staffView(report, page); break;
-    case 'tags': embed = tagsView(report, page); break;
-    case 'trends': embed = trendsView(report); break;
-    default: embed = overview(report); break;
-  }
-
-  const labels: Record<AnalyticsView, string> = {
-    overview: 'Overview',
-    departments: 'Department Analytics',
-    staff: 'Staff Workload',
-    tags: 'Tag Analytics',
-    trends: 'Ticket Trends',
-  };
-  const existingFooter = (embed.toJSON().footer?.text ?? '')
-    .replace(/^QueryFixr • Analytics • /, '')
-    .slice(0, 300);
-  return applyQueryFixrBranding(embed, labels[view], themeColor)
-    .setFooter({ text: queryFixrFooter('Analytics · ' + labels[view], existingFooter || 'Operational metrics') });
-}
-
-function viewButton(view: AnalyticsView, active: AnalyticsView, period: number): ButtonBuilder {
-  return new ButtonBuilder()
-    .setCustomId('sf:settings:analytics:view:' + view + ':' + period + 'd:0')
-    .setLabel(view === 'overview' ? 'Overview' : view[0]!.toUpperCase() + view.slice(1))
-    .setStyle(view === active ? ButtonStyle.Primary : ButtonStyle.Secondary);
-}
-
-export function buildAdvancedAnalyticsComponents(report: AdvancedAnalyticsReport, view: AnalyticsView, page = 0): ActionRowBuilder<ButtonBuilder>[] {
-  const period = report.periodDays;
-  const pageCount = Math.max(1, Math.ceil(analyticsItemCount(report, view) / ANALYTICS_PAGE_SIZE));
-  const safePage = Math.min(Math.max(page, 0), pageCount - 1);
-  const periodRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId('sf:settings:analytics:view:' + view + ':7d:0').setLabel('7 days').setStyle(period === 7 ? ButtonStyle.Primary : ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('sf:settings:analytics:view:' + view + ':30d:0').setLabel('30 days').setStyle(period === 30 ? ButtonStyle.Primary : ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('sf:settings:analytics:view:' + view + ':90d:0').setLabel('90 days').setStyle(period === 90 ? ButtonStyle.Primary : ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('sf:settings:home').setLabel('Settings Home').setStyle(ButtonStyle.Secondary),
-  );
-  const views = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    viewButton('overview', view, period),
-    viewButton('departments', view, period),
-    viewButton('staff', view, period),
-    viewButton('tags', view, period),
-    viewButton('trends', view, period),
-  );
-  const navigation = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId('sf:settings:analytics:export:' + period + 'd').setLabel('Export CSV').setEmoji('📄').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('sf:settings:analytics:page:' + view + ':' + period + 'd:' + (safePage - 1)).setLabel('Previous').setStyle(ButtonStyle.Secondary).setDisabled(safePage <= 0 || view === 'overview' || view === 'trends'),
-    new ButtonBuilder().setCustomId('sf:settings:analytics:page:' + view + ':' + period + 'd:' + (safePage + 1)).setLabel('Next').setStyle(ButtonStyle.Secondary).setDisabled(safePage >= pageCount - 1 || view === 'overview' || view === 'trends'),
-  );
-  return [periodRow, views, navigation];
+function viewButton(view:AnalyticsView,active:AnalyticsView,period:number,locale:string):ButtonBuilder{return new ButtonBuilder().setCustomId('sf:settings:analytics:view:'+view+':'+period+'d:0').setLabel(t(locale,VIEW_KEYS[view])).setStyle(view===active?ButtonStyle.Primary:ButtonStyle.Secondary);}
+export function buildAdvancedAnalyticsComponents(report:AdvancedAnalyticsReport,view:AnalyticsView,page=0,locale='en-US'):ActionRowBuilder<ButtonBuilder>[] {
+ const period=report.periodDays,pageCount=Math.max(1,Math.ceil(analyticsItemCount(report,view)/ANALYTICS_PAGE_SIZE)),safe=Math.min(Math.max(page,0),pageCount-1);
+ const periods=new ActionRowBuilder<ButtonBuilder>().addComponents(
+ new ButtonBuilder().setCustomId('sf:settings:analytics:view:'+view+':7d:0').setLabel(t(locale,'analytics.advanced.button.days',{days:count(locale,7)})).setStyle(period===7?ButtonStyle.Primary:ButtonStyle.Secondary),
+ new ButtonBuilder().setCustomId('sf:settings:analytics:view:'+view+':30d:0').setLabel(t(locale,'analytics.advanced.button.days',{days:count(locale,30)})).setStyle(period===30?ButtonStyle.Primary:ButtonStyle.Secondary),
+ new ButtonBuilder().setCustomId('sf:settings:analytics:view:'+view+':90d:0').setLabel(t(locale,'analytics.advanced.button.days',{days:count(locale,90)})).setStyle(period===90?ButtonStyle.Primary:ButtonStyle.Secondary),
+ new ButtonBuilder().setCustomId('sf:settings:home').setLabel(t(locale,'analytics.button.settingsHome')).setStyle(ButtonStyle.Secondary));
+ const views=new ActionRowBuilder<ButtonBuilder>().addComponents(viewButton('overview',view,period,locale),viewButton('departments',view,period,locale),viewButton('staff',view,period,locale),viewButton('tags',view,period,locale),viewButton('trends',view,period,locale));
+ const navigation=new ActionRowBuilder<ButtonBuilder>().addComponents(
+ new ButtonBuilder().setCustomId('sf:settings:analytics:export:'+period+'d').setLabel(t(locale,'analytics.advanced.button.export')).setEmoji('📄').setStyle(ButtonStyle.Success),
+ new ButtonBuilder().setCustomId('sf:settings:analytics:page:'+view+':'+period+'d:'+(safe-1)).setLabel(t(locale,'analytics.advanced.button.previous')).setStyle(ButtonStyle.Secondary).setDisabled(safe<=0||view==='overview'||view==='trends'),
+ new ButtonBuilder().setCustomId('sf:settings:analytics:page:'+view+':'+period+'d:'+(safe+1)).setLabel(t(locale,'analytics.advanced.button.next')).setStyle(ButtonStyle.Secondary).setDisabled(safe>=pageCount-1||view==='overview'||view==='trends'));
+ return [periods,views,navigation];
 }

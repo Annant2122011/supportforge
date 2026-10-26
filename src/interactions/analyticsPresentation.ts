@@ -1,127 +1,48 @@
-import {
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  EmbedBuilder,
-} from 'discord.js';
-
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
 import type { GuildAnalyticsSummary } from '../services/analyticsService';
+import { translate, formatLocaleNumber, formatLocaleDate } from '../i18n/translationService';
 import { applyQueryFixrBranding, QUERYFIXR_ACCENT_COLOR, queryFixrFooter } from './brandPresentation';
 
-function utc(value: string): string {
-  return new Date(value).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+function utc(locale:string,value:string):string {
+ const date=new Date(value); if(!Number.isFinite(date.getTime()))throw new RangeError('Cannot format an invalid analytics timestamp.');
+ const d=formatLocaleDate(locale,date,{year:'numeric',month:'2-digit',day:'2-digit',timeZone:'UTC'});
+ const tm=new Intl.DateTimeFormat(locale,{hour:'2-digit',minute:'2-digit',hourCycle:'h23',timeZone:'UTC'}).format(date);
+ return d+' '+tm+' UTC';
 }
-
-function formatMinutes(value: number | null): string {
-  if (value === null) return 'Not enough reliable data yet';
-  if (value < 60) return value.toFixed(1) + ' min';
-  if (value < 60 * 24) {
-    const hours = value / 60;
-    return hours.toFixed(1) + ' hr';
-  }
-  return (value / (60 * 24)).toFixed(1) + ' days';
+function decimal(locale:string,value:number):string{return formatLocaleNumber(locale,value,{minimumFractionDigits:1,maximumFractionDigits:1});}
+function count(locale:string,value:number):string{return formatLocaleNumber(locale,value);}
+function formatMinutes(locale:string,value:number|null):string {
+ if(value===null)return translate(locale,'analytics.notEnoughData');
+ if(value<60)return translate(locale,'analytics.minutes',{value:decimal(locale,value)});
+ if(value<1440)return translate(locale,'analytics.hours',{value:decimal(locale,value/60)});
+ return translate(locale,'analytics.days',{value:decimal(locale,value/(60*24))});
 }
-
-function formatAge(createdAt: string | null, now: string): string {
-  if (!createdAt) return 'No active tickets';
-  const elapsedMinutes = Math.max(
-    0,
-    (Date.parse(now) - Date.parse(createdAt)) / 60_000,
-  );
-  return formatMinutes(Math.round(elapsedMinutes * 10) / 10);
+function formatAge(locale:string,createdAt:string|null,now:string):string {
+ if(!createdAt)return translate(locale,'analytics.noActiveTickets');
+ const elapsed=Math.max(0,(Date.parse(now)-Date.parse(createdAt))/60000);
+ return formatMinutes(locale,Math.round(elapsed*10)/10);
 }
-
-function count(value: number): string {
-  return value.toLocaleString('en-US');
+export function buildAnalyticsEmbed(summary:GuildAnalyticsSummary,themeColor=QUERYFIXR_ACCENT_COLOR,locale='en-US'):EmbedBuilder {
+ const reopenRate=summary.reopenRatePercent===null?translate(locale,'analytics.reopenRateUnavailable'):decimal(locale,summary.reopenRatePercent)+'%';
+ const responseCoverage=summary.firstResponseEligible>0
+ ?translate(locale,'analytics.coverage.recorded',{responded:count(locale,summary.firstResponseSamples),eligible:count(locale,summary.firstResponseEligible)})
+ :translate(locale,'analytics.coverage.none');
+ return applyQueryFixrBranding(new EmbedBuilder(),'Support Analytics',themeColor)
+ .setTitle(translate(locale,'analytics.title',{period:translate(locale,'analytics.period',{days:count(locale,summary.periodDays)})}))
+ .setDescription(translate(locale,'analytics.reportingWindow',{start:utc(locale,summary.periodStartAt),end:utc(locale,summary.periodEndAt)})+
+ '\n'+translate(locale,'analytics.generated',{time:utc(locale,summary.generatedAt)})+'\n'+translate(locale,'analytics.snapshotNote'))
+ .addFields(
+ {name:translate(locale,'analytics.field.activity'),value:translate(locale,'analytics.value.activity',{created:count(locale,summary.ticketsCreated),firstResolved:count(locale,summary.firstResolvedTickets),closeActions:count(locale,summary.closeActions),reopened:count(locale,summary.reopenedTickets)}),inline:true},
+ {name:translate(locale,'analytics.field.queue'),value:translate(locale,'analytics.value.queue',{active:count(locale,summary.activeTickets),open:count(locale,summary.openTickets),claimed:count(locale,summary.claimedTickets),pending:count(locale,summary.pendingTickets),urgent:count(locale,summary.urgentOrCriticalTickets),age:formatAge(locale,summary.oldestActiveCreatedAt,summary.generatedAt)}),inline:true},
+ {name:translate(locale,'analytics.field.firstResponse'),value:translate(locale,'analytics.value.firstResponse',{average:formatMinutes(locale,summary.avgFirstResponseMinutes),coverage:responseCoverage,methodNote:translate(locale,'analytics.methodNote')}),inline:false},
+ {name:translate(locale,'analytics.field.resolution'),value:translate(locale,'analytics.value.resolution',{average:formatMinutes(locale,summary.avgResolutionMinutes),firstResolved:count(locale,summary.firstResolvedTickets),reopenRate,reopened:count(locale,summary.reopenedAfterFirstClose)}),inline:false},
+ {name:translate(locale,'analytics.field.definitions'),value:translate(locale,'analytics.value.definitions'),inline:false})
+ .setFooter({text:queryFixrFooter(translate(locale,'analytics.advanced.footer.analytics'),translate(locale,'analytics.footer.source'))});
 }
-
-function periodLabel(days: number): string {
-  return 'Last ' + days + ' days';
-}
-
-export function buildAnalyticsEmbed(summary: GuildAnalyticsSummary, themeColor = QUERYFIXR_ACCENT_COLOR): EmbedBuilder {
-  const reopenRate = summary.reopenRatePercent === null
-    ? 'Not available (no first closures in this period)'
-    : summary.reopenRatePercent.toFixed(1) + '%';
-  const responseCoverage = summary.firstResponseEligible > 0
-    ? count(summary.firstResponseSamples) + ' responded / ' +
-      count(summary.firstResponseEligible) + ' tickets with a recorded customer message'
-    : 'No customer-message events with a known author type in this ticket cohort';
-
-  return applyQueryFixrBranding(new EmbedBuilder(), 'Support Analytics', themeColor)
-    .setTitle('📊 Ticket Analytics · ' + periodLabel(summary.periodDays))
-    .setDescription(
-      '**Reporting window:** ' + utc(summary.periodStartAt) + ' to ' + utc(summary.periodEndAt) +
-      '\n**Generated:** ' + utc(summary.generatedAt) +
-      '\nThe live queue is a current snapshot. Period totals use persisted ticket and domain-event records.',
-    )
-    .addFields(
-      {
-        name: 'Activity during the period',
-        value:
-          '🎫 Created: **' + count(summary.ticketsCreated) + '**\n' +
-          '✅ First resolved: **' + count(summary.firstResolvedTickets) + '**\n' +
-          '🔒 Close actions: **' + count(summary.closeActions) + '**\n' +
-          '↩️ Tickets reopened: **' + count(summary.reopenedTickets) + '**',
-        inline: true,
-      },
-      {
-        name: 'Current live queue',
-        value:
-          '📥 Active backlog: **' + count(summary.activeTickets) + '**\n' +
-          '🟢 Open / reopened: **' + count(summary.openTickets) + '**\n' +
-          '👤 Claimed: **' + count(summary.claimedTickets) + '**\n' +
-          '⏳ Pending: **' + count(summary.pendingTickets) + '**\n' +
-          '🔴 Urgent / critical: **' + count(summary.urgentOrCriticalTickets) + '**\n' +
-          '⌛ Oldest active ticket age: **' + formatAge(summary.oldestActiveCreatedAt, summary.generatedAt) + '**',
-        inline: true,
-      },
-      {
-        name: 'First response',
-        value:
-          '**Average:** ' + formatMinutes(summary.avgFirstResponseMinutes) + '\n' +
-          '**Coverage:** ' + responseCoverage +
-          '\nMeasured from the first recorded customer message to the first later staff message, for tickets created in this period.',
-        inline: false,
-      },
-      {
-        name: 'Resolution and reopen rate',
-        value:
-          '**Average first-resolution time:** ' + formatMinutes(summary.avgResolutionMinutes) + '\n' +
-          '**Tickets first resolved in period:** ' + count(summary.firstResolvedTickets) + '\n' +
-          '**Reopen rate:** ' + reopenRate + '\n' +
-          '**Reopened after a first closure in this period:** ' + count(summary.reopenedAfterFirstClose),
-        inline: false,
-      },
-      {
-        name: 'Data definitions and coverage',
-        value:
-          'First-resolution time uses the earliest durable ticket.closed event for each ticket. Reopen rate counts those first-closed tickets with a later reopen event before this report window ends. First-response samples require explicit customer/staff message attribution; unknown events are excluded rather than guessed. Historical tickets without durable events may be absent from time-based metrics. SLA compliance and customer satisfaction are not shown until their source data is implemented.',
-        inline: false,
-      },
-    )
-    .setFooter({ text: queryFixrFooter('Analytics', 'PostgreSQL source of truth · Times shown in UTC') });
-}
-
-export function buildAnalyticsPeriodButtons(): ActionRowBuilder<ButtonBuilder>[] {
-  return [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId('sf:settings:analytics:7d')
-        .setLabel('Last 7 days')
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId('sf:settings:analytics:30d')
-        .setLabel('Last 30 days')
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId('sf:settings:analytics:90d')
-        .setLabel('Last 90 days')
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId('sf:settings:home')
-        .setLabel('Settings Home')
-        .setStyle(ButtonStyle.Secondary),
-    ),
-  ];
+export function buildAnalyticsPeriodButtons(locale='en-US'):ActionRowBuilder<ButtonBuilder>[] {
+ return [new ActionRowBuilder<ButtonBuilder>().addComponents(
+ new ButtonBuilder().setCustomId('sf:settings:analytics:7d').setLabel(translate(locale,'analytics.button.period',{days:count(locale,7)})).setStyle(ButtonStyle.Primary),
+ new ButtonBuilder().setCustomId('sf:settings:analytics:30d').setLabel(translate(locale,'analytics.button.period',{days:count(locale,30)})).setStyle(ButtonStyle.Secondary),
+ new ButtonBuilder().setCustomId('sf:settings:analytics:90d').setLabel(translate(locale,'analytics.button.period',{days:count(locale,90)})).setStyle(ButtonStyle.Secondary),
+ new ButtonBuilder().setCustomId('sf:settings:home').setLabel(translate(locale,'analytics.button.settingsHome')).setStyle(ButtonStyle.Secondary))];
 }

@@ -2301,6 +2301,7 @@ export async function handleSettingsInteraction(
     interaction.customId.startsWith('sf:settings:analytics:')
   )) {
     const customId = interaction.customId;
+    const locale = (await getAdvancedSettings(guild.id)).locale;
     let periodKey = '7d';
     let view: AnalyticsView = 'overview';
     let page = 0;
@@ -2327,7 +2328,7 @@ export async function handleSettingsInteraction(
     if (!['7d', '30d', '90d'].includes(periodKey) ||
         !['overview', 'departments', 'staff', 'tags', 'trends'].includes(view) ||
         !Number.isInteger(page) || page < 0 || page > 100) {
-      await reject(interaction, '❌ That analytics view or reporting window is not supported.');
+      await reject(interaction, translate(locale, 'analytics.advanced.unsupportedView'));
       return true;
     }
 
@@ -2342,21 +2343,21 @@ export async function handleSettingsInteraction(
       if (exportCsv) {
         const csv = buildAdvancedAnalyticsCsv(report);
         await interaction.editReply({
-          content: '✅ QueryFixr analytics export is ready. This bounded file contains aggregate operational data only, not message bodies or transcripts.',
+          content: translate(locale, 'analytics.advanced.exportReady'),
           embeds: [],
           components: [],
           files: [new AttachmentBuilder(Buffer.from(csv, 'utf8'), { name: 'queryfixr-analytics-' + period + 'd.csv' })],
         });
       } else {
         await interaction.editReply({
-          embeds: [buildAdvancedAnalyticsEmbed(report, view, page, getThemeColor((await getGuildConfig(guild.id)).theme))],
-          components: buildAdvancedAnalyticsComponents(report, view, page),
+          embeds: [buildAdvancedAnalyticsEmbed(report, view, page, getThemeColor((await getGuildConfig(guild.id)).theme), locale)],
+          components: buildAdvancedAnalyticsComponents(report, view, page, locale),
         });
       }
     } catch (error) {
       console.error('QueryFixr analytics view failed for guild ' + guild.id + ':', error);
       await interaction.editReply({
-        content: '❌ Analytics could not be loaded from the database. Please try again later.',
+        content: translate(locale, 'analytics.advanced.loadFailed'),
         embeds: [],
         components: [],
       }).catch(() => undefined);

@@ -85,6 +85,7 @@ import {
   restoreConfigurationSnapshot,
 } from '../services/configurationHistoryService';
 import { LOCALE_OPTIONS } from '../i18n/localeRegistry';
+import { translate } from '../i18n/translationService';
 import { handleSettingsSlashCommand } from '../interactions/settingsCommandTools';
 import {
   applyTicketFormTemplate,
@@ -2273,6 +2274,7 @@ export async function execute(
 
     if (subcommand === 'analytics' && !group) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const locale = (await getAdvancedSettings(guild.id)).locale;
       const period = parseAnalyticsPeriod(interaction.options.getString('period'));
       const viewValue = interaction.options.getString('view') ?? 'overview';
       const filters = parseAnalyticsFilters({
@@ -2285,15 +2287,15 @@ export async function execute(
       if (viewValue === 'csv') {
         const csv = buildAdvancedAnalyticsCsv(report);
         await interaction.editReply({
-          content: '✅ QueryFixr analytics export is ready. This bounded CSV contains aggregate operational data only; ticket messages and transcripts are never exported.',
+          content: translate(locale, 'analytics.advanced.exportReady'),
           files: [new AttachmentBuilder(Buffer.from(csv, 'utf8'), { name: 'queryfixr-analytics-' + period + 'd.csv' })],
         });
         return;
       }
       const view = viewValue as AnalyticsView;
       await interaction.editReply({
-        embeds: [buildAdvancedAnalyticsEmbed(report, view, 0, getThemeColor((await getGuildConfig(guild.id)).theme))],
-        components: buildAdvancedAnalyticsComponents(report, view, 0),
+        embeds: [buildAdvancedAnalyticsEmbed(report, view, 0, getThemeColor((await getGuildConfig(guild.id)).theme), locale)],
+        components: buildAdvancedAnalyticsComponents(report, view, 0, locale),
       });
       return;
     }
