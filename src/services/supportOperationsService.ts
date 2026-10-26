@@ -6,7 +6,7 @@ import { getPostgresPool } from '../core/persistence/postgresDatabase';
 import { logTicketEvent } from './auditLogService';
 import { getGuildConfig } from './configService';
 import { runTrackedOperationalTask } from './operationalTaskTelemetry';
-import { evaluateSlaTarget, isValidSlaScope, type SlaLifecycleEvent, type SlaTargetResult } from '../core/domain/supportSla';
+import { evaluateSlaTarget, findFirstClaimAt, isValidSlaScope, type SlaLifecycleEvent, type SlaTargetResult } from '../core/domain/supportSla';
 import { normalizeCsatResponse } from '../core/domain/csatPolicy';
 import { getPersistedTicket, getPersistedTicketById } from './ticketPersistenceService';
 
@@ -18,6 +18,7 @@ export interface SupportSlaPolicy {
   departmentId: string;
   priority: SlaPriority;
   firstResponseMinutes: number;
+  claimMinutes: number;
   resolutionMinutes: number;
   pauseWhilePending: boolean;
   warningRatio: number;
@@ -31,6 +32,7 @@ export interface SupportSlaPolicyInput {
   departmentId?: string | null;
   priority?: SlaPriority;
   firstResponseMinutes: number;
+  claimMinutes?: number;
   resolutionMinutes: number;
   pauseWhilePending?: boolean;
   warningRatio?: number;
@@ -44,8 +46,10 @@ export interface SupportSlaEvaluation {
   status: string;
   policy: SupportSlaPolicy | null;
   firstResponseAt: string | null;
+  claimedAt: string | null;
   resolvedAt: string | null;
   firstResponse: SlaTargetResult | null;
+  claim: SlaTargetResult | null;
   resolution: SlaTargetResult | null;
   warning: string | null;
 }
@@ -90,7 +94,7 @@ function boundedMinutes(value: number, field: string): number {
 
 function fromSlaRow(row: QueryResultRow & {
   id: string; guild_id: string; department_id: string; priority: string;
-  first_response_minutes: number; resolution_minutes: number;
+  first_response_minutes: number; claim_minutes: number; resolution_minutes: number;
   pause_while_pending: boolean; warning_ratio: string | number; enabled: boolean;
   version: number; updated_at: Date | string; updated_by: string | null;
 }): SupportSlaPolicy {
@@ -100,6 +104,7 @@ function fromSlaRow(row: QueryResultRow & {
     departmentId: row.department_id,
     priority: row.priority as SlaPriority,
     firstResponseMinutes: Number(row.first_response_minutes),
+    claimMinutes: Number(row.claim_minutes),
     resolutionMinutes: Number(row.resolution_minutes),
     pauseWhilePending: Boolean(row.pause_while_pending),
     warningRatio: Number(row.warning_ratio),
@@ -110,7 +115,7 @@ function fromSlaRow(row: QueryResultRow & {
   };
 }
 
-const SLA_SELECT = 'SELECT id,guild_id,department_id,priority,first_response_minutes,resolution_minutes,' +
+const SLA_SELECT = 'SELECT id,guild_id,department_id,priority,first_response_minutes,claim_minutes,resolution_minutes,' +
   'pause_while_pending,warning_ratio,enabled,version,updated_at,updated_by FROM support_sla_policies ';
 
 export async function listSupportSlaPolicies(guildId: string): Promise<SupportSlaPolicy[]> {
@@ -129,6 +134,7 @@ export async function saveSupportSlaPolicy(
     throw new Error('Choose a valid department ID and priority. Use * for all departments or priorities.');
   }
   const firstResponseMinutes = boundedMinutes(input.firstResponseMinutes, 'First-response target');
+  const claimMinutes = boundedMinutes(input.claimMinutes ?? 60, 'Claim target');
   const resolutionMinutes = boundedMinutes(input.resolutionMinutes, 'Resolution target');
   if (resolutionMinutes < firstResponseMinutes) {
     throw new Error('The resolution target must be greater than or equal to the first-response target.');
@@ -140,15 +146,15 @@ export async function saveSupportSlaPolicy(
   const pool = getPostgresPool();
   const result = await pool.query(
     'INSERT INTO support_sla_policies ' +
-      '(id,guild_id,department_id,priority,first_response_minutes,resolution_minutes,pause_while_pending,warning_ratio,enabled,version,updated_by,created_at,updated_at) ' +
-      'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,1,$10,NOW(),NOW()) ' +
+      '(id,guild_id,department_id,priority,first_response_minutes,claim_minutes,resolution_minutes,pause_while_pending,warning_ratio,enabled,version,updated_by,created_at,updated_at) ' +
+      'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,$11,NOW(),NOW()) ' +
       'ON CONFLICT (guild_id,department_id,priority) DO UPDATE SET ' +
-      'first_response_minutes=EXCLUDED.first_response_minutes,resolution_minutes=EXCLUDED.resolution_minutes,' +
+      'first_response_minutes=EXCLUDED.first_response_minutes,claim_minutes=EXCLUDED.claim_minutes,resolution_minutes=EXCLUDED.resolution_minutes,' +
       'pause_while_pending=EXCLUDED.pause_while_pending,warning_ratio=EXCLUDED.warning_ratio,enabled=EXCLUDED.enabled,' +
       'version=support_sla_policies.version+1,updated_by=EXCLUDED.updated_by,updated_at=NOW() ' +
-      'RETURNING id,guild_id,department_id,priority,first_response_minutes,resolution_minutes,pause_while_pending,warning_ratio,enabled,version,updated_at,updated_by',
+      'RETURNING id,guild_id,department_id,priority,first_response_minutes,claim_minutes,resolution_minutes,pause_while_pending,warning_ratio,enabled,version,updated_at,updated_by',
     [
-      randomUUID(), guildId, departmentId, priority, firstResponseMinutes, resolutionMinutes,
+      randomUUID(), guildId, departmentId, priority, firstResponseMinutes, claimMinutes, resolutionMinutes,
       input.pauseWhilePending ?? true, warningRatio, input.enabled ?? true, actorId,
     ],
   );
@@ -198,8 +204,10 @@ export async function evaluateTicketSla(
       status: ticket.status,
       policy: null,
       firstResponseAt: null,
+      claimedAt: null,
       resolvedAt: null,
       firstResponse: null,
+      claim: null,
       resolution: null,
       warning: 'No enabled SLA policy matches this ticket. Add a guild-wide or more specific policy.',
     };
@@ -223,6 +231,7 @@ export async function evaluateTicketSla(
     payload: row.payload ?? {},
   }));
   const firstResponseAt = toIso(firstResponseResult.rows[0]?.first_response_at);
+  const claimedAt = findFirstClaimAt(events, ticket.createdAt);
   const reopenedEvents = events.filter((event) => event.type === 'ticket.reopened' || event.payload?.to === 'reopened');
   const latestReopen = reopenedEvents[reopenedEvents.length - 1]?.occurredAt;
   const resolutionStartedAt = latestReopen ?? ticket.createdAt;
@@ -243,6 +252,17 @@ export async function evaluateTicketSla(
     pauseWhilePending: policy.pauseWhilePending,
     events,
   });
+  const claim = evaluateSlaTarget({
+    clockKind: 'claim',
+    startedAt: ticket.createdAt,
+    observedAt: now,
+    completedAt: claimedAt,
+    currentStatus: ticket.status,
+    targetMinutes: policy.claimMinutes,
+    warningRatio: policy.warningRatio,
+    pauseWhilePending: policy.pauseWhilePending,
+    events,
+  });
   const resolution = evaluateSlaTarget({
     clockKind: 'resolution',
     startedAt: ticket.createdAt,
@@ -257,13 +277,15 @@ export async function evaluateTicketSla(
 
   const warning = firstResponse.progress === 'breached'
     ? 'First-response SLA is breached.'
-    : resolution.progress === 'breached'
-      ? 'Resolution SLA is breached.'
-      : firstResponse.progress === 'warning' || resolution.progress === 'warning'
-        ? 'An SLA target is approaching its warning threshold.'
-        : firstResponse.progress === 'paused' && resolution.progress === 'paused'
-          ? 'SLA clocks are paused while the ticket is pending.'
-          : null;
+    : claim.progress === 'breached'
+      ? 'Claim SLA is breached.'
+      : resolution.progress === 'breached'
+        ? 'Resolution SLA is breached.'
+        : firstResponse.progress === 'warning' || claim.progress === 'warning' || resolution.progress === 'warning'
+          ? 'An SLA target is approaching its warning threshold.'
+          : firstResponse.progress === 'paused' && claim.progress === 'paused' && resolution.progress === 'paused'
+            ? 'SLA clocks are paused while the ticket is pending.'
+            : null;
 
   return {
     ticketId: ticket.id,
@@ -272,8 +294,10 @@ export async function evaluateTicketSla(
     status: ticket.status,
     policy,
     firstResponseAt,
+    claimedAt,
     resolvedAt,
     firstResponse,
+    claim,
     resolution,
     warning,
   };
@@ -353,14 +377,15 @@ const slaSweepCursorByGuild = new Map<string, string>();
 async function persistSlaAlert(
   guildId: string,
   ticket: SupportSlaEvaluation,
-  targetType: 'first_response' | 'resolution',
+  targetType: 'first_response' | 'claim' | 'resolution',
   result: SlaTargetResult,
 ): Promise<boolean> {
   if (!ticket.policy || (result.progress !== 'warning' && result.progress !== 'breached')) return false;
   const policy = ticket.policy;
   const cycleStartedAt = result.startedAt;
+  const targetLabel = targetType === 'first_response' ? 'First-response' : targetType === 'claim' ? 'Claim' : 'Resolution';
   const detail =
-    (targetType === 'first_response' ? 'First-response' : 'Resolution') + ' SLA ' + result.progress +
+    targetLabel + ' SLA ' + result.progress +
     ' for ticket ' + (ticket.ticketNumber ?? ticket.ticketId) + '; elapsed=' + result.elapsedMinutes +
     'm; target=' + result.targetMinutes + 'm; paused=' + result.pausedMinutes + 'm; policy=' + policy.id +
     '; policyVersion=' + policy.version + '.';
@@ -409,9 +434,10 @@ export async function sweepSupportSlaAlerts(client: Client): Promise<number> {
       for (const row of active.rows) {
         try {
           const evaluation = await evaluateTicketSla(guild.id, row.id);
-          if (!evaluation.policy || !evaluation.firstResponse || !evaluation.resolution) continue;
-          const candidates: Array<{ type: 'first_response' | 'resolution'; result: SlaTargetResult }> = [
+          if (!evaluation.policy || !evaluation.firstResponse || !evaluation.claim || !evaluation.resolution) continue;
+          const candidates: Array<{ type: 'first_response' | 'claim' | 'resolution'; result: SlaTargetResult }> = [
             { type: 'first_response', result: evaluation.firstResponse },
+            { type: 'claim', result: evaluation.claim },
             { type: 'resolution', result: evaluation.resolution },
           ];
           for (const candidate of candidates) {
