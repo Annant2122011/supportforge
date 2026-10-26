@@ -14,7 +14,7 @@ export interface KnowledgeSearchScore {
 
 export function normalizeKnowledgeText(value: string): string {
   return value.normalize('NFKC').toLocaleLowerCase('en-US')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ')
     .trim()
     .replace(/\s+/g, ' ');
 }
