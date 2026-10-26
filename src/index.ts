@@ -96,7 +96,7 @@ async function initializeAndLogin(): Promise<void> {
     });
   } catch (error) {
     throw new Error(
-      'ResolvX durable database initialization failed. The bot will not start with unverified persistence.',
+      'QueryFixr durable database initialization failed. The bot will not start with unverified persistence.',
       { cause: error },
     );
   }
@@ -157,7 +157,7 @@ let stopOutboxProcessor: (() => void) | undefined;
 
 client.once('clientReady', (readyClient) => {
   console.log(
-    `✅ ResolvX online as ${readyClient.user.tag}`,
+    `✅ QueryFixr online as ${readyClient.user.tag}`,
   );
   if (!stopOutboxProcessor) {
     stopOutboxProcessor = startOutboxProcessor(
@@ -199,17 +199,17 @@ client.once('clientReady', (readyClient) => {
           Object.keys(config.departments ?? {}).length > 0
         );
         if (!previouslyConfigured) {
-          recordOperationalTaskSkipped('startup-reconciliation', guild.id, 'Guild has no previously configured ResolvX setup');
+          recordOperationalTaskSkipped('startup-reconciliation', guild.id, 'Guild has no previously configured QueryFixr setup');
           continue;
         }
 
         const result = await runTrackedOperationalTask('startup-reconciliation', guild.id, () => runSupportForgeRepair(guild));
         console.info(
-          '✅ ResolvX startup reconciliation completed for guild ' + guild.id +
+          '✅ QueryFixr startup reconciliation completed for guild ' + guild.id +
           '; recovered ' + result.recoveredTickets + ' ticket record(s).',
         );
       } catch (error) {
-        console.warn('⚠️ ResolvX startup reconciliation failed for guild ' + guild.id + '; the next repair/startup can retry:', error);
+        console.warn('⚠️ QueryFixr startup reconciliation failed for guild ' + guild.id + '; the next repair/startup can retry:', error);
       }
     }
   })();
@@ -302,7 +302,7 @@ client.once('clientReady', (readyClient) => {
           recordOperationalTaskFailed('developer-audit-reconciliation', guild.id, new Error('Missing managed parent category'));
           console.warn(
             '⚠️ Developer Audit repair skipped for guild ' + guild.id +
-            ': no valid ResolvX parent category was found. Run /supportforge setup to recreate it.',
+            ': no valid QueryFixr parent category was found. Run /supportforge setup to recreate it.',
           );
         }
       } catch (error) {
@@ -340,7 +340,7 @@ client.on('channelCreate', async (channel) => {
   ) {
     void ensureDefaultChannelPurpose(guildChannel).catch((error) => {
       console.warn(
-        `⚠️ Could not add ResolvX purpose message to ${guildChannel.id}:`,
+        `⚠️ Could not add QueryFixr purpose message to ${guildChannel.id}:`,
         error,
       );
     });
@@ -357,8 +357,8 @@ client.on('channelCreate', async (channel) => {
       ? 'CATEGORY_CREATED'
       : 'CHANNEL_CREATED',
     guildChannel.type === ChannelType.GuildCategory
-      ? `Created ResolvX category ${guildChannel.name} (${guildChannel.id}).`
-      : `Created ResolvX-managed channel ${guildChannel.name} (${guildChannel.id}). Ticket channel: ${createdTicketChannel ? 'yes' : 'no'}.`,
+      ? `Created QueryFixr category ${guildChannel.name} (${guildChannel.id}).`
+      : `Created QueryFixr-managed channel ${guildChannel.name} (${guildChannel.id}). Ticket channel: ${createdTicketChannel ? 'yes' : 'no'}.`,
     AuditLogEvent.ChannelCreate,
   );
 });
@@ -453,7 +453,7 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
   );
 
   /*
-   * Topic metadata is useful to ResolvX but not useful to users. Store
+   * Topic metadata is useful to QueryFixr but not useful to users. Store
    * it as an internal audit event while keeping it out of visible reports.
    */
   if (topicChanged) {
@@ -461,7 +461,7 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
       newGuildChannel.guild,
       newGuildChannel,
       'CHANNEL_TOPIC_CHANGED',
-      'ResolvX internal channel metadata changed.',
+      'QueryFixr internal channel metadata changed.',
       AuditLogEvent.ChannelUpdate,
     );
   }
@@ -554,7 +554,7 @@ client.on('channelDelete', async (channel) => {
 
       if (voiceChannel) {
         await voiceChannel.delete(
-          'ResolvX cleanup after ticket deletion',
+          'QueryFixr cleanup after ticket deletion',
         ).catch((error) => {
           console.warn(
             `⚠️ Could not delete orphaned ticket voice channel ${voiceChannelId}:`,
@@ -576,8 +576,8 @@ client.on('channelDelete', async (channel) => {
       ? 'CATEGORY_DELETED'
       : 'CHANNEL_DELETED',
     guildChannel.type === ChannelType.GuildCategory
-      ? `Deleted ResolvX category ${guildChannel.name} (${guildChannel.id}).`
-      : `Deleted ResolvX-managed channel ${guildChannel.name} (${guildChannel.id}). Ticket channel: ${
+      ? `Deleted QueryFixr category ${guildChannel.name} (${guildChannel.id}).`
+      : `Deleted QueryFixr-managed channel ${guildChannel.name} (${guildChannel.id}). Ticket channel: ${
           guildChannel.type === ChannelType.GuildText &&
           isTicketTopic(guildChannel.topic ?? '')
             ? 'yes'
@@ -589,7 +589,7 @@ client.on('channelDelete', async (channel) => {
   /*
    * Settings is the recovery hub. If somebody deletes it manually while the
    * main Support Forge category still exists, recreate it immediately.
-   * If the entire ResolvX structure was deleted, /supportforge setup
+   * If the entire QueryFixr structure was deleted, /supportforge setup
    * remains the explicit recovery path.
    */
   if (deletedWasSettings && !isFactoryResetInProgress(guildChannel.guild.id)) {
@@ -605,7 +605,7 @@ client.on('channelDelete', async (channel) => {
           parent.id,
         ).catch((error) => {
           console.warn(
-            `⚠️ Automatic ResolvX Settings recovery failed for ${guildChannel.guild.id}:`,
+            `⚠️ Automatic QueryFixr Settings recovery failed for ${guildChannel.guild.id}:`,
             error,
           );
         });
@@ -625,7 +625,7 @@ client.on('roleCreate', async (role) => {
     role.guild,
     role,
     'ROLE_CREATED',
-    `Created ResolvX-managed role ${role.name} (${role.id}).`,
+    `Created QueryFixr-managed role ${role.name} (${role.id}).`,
     AuditLogEvent.RoleCreate,
   );
 });
@@ -682,7 +682,7 @@ client.on('roleDelete', async (role) => {
     role.guild,
     role,
     'ROLE_DELETED',
-    `Deleted ResolvX-managed role ${role.name} (${role.id}).`,
+    `Deleted QueryFixr-managed role ${role.name} (${role.id}).`,
     AuditLogEvent.RoleDelete,
   );
 });
@@ -706,8 +706,10 @@ client.on('messageDelete', (message) => {
   if (message.channel.type !== ChannelType.GuildText || message.author?.id !== client.user?.id) return;
 
   const purposeWasDeleted = message.embeds.some((embed) =>
-    ((embed.title === '📝 ResolvX Channel Purpose' &&
-      embed.footer?.text === 'ResolvX • Channel Purpose') ||
+    ((embed.title === '📝 QueryFixr Channel Purpose' &&
+      embed.footer?.text === 'QueryFixr • Channel Purpose') ||
+      (embed.title === '📝 ResolvX Channel Purpose' && embed.footer?.text === 'ResolvX • Channel Purpose') ||
+      (embed.title === '📝 ResolveX Channel Purpose' && embed.footer?.text === 'ResolveX • Channel Purpose') ||
       (embed.title === '📝 SupportForge Channel Purpose' &&
       embed.footer?.text === 'SupportForge • Channel Purpose')),
   );
@@ -920,7 +922,7 @@ client.on('messageCreate', async (message) => {
           allowedMentions: { parse: [] },
           embeds: [
             new EmbedBuilder()
-              .setTitle('🤖 ResolvX • Message Preserved')
+              .setTitle('🤖 QueryFixr • Message Preserved')
               .setDescription(description)
               .setFooter({ text: 'Read-only reproduction of the exact text you attempted to send.' })
               .setTimestamp(),
@@ -986,7 +988,7 @@ client.on('messageCreate', async (message) => {
       occurredAt,
     ).catch((error) => {
       console.error(
-        'ResolvX could not persist ticket message activity for ' + message.channel.id + ':',
+        'QueryFixr could not persist ticket message activity for ' + message.channel.id + ':',
         error,
       );
     });
@@ -1077,11 +1079,11 @@ client.on(
       try {
         if (interaction.deferred || interaction.replied) {
           await interaction.editReply({
-            content: '❌ ResolvX encountered an unexpected error while processing this action.',
+            content: '❌ QueryFixr encountered an unexpected error while processing this action.',
           });
         } else {
           await interaction.reply({
-            content: '❌ ResolvX encountered an unexpected error while processing this action.',
+            content: '❌ QueryFixr encountered an unexpected error while processing this action.',
             flags: MessageFlags.Ephemeral,
           });
         }
@@ -1096,6 +1098,6 @@ client.on(
 );
 
 void initializeAndLogin().catch((error) => {
-  console.error('❌ ResolvX startup failed:', error);
+  console.error('❌ QueryFixr startup failed:', error);
   process.exitCode = 1;
 });
