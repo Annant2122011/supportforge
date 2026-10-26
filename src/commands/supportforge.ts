@@ -2284,7 +2284,7 @@ export async function execute(
       }
       const view = viewValue as AnalyticsView;
       await interaction.editReply({
-        embeds: [buildAdvancedAnalyticsEmbed(report, view)],
+        embeds: [buildAdvancedAnalyticsEmbed(report, view, 0, getThemeColor((await getGuildConfig(guild.id)).theme))],
         components: buildAdvancedAnalyticsComponents(report, view, 0),
       });
       return;
