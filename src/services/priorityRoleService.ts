@@ -33,7 +33,7 @@ export async function enforcePriorityRoleHierarchy(guild: Guild): Promise<void> 
 
   const botHighestRole = botMember?.roles.highest;
   if (!botHighestRole) {
-    console.warn('⚠️ ResolvX could not determine its highest role; priority role ordering was skipped.');
+    console.warn('⚠️ QueryFixr could not determine its highest role; priority role ordering was skipped.');
     return;
   }
 
@@ -51,7 +51,7 @@ export async function enforcePriorityRoleHierarchy(guild: Guild): Promise<void> 
 
   if (lowestTargetPosition < 1) {
     console.warn(
-      '⚠️ Not enough manageable role positions below the ResolvX bot role; priority role ordering was skipped.',
+      '⚠️ Not enough manageable role positions below the QueryFixr bot role; priority role ordering was skipped.',
     );
     return;
   }
@@ -66,7 +66,7 @@ export async function enforcePriorityRoleHierarchy(guild: Guild): Promise<void> 
     await guild.roles.fetch();
   } catch (error) {
     console.warn(
-      '⚠️ Could not reorder ResolvX priority roles. Role creation/deletion will continue normally:',
+      '⚠️ Could not reorder QueryFixr priority roles. Role creation/deletion will continue normally:',
       error,
     );
   }
