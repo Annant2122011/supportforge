@@ -33,7 +33,7 @@ import { buildRecoveryPreviewSummary, type RecoveryPreviewSummary, type Recovery
 
 const ARCHIVE_PAGE_SIZE = 100;
 const DEFAULT_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
-const RECOVERY_FOOTER_PREFIX = 'ResolvX Recovery Archive';
+const RECOVERY_FOOTER_PREFIX = 'QueryFixr Recovery Archive';
 
 interface ChannelArchiveRow extends QueryResultRow {
   ticket_id: string;
@@ -281,7 +281,7 @@ async function archiveAttachment(
 
   try {
     const response = await fetch(attachment.url, {
-      headers: { 'User-Agent': 'ResolvX-Ticket-Archive/1.0' },
+      headers: { 'User-Agent': 'QueryFixr-Ticket-Archive/1.0' },
       signal: AbortSignal.timeout(15_000),
       redirect: 'error',
     });
@@ -305,7 +305,7 @@ async function archiveAttachment(
       'UPDATE ticket_message_archive_attachments SET archive_status=$2, archive_error=$3, updated_at=NOW() WHERE attachment_id=$1',
       [attachment.id, 'failed', detail],
     );
-    console.warn('ResolvX could not archive attachment ' + attachment.id + ': ' + detail);
+    console.warn('QueryFixr could not archive attachment ' + attachment.id + ': ' + detail);
   }
 }
 
@@ -448,7 +448,7 @@ export async function startTicketArchiveBackfill(client: { guilds: { cache: Map<
     try {
       await runTrackedOperationalTask('ticket-archive-backfill', null, () => backfillTicketArchiveBatch(client));
     } catch (error) {
-      console.warn('ResolvX ticket archive backfill will retry:', error instanceof Error ? error.message : 'unknown error');
+      console.warn('QueryFixr ticket archive backfill will retry:', error instanceof Error ? error.message : 'unknown error');
     } finally {
       running = false;
     }
@@ -1034,9 +1034,9 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
         const customId = String(component.custom_id ?? component.customId ?? '');
         return customId.startsWith('ticket:');
       });
-    }) && archivedEmbeds.some((entry) => /(?:ResolvX|SupportForge) Ticket #/.test(String((entry as Record<string, unknown>).title ?? '')));
+    }) && archivedEmbeds.some((entry) => /(?:QueryFixr|SupportForge) Ticket #/.test(String((entry as Record<string, unknown>).title ?? '')));
     if (isPanel || (botId && archived.author_id === botId && archivedComponents.length > 0 && archivedEmbeds.length > 0 &&
-      archivedEmbeds.some((entry) => /(?:ResolvX|SupportForge) Ticket #/.test(String((entry as Record<string, unknown>).title ?? ''))))) {
+      archivedEmbeds.some((entry) => /(?:QueryFixr|SupportForge) Ticket #/.test(String((entry as Record<string, unknown>).title ?? ''))))) {
       continue;
     }
 
@@ -1057,7 +1057,7 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
         .setColor(color)
         .setTitle(('Recovered message • ' + author).slice(0, 256))
         .setDescription(
-          'This content was reposted by ResolvX from its durable archive. It is not an original Discord message authored by the user.\n\n' +
+          'This content was reposted by QueryFixr from its durable archive. It is not an original Discord message authored by the user.\n\n' +
           '**Original author:** ' + author + ' (user ID: ' + archived.author_id + ')\n' +
           '**Original channel ID:** ' + archived.original_channel_id + '\n' +
           '**Original message ID:** ' + archived.message_id + '\n' +
@@ -1158,7 +1158,7 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
       restored += 1;
     } catch (error) {
       failed += 1;
-      console.warn('ResolvX could not replay archived message ' + archived.message_id + ':', error instanceof Error ? error.message : 'unknown error');
+      console.warn('QueryFixr could not replay archived message ' + archived.message_id + ':', error instanceof Error ? error.message : 'unknown error');
       // Fail fast: don't push an uncertain partial replay out of the recent-history retry window.
       return { restored, failed };
     }
@@ -1276,7 +1276,7 @@ async function restoreArchivedTicketUnlocked(
       position: snapshot?.position,
       nsfw: snapshot?.nsfw ?? false,
       rateLimitPerUser: snapshot?.rate_limit_per_user ?? 0,
-      reason: 'ResolvX ticket recovery; original channel ID ' + recoveryEvent.original_channel_id,
+      reason: 'QueryFixr ticket recovery; original channel ID ' + recoveryEvent.original_channel_id,
     });
     await pool.query(
       "UPDATE ticket_recovery_events SET status='restoring', replacement_channel_id=$2, updated_at=NOW(), resolved_at=NULL WHERE id=$1",
