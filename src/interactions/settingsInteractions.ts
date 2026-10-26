@@ -639,6 +639,7 @@ const SETTINGS_LAYOUT_LABELS: Record<SettingsDashboardButtonKey, string> = {
   tags: 'Tags / Departments',
   usecases: 'Use Cases',
   reports: 'Safety & Reports',
+  analytics: 'Analytics',
   retention: 'Retention',
   appearance: 'Public Panel Appearance',
   storage: 'Storage',
