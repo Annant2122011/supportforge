@@ -136,6 +136,7 @@ import { requestGitHubDeployment } from '../services/updateService';
 import { parseAnalyticsPeriod } from '../services/analyticsService';
 import { getAdvancedAnalyticsReport, buildAdvancedAnalyticsCsv, parseAnalyticsFilters } from '../services/advancedAnalyticsService';
 import { buildAdvancedAnalyticsEmbed, buildAdvancedAnalyticsComponents, type AnalyticsView } from '../interactions/advancedAnalyticsPresentation';
+import { applyQueryFixrBranding } from '../interactions/brandPresentation';
 
 import {
   ensureSettingsChannel,
@@ -385,8 +386,7 @@ export async function buildPanelEmbed(
         : '')
     : 'No ticket departments configured.';
 
-  return new EmbedBuilder()
-    .setColor(getThemeColor(config.theme))
+  return applyQueryFixrBranding(new EmbedBuilder(), 'Support Center', getThemeColor(config.theme))
     .setTitle(settings.appearance.panelTitle)
     .setDescription(
       `Welcome to **${guild.name}** support.\n\n` +
