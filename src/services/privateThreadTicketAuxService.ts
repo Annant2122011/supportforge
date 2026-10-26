@@ -35,7 +35,7 @@ import { projectDurableTicketTopic } from './ticketTopicProjectionService';
 import { buildPrivateThreadTicketComponents, refreshPrivateThreadPanel } from './privateThreadTicketService';
 import { logTicketEvent } from './auditLogService';
 import { archiveTicketChannelSnapshot, archiveTicketMessage, beginTicketButtonDeletion, cancelTicketButtonDeletion } from './ticketArchiveService';
-import { applyQueryFixrBranding, QUERYFIXR_ACCENT_COLOR, queryFixrFooter } from '../interactions/brandPresentation';
+import { applyQueryFixrBranding, queryFixrFooter } from '../interactions/brandPresentation';
 import { getThemeColor } from './uiThemeService';
 
 type AuxInteraction = ButtonInteraction | ChatInputCommandInteraction | StringSelectMenuInteraction | UserSelectMenuInteraction | ModalSubmitInteraction;
