@@ -319,7 +319,12 @@ export function buildSettingsDashboardEmbed(
 
   return applyQueryFixrBranding(new EmbedBuilder(), 'Support Control Center', getThemeColor(theme))
     .setTitle(
-      !settings.settingsDashboard.title || settings.settingsDashboard.title === SETTINGS_TITLE
+      !settings.settingsDashboard.title || [
+        SETTINGS_TITLE,
+        '⚙️ ResolvX Settings',
+        '⚙️ ResolveX Settings',
+        '⚙️ SupportForge Settings',
+      ].includes(settings.settingsDashboard.title)
         ? '⚙️ ' + translate(settings.locale, 'settings.title')
         : settings.settingsDashboard.title,
     )
