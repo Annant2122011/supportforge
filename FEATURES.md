@@ -1493,7 +1493,7 @@ This is not required for initial Discord product-market validation.
 
 ## F-042 — Staff Performance Analytics
 
-**Status:** `PARTIAL`  
+**Status:** `PARTIAL (operational workload metrics)`  
 **Priority:** `P2`
 
 Potential metrics:
@@ -1515,7 +1515,7 @@ Metrics should be treated as operational signals, not as simplistic rankings. A 
 
 ## F-043 — Department Analytics
 
-**Status:** `PARTIAL`  
+**Status:** `PARTIAL (operational breakdowns)`  
 **Priority:** `P2`
 
 Possible reports:
@@ -1533,13 +1533,13 @@ Possible reports:
 
 ### Stage K implementation checkpoint
 
-The initial guild-level operational reporting foundation is being implemented in Stage K Part 1. It covers ticket volume, current backlog, urgency, first-response sample coverage, first-resolution time and reopening signals from durable PostgreSQL ticket/event records. This does not yet complete the full staff/departments analytics roadmap above: department and staff breakdowns, trend comparisons, export, authoritative SLA compliance and durable CSAT reporting remain in Stage K Part 2 or dependent stages. See [Stage K Part 1 architecture and metric definitions](docs/stage-k-part-1-architecture.md).
+Stage K Parts 1 and 2 implement a durable PostgreSQL guild overview, department and tag breakdowns, high-confidence staff workload metrics, daily/weekly ticket trends, equal-period comparisons, source-event coverage diagnostics, validated filters and bounded formula-neutralized CSV export. SLA compliance and CSAT remain unavailable until complete authoritative SLA event history and durable customer ratings exist. See [Part 1 architecture](docs/stage-k-part-1-architecture.md) and [Part 2 architecture](docs/stage-k-part-2-architecture.md).
 
 ---
 
 ## F-044 — Trend Analytics
 
-**Status:** `FUTURE`  
+**Status:** `PARTIAL (observed ticket trends)`  
 **Priority:** `P3`
 
 Identify recurring operational issues such as:
