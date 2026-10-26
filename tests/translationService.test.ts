@@ -35,8 +35,9 @@ test('canonical English catalog contains non-empty copy for every registered key
 });
 
 test('partial translations fall back to English on a key-by-key basis', () => {
-  const english = translate('en-US', 'ticket.intake.outsideHours', { nextOpening: '09:00 UTC' });
-  const bengaliFallback = translate('bn-IN', 'ticket.intake.outsideHours', { nextOpening: '09:00 UTC' });
+  const params = { timezone: 'UTC', nextOpening: 'Next opening: 09:00 UTC.' };
+  const english = translate('en-US', 'ticket.intake.outsideHours', params);
+  const bengaliFallback = translate('bn-IN', 'ticket.intake.outsideHours', params);
   assert.equal(bengaliFallback, english);
   assert.equal(translate('unknown-locale', 'ticket.created.title', { ticketNumber: 42 }), 'Ticket #42 created');
 });
