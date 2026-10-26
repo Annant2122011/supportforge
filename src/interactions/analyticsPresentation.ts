@@ -6,6 +6,7 @@ import {
 } from 'discord.js';
 
 import type { GuildAnalyticsSummary } from '../services/analyticsService';
+import { applyQueryFixrBranding, QUERYFIXR_ACCENT_COLOR, queryFixrFooter } from './brandPresentation';
 
 function utc(value: string): string {
   return new Date(value).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
@@ -38,7 +39,7 @@ function periodLabel(days: number): string {
   return 'Last ' + days + ' days';
 }
 
-export function buildAnalyticsEmbed(summary: GuildAnalyticsSummary): EmbedBuilder {
+export function buildAnalyticsEmbed(summary: GuildAnalyticsSummary, themeColor = QUERYFIXR_ACCENT_COLOR): EmbedBuilder {
   const reopenRate = summary.reopenRatePercent === null
     ? 'Not available (no first closures in this period)'
     : summary.reopenRatePercent.toFixed(1) + '%';
@@ -47,8 +48,7 @@ export function buildAnalyticsEmbed(summary: GuildAnalyticsSummary): EmbedBuilde
       count(summary.firstResponseEligible) + ' tickets with a recorded customer message'
     : 'No customer-message events with a known author type in this ticket cohort';
 
-  return new EmbedBuilder()
-    .setColor(0x5865f2)
+  return applyQueryFixrBranding(new EmbedBuilder(), 'Support Analytics', themeColor)
     .setTitle('📊 Ticket Analytics · ' + periodLabel(summary.periodDays))
     .setDescription(
       '**Reporting window:** ' + utc(summary.periodStartAt) + ' to ' + utc(summary.periodEndAt) +
@@ -100,7 +100,7 @@ export function buildAnalyticsEmbed(summary: GuildAnalyticsSummary): EmbedBuilde
         inline: false,
       },
     )
-    .setFooter({ text: 'Operational ticket analytics • PostgreSQL source of truth' });
+    .setFooter({ text: queryFixrFooter('Analytics', 'PostgreSQL source of truth · Times shown in UTC') });
 }
 
 export function buildAnalyticsPeriodButtons(): ActionRowBuilder<ButtonBuilder>[] {
