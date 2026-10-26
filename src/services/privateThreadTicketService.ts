@@ -8,6 +8,7 @@ import {
   PermissionFlagsBits,
   type ButtonInteraction,
   type ChatInputCommandInteraction,
+  type Message,
   type Guild,
   type ThreadChannel,
   type TextChannel,
@@ -260,7 +261,7 @@ export function privateThreadCloseTranscriptMarker(ticketId: string, attemptAt: 
 }
 
 export function isPrivateThreadCloseTranscript(content: string, marker: string): boolean {
-  return content.split(/\\r?\\n/).some((line) => line.trim() === marker);
+  return content.split(/\r?\n/).some((line) => line.trim() === marker);
 }
 
 function metadataString(ticket: PersistedTicket, key: string): string | null {
@@ -325,7 +326,7 @@ async function ensurePrivateThreadCloseTranscript(
   }
 
   const knownMessageId = metadataString(fresh, 'privateThreadCloseTranscriptMessageId');
-  let transcriptMessage = null as Awaited<ReturnType<typeof destination.messages.fetch>> | null;
+  let transcriptMessage: Message | null = null;
   if (knownMessageId) {
     try {
       const known = await destination.messages.fetch(knownMessageId);
