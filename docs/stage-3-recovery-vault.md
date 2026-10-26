@@ -47,7 +47,7 @@
 
 ### Latest exact-head evidence
 
-- Stage 3 exact updated head: [CI run #40314300653](https://github.com/Annant2122011/supportforge/actions/runs/40314300653) for `1097fb88b8a9d27ba9f73bb029ff224a7001e558`, build passed, **195/195 tests**, zero failed, and disposable PostgreSQL verification passed, including the new claim-SLA schema/alert-constraint checks.
+- Latest Stage 3 source/test head: [CI run #40316185689](https://github.com/Annant2122011/supportforge/actions/runs/40316185689) for `233a4b0964ddf95383c7d2c4c75e6d8db5cf57e2`, build passed, **196/196 tests**, zero failed, and disposable PostgreSQL verification passed, including claim-SLA schema/alert-constraint checks.
 
 | Acceptance gate | Result |
 |---|---|
