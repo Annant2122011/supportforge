@@ -424,8 +424,8 @@ export async function sweepSupportSlaAlerts(client: Client): Promise<number> {
                 ticketChannelId: evaluation.channelId,
                 event: 'SUPPORT_SLA_' + candidate.type.toUpperCase() + '_' + candidate.result.progress.toUpperCase(),
                 actorId: 'supportforge-system',
-                actor: 'ResolvX SLA monitor',
-                actorName: 'ResolvX SLA monitor',
+                actor: 'QueryFixr SLA monitor',
+                actorName: 'QueryFixr SLA monitor',
                 detail: candidate.type + ' SLA ' + candidate.result.progress + '; elapsed ' +
                   candidate.result.elapsedMinutes + ' of ' + candidate.result.targetMinutes + ' minutes; policy ' +
                   evaluation.policy.id + ' v' + evaluation.policy.version + '.',
@@ -436,7 +436,7 @@ export async function sweepSupportSlaAlerts(client: Client): Promise<number> {
         } catch (error) {
           failedTicketChecks += 1;
           console.warn(
-            'ResolvX SLA monitor could not evaluate ticket ' + row.id + ':',
+            'QueryFixr SLA monitor could not evaluate ticket ' + row.id + ':',
             error instanceof Error ? error.message : 'unknown error',
           );
         }
@@ -451,7 +451,7 @@ export async function sweepSupportSlaAlerts(client: Client): Promise<number> {
     } catch (error) {
       // Keep one guild's transient failure from preventing other guilds being scanned.
       console.warn(
-        'ResolvX SLA monitor did not complete for guild ' + guild.id + ':',
+        'QueryFixr SLA monitor did not complete for guild ' + guild.id + ':',
         error instanceof Error ? error.message : 'unknown error',
       );
     }
@@ -468,7 +468,7 @@ export function startSupportSlaMonitor(client: Client): void {
     try {
       await sweepSupportSlaAlerts(client);
     } catch (error) {
-      console.warn('ResolvX SLA monitor will retry:', error instanceof Error ? error.message : 'unknown error');
+      console.warn('QueryFixr SLA monitor will retry:', error instanceof Error ? error.message : 'unknown error');
     } finally {
       running = false;
     }
