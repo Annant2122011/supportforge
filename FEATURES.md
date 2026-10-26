@@ -1493,19 +1493,18 @@ This is not required for initial Discord product-market validation.
 
 ## F-042 — Staff Performance Analytics
 
-**Status:** `PLANNED`  
+**Status:** `BUILT / PARTIAL`  
 **Priority:** `P2`
 
-Potential metrics:
+Implemented operational workload signals include:
 
-- tickets handled
-- first response time
-- resolution time
-- SLA compliance
-- reopen rate
-- backlog
-- customer satisfaction
-- active workload
+- claimed and closed tickets
+- high-confidence staff replies and first responses
+- average first-response time where attributed event data exists
+- current active workload
+- source-data coverage and bounded time-window reports
+
+SLA compliance and customer satisfaction are not presented by Stage K analytics. They need authoritative SLA-history evaluation and a durable customer-rating source before being treated as trusted metrics.
 
 ### Important interpretation rule
 
@@ -1515,30 +1514,30 @@ Metrics should be treated as operational signals, not as simplistic rankings. A 
 
 ## F-043 — Department Analytics
 
-**Status:** `PLANNED`  
+**Status:** `BUILT / PARTIAL`  
 **Priority:** `P2`
 
-Possible reports:
+Implemented reports include:
 
-- tickets per day/week/month
-- average response time
-- average resolution time
-- SLA breaches
-- ticket source
-- priority distribution
-- tag distribution
-- satisfaction
-- reopening rate
-- backlog
+- tickets created and first resolved during the selected window
+- current active/open/claimed/pending and urgent/critical backlog
+- average response and first-resolution time where durable events exist
+- priority, department and tag breakdowns
+- reopened tickets and equal-length previous-period comparisons
+- daily/weekly trends with explicit data-coverage context
+
+Ticket source, authoritative SLA breaches and customer satisfaction remain outside the currently trusted aggregate.
 
 ---
 
 ## F-044 — Trend Analytics
 
-**Status:** `FUTURE`  
+**Status:** `BUILT / PARTIAL`  
 **Priority:** `P3`
 
-Identify recurring operational issues such as:
+Stage K provides daily and weekly created/first-resolved trends, reopen counts, equal-period comparisons and source-data coverage. Automated anomaly detection and issue-correlation remain future scope.
+
+Future enhancements may identify recurring operational issues such as:
 
 - payment incidents increasing
 - a particular product producing more tickets
@@ -1767,17 +1766,19 @@ The original message should remain available so translations do not replace sour
 
 ## F-053 — Knowledge Base
 
-**Status:** `INFRASTRUCTURE REQUIRED`  
-**Priority:** `P3`
+**Status:** `BUILT / PARTIAL`  
+**Priority:** `P2`
 
-Sources may include:
+The current implementation stores versioned support articles in Neon/PostgreSQL and supports draft, publish, archive and revision recovery; per-guild article visibility, staff/public access controls, role gates, synonyms, feedback, aggregate usage metrics and contextual ticket suggestions are included.
 
-- FAQs
+Current article content is managed through the supported QueryFixr article workflows. Automated ingestion from external documentation sources, document parsing and semantic RAG are not implemented.
+
+Initial article types include:
+
+- FAQs and help articles
 - product documentation
 - troubleshooting guides
-- policy documents
-- internal support manuals
-- help articles
+- policy and internal support notes
 
 ### Structure
 
@@ -1799,15 +1800,12 @@ Knowledge Base
 
 ## F-054 — Knowledge Base Search
 
-**Status:** `INFRASTRUCTURE REQUIRED`  
-**Priority:** `P3`
+**Status:** `BUILT / PARTIAL`  
+**Priority:** `P2`
 
-Search should support both:
+PostgreSQL-backed search supports weighted lexical ranking, simple/English text search, typo-tolerant matching and explicit synonyms. Visibility and role access are checked before search results are returned or shared into a ticket.
 
-- keyword search
-- semantic search
-
-Search results should expose source references where practical.
+Semantic/vector search and model-based RAG are future scope. Search results are deterministic and do not claim AI-generated relevance.
 
 ---
 
