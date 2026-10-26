@@ -47,7 +47,7 @@ function repositoryWithRows() {
           active_workload: '2',
           avg_first_response_minutes: '9.96',
         };
-      } else if (sql.includes('AS tag_id')) {
+      } else if (sql.includes('IS NOT DISTINCT FROM tags.tag_id')) {
         row = {
           tag_id: 'refund',
           tickets_created: '5',
