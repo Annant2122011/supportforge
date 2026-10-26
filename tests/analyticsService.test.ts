@@ -79,6 +79,10 @@ test('analytics report uses a rolling UTC window and computes reopen rate', asyn
     'guild-1',
     '2026-10-18T12:00:00.000Z',
     '2026-10-25T12:00:00.000Z',
+    null,
+    null,
+    null,
+    null,
   ]);
   assert.match(calls[0]?.sql ?? '', /messageAuthorType/);
   assert.match(calls[0]?.sql ?? '', /messageTimestamp/);
