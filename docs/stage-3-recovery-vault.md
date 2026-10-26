@@ -66,3 +66,8 @@
 5. Continue Stage H2 locale completion for the remaining Settings pages, panel previews and selected reports under the consolidated PR #39 release gate.
 
 **Release rule:** green CI, a valid dump file and an empty-target restore script are not proof of an actual Neon restore drill. Report source review, CI, test-guild acceptance, database restore and deployment as separate outcomes.
+
+
+## Safe integration and Stage G acceptance branch
+
+The staged merge and acceptance protocol is documented in [`pr34-pr39-stage-g-acceptance-architecture.md`](pr34-pr39-stage-g-acceptance-architecture.md) on the non-production `integration/stage-g-acceptance` branch. PR #34 must be validated against the latest `main` merge ref, merged first into that acceptance branch, and followed by PR #39. Direct merges to `main` are deferred because the repository's `deploy-server.yml` automatically deploys main pushes and runs migrations/restarts the service. Stage G is not accepted until controlled Discord tests and the isolated non-production Neon restore drill are recorded.
