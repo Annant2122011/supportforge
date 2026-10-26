@@ -2092,7 +2092,7 @@ export async function execute(
             action: 'SUPPORT_SLA_POLICY_SAVED',
             actorId: interaction.user.id,
             actorName: interaction.user.tag,
-            detail: 'Saved SLA policy ' + policy.id + ' for department=' + policy.departmentId + ', priority=' + policy.priority + ', first-response=' + policy.firstResponseMinutes + 'm, claim=' + policy.claimMinutes + 'm, resolution=' + policy.resolutionMinutes + 'm, pending-pauses=' + policy.pauseWhilePending + ', version=' + policy.version + '.', 
+            detail: 'Saved SLA policy ' + policy.id + ' for department=' + policy.departmentId + ', priority=' + policy.priority + ', first-response=' + policy.firstResponseMinutes + 'm, claim=' + policy.claimMinutes + 'm, resolution=' + policy.resolutionMinutes + 'm, pending-pauses=' + policy.pauseWhilePending + ', version=' + policy.version + '.',
           });
         }
         await interaction.editReply('Saved SLA policy ' + policy.id + ' (version ' + policy.version + '). First response: ' + policy.firstResponseMinutes + ' minutes; claim: ' + policy.claimMinutes + ' minutes; resolution: ' + policy.resolutionMinutes + ' minutes; pending pause: ' + policy.pauseWhilePending + '.');
@@ -2134,6 +2134,7 @@ export async function execute(
             .setDescription(
               'Ticket: <#' + evaluation.channelId + '>\nStatus: **' + evaluation.status + '**\nPolicy: ' + evaluation.policy.id + ' (version ' + evaluation.policy.version + ')\n\n' +
               '**First response**\n' + fmt(evaluation.firstResponse) + '\n\n' +
+              '**Claim**\\n' + fmt(evaluation.claim) + '\\n\\n' +
               '**Resolution**\n' + fmt(evaluation.resolution) + '\n\n' +
               (evaluation.warning ? 'Warning: ' + evaluation.warning : 'No active SLA warning.'),
             )
