@@ -127,6 +127,10 @@ function validateSnapshot(value: unknown, guildId: string): ConfigurationSnapsho
     supportHours: raw.payload.supportHours,
     ticketForms: raw.payload.ticketForms,
   };
+  const computedFingerprint = configurationFingerprint(payload);
+  if (typeof raw.fingerprint === 'string' && raw.fingerprint.toLowerCase() !== computedFingerprint) {
+    throw malformedHistory('snapshot fingerprint does not match its payload');
+  }
   return {
     id: raw.id,
     guildId,
@@ -139,7 +143,7 @@ function validateSnapshot(value: unknown, guildId: string): ConfigurationSnapsho
     tagCount: raw.tagCount as number,
     formCount: raw.formCount as number,
     supportHoursPolicyCount: raw.supportHoursPolicyCount as number,
-    fingerprint: typeof raw.fingerprint === 'string' ? raw.fingerprint : configurationFingerprint(payload),
+    fingerprint: computedFingerprint,
     payload,
   };
 }
