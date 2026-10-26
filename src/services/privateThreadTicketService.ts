@@ -285,14 +285,23 @@ async function ensurePrivateThreadCloseTranscript(
   if (!config.transcriptChannelId) {
     throw new Error('Transcript channel is not configured. The private-thread ticket was not closed.');
   }
-  const destination = thread.guild.channels.cache.get(config.transcriptChannelId)
-    ?? await thread.guild.channels.fetch(config.transcriptChannelId);
-  if (!destination || destination.type !== ChannelType.GuildText) {
-    throw new Error('The configured transcript channel is missing or is not a text channel. The private-thread ticket was not closed.');
-  }
 
   const storedAttempt = metadataString(ticket, 'privateThreadCloseAttemptAt');
   const storedAttemptMs = storedAttempt ? Date.parse(storedAttempt) : Number.NaN;
+  const storedDestinationId = metadataString(ticket, 'privateThreadCloseTranscriptDestinationId');
+  // A retry must look for the receipt in the original destination even if an
+  // administrator changed the configured transcript channel mid-operation.
+  // Never silently upload a second copy to a new channel when the old one is
+  // temporarily inaccessible.
+  const destinationId = Number.isFinite(storedAttemptMs) && storedDestinationId
+    ? storedDestinationId
+    : config.transcriptChannelId;
+  const destination = thread.guild.channels.cache.get(destinationId)
+    ?? await thread.guild.channels.fetch(destinationId);
+  if (!destination || destination.type !== ChannelType.GuildText) {
+    throw new Error('The configured transcript destination is missing or is not a text channel. The private-thread ticket was not closed.');
+  }
+
   const closedAt = Number.isFinite(storedAttemptMs)
     ? new Date(storedAttemptMs).toISOString()
     : new Date().toISOString();
