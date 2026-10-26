@@ -29,6 +29,8 @@ import { buildTicketPanelEmbed } from './ticketPanelService';
 import { logTicketEvent } from './auditLogService';
 import { canPrivateThreadTicketAction, getPrivateThreadTicketActions, normalizeTicketWorkspaceMode, type PrivateThreadTicketAction, type TicketWorkspaceMode } from '../core/domain/privateThreadTicketPolicy';
 import { canPerformTicketAction, isTicketManager } from '../core/domain/ticketAuthorization';
+import { withPostgresAdvisoryLock } from '../core/persistence/operationLock';
+import { generateTranscript } from './transcriptService';
 
 const THREAD_PARENT_PREFIX = 'supportforge:ticket-thread-parent';
 
@@ -248,6 +250,161 @@ function parseTicketTopic(ticket: PersistedTicket): string {
   return projectDurableTicketTopic('', ticket);
 }
 
+export function privateThreadCloseTranscriptMarker(ticketId: string, attemptAt: string): string {
+  const id = ticketId.trim();
+  const timestamp = Date.parse(attemptAt);
+  if (!id || !Number.isFinite(timestamp)) {
+    throw new Error('A ticket ID and valid close-attempt timestamp are required for transcript idempotency.');
+  }
+  return 'QueryFixr private-thread close transcript | ticket=' + id + ' | attempt=' + new Date(timestamp).toISOString();
+}
+
+export function isPrivateThreadCloseTranscript(content: string, marker: string): boolean {
+  return content.split(/\\r?\\n/).some((line) => line.trim() === marker);
+}
+
+function metadataString(ticket: PersistedTicket, key: string): string | null {
+  const value = ticket.metadata[key];
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function isUnknownDiscordMessage(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const value = error as { code?: unknown; rawError?: { code?: unknown } };
+  return Number(value.code ?? value.rawError?.code) === 10008;
+}
+
+async function ensurePrivateThreadCloseTranscript(
+  interaction: ButtonInteraction | ChatInputCommandInteraction,
+  thread: ThreadChannel,
+  ticket: PersistedTicket,
+  topic: string,
+): Promise<{ messageId: string; destinationId: string; closedAt: string }> {
+  const config = await getGuildConfig(thread.guild.id);
+  if (!config.transcriptChannelId) {
+    throw new Error('Transcript channel is not configured. The private-thread ticket was not closed.');
+  }
+  const destination = thread.guild.channels.cache.get(config.transcriptChannelId)
+    ?? await thread.guild.channels.fetch(config.transcriptChannelId);
+  if (!destination || destination.type !== ChannelType.GuildText) {
+    throw new Error('The configured transcript channel is missing or is not a text channel. The private-thread ticket was not closed.');
+  }
+
+  const storedAttempt = metadataString(ticket, 'privateThreadCloseAttemptAt');
+  const storedAttemptMs = storedAttempt ? Date.parse(storedAttempt) : Number.NaN;
+  const closedAt = Number.isFinite(storedAttemptMs)
+    ? new Date(storedAttemptMs).toISOString()
+    : new Date().toISOString();
+  const marker = privateThreadCloseTranscriptMarker(ticket.id, closedAt);
+
+  // Persist the attempt marker before generating/sending the transcript. If a
+  // send succeeds but the receipt write or lifecycle commit fails, a retry
+  // searches for the same marker instead of uploading another transcript.
+  if (!storedAttempt || !Number.isFinite(storedAttemptMs)) {
+    await updatePersistedTicketMetadata(thread.id, {
+      metadata: {
+        privateThreadCloseAttemptAt: closedAt,
+        privateThreadCloseTranscriptMessageId: null,
+        privateThreadCloseTranscriptDestinationId: destination.id,
+      },
+    }, actor(interaction));
+  }
+
+  let fresh = await getPersistedTicket(thread.id);
+  if (!fresh || fresh.deletedAt || fresh.status !== ticket.status) {
+    if (fresh) {
+      await updatePersistedTicketMetadata(thread.id, {
+        metadata: {
+          privateThreadCloseAttemptAt: null,
+          privateThreadCloseTranscriptMessageId: null,
+          privateThreadCloseTranscriptDestinationId: null,
+        },
+      }, actor(interaction)).catch(() => undefined);
+    }
+    throw new Error('The ticket state changed while preparing its transcript. Refresh the ticket and retry; no close transition was applied by this action.');
+  }
+
+  const knownMessageId = metadataString(fresh, 'privateThreadCloseTranscriptMessageId');
+  let transcriptMessage = null as Awaited<ReturnType<typeof destination.messages.fetch>> | null;
+  if (knownMessageId) {
+    try {
+      const known = await destination.messages.fetch(knownMessageId);
+      if (known.author.id === thread.client.user?.id && isPrivateThreadCloseTranscript(known.content, marker)) {
+        transcriptMessage = known;
+      }
+    } catch (error) {
+      if (!isUnknownDiscordMessage(error)) throw error;
+    }
+  }
+
+  if (!transcriptMessage) {
+    const recent = await destination.messages.fetch({ limit: 100 });
+    transcriptMessage = recent.find((message) =>
+      message.author.id === thread.client.user?.id &&
+      isPrivateThreadCloseTranscript(message.content, marker),
+    ) ?? null;
+  }
+
+  if (!transcriptMessage) {
+    const openedAtValue = metadataString(fresh, 'openedAt') ?? getField(topic, 'opened_at') ?? fresh.createdAt;
+    const parsedOpenedAt = new Date(openedAtValue);
+    const openedAt = Number.isFinite(parsedOpenedAt.getTime()) ? parsedOpenedAt : new Date(fresh.createdAt);
+    const rawSubject = metadataString(fresh, 'subject') ?? getField(topic, 'subject') ?? 'Support request';
+    let subject = rawSubject;
+    try {
+      subject = decodeURIComponent(rawSubject);
+    } catch {
+      // Keep legacy or already-decoded subjects intact.
+    }
+    const ownerMember = fresh.ownerId
+      ? await thread.guild.members.fetch(fresh.ownerId).catch(() => null)
+      : null;
+    const transcript = await generateTranscript({
+      channel: thread,
+      ticketNumber: fresh.ticketNumber ?? 'unknown',
+      subject,
+      ownerId: fresh.ownerId ?? 'unknown',
+      ownerName: ownerMember?.user.tag ?? (fresh.ownerId ? '<@' + fresh.ownerId + '>' : 'Unknown owner'),
+      closedBy: interaction.user.tag,
+      openedAt,
+      closedAt: new Date(closedAt),
+    });
+
+    // Check the persisted lifecycle once more after transcript generation.
+    const beforeUpload = await getPersistedTicket(thread.id);
+    if (!beforeUpload || beforeUpload.deletedAt || beforeUpload.status !== ticket.status) {
+      await updatePersistedTicketMetadata(thread.id, {
+        metadata: {
+          privateThreadCloseAttemptAt: null,
+          privateThreadCloseTranscriptMessageId: null,
+          privateThreadCloseTranscriptDestinationId: null,
+        },
+      }, actor(interaction)).catch(() => undefined);
+      throw new Error('The ticket state changed while generating its transcript. No close transition was applied by this action.');
+    }
+
+    transcriptMessage = await destination.send({
+      content: '📄 Transcript for ticket **#' + (fresh.ticketNumber ?? 'unknown') + '**\\n' + marker +
+        '\\nTicket: <#' + thread.id + '>',
+      files: [transcript],
+      allowedMentions: { parse: [] },
+    });
+  }
+
+  // Persist the upload receipt before the close transaction. A retry after a
+  // PostgreSQL failure can use this known message ID even if it leaves the
+  // transcript channel's recent-message window.
+  await updatePersistedTicketMetadata(thread.id, {
+    metadata: {
+      privateThreadCloseAttemptAt: closedAt,
+      privateThreadCloseTranscriptMessageId: transcriptMessage.id,
+      privateThreadCloseTranscriptDestinationId: destination.id,
+    },
+  }, actor(interaction));
+
+  return { messageId: transcriptMessage.id, destinationId: destination.id, closedAt };
+}
+
 function actor(interaction: ButtonInteraction | ChatInputCommandInteraction) {
   return { id: interaction.user.id, attribution: 'actorKnown' as const, confidence: 'high' as const };
 }
@@ -327,6 +484,21 @@ async function performThreadAction(
   interaction: ButtonInteraction | ChatInputCommandInteraction,
   action: PrivateThreadTicketAction,
 ): Promise<void> {
+  const channel = interaction.channel;
+  if (channel?.type !== ChannelType.PrivateThread) {
+    throw new Error('This action must be used in a QueryFixr private ticket thread.');
+  }
+  await withPostgresAdvisoryLock(
+    'private-thread-ticket-action:' + channel.id,
+    'This private-thread ticket is already being processed. Please retry in a moment.',
+    () => performThreadActionUnlocked(interaction, action),
+  );
+}
+
+async function performThreadActionUnlocked(
+  interaction: ButtonInteraction | ChatInputCommandInteraction,
+  action: PrivateThreadTicketAction,
+): Promise<void> {
   const guild = interaction.guild;
   const channel = interaction.channel;
   if (!guild || channel?.type !== ChannelType.PrivateThread) {
@@ -397,9 +569,18 @@ async function performThreadAction(
       break;
   }
 
+  // Closing a private thread follows the same transcript-before-state contract
+  // as text tickets. The advisory lock serializes concurrent close/reopen
+  // actions across bot processes while the deterministic receipt marker makes
+  // send retries idempotent after a process/database failure.
+  const closeReceipt = action === 'close'
+    ? await ensurePrivateThreadCloseTranscript(interaction, thread, ticket, topic)
+    : null;
+
   // Do not unlock a closed ticket before the durable reopen/resume transition commits.
-  const now = new Date().toISOString();
-  const nextTopic = nextTicketTopic(ticket, topic, nextStatus, now, claimedByIds);
+  const now = closeReceipt?.closedAt ?? new Date().toISOString();
+  let nextTopic = nextTicketTopic(ticket, topic, nextStatus, now, claimedByIds);
+  if (closeReceipt) nextTopic = setField(nextTopic, 'transcript_id', closeReceipt.messageId);
   const nextParticipants = [...new Set([
     ...(ticket.ownerId ? [ticket.ownerId] : []),
     ...ticket.participantIds.filter((id) => id !== ticket.ownerId),
@@ -410,9 +591,18 @@ async function performThreadAction(
     metadata: {
       ticketTopic: nextTopic,
       lastActivityAt: now,
-      ...(nextStatus === 'closed' ? { closedAt: now } : {}),
+      ...(nextStatus === 'closed' ? {
+        closedAt: now,
+        closedById: interaction.user.id,
+        closedByTag: interaction.user.tag,
+        transcriptId: closeReceipt!.messageId,
+        transcriptDestinationId: closeReceipt!.destinationId,
+      } : {}),
       ...(nextStatus === 'reopened' ? { reopenedAt: now } : {}),
       ...(nextStatus === 'archived' ? { archivedAt: now } : {}),
+      privateThreadCloseAttemptAt: null,
+      privateThreadCloseTranscriptMessageId: null,
+      privateThreadCloseTranscriptDestinationId: null,
     },
   }, actor(interaction), now);
 
