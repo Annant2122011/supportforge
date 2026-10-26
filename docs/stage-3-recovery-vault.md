@@ -47,7 +47,7 @@
 
 ### Latest exact-head evidence
 
-- Stage 3: [CI #2389](https://github.com/Annant2122011/supportforge/actions/runs/40053953590) for `f16b73dac24e5885875d632db959f9f0e012c071`, build passed, **194/194 tests**, zero skipped, disposable PostgreSQL verification passed.
+- Stage 3 exact updated head: [CI run #40314300653](https://github.com/Annant2122011/supportforge/actions/runs/40314300653) for `1097fb88b8a9d27ba9f73bb029ff224a7001e558`, build passed, **195/195 tests**, zero failed, and disposable PostgreSQL verification passed, including the new claim-SLA schema/alert-constraint checks.
 
 | Acceptance gate | Result |
 |---|---|
@@ -63,6 +63,6 @@
 2. Create a backup from a disposable source, restore it into a newly created empty Neon branch/database, then record checksum, schema migration level, core row counts, orphan checks and application smoke-test evidence.
 3. Exercise SLA cursor rotation over multiple batches, claim transitions and missing legacy attribution, pause/resume across pending/reopen cycles, concurrent policy edits, repeated worker failures and notification rate limits in CI/test guild.
 4. Stress backup file size, restore duration, archive volume and operational metrics on a disposable environment.
-5. Continue Stage H2 locale completion for the remaining Settings pages, panel previews and selected reports under the Stage 1/2 release gate.
+5. Continue Stage H2 locale completion for the remaining Settings pages, panel previews and selected reports under the consolidated PR #39 release gate.
 
 **Release rule:** green CI, a valid dump file and an empty-target restore script are not proof of an actual Neon restore drill. Report source review, CI, test-guild acceptance, database restore and deployment as separate outcomes.
