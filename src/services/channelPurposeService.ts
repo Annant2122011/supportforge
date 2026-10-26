@@ -124,10 +124,31 @@ export async function ensureChannelPurposeMessage(
     );
 
     /*
-     * The purpose message is an onboarding marker, not a live status panel.
-     * Once present, leave the original message in place.
+     * This exact bot-owned title/footer pair is a managed marker. Upgrade only
+     * those known marker messages; never rewrite a user-authored message or
+     * arbitrary custom embed that happens to mention a previous brand name.
      */
     if (existing) {
+      const managedMarker = existing.embeds.find((embed) =>
+        (embed.title === PURPOSE_TITLE && embed.footer?.text === PURPOSE_FOOTER) ||
+        (embed.title === '📝 ResolvX Channel Purpose' && embed.footer?.text === 'ResolvX • Channel Purpose') ||
+        (embed.title === '📝 ResolveX Channel Purpose' && embed.footer?.text === 'ResolveX • Channel Purpose') ||
+        (embed.title === '📝 SupportForge Channel Purpose' && embed.footer?.text === 'SupportForge • Channel Purpose'),
+      );
+      const isCurrentMarker = managedMarker?.title === PURPOSE_TITLE &&
+        managedMarker.footer?.text === PURPOSE_FOOTER &&
+        managedMarker.description === purpose;
+      if (managedMarker && !isCurrentMarker) {
+        await existing.edit({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle(PURPOSE_TITLE)
+              .setDescription(purpose)
+              .setFooter({ text: PURPOSE_FOOTER })
+              .setTimestamp(existing.createdAt),
+          ],
+        });
+      }
       purposeVerifiedChannels.add(channel.id);
       return;
     }
