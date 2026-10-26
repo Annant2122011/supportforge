@@ -213,3 +213,25 @@ test('empty drafts are allowed only when explicitly requested and draft confirma
     departmentId: 'billing', label: 'Billing', confirmationMessage: 'x'.repeat(1001),
   }], departments), /confirmationMessage/);
 });
+
+
+test('custom panel embed respects Discord text budgets for overlong saved presentation copy', () => {
+  const panel = {
+    ...examplePanel,
+    title: 'T'.repeat(400),
+    description: 'D'.repeat(4000),
+    footer: 'F'.repeat(2048),
+  };
+  const embed = buildCustomPanelEmbed(panel, 'Example Server', 0x5865f2, true).toJSON();
+  assert.ok((embed.title ?? '').length <= 256);
+  assert.ok((embed.description ?? '').length <= 4096);
+  assert.ok((embed.description ?? '').includes('shortened to fit Discord limits'));
+  assert.ok((embed.footer?.text ?? '').length <= 512);
+  const textualTotal =
+    (embed.title?.length ?? 0) +
+    (embed.description?.length ?? 0) +
+    (embed.footer?.text.length ?? 0) +
+    (embed.author?.name.length ?? 0) +
+    (embed.fields ?? []).reduce((sum, field) => sum + field.name.length + field.value.length, 0);
+  assert.ok(textualTotal <= 6000, 'embed text total must fit Discord’s 6,000 character aggregate limit');
+});
