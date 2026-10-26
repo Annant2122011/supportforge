@@ -47,12 +47,12 @@
 
 ### Latest exact-head evidence
 
-- Latest Stage 3 source/test head: [CI run #40316185689](https://github.com/Annant2122011/supportforge/actions/runs/40316185689) for `233a4b0964ddf95383c7d2c4c75e6d8db5cf57e2`, build passed, **196/196 tests**, zero failed, and disposable PostgreSQL verification passed, including claim-SLA schema/alert-constraint checks.
+- Latest Stage 3 source/test head: [CI run #40316499006](https://github.com/Annant2122011/supportforge/actions/runs/40316499006) for `2f8a798753147deea93b047f50f9cc8c92f8a008`, build passed, **196/196 tests**, zero failed, and disposable PostgreSQL verification passed, including claim-SLA schema/alert-constraint checks.
 
 | Acceptance gate | Result |
 |---|---|
-| Source and tests for recovery preview, replay markers, backup/restore safeguards, SLA, CSAT and durable segment ledger | Implemented; latest CI passed on head f16b73d |
-| Build/test against disposable PostgreSQL | **PASS**: CI #2389, 194 tests, zero skipped; DB schema/integrity verification passed |
+| Source and tests for recovery preview, replay markers, backup/restore safeguards, SLA, CSAT and durable segment ledger | Implemented; latest verified Stage 3 CI passed on head 2f8a798 |
+| Build/test against disposable PostgreSQL | **PASS**: CI #40316499006, 196 tests, zero failed; DB schema/integrity and claim-SLA schema verification passed |
 | Live Discord deletion/recovery/permissions/429/restart scenarios | **Blocked / not run** |
 | Isolated Neon backup and restore, including checksum/schema/row-count/application smoke test | **Blocked / not run** |
 | Real SLA alert timing and large-guild throughput | **Blocked / not run** |
