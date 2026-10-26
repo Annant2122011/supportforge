@@ -248,11 +248,11 @@ SELECT d.department_id,
        r.avg_resolution_minutes,
        a.oldest_active_created_at
 FROM department_ids AS d
-LEFT JOIN created AS c USING (department_id)
-LEFT JOIN active AS a USING (department_id)
-LEFT JOIN resolved AS r USING (department_id)
-LEFT JOIN reopened AS o USING (department_id)
-LEFT JOIN response AS resp USING (department_id)
+LEFT JOIN created AS c ON c.department_id IS NOT DISTINCT FROM d.department_id
+LEFT JOIN active AS a ON a.department_id IS NOT DISTINCT FROM d.department_id
+LEFT JOIN resolved AS r ON r.department_id IS NOT DISTINCT FROM d.department_id
+LEFT JOIN reopened AS o ON o.department_id IS NOT DISTINCT FROM d.department_id
+LEFT JOIN response AS resp ON resp.department_id IS NOT DISTINCT FROM d.department_id
 ORDER BY COALESCE(c.tickets_created, 0) DESC, COALESCE(a.active_tickets, 0) DESC, d.department_id NULLS LAST
 LIMIT 500`;
 
@@ -376,9 +376,9 @@ SELECT tags.tag_id, COALESCE(c.tickets_created, 0) AS tickets_created,
        COALESCE(r.first_resolved_tickets, 0) AS first_resolved_tickets,
        COALESCE(a.urgent_or_critical_tickets, 0) AS urgent_or_critical_tickets
 FROM tag_ids AS tags
-LEFT JOIN created AS c USING (tag_id)
-LEFT JOIN active AS a USING (tag_id)
-LEFT JOIN resolved AS r USING (tag_id)
+LEFT JOIN created AS c ON c.tag_id IS NOT DISTINCT FROM tags.tag_id
+LEFT JOIN active AS a ON a.tag_id IS NOT DISTINCT FROM tags.tag_id
+LEFT JOIN resolved AS r ON r.tag_id IS NOT DISTINCT FROM tags.tag_id
 ORDER BY COALESCE(c.tickets_created, 0) DESC, COALESCE(a.active_tickets, 0) DESC, tags.tag_id NULLS LAST
 LIMIT 500`;
 
