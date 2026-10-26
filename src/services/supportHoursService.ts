@@ -542,6 +542,16 @@ export async function evaluateSupportHours(
   };
 }
 
+/**
+ * Drop in-memory policy state after a transactional configuration restore.
+ * The next normal read reloads the committed durable document.
+ */
+export async function resetSupportHoursStateForReload(): Promise<void> {
+  await writeQueue.catch(() => undefined);
+  state = null;
+  writeQueue = Promise.resolve();
+}
+
 export function formatSupportHoursInstant(instant: Date, timezone: string): string {
   return new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
