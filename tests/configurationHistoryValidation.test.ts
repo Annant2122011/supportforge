@@ -60,6 +60,19 @@ test('malformed snapshots fail closed instead of being silently dropped on the n
   );
 });
 
+test('a snapshot fingerprint mismatch detects payload corruption instead of restoring it', () => {
+  const guildId = '123456789012345678';
+  const corrupted = { ...snapshot('fingerprint', guildId), fingerprint: '0000000000000000' };
+
+  assert.throws(
+    () => normalizeConfigurationHistoryDocument({
+      version: 1,
+      guilds: { [guildId]: [corrupted] },
+    }),
+    /fingerprint does not match its payload/,
+  );
+});
+
 test('history documents from unsupported versions are not normalized or overwritten', () => {
   assert.throws(
     () => normalizeConfigurationHistoryDocument({ version: 2, guilds: {} }),
