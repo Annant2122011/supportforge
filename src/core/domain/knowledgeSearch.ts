@@ -14,7 +14,9 @@ export interface KnowledgeSearchScore {
 
 export function normalizeKnowledgeText(value: string): string {
   return value.normalize('NFKC').toLocaleLowerCase('en-US')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    // Unicode combining marks are part of letters in scripts such as Devanagari.
+    // Keep them with the base character instead of splitting or deleting words.
+    .replace(/[^\p{L}\p{N}\p{M}]+/gu, ' ')
     .trim()
     .replace(/\s+/g, ' ');
 }
