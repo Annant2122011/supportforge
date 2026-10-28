@@ -6,6 +6,7 @@ import { data } from '../src/commands/supportforge';
 interface CommandOptionNode {
   name?: string;
   options?: CommandOptionNode[];
+  required?: boolean;
 }
 
 test('registered /supportforge command stays within Discord nested option limits', () => {
@@ -26,5 +27,28 @@ test('registered /supportforge command stays within Discord nested option limits
     for (const option of options) visit(option, path + ' ' + (option.name ?? '<unnamed>'));
   };
 
+  visit(command, '/supportforge');
+});
+
+test('registered /supportforge command places all required options before optional options', () => {
+  const command = data.toJSON() as unknown as CommandOptionNode & { name: string };
+  const visit = (node: CommandOptionNode, path: string): void => {
+    const options = node.options ?? [];
+    if (options.some((option) => typeof option.required === 'boolean')) {
+      let optionalSeen = false;
+      for (const option of options) {
+        if (option.required === true) {
+          assert.equal(
+            optionalSeen,
+            false,
+            path + ' places required option "' + (option.name ?? '<unnamed>') + '" after an optional option.',
+          );
+        } else {
+          optionalSeen = true;
+        }
+      }
+    }
+    for (const option of options) visit(option, path + ' ' + (option.name ?? '<unnamed>'));
+  };
   visit(command, '/supportforge');
 });

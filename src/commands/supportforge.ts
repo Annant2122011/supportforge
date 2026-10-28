@@ -1286,8 +1286,8 @@ export const data =
             .addUserOption((option) => option.setName('target').setDescription('Ticket participant being reported').setRequired(true))
             .addStringOption((option) => option.setName('category-id').setDescription('Configured report category name or ID').setRequired(true).setMaxLength(80))
             .addStringOption((option) => option.setName('subcategory-id').setDescription('Configured subcategory name or ID').setRequired(true).setMaxLength(80))
-            .addStringOption((option) => option.setName('description').setDescription('Evidence or context (optional)').setRequired(false).setMaxLength(500))
-            .addBooleanOption((option) => option.setName('flag').setDescription('Flag violation (true) or record only (false)').setRequired(true)),
+            .addBooleanOption((option) => option.setName('flag').setDescription('Flag violation (true) or record only (false)').setRequired(true))
+            .addStringOption((option) => option.setName('description').setDescription('Evidence or context (optional)').setRequired(false).setMaxLength(500)),
         )
         .addSubcommand((subcommand) =>
           subcommand.setName('move-panel').setDescription('Move the ticket controls to the bottom'),
