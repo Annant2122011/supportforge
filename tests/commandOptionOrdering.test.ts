@@ -51,6 +51,7 @@ test('orders required arguments before optional arguments at every nested comman
     'department-id', 'priority', 'claim-minutes',
   ]);
 
+  // The helper is pure; it does not mutate the source builder payload.
   assert.deepEqual(input.options?.[0].options?.[0].options?.map((option) => option.name), [
     'target', 'category-id', 'subcategory-id', 'description', 'flag',
   ]);
