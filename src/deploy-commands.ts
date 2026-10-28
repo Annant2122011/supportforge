@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { REST, Routes } from 'discord.js';
 import { data } from './commands/supportforge';
+import { normalizeRequiredOptionOrder, type CommandOptionPayload } from './commands/optionOrdering';
 
 function required(name: string): string {
   const value = process.env[name];
@@ -14,8 +15,11 @@ async function deploy(): Promise<void> {
   const clientId = required('CLIENT_ID');
   const guildId = required('GUILD_ID');
   console.log('🔄 Deploying QueryFixr commands...');
+  const command = normalizeRequiredOptionOrder(
+    data.toJSON() as unknown as CommandOptionPayload,
+  );
   await rest.put(Routes.applicationGuildCommands(clientId, guildId), {
-    body: [data.toJSON()],
+    body: [command as unknown as ReturnType<typeof data.toJSON>],
   });
   console.log('✅ QueryFixr command deployed.');
 }

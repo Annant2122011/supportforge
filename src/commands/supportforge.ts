@@ -1649,8 +1649,8 @@ export const data =
             .addUserOption((option) => option.setName('target').setDescription('Ticket participant being reported').setRequired(true))
             .addStringOption((option) => option.setName('category-id').setDescription('Configured report category name or ID').setRequired(true).setMaxLength(80))
             .addStringOption((option) => option.setName('subcategory-id').setDescription('Configured subcategory name or ID').setRequired(true).setMaxLength(80))
-            .addStringOption((option) => option.setName('description').setDescription('Evidence or context (optional)').setRequired(false).setMaxLength(500))
-            .addBooleanOption((option) => option.setName('flag').setDescription('Flag violation (true) or record only (false)').setRequired(true)),
+            .addBooleanOption((option) => option.setName('flag').setDescription('Flag violation (true) or record only (false)').setRequired(true))
+            .addStringOption((option) => option.setName('description').setDescription('Evidence or context (optional)').setRequired(false).setMaxLength(500)),
         )
         .addSubcommand((subcommand) =>
           subcommand.setName('move-panel').setDescription('Move the ticket controls to the bottom'),
@@ -1998,6 +1998,8 @@ export const data =
           subcommand
             .setName('sla-set')
             .setDescription('Create or update an SLA policy for a department and priority')
+            .addIntegerOption((option) => option.setName('first-response-minutes').setDescription('Target minutes for first human response').setRequired(true).setMinValue(1).setMaxValue(43200))
+            .addIntegerOption((option) => option.setName('resolution-minutes').setDescription('Target minutes to resolve a ticket').setRequired(true).setMinValue(1).setMaxValue(43200))
             .addStringOption((option) => option.setName('department-id').setDescription('Department ID; omit or use * for all').setRequired(false).setMaxLength(80))
             .addStringOption((option) => option.setName('priority').setDescription('Priority scope; omit or use * for all').setRequired(false).addChoices(
               { name: 'All priorities', value: '*' },
@@ -2007,9 +2009,7 @@ export const data =
               { name: 'Urgent', value: 'urgent' },
               { name: 'Critical', value: 'critical' },
             ))
-            .addIntegerOption((option) => option.setName('first-response-minutes').setDescription('Target minutes for first human response').setRequired(true).setMinValue(1).setMaxValue(43200))
             .addIntegerOption((option) => option.setName('claim-minutes').setDescription('Target minutes for staff to claim the ticket (default 60)').setRequired(false).setMinValue(1).setMaxValue(43200))
-            .addIntegerOption((option) => option.setName('resolution-minutes').setDescription('Target minutes to resolve a ticket').setRequired(true).setMinValue(1).setMaxValue(43200))
             .addBooleanOption((option) => option.setName('pause-while-pending').setDescription('Pause both clocks while status is Pending (default true)').setRequired(false))
             .addNumberOption((option) => option.setName('warning-ratio').setDescription('Warning fraction of target, from 0.5 to 0.99 (default 0.8)').setRequired(false).setMinValue(0.5).setMaxValue(0.99)),
         )
