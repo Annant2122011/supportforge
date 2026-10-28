@@ -12,6 +12,15 @@ This checklist is for a non-production bot and test guild. Do not use production
 
 The checkboxes below separate source/CI evidence from live-environment acceptance. Do not mark blocked items as pass.
 
+## Re-audit addendum — 2026-10-23
+
+- [x] Rechecked PR dependency chain: #33 → #31 → #32. All three remain open drafts; none is integrated.
+- [x] Current recorded Stage 1 evidence: [CI #2052](https://github.com/Annant2122011/supportforge/actions/runs/39972706424), build passed, 138/138 tests passed, zero skipped, disposable PostgreSQL passed.
+- [ ] Test-guild acceptance remains blocked/not run.
+- [ ] Isolated non-production Neon backup/restore remains blocked/not run.
+- [ ] Remaining Stage H2 Settings pages, panel previews and selected reports remain partial.
+- [ ] Stage 1 is not production-accepted until all environment-dependent gates have recorded evidence.
+
 ## 1. Source and dependency baseline
 
 - [x] Inspect open pull requests and branches; document dependencies and identify conflicting branding branches. (See the Stage 1 audit report and PRs #31/#32; QueryFixr is kept separate.)

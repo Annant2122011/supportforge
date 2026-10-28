@@ -192,7 +192,7 @@ function warningEmbed(
     .setDescription(
       'Ticket **#' + (ticket.ticketNumber ?? 'unknown') + '** has had no recorded activity for **' + idleHours + ' hours**. ' +
       'Reply in this ticket before <t:' + Math.floor(deadlineMs / 1000) + ':F> to keep it open. ' +
-      'If no one replies during the next **' + graceHours + ' hours**, ResolveX will save a transcript and close the ticket. ' +
+      'If no one replies during the next **' + graceHours + ' hours**, QueryFixr will save a transcript and close the ticket. ' +
       'Any new message resets this timer. If you still need support, please reply here.',
     )
     .setFooter({ text: marker })

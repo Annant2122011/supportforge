@@ -1,5 +1,7 @@
+import { randomBytes } from 'node:crypto';
 import {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonInteraction,
   ButtonStyle,
@@ -36,7 +38,7 @@ import {
   type TicketPriority,
 } from '../services/advancedSettingsService';
 import { LOCALE_OPTIONS, getLocaleLabel, isSupportedLocale } from '../i18n/localeRegistry';
-import { translate } from '../i18n/translationService';
+import { translate, type TranslationKey } from '../i18n/translationService';
 import { buildSystemDiagnosticsEmbed, diagnosticsPageCount, runSystemDiagnostics } from '../services/systemDiagnosticsService';
 import {
   assertCurrentConfigurationFingerprint,
@@ -95,6 +97,7 @@ import { handleTicketFormSettingsInteraction } from './ticketFormSettingsInterac
 import { handleCustomPanelSettingsInteraction } from './customPanelSettingsInteractions';
 import {
   answerTicketDeletionReview,
+  getTicketRecoveryPreview,
   listTicketRecoveryCandidates,
   restoreArchivedTicket,
   type TicketRecoveryCandidate,
@@ -106,6 +109,9 @@ import {
   runRetentionSweepForGuild,
 } from '../services/ticketRetentionService';
 import { clearTicketInactivityWarningsForGuild } from '../services/ticketInactivityService';
+import { parseAnalyticsPeriod } from '../services/analyticsService';
+import { getAdvancedAnalyticsReport, buildAdvancedAnalyticsCsv } from '../services/advancedAnalyticsService';
+import { buildAdvancedAnalyticsComponents, buildAdvancedAnalyticsEmbed, type AnalyticsView } from './advancedAnalyticsPresentation';
 
 import {
   ensureContainer,
@@ -148,67 +154,25 @@ async function isDepartmentStaff(interaction: ButtonInteraction | StringSelectMe
   return Boolean(member?.roles.cache.some((role) => roleIds.has(role.id)));
 };
 
-function manualQuickEmbed(): EmbedBuilder {
+function manualQuickEmbed(locale: string): EmbedBuilder {
   return new EmbedBuilder()
-    .setTitle('📖 ResolvX Staff Manual • Quick Overview')
-    .setDescription(
-      '**1. Ticket lifecycle**\n' +
-      'Open → Claimed/Pending → Closed → Archived. Reopened tickets return to the active workflow.\n\n' +
-      '**2. Main staff controls**\n' +
-      'Claim a ticket when you take ownership. Pending means you are waiting for information. Resume returns it to Open. Close creates the transcript and makes the ticket read-only.\n\n' +
-      '**3. Priority**\n' +
-      '🟣 Critical • 🔴 Urgent • 🟠 High • 🟡 Normal • 🟢 Low. Priority is shown in the ticket name and panel.\n\n' +
-      '**4. Ticket tools**\n' +
-      'Use Add User, Priority, Tag, Note and History from the ticket panel.\n\n' +
-      '**5. Audit & Settings**\n' +
-      'The audit log records important activity. Settings is button-driven. Staff can read the Manual; administrators can change configuration.\n\n' +
-      '**6. Important rule**\n' +
-      'Closed and archived tickets are read-only. Do not work around the lock by sending messages manually.',
-    )
-    .setFooter({ text: 'Private manual view • only you can see this response' })
+    .setTitle(translate(locale, 'settings.manual.quick.title'))
+    .setDescription(translate(locale, 'settings.manual.quick.content'))
+    .setFooter({ text: translate(locale, 'settings.manual.quick.footer') })
     .setTimestamp();
 }
 
-function manualDetailedEmbeds(): EmbedBuilder[] {
+function manualDetailedEmbeds(locale: string): EmbedBuilder[] {
   return [
     new EmbedBuilder()
-      .setTitle('📖 ResolvX Staff Manual • Detailed • Page 1')
-      .setDescription(
-        '**Getting started**\n' +
-        'ResolvX keeps ticket work private and structured. Your department role controls which support areas and audit/settings resources you can access. Use the buttons in the ticket panel instead of attempting manual channel-management actions.\n\n' +
-        '**Ticket states**\n' +
-        '• **Open:** Active ticket waiting for staff action.\n' +
-        '• **Claimed:** A staff member has taken ownership.\n' +
-        '• **Pending:** Waiting for the customer or another dependency.\n' +
-        '• **Reopened:** A previously closed ticket has returned to active work.\n' +
-        '• **Closed:** Transcript saved; ticket becomes read-only.\n' +
-        '• **Archived:** Historical terminal state.\n\n' +
-        '**Claiming and pending**\n' +
-        'Claim only when you intend to own the work. Pending should be used when progress genuinely depends on a response. Resume moves a pending ticket back to Open.\n\n' +
-        '**Closing**\n' +
-        'ResolvX generates and uploads the transcript before committing the Closed state. If transcript creation fails, the ticket is not treated as safely closed. Reopen is available only from Closed, and Archive is the deliberate terminal historical action.',
-      )
-      .setFooter({ text: 'Private manual view • Page 1 of 2' })
+      .setTitle(translate(locale, 'settings.manual.detailed.page1.title'))
+      .setDescription(translate(locale, 'settings.manual.detailed.page1.content'))
+      .setFooter({ text: translate(locale, 'settings.manual.detailed.page1.footer') })
       .setTimestamp(),
     new EmbedBuilder()
-      .setTitle('📖 ResolvX Staff Manual • Detailed • Page 2')
-      .setDescription(
-        '**Priority & tags**\n' +
-        'Priority is not cosmetic. It is displayed in the ticket name, panel color, and status area. Use the lowest accurate priority and increase it when urgency changes. Tags add searchable operational context.\n\n' +
-        '**Internal notes & history**\n' +
-        'Internal notes are staff-only workflow context. History reads the audit record for the ticket. Do not put customer-facing promises, passwords, tokens, or other secrets into notes.\n\n' +
-        '**Panel navigation**\n' +
-        'When conversation activity pushes the panel away from view, ResolvX may collapse or move it. Restore/Move Panel brings the controls back to the bottom without duplicating old panels.\n\n' +
-        '**Audit log**\n' +
-        'The audit log records ticket and administrative activity. Use **Daily Summary** for the current day, **Audit Data Settings** for retention controls, and **Developer Options** for the continuous technical audit stream.\n\n' +
-        '**Settings & priority roles**\n' +
-        'Administrators can configure departments, retention, appearance, storage and optional priority roles. Priority roles are never created automatically. Claimed and Pending are status states, not extra role types.\n\n' +
-        '**Retention**\n' +
-        'Closed and archived tickets are not silently deleted. When a retention rule finds eligible tickets, an approval step is required. Review the eligible tickets before approving deletion.\n\n' +
-        '**Safety**\n' +
-        'Never bypass ResolvX permissions. Never expose private tickets. When a workflow looks stale, use the supported panel controls or ask an administrator to run Repair System.',
-      )
-      .setFooter({ text: 'Private manual view • Page 2 of 2' })
+      .setTitle(translate(locale, 'settings.manual.detailed.page2.title'))
+      .setDescription(translate(locale, 'settings.manual.detailed.page2.content'))
+      .setFooter({ text: translate(locale, 'settings.manual.detailed.page2.footer') })
       .setTimestamp(),
   ];
 }
@@ -223,7 +187,7 @@ function findPriorityRole(
   configuredRoleId?: string,
 ) {
   // A matching display name is not ownership proof. Only the saved role ID
-  // identifies a ResolvX-managed priority role.
+  // identifies a QueryFixr-managed priority role.
   if (!configuredRoleId) return undefined;
   const configured = guild.roles.cache.get(configuredRoleId);
   return configured && !configured.managed ? configured : undefined;
@@ -232,28 +196,41 @@ function findPriorityRole(
 const pendingResetAuditChoice = new Map<string, boolean>();
 
 async function showManual(interaction: SettingsViewInteraction): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('📖 Staff Manual')
-      .setDescription(
-        'A newcomer-friendly guide to ResolvX. Choose a concise overview or the full instructions. Each manual is delivered as an **ephemeral** response, so other staff do not see or accumulate your manual pages.',
-      )
+      .setTitle('📖 ' + translate(settings.locale, 'settings.manual.title'))
+      .setDescription(translate(settings.locale, 'settings.manual.description'))
       .addFields(
-        { name: 'Quick Overview', value: 'Core workflow and the controls you need most often.', inline: true },
-        { name: 'Detailed Manual', value: 'Full lifecycle, priorities, notes, audit, settings, retention and safety guidance.', inline: true },
+        {
+          name: translate(settings.locale, 'settings.manual.field.quick'),
+          value: translate(settings.locale, 'settings.manual.value.quick'),
+          inline: true,
+        },
+        {
+          name: translate(settings.locale, 'settings.manual.field.detailed'),
+          value: translate(settings.locale, 'settings.manual.value.detailed'),
+          inline: true,
+        },
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:manual:quick').setLabel('Display Quick Manual').setEmoji('⚡').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('sf:settings:manual:detailed').setLabel('Display Detailed Manual').setEmoji('📚').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sf:settings:manual:quick')
+        .setLabel(translate(settings.locale, 'settings.manual.action.quick'))
+        .setEmoji('⚡').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:manual:detailed')
+        .setLabel(translate(settings.locale, 'settings.manual.action.detailed'))
+        .setEmoji('📚').setStyle(ButtonStyle.Secondary),
       backButton(),
     ),
   ]);
 }
 
+
 async function showManualVersion(interaction: ButtonInteraction, detailed: boolean): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   await interaction.reply({
-    embeds: detailed ? manualDetailedEmbeds() : [manualQuickEmbed()],
+    embeds: detailed ? manualDetailedEmbeds(settings.locale) : [manualQuickEmbed(settings.locale)],
     flags: MessageFlags.Ephemeral,
   });
 }
@@ -304,9 +281,9 @@ async function showPriorityRules(interaction: ButtonInteraction): Promise<void> 
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🎨 Priority Rules & Roles')
+      .setTitle('🎨 ' + translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'settings.priorityRules.title'))
       .setDescription(
-        'Priority roles are optional server rules. **Nothing is created automatically.** Choose a priority to create its role, or delete an existing ResolvX priority role. ResolvX will not fail the whole rule operation just because Discord refuses a role-hierarchy reorder.',
+        'Priority roles are optional server rules. **Nothing is created automatically.** Choose a priority to create its role, or delete an existing QueryFixr priority role. QueryFixr will not fail the whole rule operation just because Discord refuses a role-hierarchy reorder.',
       )
       .addFields({
         name: 'Current priority rules',
@@ -320,7 +297,7 @@ async function showPriorityRules(interaction: ButtonInteraction): Promise<void> 
 
 async function createPriorityRole(interaction: ButtonInteraction, priority: TicketPriority): Promise<void> {
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
-    await reject(interaction, '❌ Creating priority roles requires the **Administrator** permission.');
+    await reject(interaction, '❌ ' + translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'settings.priorityRules.adminRequired'));
     return;
   }
 
@@ -331,7 +308,7 @@ async function createPriorityRole(interaction: ButtonInteraction, priority: Tick
   if (!botMember?.permissions.has(PermissionFlagsBits.ManageRoles)) {
     await reject(
       interaction,
-      '❌ ResolvX needs **Manage Roles** to create priority roles. Discord does not allow a bot to grant itself that permission.',
+      '❌ QueryFixr needs **Manage Roles** to create priority roles. Discord does not allow a bot to grant itself that permission.',
     );
     return;
   }
@@ -361,12 +338,12 @@ async function createPriorityRole(interaction: ButtonInteraction, priority: Tick
   try {
     const definition = PRIORITY_ROLE_DEFINITIONS[priority];
     const role = await interaction.guild!.roles.create({
-      name: 'ResolvX • ' + definition.label + ' Tickets',
+      name: 'QueryFixr • ' + definition.label + ' Tickets',
       colors: {
         primaryColor: definition.color,
       },
       mentionable: false,
-      reason: 'ResolvX administrator-created priority rule',
+      reason: 'QueryFixr administrator-created priority rule',
     });
 
     await updateAdvancedSettings(interaction.guild!.id, (settings) => {
@@ -382,7 +359,7 @@ async function createPriorityRole(interaction: ButtonInteraction, priority: Tick
     await interaction.editReply({
       embeds: [
         new EmbedBuilder()
-          .setTitle('✅ Priority Role Created')
+          .setTitle('✅ ' + translate((await getAdvancedSettings(interaction.guild!.id)).locale, 'settings.priorityRules.createdTitle'))
           .setDescription(
             definition.emoji +
               ' **' +
@@ -406,7 +383,7 @@ async function createPriorityRole(interaction: ButtonInteraction, priority: Tick
   } catch (error) {
     console.error('❌ Priority role creation failed:', error);
     await interaction.editReply(
-      '❌ ResolvX could not create that priority role. Check that the bot can Manage Roles and that its role is above the target role.',
+      '❌ QueryFixr could not create that priority role. Check that the bot can Manage Roles and that its role is above the target role.',
     );
   }
 }
@@ -440,7 +417,7 @@ async function deletePriorityRole(
       await interaction.editReply(
         'ℹ️ No ' +
           priorityRoleLabel(priority) +
-          ' priority role exists. The stale ResolvX configuration was cleared.',
+          ' priority role exists. The stale QueryFixr configuration was cleared.',
       );
       await auditSettingsAction(
         interaction.guild!,
@@ -465,14 +442,14 @@ async function deletePriorityRole(
           ' because Discord role hierarchy/permissions do not permit the bot to manage it.',
       );
       await interaction.editReply(
-        '❌ Discord will not let ResolvX delete ' +
+        '❌ Discord will not let QueryFixr delete ' +
           role.toString() +
-          '. Move the ResolvX bot role above this role and ensure it has **Manage Roles**, then try again.',
+          '. Move the QueryFixr bot role above this role and ensure it has **Manage Roles**, then try again.',
       );
       return;
     }
 
-    await role.delete('ResolvX administrator deleted priority rule role');
+    await role.delete('QueryFixr administrator deleted priority rule role');
 
     await updateAdvancedSettings(interaction.guild!.id, (current) => {
       delete current.priorityRoles[priority];
@@ -496,7 +473,7 @@ async function deletePriorityRole(
   } catch (error) {
     console.error('❌ Priority role deletion failed:', error);
     await interaction.editReply(
-      '❌ ResolvX could not delete that priority role. Discord may be preventing the bot from managing it because of the role hierarchy.',
+      '❌ QueryFixr could not delete that priority role. Discord may be preventing the bot from managing it because of the role hierarchy.',
     );
   }
 }
@@ -662,6 +639,7 @@ const SETTINGS_LAYOUT_LABELS: Record<SettingsDashboardButtonKey, string> = {
   tags: 'Tags / Departments',
   usecases: 'Use Cases',
   reports: 'Safety & Reports',
+  analytics: 'Analytics',
   retention: 'Retention',
   appearance: 'Public Panel Appearance',
   storage: 'Storage',
@@ -684,6 +662,7 @@ const SETTINGS_LAYOUT_LABELS: Record<SettingsDashboardButtonKey, string> = {
 
 const SETTINGS_LAYOUT_DEFAULT_EMOJIS: Record<SettingsDashboardButtonKey, string> = {
   panel: '🎛️', defaults: '🎟️', tags: '🏷️', usecases: '🧩', reports: '🚩',
+  analytics: '📊',
   retention: '🧹', appearance: '🎨', storage: '🗄️', rules: '🛡️', repair: '🛠️',
   team: '👥', manual: '📖', forms: '🧾', refresh: '🔄', reset: '🚨', theme: '🌈',
   premium: '💎', panels: '🧱', 'dashboard-builder': '🧰', 'support-hours': '🕒', 'ticket-workspace': '🧵',
@@ -731,30 +710,30 @@ async function showSettingsDashboardBuilder(
   const orderText = order.map((key, index) => (index + 1) + '. ' + (effectiveSettingsLayoutEmoji(settings, key) ? effectiveSettingsLayoutEmoji(settings, key) + ' ' : '') + effectiveSettingsLayoutLabel(settings, key)).join('\n');
   const chooser = new StringSelectMenuBuilder()
     .setCustomId(SETTINGS_LAYOUT_PREFIX + ':reorder-select')
-    .setPlaceholder('Choose a control to move up or down')
+    .setPlaceholder(translate(settings.locale, 'settings.layout.chooseControl'))
     .addOptions(order.map((key) => ({
       label: effectiveSettingsLayoutLabel(settings, key).slice(0, 100),
       value: key,
-      description: 'Current position ' + (order.indexOf(key) + 1) + ' of ' + order.length,
+      description: translate(settings.locale, 'settings.layout.currentPosition', { position: order.indexOf(key) + 1, total: order.length }),
       default: key === order[0],
     })));
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🧰 Settings Dashboard Builder')
+      .setTitle('🧰 ' + translate(settings.locale, 'settings.layout.title'))
       .setDescription(
         (notice ? notice + '\n\n' : '') +
-        'Customize the **Settings channel itself** for this server. Change its heading, description, footer, control order, per-control labels and emojis. Edits save immediately; Preview shows the saved layout with disabled controls. This changes only the Settings dashboard, not the public ticket panel.\n\n' +
+        translate(settings.locale, 'settings.layout.description') + '\n\n' +
         '**Title:** ' + settings.settingsDashboard.title + '\n' +
-        '**Description:** ' + (settings.settingsDashboard.description || 'No description') + '\n' +
+        '**Description:** ' + (settings.settingsDashboard.description || translate(settings.locale, 'settings.layout.noDescription')) + '\n' +
         '**Footer:** ' + settings.settingsDashboard.footer + '\n\n' +
-        '**Control order**\n' + orderText +
-        '\n\nSafety rule: all built-in controls remain available. Reordering cannot hide repair, refresh or Delete Everything.',
+        '**' + translate(settings.locale, 'settings.layout.controlOrder') + '**\n' + orderText +
+        '\n\n' + translate(settings.locale, 'settings.layout.safetyRule'),
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':edit').setLabel('Edit Branding').setEmoji('🎨').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':preview').setLabel('Preview').setEmoji('👁️').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':reset-order').setLabel('Reset Layout').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':edit').setLabel(translate(settings.locale, 'settings.layout.editBranding')).setEmoji('🎨').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':preview').setLabel(translate(settings.locale, 'settings.layout.preview')).setEmoji('👁️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':reset-order').setLabel(translate(settings.locale, 'settings.layout.reset')).setEmoji('↩️').setStyle(ButtonStyle.Secondary),
       backButton(),
     ),
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(chooser),
@@ -768,23 +747,23 @@ async function showSettingsDashboardOrder(
   const settings = await getAdvancedSettings(interaction.guild!.id);
   const order = settingsButtonOrder(settings);
   const index = order.indexOf(key);
-  if (index < 0) throw new Error('That Settings control no longer exists.');
+  if (index < 0) throw new Error(translate(settings.locale, 'settings.layout.missingControl'));
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('Reorder Settings Control')
+      .setTitle(translate(settings.locale, 'settings.layout.reorderTitle'))
       .setDescription(
-        '**Selected:** ' + (effectiveSettingsLayoutEmoji(settings, key) ? effectiveSettingsLayoutEmoji(settings, key) + ' ' : '') + effectiveSettingsLayoutLabel(settings, key) + '\n' +
-        '**Current position:** ' + (index + 1) + ' of ' + order.length + '\n' +
-        '**Emoji:** ' + (effectiveSettingsLayoutEmoji(settings, key) || 'None') + '\n\n' +
-        'Moving this item changes the order of buttons on the persistent Settings dashboard for this server. It does not remove or disable the selected feature.',
+        '**' + translate(settings.locale, 'settings.layout.selected') + ':** ' + (effectiveSettingsLayoutEmoji(settings, key) ? effectiveSettingsLayoutEmoji(settings, key) + ' ' : '') + effectiveSettingsLayoutLabel(settings, key) + '\n' +
+        '**' + translate(settings.locale, 'settings.layout.currentPositionLabel') + ':** ' + (index + 1) + ' of ' + order.length + '\n' +
+        '**' + translate(settings.locale, 'settings.layout.emoji') + ':** ' + (effectiveSettingsLayoutEmoji(settings, key) || translate(settings.locale, 'settings.layout.none')) + '\n\n' +
+        translate(settings.locale, 'settings.layout.reorderDescription'),
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':up:' + key).setLabel('Move Up').setEmoji('⬆️').setStyle(ButtonStyle.Secondary).setDisabled(index === 0),
-      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':down:' + key).setLabel('Move Down').setEmoji('⬇️').setStyle(ButtonStyle.Secondary).setDisabled(index === order.length - 1),
-      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':customize:' + key).setLabel('Customize Label / Emoji').setEmoji('✏️').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':preview').setLabel('Preview').setEmoji('👁️').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel('Layout Builder').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':up:' + key).setLabel(translate(settings.locale, 'settings.layout.moveUp')).setEmoji('⬆️').setStyle(ButtonStyle.Secondary).setDisabled(index === 0),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':down:' + key).setLabel(translate(settings.locale, 'settings.layout.moveDown')).setEmoji('⬇️').setStyle(ButtonStyle.Secondary).setDisabled(index === order.length - 1),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':customize:' + key).setLabel(translate(settings.locale, 'settings.layout.customize')).setEmoji('✏️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':preview').setLabel(translate(settings.locale, 'settings.layout.preview')).setEmoji('👁️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel(translate(settings.locale, 'settings.layout.home')).setEmoji('↩️').setStyle(ButtonStyle.Secondary),
     ),
   ]);
 }
@@ -799,31 +778,34 @@ async function showSettingsDashboardPreview(interaction: SettingsViewInteraction
     0,
   );
   const preview = buildSettingsDashboardEmbed(settings, departmentCount, tagCount, config.theme)
-    .addFields({ name: 'Preview only', value: 'These controls are disabled. Saving the builder changes the persistent Settings dashboard for this server.' });
+    .addFields({
+      name: translate(settings.locale, 'settings.preview.only'),
+      value: translate(settings.locale, 'settings.preview.disabledDescription'),
+    });
   await renderSettingsView(interaction, [preview], [
     ...buildSettingsDashboardComponents(settings, true),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel('Return to Layout Builder').setEmoji('↩️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel(translate(settings.locale, 'settings.preview.returnToBuilder')).setEmoji('↩️').setStyle(ButtonStyle.Primary),
     ),
   ]);
 }
 
 async function showPremiumSettings(interaction: SettingsViewInteraction, notice = ''): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   const tier = await getTier(interaction.guild!.id);
   const next = tier === 'free' ? 'premium-demo' : tier === 'premium-demo' ? 'pro-demo' : 'free';
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('💎 Premium & Feature Demo')
+      .setTitle('💎 ' + translate(settings.locale, 'settings.premium.title'))
       .setDescription(
         (notice ? notice + '\\n\\n' : '') +
-        'Current tier: **' + tierLabel(tier) + '**. Premium and Pro are demo entitlements for preview only, not real billing. ' +
-        'This control cycles Free → Premium Demo → Pro Demo → Free.',
+        translate(settings.locale, 'settings.premium.description', { tier: tierLabel(tier) }),
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId('sf:settings:premium:toggle')
-        .setLabel('Switch to ' + tierLabel(next))
+        .setLabel(translate(settings.locale, 'settings.premium.switchTo', { tier: tierLabel(next) }))
         .setEmoji('🔁')
         .setStyle(ButtonStyle.Primary),
       backButton(),
@@ -862,11 +844,15 @@ async function showSupportHoursSettings(
 ): Promise<void> {
   const guild = interaction.guild!;
   const config = await getGuildConfig(guild.id);
+  const settings = await getAdvancedSettings(guild.id);
+  const locale = settings.locale;
   const scope = { scopeType, scopeId: scopeType === 'guild' ? null : scopeId };
   if (scope.scopeType !== 'guild' && !scope.scopeId) {
-    await renderSettingsView(interaction, [new EmbedBuilder().setTitle('🕒 Support Hours').setDescription('Choose a valid department or ticket panel to configure its override.')], [
-      new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()),
-    ]);
+    await renderSettingsView(interaction, [
+      new EmbedBuilder()
+        .setTitle('🕒 ' + translate(locale, 'settings.supportHours.title'))
+        .setDescription(translate(locale, 'settings.supportHours.invalidScope')),
+    ], [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())]);
     return;
   }
 
@@ -880,50 +866,99 @@ async function showSupportHoursSettings(
   const schedule = effectivePolicy
     ? formatSupportHoursWeeklySchedule(effectivePolicy.weeklySchedule)
     : SUPPORT_HOURS_DAYS.map((day) => day + '=closed').join('\n');
+
   const status = !effectivePolicy
-    ? 'Not configured · new ticket creation is unrestricted'
+    ? translate(locale, 'settings.supportHours.unrestricted')
     : !decision.policyEnabled
-      ? 'Enforcement disabled'
+      ? translate(locale, 'settings.supportHours.enforcementDisabled')
       : decision.isOpen
-        ? 'OPEN'
+        ? translate(locale, 'settings.supportHours.open')
         : decision.ticketCreationAllowed
-          ? 'CLOSED · new tickets allowed with notice'
-          : 'CLOSED · new ticket creation restricted';
+          ? translate(locale, 'settings.supportHours.closedAllow')
+          : translate(locale, 'settings.supportHours.closedRestrict');
+
   const scopeLabel = scope.scopeType === 'guild'
-    ? 'Server default'
+    ? translate(locale, 'settings.supportHours.scope.server')
     : scope.scopeType === 'department'
-      ? 'Department · ' + (config.departments[scope.scopeId!]?.name ?? scope.scopeId)
-      : 'Ticket panel · ' + scope.scopeId;
+      ? translate(locale, 'settings.supportHours.scope.department', {
+          name: config.departments[scope.scopeId!]?.name ?? scope.scopeId!,
+        })
+      : translate(locale, 'settings.supportHours.scope.panel', { id: scope.scopeId! });
+
+  const inheritedScope = effectivePolicy?.scopeType === 'guild'
+    ? translate(locale, 'settings.supportHours.scope.server')
+    : effectivePolicy?.scopeType === 'department'
+      ? translate(locale, 'settings.supportHours.scope.department', {
+          name: config.departments[effectivePolicy.scopeId!]?.name ?? effectivePolicy.scopeId!,
+        })
+      : effectivePolicy?.scopeType === 'panel'
+        ? translate(locale, 'settings.supportHours.scope.panel', { id: effectivePolicy.scopeId! })
+        : '';
   const inheritance = localPolicy
-    ? 'An override is saved for this scope.'
+    ? translate(locale, 'settings.supportHours.overrideSaved')
     : effectivePolicy
-      ? 'No override is saved here; this scope inherits the ' + effectivePolicy.scopeType + ' schedule. Editing will create an override.'
-      : 'No schedule is configured for this scope.';
+      ? translate(locale, 'settings.supportHours.inherits', { scope: inheritedScope })
+      : translate(locale, 'settings.supportHours.noSchedule');
+
+  const policyVersion = localPolicy?.version !== undefined
+    ? String(localPolicy.version)
+    : effectivePolicy
+      ? translate(locale, 'settings.supportHours.inheritedVersion', { version: effectivePolicy.version })
+      : translate(locale, 'settings.supportHours.notSaved');
+
+  const outsideHoursValue = effectivePolicy?.outsideHoursBehavior === 'allow'
+    ? translate(locale, 'settings.supportHours.action.allow')
+    : translate(locale, 'settings.supportHours.action.restrict');
 
   const embed = new EmbedBuilder()
-    .setTitle('🕒 Support Hours & Time Zone')
+    .setTitle('🕒 ' + translate(locale, 'settings.supportHours.title'))
     .setDescription(
       (notice ? notice + '\n\n' : '') +
-      '**Scope:** ' + scopeLabel + '\n' + inheritance + '\n\n' +
-      '**Status:** ' + status + '\n' +
-      '**Time zone:** ' + (effectivePolicy?.timezone ?? 'Not configured') + '\n' +
-      '**Outside hours:** ' + (effectivePolicy?.outsideHoursBehavior ?? 'restrict') + '\n' +
-      '**Policy version:** ' + (localPolicy?.version !== undefined ? String(localPolicy.version) : effectivePolicy ? String(effectivePolicy.version) + ' (inherited)' : 'Not saved') + '\n\n' +
-      '**Weekly schedule**\n' + schedule +
-      (decision.nextOpeningAt ? '\n\n**Next opening:** ' + formatSupportHoursInstant(decision.nextOpeningAt, decision.timezone) : '') +
-      '\n\nUse 24-hour local times. Daylight-saving transitions are handled by the shared schedule service.',
+      '**' + translate(locale, 'settings.supportHours.label.scope') + ':** ' + scopeLabel + '\n' +
+      inheritance + '\n\n' +
+      '**' + translate(locale, 'settings.supportHours.label.status') + ':** ' + status + '\n' +
+      '**' + translate(locale, 'settings.supportHours.label.timezone') + ':** ' +
+      (effectivePolicy?.timezone ?? translate(locale, 'settings.supportHours.notConfiguredTimezone')) + '\n' +
+      '**' + translate(locale, 'settings.supportHours.label.outsideHours') + ':** ' + outsideHoursValue + '\n' +
+      '**' + translate(locale, 'settings.supportHours.label.version') + ':** ' + policyVersion + '\n\n' +
+      '**' + translate(locale, 'settings.supportHours.label.weeklySchedule') + '**\n' + schedule +
+      (decision.nextOpeningAt
+        ? '\n\n**' + translate(locale, 'settings.supportHours.nextOpening') + ':** ' +
+          formatSupportHoursInstant(decision.nextOpeningAt, decision.timezone)
+        : '') +
+      '\n\n' + translate(locale, 'settings.supportHours.timeHint'),
     );
 
   const hasIntervals = Boolean(effectivePolicy && SUPPORT_HOURS_DAYS.some((day) => effectivePolicy.weeklySchedule[day].length > 0));
   const currentBehavior = effectivePolicy?.outsideHoursBehavior ?? 'restrict';
   const rows: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>> = [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(supportHoursScopedActionId('edit', scope)).setLabel('Edit Weekly Schedule').setEmoji('🗓️').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(supportHoursScopedActionId('toggle', scope)).setLabel(decision.policyEnabled ? 'Disable Enforcement' : 'Enable Enforcement').setEmoji(decision.policyEnabled ? '⏸️' : '▶️').setStyle(decision.policyEnabled ? ButtonStyle.Danger : ButtonStyle.Success).setDisabled(!decision.policyEnabled && !hasIntervals),
-      new ButtonBuilder().setCustomId(supportHoursScopedActionId('behavior', scope)).setLabel(currentBehavior === 'allow' ? 'Restrict After Hours' : 'Allow After Hours').setEmoji('🚦').setStyle(ButtonStyle.Secondary).setDisabled(!effectivePolicy),
+      new ButtonBuilder()
+        .setCustomId(supportHoursScopedActionId('edit', scope))
+        .setLabel(translate(locale, 'settings.supportHours.action.editSchedule'))
+        .setEmoji('🗓️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(supportHoursScopedActionId('toggle', scope))
+        .setLabel(translate(locale, decision.policyEnabled
+          ? 'settings.supportHours.action.disable'
+          : 'settings.supportHours.action.enable'))
+        .setEmoji(decision.policyEnabled ? '⏸️' : '▶️')
+        .setStyle(decision.policyEnabled ? ButtonStyle.Danger : ButtonStyle.Success)
+        .setDisabled(!decision.policyEnabled && !hasIntervals),
+      new ButtonBuilder()
+        .setCustomId(supportHoursScopedActionId('behavior', scope))
+        .setLabel(translate(locale, currentBehavior === 'allow'
+          ? 'settings.supportHours.action.restrict'
+          : 'settings.supportHours.action.allow'))
+        .setEmoji('🚦').setStyle(ButtonStyle.Secondary).setDisabled(!effectivePolicy),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(supportHoursScopedActionId('clear', scope)).setLabel(scope.scopeType === 'guild' ? 'Clear Server Default' : 'Clear Override').setEmoji('🧹').setStyle(ButtonStyle.Secondary).setDisabled(!localPolicy),
+      new ButtonBuilder()
+        .setCustomId(supportHoursScopedActionId('clear', scope))
+        .setLabel(translate(locale, scope.scopeType === 'guild'
+          ? 'settings.supportHours.action.clearServer'
+          : 'settings.supportHours.action.clearOverride'))
+        .setEmoji('🧹').setStyle(ButtonStyle.Secondary).setDisabled(!localPolicy),
       backButton(),
     ),
   ];
@@ -938,7 +973,10 @@ async function showSupportHoursSettings(
   if (departments.length) {
     const menu = new StringSelectMenuBuilder()
       .setCustomId('sf:settings:support-hours:scope:department')
-      .setPlaceholder('Choose a department override · page ' + (departmentPage + 1) + '/' + departmentPageCount)
+      .setPlaceholder(translate(locale, 'settings.supportHours.chooseDepartment', {
+        page: departmentPage + 1,
+        pages: departmentPageCount,
+      }).slice(0, 150))
       .addOptions(departments.slice(departmentPage * 25, departmentPage * 25 + 25).map(([id, department]) => ({
         label: String(department.name || id).slice(0, 100),
         value: id,
@@ -949,7 +987,10 @@ async function showSupportHoursSettings(
   if (panels.length) {
     const menu = new StringSelectMenuBuilder()
       .setCustomId('sf:settings:support-hours:scope:panel')
-      .setPlaceholder('Choose a ticket-panel override · page ' + (panelPage + 1) + '/' + panelPageCount)
+      .setPlaceholder(translate(locale, 'settings.supportHours.choosePanel', {
+        page: panelPage + 1,
+        pages: panelPageCount,
+      }).slice(0, 150))
       .addOptions(panels.slice(panelPage * 25, panelPage * 25 + 25).map((id) => ({
         label: ('Panel ' + id).slice(0, 100),
         value: id,
@@ -960,16 +1001,24 @@ async function showSupportHoursSettings(
 
   const pageButtons: ButtonBuilder[] = [];
   if (departmentPage > 0) {
-    pageButtons.push(new ButtonBuilder().setCustomId('sf:settings:support-hours:page:' + (departmentPage - 1) + ':' + panelPage + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-')).setLabel('Previous Departments').setStyle(ButtonStyle.Secondary));
+    pageButtons.push(new ButtonBuilder()
+      .setCustomId('sf:settings:support-hours:page:' + (departmentPage - 1) + ':' + panelPage + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-'))
+      .setLabel(translate(locale, 'settings.supportHours.previousDepartments')).setStyle(ButtonStyle.Secondary));
   }
   if (departmentPage + 1 < departmentPageCount) {
-    pageButtons.push(new ButtonBuilder().setCustomId('sf:settings:support-hours:page:' + (departmentPage + 1) + ':' + panelPage + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-')).setLabel('Next Departments').setStyle(ButtonStyle.Secondary));
+    pageButtons.push(new ButtonBuilder()
+      .setCustomId('sf:settings:support-hours:page:' + (departmentPage + 1) + ':' + panelPage + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-'))
+      .setLabel(translate(locale, 'settings.supportHours.nextDepartments')).setStyle(ButtonStyle.Secondary));
   }
   if (panelPage > 0) {
-    pageButtons.push(new ButtonBuilder().setCustomId('sf:settings:support-hours:page:' + departmentPage + ':' + (panelPage - 1) + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-')).setLabel('Previous Panels').setStyle(ButtonStyle.Secondary));
+    pageButtons.push(new ButtonBuilder()
+      .setCustomId('sf:settings:support-hours:page:' + departmentPage + ':' + (panelPage - 1) + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-'))
+      .setLabel(translate(locale, 'settings.supportHours.previousPanels')).setStyle(ButtonStyle.Secondary));
   }
   if (panelPage + 1 < panelPageCount) {
-    pageButtons.push(new ButtonBuilder().setCustomId('sf:settings:support-hours:page:' + departmentPage + ':' + (panelPage + 1) + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-')).setLabel('Next Panels').setStyle(ButtonStyle.Secondary));
+    pageButtons.push(new ButtonBuilder()
+      .setCustomId('sf:settings:support-hours:page:' + departmentPage + ':' + (panelPage + 1) + ':' + scope.scopeType + ':' + (scope.scopeId ?? '-'))
+      .setLabel(translate(locale, 'settings.supportHours.nextPanels')).setStyle(ButtonStyle.Secondary));
   }
   if (pageButtons.length) rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(pageButtons));
 
@@ -984,27 +1033,30 @@ async function showTicketWorkspaceSettings(
   const privateThreads = settings.ticketWorkspace.mode === 'private-threads';
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🧵 Ticket Workspace')
+      .setTitle('🧵 ' + translate(settings.locale, 'settings.nav.ticketWorkspace'))
       .setDescription(
         (notice ? notice + '\n\n' : '') +
-        '**Current mode:** ' + (privateThreads ? 'Private threads' : 'Dedicated text channels') + '\n\n' +
-        (privateThreads
-          ? 'Each new ticket is a private thread under its department workspace. Only the ticket owner, the department staff with access to that workspace, administrators, and the bot can read the conversation. The parent is read-only to normal members; other customers cannot see this thread. Department staff roles must be configured for staff access.'
-          : 'Each new ticket is a private text channel, using the existing permission-overwrite model.') +
-        '\n\n**Scope:** This setting affects new tickets only. Existing tickets keep their current resource type. The parent workspace for a private-thread department is created lazily when its next ticket is opened.' +
-        '\n\nPrivate threads require the bot to have Manage Threads, Create Private Threads, View Channel and Send Messages in Threads. If setup fails, ticket creation is stopped rather than falling back to a less-private channel.',
+        '**' + translate(settings.locale, 'settings.ticketWorkspace.label.currentMode') + ':** ' +
+        translate(settings.locale, privateThreads
+          ? 'settings.value.privateThreads'
+          : 'settings.value.privateTextChannels') + '\n\n' +
+        translate(settings.locale, privateThreads
+          ? 'settings.ticketWorkspace.description.privateThreads'
+          : 'settings.ticketWorkspace.description.textChannels') + '\n\n' +
+        translate(settings.locale, 'settings.ticketWorkspace.scope.newOnly') +
+        (privateThreads ? '\n\n' + translate(settings.locale, 'settings.ticketWorkspace.requirements') : ''),
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId('sf:settings:ticket-workspace:set:text-channels')
-        .setLabel('Use Text Channels')
+        .setLabel(translate(settings.locale, 'settings.ticketWorkspace.action.useTextChannels'))
         .setEmoji('📁')
         .setStyle(privateThreads ? ButtonStyle.Secondary : ButtonStyle.Success)
         .setDisabled(!privateThreads),
       new ButtonBuilder()
         .setCustomId('sf:settings:ticket-workspace:set:private-threads')
-        .setLabel('Use Private Threads')
+        .setLabel(translate(settings.locale, 'settings.ticketWorkspace.action.usePrivateThreads'))
         .setEmoji('🧵')
         .setStyle(privateThreads ? ButtonStyle.Success : ButtonStyle.Secondary)
         .setDisabled(privateThreads),
@@ -1015,23 +1067,30 @@ async function showTicketWorkspaceSettings(
 
 async function showPanelSettings(interaction: ButtonInteraction): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
+  const status = translate(settings.locale, settings.panelActivity.enabled ? 'common.enabled' : 'common.disabled');
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🎛️ Panel Settings')
-      .setDescription('Automatic panel positioning uses message count and estimated visual occupancy because Discord does not expose a bot-readable viewport.')
+      .setTitle('🎛️ ' + translate(settings.locale, 'settings.panel.title'))
+      .setDescription(translate(settings.locale, 'settings.panel.description'))
       .addFields({
-        name: 'Current configuration',
-        value:
-          `Automatic movement: **${settings.panelActivity.enabled ? 'Enabled' : 'Disabled'}**\n` +
-          `Visual budget: **${settings.panelActivity.visualLineBudget} lines**\n` +
-          `Message safety cap: **${settings.panelActivity.messageBudget}**\n` +
-          `Minimum messages: **${settings.panelActivity.minimumMessagesBeforeMove}**`,
+        name: translate(settings.locale, 'settings.panel.field.currentConfiguration'),
+        value: [
+          translate(settings.locale, 'settings.panel.value.automaticMovement', { status }),
+          translate(settings.locale, 'settings.panel.value.visualBudget', { lines: settings.panelActivity.visualLineBudget }),
+          translate(settings.locale, 'settings.panel.value.messageCap', { cap: settings.panelActivity.messageBudget }),
+          translate(settings.locale, 'settings.panel.value.minimumMessages', { count: settings.panelActivity.minimumMessagesBeforeMove }),
+        ].join('\n'),
       }),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:panel:toggle').setLabel(settings.panelActivity.enabled ? 'Disable Auto Move' : 'Enable Auto Move').setEmoji(settings.panelActivity.enabled ? '⏸️' : '▶️').setStyle(settings.panelActivity.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('sf:settings:panel:thresholds').setLabel('Edit Thresholds').setEmoji('📏').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:panel:toggle')
+        .setLabel(translate(settings.locale, settings.panelActivity.enabled ? 'settings.panel.action.disableAutoMove' : 'settings.panel.action.enableAutoMove'))
+        .setEmoji(settings.panelActivity.enabled ? '⏸️' : '▶️')
+        .setStyle(settings.panelActivity.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sf:settings:panel:thresholds')
+        .setLabel(translate(settings.locale, 'settings.panel.action.editThresholds'))
+        .setEmoji('📏').setStyle(ButtonStyle.Primary),
       backButton(),
     ),
   ]);
@@ -1042,15 +1101,27 @@ async function showTeamSettings(interaction: ButtonInteraction): Promise<void> {
   const max = settings.ticketDefaults.maxClaimedModerators;
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('👥 Team & Voice')
-      .setDescription('A ticket may be assisted by multiple moderators at the same time. The same limit controls the private voice room: **customer + configured moderator capacity**.')
+      .setTitle('👥 ' + translate(settings.locale, 'settings.team.title'))
+      .setDescription(translate(settings.locale, 'settings.team.description'))
       .addFields(
-        { name: 'Maximum simultaneous moderators', value: '**' + max + '**', inline: true },
-        { name: 'Voice capacity', value: '**' + (max + 1) + '** people', inline: true },
+        {
+          name: translate(settings.locale, 'settings.team.field.maxModerators'),
+          value: '**' + max + '**',
+          inline: true,
+        },
+        {
+          name: translate(settings.locale, 'settings.team.field.voiceCapacity'),
+          value: '**' + translate(settings.locale, 'settings.team.value.people', { count: max + 1 }) + '**',
+          inline: true,
+        },
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:team:edit').setLabel('Set Moderator Limit').setEmoji('👥').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('sf:settings:team:edit')
+        .setLabel(translate(settings.locale, 'settings.team.action.setModeratorLimit'))
+        .setEmoji('👥')
+        .setStyle(ButtonStyle.Primary),
       backButton(),
     ),
   ]);
@@ -1063,32 +1134,48 @@ async function showReportSettings(interaction: ButtonInteraction): Promise<void>
   const categoryText = categories.map((category) =>
     category.emoji + ' **' + category.name + '**\n' +
     Object.values(category.subcategories).map((sub) => '• ' + sub.name).join(' • ')
-  ).join('\n\n').slice(0, 3800) || 'No report categories configured.';
+  ).join('\n\n').slice(0, 3800) || translate(settings.locale, 'settings.reports.value.noCategories');
 
+  const actionKeys: Record<'tickets' | 'channel' | 'server', TranslationKey> = {
+    tickets: 'settings.reports.ruleAction.tickets',
+    channel: 'settings.reports.ruleAction.channel',
+    server: 'settings.reports.ruleAction.server',
+  };
   const ruleText = rules.length
-    ? rules.map((rule) => '• **' + rule.threshold + ' flags** → **' + rule.action + '**' + (rule.channelId ? ' in <#' + rule.channelId + '>' : '')).join('\n')
-    : 'No automatic actions configured.';
+    ? rules.map((rule) => {
+        const actionKey = actionKeys[rule.action as keyof typeof actionKeys] ?? 'settings.reports.ruleAction.unknown';
+        return '• **' + translate(settings.locale, 'settings.reports.flagThreshold', { threshold: rule.threshold }) +
+          ' → **' + translate(settings.locale, actionKey) + '**' +
+          (rule.channelId ? ' • <#' + rule.channelId + '>' : '');
+      }).join('\n')
+    : translate(settings.locale, 'settings.reports.value.noAutomaticActions');
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🚩 Safety & Reports')
-      .setDescription('Reports are independent of ticket use cases. Moderators choose a category and subcategory during a report; they never need to configure a use-case preset first.')
+      .setTitle('🚩 ' + translate(settings.locale, 'settings.reports.title'))
+      .setDescription(translate(settings.locale, 'settings.reports.description'))
       .addFields(
-        { name: 'Reporting', value: settings.reports.enabled ? '🟢 Enabled' : '🔴 Disabled', inline: true },
-        { name: 'Configured categories', value: String(categories.length), inline: true },
-        { name: 'Automatic flag rules', value: String(rules.length), inline: true },
-        { name: 'Categories & subcategories', value: categoryText.slice(0, 1024) },
-        { name: 'Automatic actions', value: ruleText.slice(0, 1024) },
+        { name: translate(settings.locale, 'settings.reports.field.reporting'), value: settings.reports.enabled ? '🟢 ' + translate(settings.locale, 'common.enabled') : '🔴 ' + translate(settings.locale, 'common.disabled'), inline: true },
+        { name: translate(settings.locale, 'settings.reports.field.configuredCategories'), value: String(categories.length), inline: true },
+        { name: translate(settings.locale, 'settings.reports.field.automaticFlagRules'), value: String(rules.length), inline: true },
+        { name: translate(settings.locale, 'settings.reports.field.categoriesSubcategories'), value: categoryText.slice(0, 1024) },
+        { name: translate(settings.locale, 'settings.reports.field.automaticActions'), value: ruleText.slice(0, 1024) },
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:reports:toggle').setLabel(settings.reports.enabled ? 'Disable Reports' : 'Enable Reports').setEmoji(settings.reports.enabled ? '⏸️' : '▶️').setStyle(settings.reports.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('sf:settings:reports:rules').setLabel('Flag Rules').setEmoji('🚩').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:reports:toggle')
+        .setLabel(translate(settings.locale, settings.reports.enabled ? 'settings.reports.action.disable' : 'settings.reports.action.enable'))
+        .setEmoji(settings.reports.enabled ? '⏸️' : '▶️')
+        .setStyle(settings.reports.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sf:settings:reports:rules')
+        .setLabel(translate(settings.locale, 'settings.reports.action.flagRules'))
+        .setEmoji('🚩').setStyle(ButtonStyle.Primary),
       backButton(),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       ...categories.slice(0, 5).map((category) =>
-        new ButtonBuilder().setCustomId('sf:settings:reports:category:' + category.id).setLabel(category.name.slice(0, 80)).setEmoji(category.emoji).setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('sf:settings:reports:category:' + category.id)
+          .setLabel(category.name.slice(0, 80)).setEmoji(category.emoji).setStyle(ButtonStyle.Secondary),
       ),
     ),
   ]);
@@ -1097,17 +1184,26 @@ async function showReportSettings(interaction: ButtonInteraction): Promise<void>
 async function showReportCategorySettings(interaction: ButtonInteraction, categoryId: string): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
   const category = settings.reports.categories[categoryId];
-  if (!category) { await reject(interaction, '❌ Report category not found.'); return; }
+  if (!category) {
+    await reject(interaction, '❌ ' + translate(settings.locale, 'settings.reports.error.categoryMissing'));
+    return;
+  }
   const subcategories = Object.values(category.subcategories);
   await renderSettingsView(interaction, [
     new EmbedBuilder()
       .setTitle(category.emoji + ' ' + category.name)
-      .setDescription('These are the report subcategories automatically available to moderators. They are independent of ticket departments and use cases.')
-      .addFields({ name: 'Subcategories', value: subcategories.map((sub) => '• ' + sub.name).join('\n').slice(0, 3900) || 'None' }),
+      .setDescription(translate(settings.locale, 'settings.reports.category.description'))
+      .addFields({
+        name: translate(settings.locale, 'settings.reports.category.subcategories'),
+        value: subcategories.map((sub) => '• ' + sub.name).join('\n').slice(0, 3900) ||
+          translate(settings.locale, 'settings.reports.value.noSubcategories'),
+      }),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:add:' + categoryId).setLabel('Add Subcategory').setEmoji('➕').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:select:' + categoryId).setLabel('Edit / Remove').setEmoji('✏️').setStyle(ButtonStyle.Primary).setDisabled(!subcategories.length),
+      new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:add:' + categoryId)
+        .setLabel(translate(settings.locale, 'settings.reports.action.addSubcategory')).setEmoji('➕').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:select:' + categoryId)
+        .setLabel(translate(settings.locale, 'settings.reports.action.editRemoveSubcategory')).setEmoji('✏️').setStyle(ButtonStyle.Primary).setDisabled(!subcategories.length),
       backButton(),
     ),
   ]);
@@ -1121,7 +1217,7 @@ async function showReportSubcategorySelector(
   const settings = await getAdvancedSettings(interaction.guild!.id);
   const category = settings.reports.categories[categoryId];
   if (!category) {
-    await reject(interaction, '❌ Report category not found.');
+    await reject(interaction, '❌ ' + translate(settings.locale, 'settings.reports.error.categoryMissing'));
     return;
   }
 
@@ -1143,7 +1239,7 @@ async function showReportSubcategorySelector(
         .setCustomId(
           'sf:settings:reports:subcategory:pick:' + categoryId,
         )
-        .setPlaceholder('Choose a subcategory')
+        .setPlaceholder(translate(settings.locale, 'settings.reports.selector.chooseSubcategory'))
         .addOptions(
           visible.map((sub) => ({
             label: sub.name.slice(0, 100),
@@ -1163,7 +1259,7 @@ async function showReportSubcategorySelector(
               ':' +
               (safePage - 1),
           )
-          .setLabel('Previous')
+          .setLabel(translate(settings.locale, 'settings.common.previous'))
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(safePage === 0),
         new ButtonBuilder()
@@ -1173,7 +1269,7 @@ async function showReportSubcategorySelector(
               ':' +
               safePage,
           )
-          .setLabel('Page ' + (safePage + 1) + ' / ' + pageCount)
+          .setLabel(translate(settings.locale, 'settings.reports.selector.page', { page: safePage + 1, pages: pageCount }))
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(true),
         new ButtonBuilder()
@@ -1183,7 +1279,7 @@ async function showReportSubcategorySelector(
               ':' +
               (safePage + 1),
           )
-          .setLabel('Next')
+          .setLabel(translate(settings.locale, 'settings.common.next'))
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(safePage >= pageCount - 1),
       ),
@@ -1195,11 +1291,10 @@ async function showReportSubcategorySelector(
   );
 
   await interaction.reply({
-    content:
-      'Select the report subcategory to edit or remove.' +
-      (pageCount > 1
-        ? ' Page ' + (safePage + 1) + ' of ' + pageCount + '.'
-        : ''),
+    content: translate(settings.locale, 'settings.reports.selector.prompt') +
+      (pageCount > 1 ? ' ' + translate(settings.locale, 'settings.reports.selector.pagePrompt', {
+        page: safePage + 1, pages: pageCount,
+      }) : ''),
     components,
     flags: MessageFlags.Ephemeral,
   });
@@ -1207,15 +1302,29 @@ async function showReportSubcategorySelector(
 
 async function showDefaults(interaction: ButtonInteraction): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
+  const priorityKeys: Record<TicketPriority, TranslationKey> = {
+    low: 'priority.low',
+    normal: 'priority.normal',
+    high: 'priority.high',
+    urgent: 'priority.urgent',
+    critical: 'priority.critical',
+  };
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🎟️ Ticket Defaults')
-      .setDescription('Defaults are applied automatically when a new ticket is created.')
-      .addFields({ name: 'Default priority', value: `⚡ **${settings.ticketDefaults.priority}**` }),
+      .setTitle('🎟️ ' + translate(settings.locale, 'settings.defaults.title'))
+      .setDescription(translate(settings.locale, 'settings.defaults.description'))
+      .addFields({
+        name: translate(settings.locale, 'settings.defaults.field.priority'),
+        value: '⚡ **' + translate(settings.locale, priorityKeys[settings.ticketDefaults.priority]) + '**',
+      }),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:defaults:edit').setLabel('Change Default Priority').setEmoji('⚡').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('sf:settings:defaults:edit')
+        .setLabel(translate(settings.locale, 'settings.defaults.action.changePriority'))
+        .setEmoji('⚡')
+        .setStyle(ButtonStyle.Primary),
       backButton(),
     ),
   ]);
@@ -1223,41 +1332,70 @@ async function showDefaults(interaction: ButtonInteraction): Promise<void> {
 
 async function showTagActions(interaction: SettingsViewInteraction, departmentId: string, tagId: string): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const locale = settings.locale;
   const department = config.departments[departmentId];
   const tag = department?.tags?.[tagId];
-  if (!department || !tag) { await reject(interaction, '❌ Tag not found.'); return; }
+  if (!department || !tag) {
+    await reject(interaction, '❌ ' + translate(locale, 'settings.tags.notFound'));
+    return;
+  }
   await renderSettingsView(interaction, [
-    new EmbedBuilder().setTitle('🏷️ ' + tag.name).setDescription('Tag **' + tag.name + '** belongs to **' + department.name + '**. Tags are subcategories only and never create Discord categories.'),
+    new EmbedBuilder()
+      .setTitle('🏷️ ' + tag.name)
+      .setDescription(translate(locale, 'settings.tags.detail', {
+        tag: tag.name,
+        department: department.name,
+      })),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:tag:edit:' + departmentId + ':' + tagId).setLabel('Edit Tag').setEmoji('✏️').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('sf:settings:tag:remove:' + departmentId + ':' + tagId).setLabel('Remove Tag').setEmoji('🗑️').setStyle(ButtonStyle.Danger).setDisabled(Object.keys(department.tags).length <= 1),
-      new ButtonBuilder().setCustomId('sf:settings:tag:manage:' + departmentId).setLabel('Back').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sf:settings:tag:edit:' + departmentId + ':' + tagId)
+        .setLabel(translate(locale, 'settings.tags.actions.edit')).setEmoji('✏️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:tag:remove:' + departmentId + ':' + tagId)
+        .setLabel(translate(locale, 'settings.tags.actions.remove')).setEmoji('🗑️')
+        .setStyle(ButtonStyle.Danger).setDisabled(Object.keys(department.tags).length <= 1),
+      new ButtonBuilder().setCustomId('sf:settings:tag:manage:' + departmentId)
+        .setLabel(translate(locale, 'settings.tags.actions.backToDepartment')).setStyle(ButtonStyle.Secondary),
     ),
   ]);
 }
 
 async function showTags(interaction: SettingsViewInteraction): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const locale = settings.locale;
   const departments = Object.values(config.departments).sort((a, b) => a.name.localeCompare(b.name));
   const lines = departments.length
-    ? departments.map((d) => {
-        const tags = Object.values(d.tags ?? {}).map((t) => t.name).sort().join(', ') || 'No tags';
-        return '📂 **' + d.name + '** • ' + (d.categoryId ? '<#' + d.categoryId + '>' : 'Category pending') + '\n   🏷️ ' + tags;
+    ? departments.map((department) => {
+        const tags = Object.values(department.tags ?? {}).map((tag) => tag.name).sort().join(', ') ||
+          translate(locale, 'settings.departments.noTags');
+        return '📂 **' + department.name + '** • ' +
+          (department.categoryId ? '<#' + department.categoryId + '>' : translate(locale, 'settings.departments.categoryPending')) +
+          '\n   🏷️ ' + tags;
       }).join('\n')
-    : 'No departments configured.';
+    : translate(locale, 'settings.departments.noDepartments');
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('📂 Departments & Tags')
-      .setDescription(lines.slice(0, 3900))
+      .setTitle('📂 ' + translate(locale, 'settings.departments.title'))
+      .setDescription(lines.slice(0, 3200))
       .addFields(
-        { name: 'Hierarchy', value: 'A **Department** owns one Discord category and optional staff role. **Tags are subcategories inside that department** and never create Discord categories. Tickets select one department and one tag.' },
-        { name: 'AI-ready design', value: 'Premium AI can classify a ticket into a department, then choose only from that department’s tags. The model never needs to invent categories or tags.' },
+        {
+          name: translate(locale, 'settings.departments.hierarchy.title'),
+          value: translate(locale, 'settings.departments.hierarchy.description'),
+        },
+        {
+          name: translate(locale, 'settings.departments.aiReady.title'),
+          value: translate(locale, 'settings.departments.aiReady.description'),
+        },
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:departments:add').setLabel('Add Department').setEmoji('📂').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('sf:settings:departments:manage').setLabel('Manage Departments').setEmoji('⚙️').setStyle(ButtonStyle.Primary).setDisabled(!departments.length),
+      new ButtonBuilder().setCustomId('sf:settings:departments:add')
+        .setLabel(translate(locale, 'settings.departments.actions.add'))
+        .setEmoji('📂').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sf:settings:departments:manage')
+        .setLabel(translate(locale, 'settings.departments.actions.manage'))
+        .setEmoji('⚙️').setStyle(ButtonStyle.Primary).setDisabled(!departments.length),
       backButton(),
     ),
   ]);
@@ -1268,109 +1406,104 @@ async function showDepartmentPicker(
   page = 0,
 ): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
-  const departments = Object.values(config.departments).sort((a, b) =>
-    a.name.localeCompare(b.name),
-  );
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const locale = settings.locale;
+  const departments = Object.values(config.departments).sort((a, b) => a.name.localeCompare(b.name));
   if (!departments.length) {
-    await renderSettingsView(
-      interaction,
-      [new EmbedBuilder().setTitle('📂 Departments').setDescription('No departments configured.')],
-      [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
-    );
+    await renderSettingsView(interaction, [
+      new EmbedBuilder()
+        .setTitle('📂 ' + translate(locale, 'settings.departments.title'))
+        .setDescription(translate(locale, 'settings.departments.noDepartments')),
+    ], [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())]);
     return;
   }
 
   const pageSize = 25;
   const pageCount = Math.max(1, Math.ceil(departments.length / pageSize));
   const safePage = Math.min(Math.max(page, 0), pageCount - 1);
-  const visible = departments.slice(
-    safePage * pageSize,
-    (safePage + 1) * pageSize,
-  );
-
-  const components: Array<
-    ActionRowBuilder<StringSelectMenuBuilder> |
-    ActionRowBuilder<ButtonBuilder>
-  > = [
+  const visible = departments.slice(safePage * pageSize, (safePage + 1) * pageSize);
+  const components: Array<ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<ButtonBuilder>> = [
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId('sf:settings:department:select')
-        .setPlaceholder('Choose a department')
-        .addOptions(
-          visible.map((d) => ({
-            label: d.name.slice(0, 100),
-            value: d.id,
-            description: Object.keys(d.tags ?? {}).length + ' tag(s)',
-          })),
-        ),
+        .setPlaceholder(translate(locale, 'settings.departments.actions.select').slice(0, 150))
+        .addOptions(visible.map((department) => ({
+          label: department.name.slice(0, 100),
+          value: department.id,
+          description: translate(locale, 'settings.departments.actions.tags', {
+            count: Object.keys(department.tags ?? {}).length,
+          }).slice(0, 100),
+        }))),
     ),
   ];
-
   if (pageCount > 1) {
-    components.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId('sf:settings:departments:manage:page:' + (safePage - 1))
-          .setLabel('Previous')
-          .setEmoji('⬅️')
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(safePage === 0),
-        new ButtonBuilder()
-          .setCustomId('sf:settings:departments:manage:page:' + safePage)
-          .setLabel('Page ' + (safePage + 1) + ' / ' + pageCount)
-          .setEmoji('📄')
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(true),
-        new ButtonBuilder()
-          .setCustomId('sf:settings:departments:manage:page:' + (safePage + 1))
-          .setLabel('Next')
-          .setEmoji('➡️')
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(safePage >= pageCount - 1),
-      ),
-    );
+    components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:departments:manage:page:' + (safePage - 1))
+        .setLabel(translate(locale, 'settings.common.previous'))
+        .setEmoji('⬅️').setStyle(ButtonStyle.Secondary).setDisabled(safePage === 0),
+      new ButtonBuilder().setCustomId('sf:settings:departments:manage:page:' + safePage)
+        .setLabel(translate(locale, 'settings.common.page', {
+          page: safePage + 1, pages: pageCount,
+        }).slice(0, 80))
+        .setEmoji('📄').setStyle(ButtonStyle.Secondary).setDisabled(true),
+      new ButtonBuilder().setCustomId('sf:settings:departments:manage:page:' + (safePage + 1))
+        .setLabel(translate(locale, 'settings.common.next'))
+        .setEmoji('➡️').setStyle(ButtonStyle.Secondary).setDisabled(safePage >= pageCount - 1),
+    ));
   }
-
   components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()));
-
-  await renderSettingsView(
-    interaction,
-    [new EmbedBuilder()
-      .setTitle('⚙️ Manage Departments')
+  await renderSettingsView(interaction, [
+    new EmbedBuilder()
+      .setTitle('⚙️ ' + translate(locale, 'settings.departments.actions.manage'))
       .setDescription(
-        'Select a department to manage it.' +
-        (pageCount > 1
-          ? '\nShowing departments ' +
-            (safePage * pageSize + 1) +
-            '–' +
-            Math.min((safePage + 1) * pageSize, departments.length) +
-            ' of ' +
-            departments.length +
-            '.'
-          : ''),
-      )],
-    components,
-  );
+        translate(locale, 'settings.departments.actions.selectToManage') +
+        (pageCount > 1 ? '\n' + translate(locale, 'settings.departments.range', {
+          start: safePage * pageSize + 1,
+          end: Math.min((safePage + 1) * pageSize, departments.length),
+          total: departments.length,
+        }) : ''),
+      ),
+  ], components);
 }
 
 async function showDepartmentManager(interaction: SettingsViewInteraction, departmentId: string): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
-  const d = config.departments[departmentId];
-  if (!d) { await reject(interaction, '❌ Department not found.'); return; }
-  const tags = Object.values(d.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const locale = settings.locale;
+  const department = config.departments[departmentId];
+  if (!department) {
+    await reject(interaction, '❌ ' + translate(locale, 'settings.departments.notFound'));
+    return;
+  }
+  const tags = Object.values(department.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('⚙️ ' + d.name)
-      .setDescription('**Category:** ' + (d.categoryId ? '<#' + d.categoryId + '>' : 'Pending') + '\n**Staff:** ' + (d.staffRoleId ? '<@&' + d.staffRoleId + '>' : 'Administrators only') + '\n\n**Tags:** ' + (tags.length ? tags.map((t) => '🏷️ ' + t.name).join(' • ') : 'None')),
+      .setTitle('⚙️ ' + department.name)
+      .setDescription(
+        '**' + translate(locale, 'settings.departments.field.category') + ':** ' +
+        (department.categoryId ? '<#' + department.categoryId + '>' : translate(locale, 'settings.departments.value.pending')) + '\n' +
+        '**' + translate(locale, 'settings.departments.field.staff') + ':** ' +
+        (department.staffRoleId ? '<@&' + department.staffRoleId + '>' : translate(locale, 'settings.departments.value.adminsOnly')) +
+        '\n\n**' + translate(locale, 'settings.departments.field.tags') + ':** ' +
+        (tags.length ? tags.map((tag) => '🏷️ ' + tag.name).join(' • ') : translate(locale, 'settings.departments.noTags')),
+      ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:department:edit:' + d.id).setLabel('Edit Department').setEmoji('✏️').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('sf:settings:tag:add:' + d.id).setLabel('Add Tag').setEmoji('➕').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('sf:settings:tag:manage:' + d.id).setLabel('Manage Tags').setEmoji('🏷️').setStyle(ButtonStyle.Secondary).setDisabled(!tags.length),
+      new ButtonBuilder().setCustomId('sf:settings:department:edit:' + department.id)
+        .setLabel(translate(locale, 'settings.departments.actions.edit')).setEmoji('✏️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:tag:add:' + department.id)
+        .setLabel(translate(locale, 'settings.tags.actions.add'))
+        .setEmoji('➕').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sf:settings:tag:manage:' + department.id)
+        .setLabel(translate(locale, 'settings.tags.title')).setEmoji('🏷️')
+        .setStyle(ButtonStyle.Secondary).setDisabled(!tags.length),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:department:remove:' + d.id).setLabel('Remove Department').setEmoji('🗑️').setStyle(ButtonStyle.Danger).setDisabled(Object.keys(config.departments).length <= 1),
-      new ButtonBuilder().setCustomId('sf:settings:departments').setLabel('Back').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sf:settings:department:remove:' + department.id)
+        .setLabel(translate(locale, 'settings.departments.actions.remove')).setEmoji('🗑️')
+        .setStyle(ButtonStyle.Danger).setDisabled(Object.keys(config.departments).length <= 1),
+      new ButtonBuilder().setCustomId('sf:settings:departments')
+        .setLabel(translate(locale, 'settings.departments.actions.back')).setStyle(ButtonStyle.Secondary),
     ),
   ]);
 }
@@ -1381,115 +1514,70 @@ async function showTagManager(
   page = 0,
 ): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
-  const d = config.departments[departmentId];
-  if (!d) {
-    await reject(interaction, '❌ Department not found.');
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const locale = settings.locale;
+  const department = config.departments[departmentId];
+  if (!department) {
+    await reject(interaction, '❌ ' + translate(locale, 'settings.departments.notFound'));
     return;
   }
-
-  const tags = Object.values(d.tags ?? {}).sort((a, b) =>
-    a.name.localeCompare(b.name),
-  );
-
+  const tags = Object.values(department.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name));
   if (!tags.length) {
-    await renderSettingsView(
-      interaction,
-      [new EmbedBuilder()
-        .setTitle('🏷️ Tags • ' + d.name)
-        .setDescription('No tags configured.')],
-      [
-        new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder()
-            .setCustomId('sf:settings:department:manage:' + d.id)
-            .setLabel('Back to Department')
-            .setStyle(ButtonStyle.Secondary),
-        ),
-      ],
-    );
+    await renderSettingsView(interaction, [
+      new EmbedBuilder().setTitle('🏷️ ' + translate(locale, 'settings.tags.title') + ' • ' + department.name)
+        .setDescription(translate(locale, 'settings.tags.noTags')),
+    ], [new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:department:manage:' + department.id)
+        .setLabel(translate(locale, 'settings.tags.actions.backToDepartment')).setStyle(ButtonStyle.Secondary),
+    )]);
     return;
   }
 
   const pageSize = 25;
   const pageCount = Math.max(1, Math.ceil(tags.length / pageSize));
   const safePage = Math.min(Math.max(page, 0), pageCount - 1);
-  const visible = tags.slice(
-    safePage * pageSize,
-    (safePage + 1) * pageSize,
-  );
-
-  const components: Array<
-    ActionRowBuilder<StringSelectMenuBuilder> |
-    ActionRowBuilder<ButtonBuilder>
-  > = [
+  const visible = tags.slice(safePage * pageSize, (safePage + 1) * pageSize);
+  const components: Array<ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<ButtonBuilder>> = [
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
-        .setCustomId('sf:settings:tag:select:' + d.id)
-        .setPlaceholder('Choose a tag')
-        .addOptions(
-          visible.map((t) => ({
-            label: t.name.slice(0, 100),
-            value: t.id,
-            description: 'Subcategory of ' + d.name,
-          })),
-        ),
+        .setCustomId('sf:settings:tag:select:' + department.id)
+        .setPlaceholder(translate(locale, 'settings.tags.select').slice(0, 150))
+        .addOptions(visible.map((tag) => ({
+          label: tag.name.slice(0, 100),
+          value: tag.id,
+          description: translate(locale, 'settings.tags.subcategoryOf', { department: department.name }).slice(0, 100),
+        }))),
     ),
   ];
-
   if (pageCount > 1) {
-    components.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId('sf:settings:tag:manage-page:' + d.id + ':' + (safePage - 1))
-          .setLabel('Previous')
-          .setEmoji('⬅️')
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(safePage === 0),
-        new ButtonBuilder()
-          .setCustomId('sf:settings:tag:manage-page:' + d.id + ':' + safePage)
-          .setLabel('Page ' + (safePage + 1) + ' / ' + pageCount)
-          .setEmoji('📄')
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(true),
-        new ButtonBuilder()
-          .setCustomId('sf:settings:tag:manage-page:' + d.id + ':' + (safePage + 1))
-          .setLabel('Next')
-          .setEmoji('➡️')
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(safePage >= pageCount - 1),
-      ),
-    );
+    components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sf:settings:tag:manage-page:' + department.id + ':' + (safePage - 1))
+        .setLabel(translate(locale, 'quickReply.picker.previous')).setEmoji('⬅️')
+        .setStyle(ButtonStyle.Secondary).setDisabled(safePage === 0),
+      new ButtonBuilder().setCustomId('sf:settings:tag:manage-page:' + department.id + ':' + safePage)
+        .setLabel(translate(locale, 'settings.common.page', { page: safePage + 1, pages: pageCount }).slice(0, 80))
+        .setEmoji('📄').setStyle(ButtonStyle.Secondary).setDisabled(true),
+      new ButtonBuilder().setCustomId('sf:settings:tag:manage-page:' + department.id + ':' + (safePage + 1))
+        .setLabel(translate(locale, 'quickReply.picker.next')).setEmoji('➡️')
+        .setStyle(ButtonStyle.Secondary).setDisabled(safePage >= pageCount - 1),
+    ));
   }
-
-  components.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId('sf:settings:department:manage:' + d.id)
-        .setLabel('Back to Department')
-        .setStyle(ButtonStyle.Secondary),
-    ),
-  );
-
-  await renderSettingsView(
-    interaction,
-    [new EmbedBuilder()
-      .setTitle('🏷️ Tags • ' + d.name)
+  components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('sf:settings:department:manage:' + department.id)
+      .setLabel(translate(locale, 'settings.tags.actions.backToDepartment')).setStyle(ButtonStyle.Secondary),
+  ));
+  await renderSettingsView(interaction, [
+    new EmbedBuilder().setTitle('🏷️ ' + translate(locale, 'settings.tags.title') + ' • ' + department.name)
       .setDescription(
-        'Select a tag to edit or remove it.' +
-        (pageCount > 1
-          ? '\nShowing tags ' +
-            (safePage * pageSize + 1) +
-            '–' +
-            Math.min((safePage + 1) * pageSize, tags.length) +
-            ' of ' +
-            tags.length +
-            '.'
-          : ''),
-      )],
-    components,
-  );
+        translate(locale, 'settings.tags.selectToManage') +
+        (pageCount > 1 ? '\n' + translate(locale, 'settings.tags.range', {
+          start: safePage * pageSize + 1,
+          end: Math.min((safePage + 1) * pageSize, tags.length),
+          total: tags.length,
+        }) : ''),
+      ),
+  ], components);
 }
-
-
 
 async function showDepartments(interaction: SettingsViewInteraction): Promise<void> {
   await showTags(interaction);
@@ -1497,18 +1585,33 @@ async function showDepartments(interaction: SettingsViewInteraction): Promise<vo
 
 async function showRetention(interaction: ButtonInteraction): Promise<void> {
   const settings = await getAdvancedSettings(interaction.guild!.id);
+  const retentionValue = (days: number) => days === 0
+    ? translate(settings.locale, 'settings.value.noTimer')
+    : translate(settings.locale, 'settings.value.days', { count: days });
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🧹 Retention')
-      .setDescription('Set how long closed and archived tickets remain before deletion approval. **0 means no configured timer; the one-year maximum retention policy still applies.**')
+      .setTitle('🧹 ' + translate(settings.locale, 'settings.retention.title'))
+      .setDescription(translate(settings.locale, 'settings.retention.description'))
       .addFields(
-        { name: 'Closed', value: settings.retention.closedDays === 0 ? 'No timer • 365-day maximum' : settings.retention.closedDays + ' days', inline: true },
-        { name: 'Archived', value: settings.retention.archiveDays === 0 ? 'No timer • 365-day maximum' : settings.retention.archiveDays + ' days', inline: true },
+        {
+          name: translate(settings.locale, 'settings.retention.field.closed'),
+          value: retentionValue(settings.retention.closedDays),
+          inline: true,
+        },
+        {
+          name: translate(settings.locale, 'settings.retention.field.archived'),
+          value: retentionValue(settings.retention.archiveDays),
+          inline: true,
+        },
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:retention:edit').setLabel('Edit Retention').setEmoji('🕒').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('sf:settings:retention:edit')
+        .setLabel(translate(settings.locale, 'settings.retention.action.edit'))
+        .setEmoji('🕒')
+        .setStyle(ButtonStyle.Primary),
       backButton(),
     ),
   ]);
@@ -1521,40 +1624,51 @@ async function showInactivitySettings(interaction: SettingsViewInteraction, noti
   const defaultRoleIds = settings.inactivity.exemptRoleIds.filter((roleId) => guild.roles.cache.has(roleId));
   const roleSelector = new RoleSelectMenuBuilder()
     .setCustomId('sf:settings:inactivity:exempt-roles')
-    .setPlaceholder('Select roles exempt from inactivity closure')
+    .setPlaceholder(translate(settings.locale, 'settings.inactivity.roleSelectPlaceholder').slice(0, 150))
     .setMinValues(0)
     .setMaxValues(25);
   if (defaultRoleIds.length) roleSelector.setDefaultRoles(...defaultRoleIds);
 
   const roleNames = settings.inactivity.exemptRoleIds
     .map((roleId) => guild.roles.cache.get(roleId)?.name ?? roleId)
-    .join(', ') || 'None';
+    .join(', ') || translate(settings.locale, 'common.none');
   const departmentNames = settings.inactivity.exemptDepartmentIds
     .map((departmentId) => config.departments[departmentId]?.name ?? departmentId)
-    .join(', ') || 'None';
+    .join(', ') || translate(settings.locale, 'common.none');
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('⏳ Ticket Inactivity Automation')
+      .setTitle('⏳ ' + translate(settings.locale, 'settings.inactivity.title'))
       .setDescription(
         (notice ? notice + '\n\n' : '') +
-        'When enabled, active tickets with no recorded activity receive a visible warning. If nobody replies during the grace period, ResolveX creates or reuses a transcript and closes the ticket. Any new activity resets the warning. The scheduler and deadlines survive restarts.\n\n' +
-        '**Status:** ' + (settings.inactivity.enabled ? '🟢 Enabled' : '⚪ Disabled') + '\n' +
-        '**Warn after:** ' + settings.inactivity.idleHours + ' hours without activity\n' +
-        '**Grace after warning:** ' + settings.inactivity.graceHours + ' hours\n' +
-        '**Exempt roles:** ' + roleNames + '\n' +
-        '**Exempt departments:** ' + departmentNames + '\n\n' +
-        'A selected role exempts tickets whose owner or assigned staff holds that role. Department exemptions apply to every ticket in that department. An exemption takes effect immediately and clears any existing warning for the affected ticket.'
+        translate(settings.locale, 'settings.inactivity.description') + '\n\n' +
+        '**' + translate(settings.locale, 'settings.inactivity.status') + ':** ' +
+        (settings.inactivity.enabled
+          ? '🟢 ' + translate(settings.locale, 'common.enabled')
+          : '⚪ ' + translate(settings.locale, 'common.disabled')) + '\n' +
+        translate(settings.locale, 'settings.inactivity.warnAfter', { hours: settings.inactivity.idleHours }) + '\n' +
+        translate(settings.locale, 'settings.inactivity.graceAfter', { hours: settings.inactivity.graceHours }) + '\n' +
+        '**' + translate(settings.locale, 'settings.inactivity.exemptRoles') + ':** ' + roleNames + '\n' +
+        '**' + translate(settings.locale, 'settings.inactivity.exemptDepartments') + ':** ' + departmentNames + '\n\n' +
+        translate(settings.locale, 'settings.inactivity.exemptionHelp')
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId('sf:settings:inactivity:' + (settings.inactivity.enabled ? 'disable' : 'enable'))
-        .setLabel(settings.inactivity.enabled ? 'Disable Automation' : 'Enable Automation')
+        .setLabel(translate(settings.locale, settings.inactivity.enabled ? 'settings.inactivity.action.disable' : 'settings.inactivity.action.enable'))
         .setEmoji(settings.inactivity.enabled ? '⏸️' : '▶️')
         .setStyle(settings.inactivity.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('sf:settings:inactivity:edit').setLabel('Edit Thresholds').setEmoji('🕒').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('sf:settings:inactivity:departments').setLabel('Edit Departments').setEmoji('🗂️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('sf:settings:inactivity:edit')
+        .setLabel(translate(settings.locale, 'settings.inactivity.action.editThresholds'))
+        .setEmoji('🕒')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('sf:settings:inactivity:departments')
+        .setLabel(translate(settings.locale, 'settings.inactivity.action.editDepartments'))
+        .setEmoji('🗂️')
+        .setStyle(ButtonStyle.Secondary),
       backButton(),
     ),
     new ActionRowBuilder<RoleSelectMenuBuilder>().addComponents(roleSelector),
@@ -1566,16 +1680,18 @@ async function showAppearance(interaction: ButtonInteraction): Promise<void> {
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🎨 Appearance')
-      .setDescription('Customize the main support panel without editing source code.')
+      .setTitle('🎨 ' + translate(settings.locale, 'settings.appearance.title'))
+      .setDescription(translate(settings.locale, 'settings.appearance.description'))
       .addFields(
-        { name: 'Title', value: settings.appearance.panelTitle.slice(0, 1024) || 'Not set' },
-        { name: 'Description', value: settings.appearance.panelDescription.slice(0, 1024) || 'Not set' },
-        { name: 'Footer', value: settings.appearance.panelFooter.slice(0, 1024) || 'Not set' },
+        { name: translate(settings.locale, 'settings.appearance.field.title'), value: settings.appearance.panelTitle.slice(0, 1024) || translate(settings.locale, 'settings.appearance.value.notSet') },
+        { name: translate(settings.locale, 'settings.appearance.field.description'), value: settings.appearance.panelDescription.slice(0, 1024) || translate(settings.locale, 'settings.appearance.value.notSet') },
+        { name: translate(settings.locale, 'settings.appearance.field.footer'), value: settings.appearance.panelFooter.slice(0, 1024) || translate(settings.locale, 'settings.appearance.value.notSet') },
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:appearance:edit').setLabel('Edit Appearance').setEmoji('✏️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:appearance:edit')
+        .setLabel(translate(settings.locale, 'settings.appearance.action.edit'))
+        .setEmoji('✏️').setStyle(ButtonStyle.Primary),
       backButton(),
     ),
   ]);
@@ -1586,10 +1702,11 @@ async function showThemeSettings(
   notice = '',
 ): Promise<void> {
   const config = await getGuildConfig(interaction.guild!.id);
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   const active = getThemeDefinition(config.theme);
   const chooser = new StringSelectMenuBuilder()
     .setCustomId('sf:settings:theme:select')
-    .setPlaceholder('Choose a visual theme for this server')
+    .setPlaceholder(translate(settings.locale, 'settings.theme.choose').slice(0, 150))
     .addOptions(UI_THEMES.map((theme) => ({
       label: theme.label,
       value: theme.id,
@@ -1599,14 +1716,14 @@ async function showThemeSettings(
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🌈 Server Theme')
+      .setTitle('🌈 ' + translate(settings.locale, 'settings.theme.title'))
       .setDescription(
         (notice ? notice + '\n\n' : '') +
-        'Give this server its own visual identity. The selected palette is saved in this server’s configuration and does not affect other servers. It accents the public support panel, Settings dashboard, and Ticket Forms screens. Discord’s native controls retain their built-in style.'
+        translate(settings.locale, 'settings.theme.description')
       )
       .addFields(
-        { name: 'Active palette', value: '**' + active.label + '**\n' + active.description, inline: true },
-        { name: 'Preview', value: active.preview, inline: true },
+        { name: translate(settings.locale, 'settings.theme.field.activePalette'), value: '**' + active.label + '**\n' + active.description, inline: true },
+        { name: translate(settings.locale, 'settings.theme.field.preview'), value: active.preview, inline: true },
       ),
   ], [
     new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(chooser),
@@ -1615,6 +1732,7 @@ async function showThemeSettings(
 }
 
 async function showUseCases(interaction: ButtonInteraction): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   const presets = Object.entries(USE_CASE_PRESETS);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
   for (let i = 0; i < presets.length; i += 4) {
@@ -1629,11 +1747,10 @@ async function showUseCases(interaction: ButtonInteraction): Promise<void> {
     ));
   }
   rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(backButton()));
-
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🧩 Use Cases')
-      .setDescription('Optional department presets for common support operations. Each preset adds eight relevant starter tags (ticket subcategories). You can rename or remove them later in Departments & Tags. Departments are created without a Discord category; that category is provisioned only when the first ticket is opened.'),
+      .setTitle('🧩 ' + translate(settings.locale, 'settings.useCases.title'))
+      .setDescription(translate(settings.locale, 'settings.useCases.description')),
   ], rows);
 }
 
@@ -1644,78 +1761,102 @@ async function showStorage(interaction: ButtonInteraction): Promise<void> {
 
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🗄️ Storage & Categories')
-      .setDescription(
-        'Closed tickets and Archive tickets are the only status-storage categories created by default. ' +
-        'Claimed tickets and Pending tickets can be added here when extra segregation is useful.',
-      )
+      .setTitle('🗄️ ' + translate(settings.locale, 'settings.storage.title'))
+      .setDescription(translate(settings.locale, 'settings.storage.description'))
       .addFields(
-        { name: 'Closed tickets', value: settings.closedCategoryId ? (interaction.guild!.channels.cache.get(settings.closedCategoryId)?.name ?? 'Configured category') : 'Not provisioned', inline: true },
-        { name: 'Archive tickets', value: settings.archiveCategoryId ? (interaction.guild!.channels.cache.get(settings.archiveCategoryId)?.name ?? 'Configured category') : 'Not provisioned', inline: true },
-        { name: 'Claimed tickets', value: claimed?.name ?? 'Not added', inline: true },
-        { name: 'Pending tickets', value: pending?.name ?? 'Not added', inline: true },
+        {
+          name: translate(settings.locale, 'settings.storage.field.closed'),
+          value: settings.closedCategoryId
+            ? (interaction.guild!.channels.cache.get(settings.closedCategoryId)?.name ?? translate(settings.locale, 'settings.storage.value.configuredCategory'))
+            : translate(settings.locale, 'settings.storage.value.notProvisioned'),
+          inline: true,
+        },
+        {
+          name: translate(settings.locale, 'settings.storage.field.archive'),
+          value: settings.archiveCategoryId
+            ? (interaction.guild!.channels.cache.get(settings.archiveCategoryId)?.name ?? translate(settings.locale, 'settings.storage.value.configuredCategory'))
+            : translate(settings.locale, 'settings.storage.value.notProvisioned'),
+          inline: true,
+        },
+        {
+          name: translate(settings.locale, 'settings.storage.field.claimed'),
+          value: claimed?.name ?? translate(settings.locale, 'settings.storage.value.notAdded'),
+          inline: true,
+        },
+        {
+          name: translate(settings.locale, 'settings.storage.field.pending'),
+          value: pending?.name ?? translate(settings.locale, 'settings.storage.value.notAdded'),
+          inline: true,
+        },
       ),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:storage:add:claimed').setLabel(claimed ? 'Claimed Added' : 'Add Claimed tickets').setEmoji('🙋').setStyle(ButtonStyle.Secondary).setDisabled(Boolean(claimed)),
-      new ButtonBuilder().setCustomId('sf:settings:storage:add:pending').setLabel(pending ? 'Pending Added' : 'Add Pending tickets').setEmoji('⏳').setStyle(ButtonStyle.Secondary).setDisabled(Boolean(pending)),
-      new ButtonBuilder().setCustomId('sf:settings:storage:repair').setLabel('Storage Repair').setEmoji('🗄️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('sf:settings:storage:add:claimed')
+        .setLabel(translate(settings.locale, claimed
+          ? 'settings.storage.action.claimedAdded'
+          : 'settings.storage.action.addClaimed'))
+        .setEmoji('🙋').setStyle(ButtonStyle.Secondary).setDisabled(Boolean(claimed)),
+      new ButtonBuilder()
+        .setCustomId('sf:settings:storage:add:pending')
+        .setLabel(translate(settings.locale, pending
+          ? 'settings.storage.action.pendingAdded'
+          : 'settings.storage.action.addPending'))
+        .setEmoji('⏳').setStyle(ButtonStyle.Secondary).setDisabled(Boolean(pending)),
+      new ButtonBuilder()
+        .setCustomId('sf:settings:storage:repair')
+        .setLabel(translate(settings.locale, 'settings.storage.action.repair'))
+        .setEmoji('🗄️').setStyle(ButtonStyle.Primary),
       backButton(),
     ),
   ]);
 }
 
 async function showResetStepOne(interaction: ButtonInteraction): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🚨 Delete Everything • Confirmation 1 of 3')
-      .setDescription(
-        '**This permanently removes ResolvX data from this server.**\n\n' +
-        'Before continuing, choose whether ResolvX should retain individual audit events for future summaries. Daily and overall summaries are retained either way.\n\n' +
-        'ResolvX-managed ticket channels and their messages, ResolvX categories, the public ticket panel, transcript/audit/settings channels, and stored ResolvX data will be deleted.\n\n' +
-        'Unrelated Discord channels are not targeted.',
-      ),
+      .setTitle('🚨 ' + translate(settings.locale, 'settings.reset.stepOneTitle'))
+      .setDescription(translate(settings.locale, 'settings.reset.stepOneDescription')),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:reset:audit:no').setLabel('Do Not Accumulate').setEmoji('📊').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('sf:settings:reset:audit:yes').setLabel('Accumulate Audit Data').setEmoji('💾').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sf:settings:reset:audit:no').setLabel(translate(settings.locale, 'settings.reset.noAuditEvents')).setEmoji('📊').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sf:settings:reset:audit:yes').setLabel(translate(settings.locale, 'settings.reset.keepAuditEvents')).setEmoji('💾').setStyle(ButtonStyle.Primary),
       backButton(),
     ),
   ]);
 }
 
 async function showResetStepTwo(interaction: ButtonInteraction): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   const accumulate = pendingResetAuditChoice.get(interaction.guild!.id) ?? false;
+  const auditChoice = translate(settings.locale, accumulate ? 'settings.reset.auditAccumulate' : 'settings.reset.auditSummaries');
   await renderSettingsView(interaction, [
     new EmbedBuilder()
-      .setTitle('🚨 Delete Everything • Confirmation 2 of 3')
-      .setDescription(
-        '**You are about to erase every ResolvX-managed channel and stored record in this server.**\n\n' +
-        'Audit retention choice: **' + (accumulate ? 'Accumulate individual audit data' : 'Keep summaries only') + '**.\n\n' +
-        'Daily and overall summaries will remain available after ResolvX is set up again. This choice can be changed later from the Audit Log controls.\n\n' +
-        'This includes every message inside ResolvX-managed channels. ResolvX cannot undo this operation.',
-      ),
+      .setTitle('🚨 ' + translate(settings.locale, 'settings.reset.stepTwoTitle'))
+      .setDescription(translate(settings.locale, 'settings.reset.stepTwoDescription', { auditChoice })),
   ], [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sf:settings:reset:confirm3').setLabel('Continue to Final Confirmation').setEmoji('☢️').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('sf:settings:home').setLabel('Cancel').setEmoji('✖️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sf:settings:reset:confirm3').setLabel(translate(settings.locale, 'settings.reset.continueFinal')).setEmoji('☢️').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('sf:settings:home').setLabel(translate(settings.locale, 'settings.reset.cancel')).setEmoji('✖️').setStyle(ButtonStyle.Secondary),
     ),
   ]);
 }
 
 async function showResetFinal(interaction: ButtonInteraction): Promise<void> {
+  const settings = await getAdvancedSettings(interaction.guild!.id);
   await interaction.showModal(
     new ModalBuilder()
       .setCustomId('sf:settings:modal:reset')
-      .setTitle('Final Confirmation • 3 of 3')
+      .setTitle(translate(settings.locale, 'settings.reset.finalTitle'))
       .addComponents(
         new ActionRowBuilder<TextInputBuilder>().addComponents(
           new TextInputBuilder()
             .setCustomId('confirmation')
-            .setLabel('Type DELETE SUPPORT FORGE to continue')
+            .setLabel(translate(settings.locale, 'settings.reset.finalLabel'))
             .setStyle(TextInputStyle.Short)
             .setRequired(true)
-            .setPlaceholder('DELETE SUPPORT FORGE')
+            .setPlaceholder(translate(settings.locale, 'settings.reset.finalPlaceholder'))
             .setMaxLength(20),
         ),
       ),
@@ -1737,8 +1878,9 @@ async function openModal(
     }
     await interaction.showModal(modal);
   } catch (error) {
-    console.error('❌ Failed to open ResolvX settings form:', error);
-    await reject(interaction, '❌ The settings form could not be opened. Please try again.');
+    console.error('❌ Failed to open settings form:', error);
+    const locale = await getAdvancedSettings(interaction.guild!.id).then((settings) => settings.locale).catch(() => 'en-US');
+    await reject(interaction, '❌ ' + translate(locale, 'settings.recovery.modalOpenFailed'));
   }
 }
 
@@ -1748,11 +1890,12 @@ const RECOVERY_PAGE_SIZE = 20;
 
 async function recoveryEmbed(guild: Guild, title: string, description: string): Promise<EmbedBuilder> {
   const config = await getGuildConfig(guild.id);
+  const settings = await getAdvancedSettings(guild.id);
   return new EmbedBuilder()
     .setColor(getThemeColor(config.theme))
     .setTitle(title.slice(0, 256))
-    .setDescription((description || 'Use the controls below to continue.').slice(0, 3900))
-    .setFooter({ text: getThemeDefinition(config.theme).label + ' theme • ResolvX Ticket Recovery' })
+    .setDescription((description || translate(settings.locale, 'settings.recovery.genericContinue')).slice(0, 3900))
+    .setFooter({ text: translate(settings.locale, 'settings.recovery.footer', { theme: getThemeDefinition(config.theme).label }) })
     .setTimestamp();
 }
 
@@ -1767,11 +1910,11 @@ function recoveryButton(id: string, label: string, style: ButtonStyle = ButtonSt
   return result;
 }
 
-function recoverySelect(candidates: TicketRecoveryCandidate[], source: 'discord_native' | 'ticket_button'): ActionRowBuilder<StringSelectMenuBuilder> | null {
+function recoverySelect(candidates: TicketRecoveryCandidate[], source: 'discord_native' | 'ticket_button', locale: string): ActionRowBuilder<StringSelectMenuBuilder> | null {
   if (!candidates.length) return null;
   const menu = new StringSelectMenuBuilder()
     .setCustomId(source === 'discord_native' ? 'sf:settings:recovery:channels:pick' : 'sf:settings:recovery:review:pick')
-    .setPlaceholder(source === 'discord_native' ? 'Choose a channel to restore' : 'Choose a deletion to review')
+    .setPlaceholder(translate(locale, source === 'discord_native' ? 'settings.recovery.chooseChannel' : 'settings.recovery.chooseDeletion'))
     .addOptions(candidates.slice(0, 25).map((item) => ({
       label: ('Ticket #' + item.ticketNumber).slice(0, 100),
       value: item.ticketId,
@@ -1788,41 +1931,42 @@ async function showRecoveryCandidates(
   await ensureRecoveryReply(interaction);
   const guild = interaction.guild;
   if (!guild) {
-    await interaction.editReply('Ticket recovery must be opened inside a server.');
+    await interaction.editReply(translate('en-US', 'settings.recovery.mustBeInServer'));
     return;
   }
 
+  const settings = await getAdvancedSettings(guild.id);
   const all = await listTicketRecoveryCandidates(guild.id, source);
   const pages = Math.max(1, Math.ceil(all.length / RECOVERY_PAGE_SIZE));
   const page = Math.min(Math.max(1, requestedPage), pages);
   const candidates = all.slice((page - 1) * RECOVERY_PAGE_SIZE, page * RECOVERY_PAGE_SIZE);
   const native = source === 'discord_native';
   const rows: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>> = [];
-  const select = recoverySelect(candidates, source);
+  const select = recoverySelect(candidates, source, settings.locale);
   if (select) rows.push(select);
   if (pages > 1) {
     rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-      recoveryButton('sf:settings:recovery:' + (native ? 'channels' : 'review') + ':page:' + (page - 1), 'Previous', ButtonStyle.Secondary, '◀️', page <= 1),
-      recoveryButton('sf:settings:recovery:' + (native ? 'channels' : 'review') + ':page:' + (page + 1), 'Next', ButtonStyle.Secondary, '▶️', page >= pages),
-      recoveryButton('sf:settings:repair:back', 'Repair System', ButtonStyle.Secondary, '↩️'),
+      recoveryButton('sf:settings:recovery:' + (native ? 'channels' : 'review') + ':page:' + (page - 1), translate(settings.locale, 'settings.common.previous'), ButtonStyle.Secondary, '◀️', page <= 1),
+      recoveryButton('sf:settings:recovery:' + (native ? 'channels' : 'review') + ':page:' + (page + 1), translate(settings.locale, 'settings.common.next'), ButtonStyle.Secondary, '▶️', page >= pages),
+      recoveryButton('sf:settings:repair:back', translate(settings.locale, 'settings.diagnostics.repair'), ButtonStyle.Secondary, '↩️'),
     ));
   } else {
     rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-      recoveryButton('sf:settings:repair:back', 'Repair System', ButtonStyle.Secondary, '↩️'),
+      recoveryButton('sf:settings:repair:back', translate(settings.locale, 'settings.diagnostics.repair'), ButtonStyle.Secondary, '↩️'),
     ));
   }
 
   const lines = candidates.map((item) =>
-    '• **Ticket #' + item.ticketNumber + '** • ' + item.messageCount + ' archived message(s) • original channel ID: ' + item.originalChannelId +
-    (item.accidentalAnswer === 'yes' ? ' • **marked accidental, ready to restore**' : ''),
+    translate(settings.locale, 'settings.recovery.ticketLine', { number: item.ticketNumber, messages: item.messageCount, channelId: item.originalChannelId }) +
+    (item.accidentalAnswer === 'yes' ? translate(settings.locale, 'settings.recovery.accidentalReady') : ''),
   );
   const description = native
-    ? (all.length ? 'Native Discord deletions only. These records never enter the ticket-button accidental-deletion review.\\n\\n' : 'No native Discord channel deletions are currently available for restoration.\\n\\n')
-    : (all.length ? 'Ticket-button deletions only. Choose a record to answer the question or restore a ticket already marked as accidental.\\n\\n' : 'No ticket-button deletions are awaiting review or accidental-deletion recovery.\\n\\n');
+    ? (all.length ? translate(settings.locale, 'settings.recovery.nativeIntro') + '\\n\\n' : translate(settings.locale, 'settings.recovery.noNative') + '\\n\\n')
+    : (all.length ? translate(settings.locale, 'settings.recovery.ticketIntro') + '\\n\\n' : translate(settings.locale, 'settings.recovery.noTicket') + '\\n\\n');
   const embed = await recoveryEmbed(
     guild,
-    native ? '♻️ Restore Channel' : '🛡️ Ticket Deletion Review',
-    description + (lines.length ? lines.join('\\n') : 'Nothing to display on this page.') + '\\n\\nPage ' + page + ' / ' + pages,
+    native ? '♻️ ' + translate(settings.locale, 'settings.recovery.listNativeTitle') : '🛡️ ' + translate(settings.locale, 'settings.recovery.listReviewTitle'),
+    description + (lines.length ? lines.join('\n') : translate(settings.locale, 'settings.recovery.nothingThisPage')) + '\n\n' + translate(settings.locale, 'settings.recovery.page', { page, pages }),
   );
   await interaction.editReply({ content: '', embeds: [embed], components: rows });
 }
@@ -1835,47 +1979,90 @@ async function showRecoveryCandidateDetail(
   await ensureRecoveryReply(interaction);
   const guild = interaction.guild;
   if (!guild) {
-    await interaction.editReply('Ticket recovery must be opened inside a server.');
+    await interaction.editReply(translate('en-US', 'settings.recovery.mustBeInServer'));
     return;
   }
+  const settings = await getAdvancedSettings(guild.id);
   const item = (await listTicketRecoveryCandidates(guild.id, source)).find((candidate) => candidate.ticketId === ticketId);
   if (!item) {
     await interaction.editReply({
       content: '',
-      embeds: [await recoveryEmbed(guild, 'Recovery record no longer available', 'Refresh the recovery list. The record may already have been restored or reviewed.')],
-      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:' + (source === 'discord_native' ? 'channels' : 'review'), 'Back to list', ButtonStyle.Secondary, '↩️'))],
+      embeds: [await recoveryEmbed(guild, translate(settings.locale, 'settings.recovery.recordMissingTitle'), translate(settings.locale, 'settings.recovery.recordMissingDescription'))],
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:' + (source === 'discord_native' ? 'channels' : 'review'), translate(settings.locale, 'settings.recovery.backToList'), ButtonStyle.Secondary, '↩️'))],
     });
     return;
   }
 
+  let preview: Awaited<ReturnType<typeof getTicketRecoveryPreview>>;
+  try {
+    preview = await getTicketRecoveryPreview(guild.id, ticketId, source);
+  } catch (error) {
+    await interaction.editReply({
+      content: '',
+      embeds: [await recoveryEmbed(guild, translate(settings.locale, 'settings.recovery.previewUnavailable'), error instanceof Error ? error.message : translate(settings.locale, 'settings.recovery.archiveSummaryFailed'))],
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:' + (source === 'discord_native' ? 'channels' : 'review'), translate(settings.locale, 'settings.recovery.backToList'), ButtonStyle.Secondary, '↩️'))],
+    });
+    return;
+  }
+
+  const previewLines = [
+    '**' + translate(settings.locale, 'settings.recovery.readOnlyPreview') + '**',
+    translate(settings.locale, 'settings.recovery.snapshotStatus', {
+      status: translate(settings.locale, preview.channelSnapshotAvailable ? 'settings.recovery.snapshotAvailable' : 'settings.recovery.snapshotMissing'),
+    }),
+    translate(settings.locale, 'settings.recovery.historyStatus', {
+      status: translate(settings.locale, preview.historicalBackfillComplete ? 'settings.recovery.historicalComplete' : 'settings.recovery.historicalIncomplete'),
+    }),
+    translate(settings.locale, 'settings.recovery.archiveCounts', { archived: preview.archivedMessageCount, deleted: preview.deletedMessageCount }),
+    translate(settings.locale, 'settings.recovery.attachments', {
+      total: preview.totalAttachmentCount, restorable: preview.restorableAttachmentCount, oversized: preview.tooLargeAttachmentCount,
+      metadataOnly: preview.metadataOnlyAttachmentCount, pending: preview.pendingAttachmentCount, failed: preview.failedAttachmentCount,
+    }),
+    translate(settings.locale, 'settings.recovery.attachmentRows', { tracked: preview.trackedAttachmentCount, total: preview.totalAttachmentCount, missing: preview.attachmentRecordsMissing }),
+    translate(settings.locale, 'settings.recovery.replayed', { count: preview.alreadyReplayedMessageCount }),
+    translate(settings.locale, 'settings.recovery.restoreEligibility') + ': **' +
+      translate(settings.locale, preview.eligibleToRestore ? 'settings.recovery.restoreEligible' : 'settings.recovery.restoreNotEligible') + '**',
+    ...(preview.latestArchivedAt ? [translate(settings.locale, 'settings.recovery.latestArchived') + ': <t:' + Math.floor(Date.parse(preview.latestArchivedAt) / 1000) + ':F>'] : []),
+    ...(preview.warnings.length ? ['', '**' + translate(settings.locale, 'settings.recovery.limitations') + '**', ...preview.warnings.map((warning) => '• ' + warning)] : []),
+    '',
+    translate(settings.locale, 'settings.recovery.restoreSafety'),
+  ].join('\\n');
+
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
   if (source === 'discord_native') {
     rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-      recoveryButton('sf:settings:recovery:channels:restore:' + ticketId, 'Restore Channel', ButtonStyle.Success, '♻️'),
-      recoveryButton('sf:settings:recovery:channels', 'Back to list', ButtonStyle.Secondary, '↩️'),
+      recoveryButton('sf:settings:recovery:channels:restore:' + ticketId, translate(settings.locale, 'settings.recovery.nativeRestore'), ButtonStyle.Success, '♻️', !preview.eligibleToRestore),
+      recoveryButton('sf:settings:recovery:channels', translate(settings.locale, 'settings.recovery.backToList'), ButtonStyle.Secondary, '↩️'),
     ));
   } else if (item.accidentalAnswer === 'yes') {
     rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-      recoveryButton('sf:settings:recovery:review:restore:' + ticketId, 'Restore Ticket', ButtonStyle.Success, '♻️'),
-      recoveryButton('sf:settings:recovery:review', 'Back to list', ButtonStyle.Secondary, '↩️'),
+      recoveryButton('sf:settings:recovery:review:restore:' + ticketId, translate(settings.locale, 'settings.recovery.ticketRestore'), ButtonStyle.Success, '♻️', !preview.eligibleToRestore),
+      recoveryButton('sf:settings:recovery:review', translate(settings.locale, 'settings.recovery.backToList'), ButtonStyle.Secondary, '↩️'),
     ));
   } else {
     rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
-      recoveryButton('sf:settings:recovery:review:answer:' + ticketId + ':yes', 'Yes, deleted by mistake', ButtonStyle.Success, '✅'),
-      recoveryButton('sf:settings:recovery:review:answer:' + ticketId + ':no', 'No, intentional', ButtonStyle.Danger, '🛑'),
-      recoveryButton('sf:settings:recovery:review', 'Back', ButtonStyle.Secondary, '↩️'),
+      recoveryButton('sf:settings:recovery:review:answer:' + ticketId + ':yes', translate(settings.locale, 'settings.recovery.answerYes'), ButtonStyle.Success, '✅'),
+      recoveryButton('sf:settings:recovery:review:answer:' + ticketId + ':no', translate(settings.locale, 'settings.recovery.answerNo'), ButtonStyle.Danger, '🛑'),
+      recoveryButton('sf:settings:recovery:review', translate(settings.locale, 'settings.recovery.back'), ButtonStyle.Secondary, '↩️'),
     ));
   }
 
-  const text = source === 'discord_native'
-    ? 'This channel was deleted outside the ResolvX ticket Delete button. Native deletion is recorded separately and does not trigger the accidental-deletion question.'
+  const sourceLabel = translate(settings.locale, source === 'discord_native' ? 'settings.recovery.listNativeTitle' : 'settings.recovery.listReviewTitle');
+  const context = source === 'discord_native'
+    ? translate(settings.locale, 'settings.recovery.nativeContext')
     : item.accidentalAnswer === 'yes'
-      ? 'Review answer: **Yes, it was deleted by mistake.** This ticket is eligible for restoration through this review workflow.'
-      : 'Was this ticket deleted by mistake?\\n\\nOriginal channel ID: ' + item.originalChannelId +
-        '\\nTicket creator ID: ' + item.ownerId +
-        '\\nArchived messages: ' + item.messageCount +
-        '\\n\\nYour answer will be saved in Neon and logged in both the ticket audit stream and developer/system audit stream.';
-  const embed = await recoveryEmbed(guild, (source === 'discord_native' ? '♻️ Restore Channel' : '🛡️ Ticket Deletion Review') + ' • Ticket #' + item.ticketNumber, text);
+      ? translate(settings.locale, 'settings.recovery.accidentalYesContext')
+      : [
+          translate(settings.locale, 'settings.recovery.question'),
+          '',
+          translate(settings.locale, 'settings.recovery.originalChannelId') + ': ' + item.originalChannelId,
+          translate(settings.locale, 'settings.recovery.ticketCreatorId') + ': ' + item.ownerId,
+          translate(settings.locale, 'settings.recovery.archivedMessages') + ': ' + item.messageCount,
+          '',
+          translate(settings.locale, 'settings.recovery.answerSaved'),
+        ].join('\n');
+  const text = [context, '', ...previewLines].join('\n');
+  const embed = await recoveryEmbed(guild, translate(settings.locale, 'settings.recovery.previewTitle', { source: sourceLabel, number: item.ticketNumber }), text);
   await interaction.editReply({ content: '', embeds: [embed], components: rows });
 }
 
@@ -1884,6 +2071,7 @@ async function handleTicketRecoveryInteraction(interaction: TicketRecoveryIntera
   if (!id.startsWith('sf:settings:recovery:')) return false;
   const guild = interaction.guild;
   if (!guild) return true;
+  const settings = await getAdvancedSettings(guild.id);
 
   if (id === 'sf:settings:recovery:channels') {
     await showRecoveryCandidates(interaction, 'discord_native');
@@ -1919,11 +2107,11 @@ async function handleTicketRecoveryInteraction(interaction: TicketRecoveryIntera
         await logSystemEvent(guild, config.supportCategoryId, 'TICKET_NATIVE_DELETION_RECOVERED',
           'Moderator ' + interaction.user.tag + ' restored ticket #' + restored.ticketNumber + ' from native Discord deletion. New channel ID: ' + restored.channelId + '. Replayed messages: ' + restored.restoredMessages + '. Failed messages: ' + restored.failedMessages + '.');
       }
-      const embed = await recoveryEmbed(guild, '✅ Ticket channel restored', 'Ticket #' + restored.ticketNumber + ' now exists in ' + '<#' + restored.channelId + '> with new channel ID ' + restored.channelId + ' and a new URL.\\n\\nReplayed messages: **' + restored.restoredMessages + '**\\nMessages that failed to replay: **' + restored.failedMessages + '**\\n\\nArchived author/channel/message IDs are included in each recovery message. The bot does not impersonate original users.');
-      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:channels', 'Back to Restore Channel', ButtonStyle.Secondary, '↩️'))] });
+      const embed = await recoveryEmbed(guild, '✅ ' + translate(settings.locale, 'settings.recovery.nativeRestoredTitle'), translate(settings.locale, 'settings.recovery.nativeRestoredDescription', { number: restored.ticketNumber, channel: '<#' + restored.channelId + '>', channelId: restored.channelId, restored: restored.restoredMessages, failed: restored.failedMessages }));
+      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:channels', translate(settings.locale, 'settings.recovery.backToRestoreChannel'), ButtonStyle.Secondary, '↩️'))] });
     } catch (error) {
       const embed = await recoveryEmbed(guild, '❌ Ticket recovery failed', error instanceof Error ? error.message : 'Unknown recovery error.');
-      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:channels', 'Back to Restore Channel', ButtonStyle.Secondary, '↩️'))] });
+      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:channels', translate(settings.locale, 'settings.recovery.backToRestoreChannel'), ButtonStyle.Secondary, '↩️'))] });
     }
     return true;
   }
@@ -1947,16 +2135,16 @@ async function handleTicketRecoveryInteraction(interaction: TicketRecoveryIntera
     const ticketId = parts[0] ?? '';
     const answer = parts[1] === 'yes' ? 'yes' : parts[1] === 'no' ? 'no' : null;
     if (!answer) {
-      await interaction.editReply('Invalid deletion-review answer.');
+      await interaction.editReply(translate(settings.locale, 'settings.recovery.invalidAnswer'));
       return true;
     }
     try {
       const ticket = await getPersistedTicketById(ticketId);
-      if (!ticket || ticket.guildId !== guild.id) throw new Error('Ticket deletion review belongs to a different server or no longer exists.');
+      if (!ticket || ticket.guildId !== guild.id) throw new Error(translate(settings.locale, 'settings.recovery.reviewCrossGuild'));
       const result = await answerTicketDeletionReview(ticketId, answer, interaction.user.id, interaction.user.tag);
       const config = await getGuildConfig(guild.id);
       const eventName = answer === 'yes' ? 'TICKET_DELETION_MARKED_ACCIDENTAL' : 'TICKET_DELETION_MARKED_INTENTIONAL';
-      const detail = 'Answer to “Was this ticket deleted by mistake?”: ' + (answer === 'yes' ? 'YES, deleted by mistake.' : 'NO, deletion was intentional.') +
+      const detail = translate(settings.locale, 'settings.recovery.question') + ': ' + translate(settings.locale, answer === 'yes' ? 'settings.recovery.reviewYes' : 'settings.recovery.reviewNo') +
         ' Reviewer: ' + interaction.user.tag + ' (' + interaction.user.id + '). Original channel ID: ' + result.originalChannelId + '.';
       if (config.supportCategoryId) {
         await ensureAuditDeveloperInfrastructure(guild, config.supportCategoryId);
@@ -1974,7 +2162,7 @@ async function handleTicketRecoveryInteraction(interaction: TicketRecoveryIntera
       if (answer === 'yes') {
         await showRecoveryCandidateDetail(interaction, ticketId, 'ticket_button');
       } else {
-        const embed = await recoveryEmbed(guild, '✅ Deletion review saved', 'The answer was recorded as **No, this deletion was intentional**. The response, reviewer ID and timestamp were written to the ticket audit stream and developer/system audit stream. This ticket will not appear in the accidental-deletion restoration path.');
+        const embed = await recoveryEmbed(guild, '✅ ' + translate(settings.locale, 'settings.recovery.reviewSavedTitle'), translate(settings.locale, 'settings.recovery.reviewSavedDescription'));
         await interaction.editReply({
           content: '',
           embeds: [embed],
@@ -1982,8 +2170,8 @@ async function handleTicketRecoveryInteraction(interaction: TicketRecoveryIntera
         });
       }
     } catch (error) {
-      const embed = await recoveryEmbed(guild, '❌ Could not save deletion review', error instanceof Error ? error.message : 'Unknown review error.');
-      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:review', 'Back to review list', ButtonStyle.Secondary, '↩️'))] });
+      const embed = await recoveryEmbed(guild, '❌ ' + translate(settings.locale, 'settings.recovery.reviewFailedTitle'), error instanceof Error ? error.message : translate(settings.locale, 'settings.recovery.unknownError'));
+      await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:review', translate(settings.locale, 'settings.recovery.backToReviewList'), ButtonStyle.Secondary, '↩️'))] });
     }
     return true;
   }
@@ -2008,7 +2196,7 @@ async function handleTicketRecoveryInteraction(interaction: TicketRecoveryIntera
         await logSystemEvent(guild, config.supportCategoryId, 'TICKET_ACCIDENTAL_DELETION_RECOVERED',
           'Moderator ' + interaction.user.tag + ' restored ticket #' + restored.ticketNumber + ' after marking its ticket-button deletion accidental. New channel ID: ' + restored.channelId + '.');
       }
-      const embed = await recoveryEmbed(guild, '✅ Accidentally deleted ticket restored', 'Ticket #' + restored.ticketNumber + ' is available in ' + '<#' + restored.channelId + '>.\\n\\nReplayed messages: **' + restored.restoredMessages + '**\\nMessages that failed to replay: **' + restored.failedMessages + '**\\n\\nThe new channel has a new ID and URL. Recovery messages clearly show their original user and channel IDs.');
+      const embed = await recoveryEmbed(guild, '✅ ' + translate(settings.locale, 'settings.recovery.accidentalRestoredTitle'), translate(settings.locale, 'settings.recovery.accidentalRestoredDescription', { number: restored.ticketNumber, channel: '<#' + restored.channelId + '>', restored: restored.restoredMessages, failed: restored.failedMessages }));
       await interaction.editReply({ content: '', embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(recoveryButton('sf:settings:recovery:review', 'Back to Ticket Deletion Review', ButtonStyle.Secondary, '↩️'))] });
     } catch (error) {
       const embed = await recoveryEmbed(guild, '❌ Ticket recovery failed', error instanceof Error ? error.message : 'Unknown recovery error.');
@@ -2038,7 +2226,7 @@ export async function handleSettingsInteraction(
     (interaction.customId.startsWith('sf:settings:'))
   ) {
     if (!isSettingsChannel(interaction)) {
-      await reject(interaction, '❌ ResolvX settings can only be used from the ResolvX settings channel.');
+      await reject(interaction, '❌ QueryFixr settings can only be used from the QueryFixr settings channel.');
       return true;
     }
 
@@ -2051,7 +2239,7 @@ export async function handleSettingsInteraction(
         interaction,
         manualAction
           ? '❌ The Staff Manual is available to configured department staff or administrators.'
-          : '❌ You need **Manage Server** or **Administrator** to change ResolvX settings.',
+          : '❌ You need **Manage Server** or **Administrator** to change QueryFixr settings.',
       );
       return true;
     }
@@ -2108,6 +2296,76 @@ export async function handleSettingsInteraction(
   }
 
 
+  if (interaction.isButton() && (
+    interaction.customId === 'sf:settings:analytics' ||
+    interaction.customId.startsWith('sf:settings:analytics:')
+  )) {
+    const customId = interaction.customId;
+    let locale = 'en-US';
+    let periodKey = '7d';
+    let view: AnalyticsView = 'overview';
+    let page = 0;
+    let exportCsv = false;
+    const parts = customId.split(':');
+
+    if (customId === 'sf:settings:analytics') {
+      // Open the analytics report from the persistent Settings dashboard.
+    } else if (['7d', '30d', '90d'].includes(parts[3] ?? '')) {
+      periodKey = parts[3]!;
+    } else if (parts[3] === 'view') {
+      view = (parts[4] ?? 'overview') as AnalyticsView;
+      periodKey = parts[5] ?? '7d';
+      page = Number(parts[6] ?? 0);
+    } else if (parts[3] === 'page') {
+      view = (parts[4] ?? 'overview') as AnalyticsView;
+      periodKey = parts[5] ?? '7d';
+      page = Number(parts[6] ?? 0);
+    } else if (parts[3] === 'export') {
+      periodKey = parts[4] ?? '7d';
+      exportCsv = true;
+    }
+
+    if (!['7d', '30d', '90d'].includes(periodKey) ||
+        !['overview', 'departments', 'staff', 'tags', 'trends'].includes(view) ||
+        !Number.isInteger(page) || page < 0 || page > 100) {
+      await reject(interaction, translate(locale, 'analytics.advanced.unsupportedView'));
+      return true;
+    }
+
+    try {
+      if (customId === 'sf:settings:analytics') {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      } else {
+        await interaction.deferUpdate();
+      }
+      locale = (await getAdvancedSettings(guild.id)).locale;
+      const period = parseAnalyticsPeriod(periodKey);
+      const report = await getAdvancedAnalyticsReport(guild.id, period);
+      if (exportCsv) {
+        const csv = buildAdvancedAnalyticsCsv(report);
+        await interaction.editReply({
+          content: translate(locale, 'analytics.advanced.exportReady'),
+          embeds: [],
+          components: [],
+          files: [new AttachmentBuilder(Buffer.from(csv, 'utf8'), { name: 'queryfixr-analytics-' + period + 'd.csv' })],
+        });
+      } else {
+        await interaction.editReply({
+          embeds: [buildAdvancedAnalyticsEmbed(report, view, page, getThemeColor((await getGuildConfig(guild.id)).theme), locale)],
+          components: buildAdvancedAnalyticsComponents(report, view, page, locale),
+        });
+      }
+    } catch (error) {
+      console.error('QueryFixr analytics view failed for guild ' + guild.id + ':', error);
+      await interaction.editReply({
+        content: translate(locale, 'analytics.advanced.loadFailed'),
+        embeds: [],
+        components: [],
+      }).catch(() => undefined);
+    }
+    return true;
+  }
+
   if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('sf:settings:recovery:')) {
     return await handleTicketRecoveryInteraction(interaction);
   }
@@ -2158,12 +2416,14 @@ export async function handleSettingsInteraction(
     const subcategoryId = interaction.values[0];
     const settings = await getAdvancedSettings(guild.id);
     const sub = settings.reports.categories[categoryId]?.subcategories[subcategoryId];
-    if (!sub) { await reject(interaction, '❌ Report subcategory not found.'); return true; }
+    if (!sub) { await reject(interaction, '❌ ' + translate(settings.locale, 'settings.reports.error.subcategoryMissing')); return true; }
     await interaction.editReply({
-      content: 'Edit or remove **' + sub.name + '**.',
+      content: translate(settings.locale, 'settings.reports.selector.editOrRemovePrompt', { name: sub.name }),
       components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:edit:' + categoryId + ':' + subcategoryId).setLabel('Edit').setEmoji('✏️').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:remove:' + categoryId + ':' + subcategoryId).setLabel('Remove').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:edit:' + categoryId + ':' + subcategoryId)
+          .setLabel(translate(settings.locale, 'settings.reports.action.edit')).setEmoji('✏️').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('sf:settings:reports:subcategory:remove:' + categoryId + ':' + subcategoryId)
+          .setLabel(translate(settings.locale, 'settings.reports.action.remove')).setEmoji('🗑️').setStyle(ButtonStyle.Danger),
       )],
     });
     return true;
@@ -2193,6 +2453,7 @@ export async function handleSettingsInteraction(
       id.startsWith('sf:settings:diagnostics:page:')
     ) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const locale = (await getAdvancedSettings(guild.id)).locale;
       try {
         const pageMatch = id.match(/^sf:settings:diagnostics:page:(health|setup-doctor):([1-9][0-9]{0,2})$/);
         const mode: 'health' | 'setup-doctor' = pageMatch
@@ -2210,19 +2471,19 @@ export async function handleSettingsInteraction(
           components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
             new ButtonBuilder()
               .setCustomId('sf:settings:diagnostics:page:' + mode + ':' + Math.max(1, page - 1))
-              .setLabel('Previous Checks')
+              .setLabel(translate(locale, 'settings.diagnostics.previous'))
               .setEmoji('◀️')
               .setStyle(ButtonStyle.Secondary)
               .setDisabled(page <= 1),
             new ButtonBuilder()
               .setCustomId('sf:settings:diagnostics:page:' + mode + ':' + Math.min(pageCount, page + 1))
-              .setLabel('Next Checks')
+              .setLabel(translate(locale, 'settings.diagnostics.next'))
               .setEmoji('▶️')
               .setStyle(ButtonStyle.Secondary)
               .setDisabled(page >= pageCount),
             new ButtonBuilder()
               .setCustomId('sf:settings:diagnostics:refresh')
-              .setLabel('Refresh All Checks')
+              .setLabel(translate(locale, 'settings.diagnostics.refresh'))
               .setEmoji('🔄')
               .setStyle(ButtonStyle.Primary),
           ));
@@ -2231,22 +2492,22 @@ export async function handleSettingsInteraction(
         components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
           new ButtonBuilder()
             .setCustomId('sf:settings:diagnostics:setup-doctor')
-            .setLabel('Setup Doctor')
+            .setLabel(translate(locale, 'settings.diagnostics.setupDoctor'))
             .setEmoji('🩺')
             .setStyle(ButtonStyle.Secondary),
           new ButtonBuilder()
             .setCustomId('sf:settings:diagnostics:snapshot')
-            .setLabel('Save Snapshot')
+            .setLabel(translate(locale, 'settings.diagnostics.saveSnapshot'))
             .setEmoji('📸')
             .setStyle(ButtonStyle.Success),
           new ButtonBuilder()
             .setCustomId('sf:settings:diagnostics:snapshots')
-            .setLabel('View Snapshots')
+            .setLabel(translate(locale, 'settings.diagnostics.viewSnapshots'))
             .setEmoji('🗂️')
             .setStyle(ButtonStyle.Secondary),
           new ButtonBuilder()
             .setCustomId('sf:settings:repair:back')
-            .setLabel('Repair System')
+            .setLabel(translate(locale, 'settings.diagnostics.repair'))
             .setEmoji('↩️')
             .setStyle(ButtonStyle.Secondary),
         ));
@@ -2257,13 +2518,14 @@ export async function handleSettingsInteraction(
         });
       } catch (error) {
         console.error('System diagnostics failed:', error);
-        await interaction.editReply('Diagnostics could not complete. The bot did not attempt any repair. Check the bot logs for a sanitized diagnostic error.');
+        await interaction.editReply(translate(locale, 'settings.diagnostics.failed'));
       }
       return true;
     }
 
     if (id === 'sf:settings:diagnostics:snapshot' || id === 'sf:settings:diagnostics:snapshots') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const locale = (await getAdvancedSettings(guild.id)).locale;
       try {
         if (id === 'sf:settings:diagnostics:snapshot') {
           const snapshot = await createConfigurationSnapshot(
@@ -2283,19 +2545,13 @@ export async function handleSettingsInteraction(
           await interaction.editReply({
             embeds: [new EmbedBuilder()
               .setColor(getThemeColor(config?.theme ?? 'midnight'))
-              .setTitle('✅ Configuration checkpoint saved')
+              .setTitle('✅ ' + translate(locale, 'settings.diagnostics.snapshotSavedTitle'))
               .setDescription(
-                '**Snapshot:** `' + snapshot.id + '`\n' +
-                '**Departments:** ' + snapshot.departmentCount + '\n' +
-                '**Panels:** ' + snapshot.panelCount + '\n' +
-                '**Tags:** ' + snapshot.tagCount + '\n' +
-                '**Forms:** ' + (snapshot.formCount ?? 0) + '\n' +
-                '**Support-hours policies:** ' + (snapshot.supportHoursPolicyCount ?? 0) + '\n\n' +
-                'A maximum of 10 recent checkpoints is kept per server.',
+                translate(locale, 'settings.diagnostics.snapshotSavedDescription', { id: snapshot.id, departments: snapshot.departmentCount, panels: snapshot.panelCount, tags: snapshot.tagCount, forms: snapshot.formCount ?? 0, hours: snapshot.supportHoursPolicyCount ?? 0 }),
               )],
             components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-              new ButtonBuilder().setCustomId('sf:settings:diagnostics:snapshots').setLabel('View Snapshots').setEmoji('🗂️').setStyle(ButtonStyle.Secondary),
-              new ButtonBuilder().setCustomId('sf:settings:repair:back').setLabel('Repair System').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+              new ButtonBuilder().setCustomId('sf:settings:diagnostics:snapshots').setLabel(translate(locale, 'settings.diagnostics.viewSnapshots')).setEmoji('🗂️').setStyle(ButtonStyle.Secondary),
+              new ButtonBuilder().setCustomId('sf:settings:repair:back').setLabel(translate(locale, 'settings.diagnostics.repair')).setEmoji('↩️').setStyle(ButtonStyle.Secondary),
             )],
           });
           return true;
@@ -2305,23 +2561,23 @@ export async function handleSettingsInteraction(
         const config = await getGuildConfig(guild.id).catch(() => null);
         const embed = new EmbedBuilder()
           .setColor(getThemeColor(config?.theme ?? 'midnight'))
-          .setTitle('🗂️ Configuration History')
+          .setTitle('🗂️ ' + translate(locale, 'settings.diagnostics.historyTitle'))
           .setDescription(snapshots.length
             ? snapshots.map((snapshot) =>
                 '**`' + snapshot.id + '`** · <t:' + Math.floor(Date.parse(snapshot.createdAt) / 1000) + ':R>\n' +
                 snapshot.reason + '\nDepartments: ' + snapshot.departmentCount + ' · Panels: ' + snapshot.panelCount + ' · Tags: ' + snapshot.tagCount + ' · Forms: ' + (snapshot.formCount ?? 0) + ' · Hours policies: ' + (snapshot.supportHoursPolicyCount ?? 0),
               ).join('\n\n').slice(0, 4000)
-            : 'No snapshots saved yet. Save one before changing important configuration.');
+            : translate(locale, 'settings.diagnostics.noSnapshots'));
         if (!snapshots.length) {
           await interaction.editReply({ embeds: [embed], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-            new ButtonBuilder().setCustomId('sf:settings:diagnostics:snapshot').setLabel('Save Snapshot').setEmoji('📸').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId('sf:settings:repair:back').setLabel('Repair System').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('sf:settings:diagnostics:snapshot').setLabel(translate(locale, 'settings.diagnostics.saveSnapshot')).setEmoji('📸').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('sf:settings:repair:back').setLabel(translate(locale, 'settings.diagnostics.repair')).setEmoji('↩️').setStyle(ButtonStyle.Secondary),
           )] });
           return true;
         }
         const select = new StringSelectMenuBuilder()
           .setCustomId('sf:settings:diagnostics:snapshot-select')
-          .setPlaceholder('Choose a checkpoint to review')
+          .setPlaceholder(translate(locale, 'settings.diagnostics.chooseSnapshot'))
           .addOptions(snapshots.slice(0, 10).map((snapshot) => ({
             label: (snapshot.reason || 'Configuration checkpoint').slice(0, 100),
             description: (snapshot.id + ' · ' + snapshot.departmentCount + ' departments · ' + snapshot.panelCount + ' panels · ' + (snapshot.formCount ?? 0) + ' forms').slice(0, 100),
@@ -2332,31 +2588,32 @@ export async function handleSettingsInteraction(
           components: [
             new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select),
             new ActionRowBuilder<ButtonBuilder>().addComponents(
-              new ButtonBuilder().setCustomId('sf:settings:diagnostics:snapshot').setLabel('Save New Snapshot').setEmoji('📸').setStyle(ButtonStyle.Success),
-              new ButtonBuilder().setCustomId('sf:settings:repair:back').setLabel('Repair System').setEmoji('↩️').setStyle(ButtonStyle.Secondary),
+              new ButtonBuilder().setCustomId('sf:settings:diagnostics:snapshot').setLabel(translate(locale, 'settings.diagnostics.saveNewSnapshot')).setEmoji('📸').setStyle(ButtonStyle.Success),
+              new ButtonBuilder().setCustomId('sf:settings:repair:back').setLabel(translate(locale, 'settings.diagnostics.repair')).setEmoji('↩️').setStyle(ButtonStyle.Secondary),
             ),
           ],
         });
       } catch (error) {
         console.error('Configuration history action failed:', error);
-        await interaction.editReply('Configuration history could not be read or saved. No destructive repair was attempted; inspect the database document status before retrying.');
+        await interaction.editReply(translate(locale, 'settings.diagnostics.historyFailed'));
       }
       return true;
     }
 
     if (id.startsWith('sf:settings:diagnostics:restore-preview:')) {
+      const locale = (await getAdvancedSettings(guild.id)).locale;
       const [snapshotId = '', expectedFingerprint = ''] = id.slice('sf:settings:diagnostics:restore-preview:'.length).split(':');
       const review = await reviewConfigurationSnapshot(guild.id, snapshotId);
       const snapshot = review?.snapshot ?? null;
       if (!review || !snapshot) {
-        await interaction.reply({ content: 'That snapshot no longer exists. Reopen Configuration History and select a current checkpoint.', flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: translate(locale, 'settings.diagnostics.snapshotMissing'), flags: MessageFlags.Ephemeral });
         return true;
       }
       try {
         assertCurrentConfigurationFingerprint(expectedFingerprint, review.currentFingerprint);
       } catch {
         await interaction.reply({
-          content: 'Settings changed after you selected this checkpoint. Nothing was restored. Reopen Configuration History, select the checkpoint again and review the fresh preview.',
+          content: translate(locale, 'settings.diagnostics.staleSnapshot'),
           flags: MessageFlags.Ephemeral,
         });
         return true;
@@ -2365,28 +2622,24 @@ export async function handleSettingsInteraction(
         flags: MessageFlags.Ephemeral,
         embeds: [new EmbedBuilder()
           .setColor(0xdc2626)
-          .setTitle('⚠️ Confirm Configuration Restore')
+          .setTitle('⚠️ ' + translate(locale, 'settings.diagnostics.restoreTitle'))
           .setDescription(
-            'You selected `' + snapshot.id + '` (' + snapshot.reason + ').\n\n' +
-            '**Configuration areas that differ now:**\n' +
-            (review.changedSections.length ? review.changedSections.map((section) => '• ' + section).join('\n') : 'No differences were detected in the reviewed sections.') + '\n\n' +
-            '**Saved → current counts:** departments ' + snapshot.departmentCount + ' → ' + review.currentCounts.departmentCount +
-            ', panels ' + snapshot.panelCount + ' → ' + review.currentCounts.panelCount +
-            ', tags ' + snapshot.tagCount + ' → ' + review.currentCounts.tagCount +
-            ', forms ' + (snapshot.formCount ?? 0) + ' → ' + review.currentCounts.formCount +
-            ', support-hours ' + (snapshot.supportHoursPolicyCount ?? 0) + ' → ' + review.currentCounts.supportHoursPolicyCount + '.\n\n' +
-            'ResolveX will first save a checkpoint of current settings, then restore the saved guild configuration and advanced settings. This does not restore old Discord channel names/messages or change ticket/transcript records.\n\n' +
-            '**Preview fingerprint:** \`' + review.currentFingerprint + '\`\n' +
-            'The fingerprint is tied to the current configuration and is checked again at restore time. If settings change, restore is refused and you must review a fresh preview.'          )],
+            translate(locale, 'settings.diagnostics.snapshotSelected', { id: snapshot.id, reason: snapshot.reason }) + '\n\n' +
+            '**' + translate(locale, 'settings.diagnostics.differences') + ':**\n' +
+            (review.changedSections.length ? review.changedSections.map((section) => '• ' + section).join('\n') : translate(locale, 'settings.diagnostics.noDifferences')) + '\n\n' +
+            translate(locale, 'settings.diagnostics.counts', { savedDepartments: snapshot.departmentCount, currentDepartments: review.currentCounts.departmentCount, savedPanels: snapshot.panelCount, currentPanels: review.currentCounts.panelCount, savedTags: snapshot.tagCount, currentTags: review.currentCounts.tagCount, savedForms: snapshot.formCount ?? 0, currentForms: review.currentCounts.formCount, savedHours: snapshot.supportHoursPolicyCount ?? 0, currentHours: review.currentCounts.supportHoursPolicyCount }) + '\n\n' +
+            translate(locale, 'settings.diagnostics.restoreSafety') + '\n\n' +
+            '**' + translate(locale, 'settings.diagnostics.previewFingerprint', { fingerprint: review.currentFingerprint }) + '**\n' +
+            translate(locale, 'settings.diagnostics.fingerprintSafety')          )],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
           new ButtonBuilder()
             .setCustomId('sf:settings:diagnostics:restore-confirm:' + snapshot.id + ':' + interaction.user.id + ':' + expectedFingerprint)
-            .setLabel('Confirm Restore')
+            .setLabel(translate(locale, 'settings.diagnostics.confirmRestore'))
             .setEmoji('⚠️')
             .setStyle(ButtonStyle.Danger),
           new ButtonBuilder()
             .setCustomId('sf:settings:repair:back')
-            .setLabel('Cancel')
+            .setLabel(translate(locale, 'settings.reset.cancel'))
             .setEmoji('↩️')
             .setStyle(ButtonStyle.Secondary),
         )],
@@ -2395,12 +2648,13 @@ export async function handleSettingsInteraction(
     }
 
     if (id.startsWith('sf:settings:diagnostics:restore-confirm:')) {
+      const locale = (await getAdvancedSettings(guild.id)).locale;
       const tail = id.slice('sf:settings:diagnostics:restore-confirm:'.length).split(':');
       const snapshotId = tail[0] ?? '';
       const actorId = tail[1] ?? '';
       const expectedFingerprint = tail[2] ?? '';
       if (actorId !== interaction.user.id) {
-        await interaction.reply({ content: 'This confirmation belongs to another administrator. Return to Settings and initiate your own restore.', flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: translate(locale, 'settings.diagnostics.restoreOtherAdmin'), flags: MessageFlags.Ephemeral });
         return true;
       }
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -2427,17 +2681,14 @@ export async function handleSettingsInteraction(
         await interaction.editReply({
           embeds: [new EmbedBuilder()
             .setColor(getThemeColor(config?.theme ?? 'midnight'))
-            .setTitle('✅ Configuration checkpoint restored')
+            .setTitle('✅ ' + translate(locale, 'settings.diagnostics.restoredTitle'))
             .setDescription(
-              '**Restored:** `' + result.restored.id + '`\n' +
-              '**Pre-restore checkpoint:** `' + result.checkpoint.id + '`\n\n' +
-              'Restored guild/advanced settings, support-hours policies and current schemas for forms present in the checkpoint using new immutable versions. Existing submissions, historical form versions and forms created after the checkpoint were not deleted.' +
-              (failures.length ? '\n\n⚠️ Refresh failed for: ' + failures.join(', ') + '. Use the Settings Refresh action after checking permissions.' : ''),
+              translate(locale, 'settings.diagnostics.restoredDescription', { restored: result.restored.id, checkpoint: result.checkpoint.id, refreshFailures: failures.length ? translate(locale, 'settings.diagnostics.refreshFailures', { failures: failures.join(', ') }) : '' }),
             )],
         });
       } catch (error) {
         console.error('Configuration restore failed:', error);
-        await interaction.editReply('Configuration restore was not completed. Check the diagnostic logs and use the saved pre-restore checkpoint if an operation partially failed.');
+        await interaction.editReply(translate(locale, 'settings.diagnostics.restoreFailed'));
       }
       return true;
     }
@@ -2556,7 +2807,7 @@ export async function handleSettingsInteraction(
     if (id.startsWith(SETTINGS_LAYOUT_PREFIX + ':customize:')) {
       const rawKey = id.slice((SETTINGS_LAYOUT_PREFIX + ':customize:').length);
       if (!(SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(rawKey)) {
-        await reject(interaction, 'That Settings control is not supported.');
+        await reject(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.controlUnsupported'));
         return true;
       }
       const key = rawKey as SettingsDashboardButtonKey;
@@ -2564,14 +2815,14 @@ export async function handleSettingsInteraction(
       const saved = settings.settingsDashboard.buttonCustomizations[key];
       const label = new TextInputBuilder()
         .setCustomId('label')
-        .setLabel('Button label (type default to reset)')
+        .setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.modal.buttonLabel'))
         .setStyle(TextInputStyle.Short)
         .setMaxLength(80)
         .setRequired(true)
         .setValue((saved?.label ?? SETTINGS_LAYOUT_LABELS[key]).slice(0, 80));
       const emoji = new TextInputBuilder()
         .setCustomId('emoji')
-        .setLabel('Emoji (type none to remove)')
+        .setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.modal.emoji'))
         .setStyle(TextInputStyle.Short)
         .setMaxLength(100)
         .setRequired(false)
@@ -2583,11 +2834,11 @@ export async function handleSettingsInteraction(
 
     if (id === SETTINGS_LAYOUT_PREFIX + ':edit') {
       const settings = await getAdvancedSettings(guild.id);
-      const description = new TextInputBuilder().setCustomId('description').setLabel('Dashboard description').setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setRequired(false);
+      const description = new TextInputBuilder().setCustomId('description').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.modal.description')).setStyle(TextInputStyle.Paragraph).setMaxLength(4000).setRequired(false);
       if (settings.settingsDashboard.description) description.setValue(settings.settingsDashboard.description.slice(0, 4000));
-      const footer = new TextInputBuilder().setCustomId('footer').setLabel('Dashboard footer').setStyle(TextInputStyle.Short).setMaxLength(1800).setRequired(false).setValue(settings.settingsDashboard.footer.slice(0, 1800));
+      const footer = new TextInputBuilder().setCustomId('footer').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.modal.footer')).setStyle(TextInputStyle.Short).setMaxLength(1800).setRequired(false).setValue(settings.settingsDashboard.footer.slice(0, 1800));
       await openModal(interaction, 'sf:settings:modal:dashboard-builder', 'Settings Dashboard Branding', [
-        new TextInputBuilder().setCustomId('title').setLabel('Dashboard title').setStyle(TextInputStyle.Short).setMaxLength(256).setRequired(true).setValue(settings.settingsDashboard.title.slice(0, 256)),
+        new TextInputBuilder().setCustomId('title').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.modal.title')).setStyle(TextInputStyle.Short).setMaxLength(256).setRequired(true).setValue(settings.settingsDashboard.title.slice(0, 256)),
         description,
         footer,
       ]);
@@ -2602,9 +2853,9 @@ export async function handleSettingsInteraction(
     if (id === SETTINGS_LAYOUT_PREFIX + ':reset-order') {
       await interaction.deferUpdate();
       await updateAdvancedSettings(guild.id, (settings) => {
-        settings.settingsDashboard.title = '⚙️ ResolvX Settings';
+        settings.settingsDashboard.title = '⚙️ QueryFixr Settings';
         settings.settingsDashboard.description = 'Configure your server’s ticket system, support panels and retention policies.';
-        settings.settingsDashboard.footer = 'ResolvX • Settings Dashboard';
+        settings.settingsDashboard.footer = 'QueryFixr • Settings Dashboard';
         settings.settingsDashboard.buttonOrder = [...SETTINGS_DASHBOARD_BUTTON_KEYS];
         settings.settingsDashboard.buttonCustomizations = {};
       });
@@ -2618,7 +2869,7 @@ export async function handleSettingsInteraction(
       const movingUp = id.startsWith(SETTINGS_LAYOUT_PREFIX + ':up:');
       const key = id.slice((SETTINGS_LAYOUT_PREFIX + (movingUp ? ':up:' : ':down:')).length);
       if (!(SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(key)) {
-        await reject(interaction, 'That Settings control is not supported.');
+        await reject(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.controlUnsupported'));
         return true;
       }
       await interaction.deferUpdate();
@@ -2644,7 +2895,7 @@ export async function handleSettingsInteraction(
     if (id.startsWith('sf:settings:ticket-workspace:set:')) {
       const mode = id.slice('sf:settings:ticket-workspace:set:'.length);
       if (mode !== 'text-channels' && mode !== 'private-threads') {
-        await reject(interaction, 'That ticket workspace mode is not supported.');
+        await reject(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.workspace.unsupportedMode'));
         return true;
       }
       const previous = (await getAdvancedSettings(guild.id)).ticketWorkspace.mode;
@@ -2680,7 +2931,7 @@ export async function handleSettingsInteraction(
           ? Boolean(scopeId && config.customPanels[scopeId])
           : false;
       if (!scopeType || !scopeId || !exists) {
-        await reject(interaction, 'That department or ticket panel no longer exists. Refresh the Support Hours view and choose an existing entry.');
+        await reject(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.supportHours.invalidScope'));
         return true;
       }
       await showSupportHoursSettings(interaction, '', scopeType, scopeId);
@@ -2693,7 +2944,7 @@ export async function handleSettingsInteraction(
       const panelPage = Number(parts[5]);
       const scope = parseSupportHoursSettingsScope(parts, 6);
       if (!Number.isInteger(departmentPage) || departmentPage < 0 || !Number.isInteger(panelPage) || panelPage < 0) {
-        await reject(interaction, 'That Support Hours page control has expired. Reopen Support Hours and try again.');
+        await reject(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.supportHours.expiredPage'));
         return true;
       }
       await showSupportHoursSettings(interaction, '', scope.scopeType, scope.scopeId, departmentPage, panelPage);
@@ -2708,20 +2959,20 @@ export async function handleSettingsInteraction(
       const policy = local ?? resolveEffectiveSupportHoursPolicy(policies, context);
       const timezone = new TextInputBuilder()
         .setCustomId('timezone')
-        .setLabel('IANA time zone (e.g. Asia/Kolkata)')
+        .setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.supportHours.label.timezone'))
         .setStyle(TextInputStyle.Short)
         .setRequired(true)
         .setMaxLength(100)
         .setValue((policy?.timezone ?? 'UTC').slice(0, 100));
       const schedule = new TextInputBuilder()
         .setCustomId('schedule')
-        .setLabel('All seven weekdays: day=intervals')
+        .setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.supportHours.label.weeklySchedule'))
         .setStyle(TextInputStyle.Paragraph)
-        .setPlaceholder('monday=09:00-17:00\ntuesday=09:00-17:00\n...\nsunday=closed')
+        .setPlaceholder(translate((await getAdvancedSettings(guild.id)).locale, 'settings.supportHours.schedulePlaceholder'))
         .setRequired(true)
         .setMaxLength(4000)
         .setValue((policy ? formatSupportHoursWeeklySchedule(policy.weeklySchedule) : SUPPORT_HOURS_DAYS.map((day) => day + '=closed').join('\n')).slice(0, 4000));
-      await openModal(interaction, 'sf:settings:modal:support-hours:' + scope.scopeType + ':' + (scope.scopeId ?? '-'), 'Edit Support Hours', [timezone, schedule]);
+      await openModal(interaction, 'sf:settings:modal:support-hours:' + scope.scopeType + ':' + (scope.scopeId ?? '-'), translate((await getAdvancedSettings(guild.id)).locale, 'settings.supportHours.action.editSchedule'), [timezone, schedule]);
       return true;
     }
 
@@ -2736,7 +2987,7 @@ export async function handleSettingsInteraction(
       const base = current ?? effective ?? createDefaultSupportHoursPolicy(scope.scopeType, scope.scopeId);
       const hasIntervals = SUPPORT_HOURS_DAYS.some((day) => base.weeklySchedule[day].length > 0);
       if (enabling && !hasIntervals) {
-        await showSupportHoursSettings(interaction, 'Add at least one opening interval before enabling enforcement.', scope.scopeType, scope.scopeId);
+        await showSupportHoursSettings(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.supportHours.addIntervalFirst'), scope.scopeType, scope.scopeId);
         return true;
       }
       await interaction.deferUpdate();
@@ -2760,7 +3011,7 @@ export async function handleSettingsInteraction(
       const effective = resolveEffectiveSupportHoursPolicy(policies, supportHoursContext(scope));
       const base = current ?? effective;
       if (!base) {
-        await reject(interaction, 'Edit and save a weekly schedule first.');
+        await reject(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.supportHours.noSchedule'));
         return true;
       }
       await interaction.deferUpdate();
@@ -2811,10 +3062,10 @@ export async function handleSettingsInteraction(
     }
 
     if (id === 'sf:settings:panel:thresholds') {
-      await openModal(interaction, 'sf:settings:modal:panel', 'Panel Thresholds', [
-        new TextInputBuilder().setCustomId('visual').setLabel('Visual line budget (6-40)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String((await getAdvancedSettings(guild.id)).panelActivity.visualLineBudget)),
-        new TextInputBuilder().setCustomId('messages').setLabel('Message safety cap (5-30)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String((await getAdvancedSettings(guild.id)).panelActivity.messageBudget)),
-        new TextInputBuilder().setCustomId('minimum').setLabel('Minimum messages (3-20)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String((await getAdvancedSettings(guild.id)).panelActivity.minimumMessagesBeforeMove)),
+      await openModal(interaction, 'sf:settings:modal:panel', translate((await getAdvancedSettings(guild.id)).locale, 'settings.panel.modalTitle'), [
+        new TextInputBuilder().setCustomId('visual').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.panel.modal.visualLines')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String((await getAdvancedSettings(guild.id)).panelActivity.visualLineBudget)),
+        new TextInputBuilder().setCustomId('messages').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.panel.modal.messageCap')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String((await getAdvancedSettings(guild.id)).panelActivity.messageBudget)),
+        new TextInputBuilder().setCustomId('minimum').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.panel.modal.minimumMessages')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String((await getAdvancedSettings(guild.id)).panelActivity.minimumMessagesBeforeMove)),
       ]);
       return true;
     }
@@ -2826,8 +3077,8 @@ export async function handleSettingsInteraction(
 
     if (id === 'sf:settings:team:edit') {
       const settings = await getAdvancedSettings(guild.id);
-      await openModal(interaction, 'sf:settings:modal:team', 'Team & Voice', [
-        new TextInputBuilder().setCustomId('maxModerators').setLabel('Maximum simultaneous moderators (1-3)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.ticketDefaults.maxClaimedModerators)),
+      await openModal(interaction, 'sf:settings:modal:team', translate(settings.locale, 'settings.team.editTitle'), [
+        new TextInputBuilder().setCustomId('maxModerators').setLabel(translate(settings.locale, 'settings.team.modal.moderators')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.ticketDefaults.maxClaimedModerators)),
       ]);
       return true;
     }
@@ -2850,11 +3101,11 @@ export async function handleSettingsInteraction(
       const ticketRule = Object.values(settings.reports.flagRules).find((r) => r.action === 'tickets');
       const serverRule = Object.values(settings.reports.flagRules).find((r) => r.action === 'server');
       const channelRule = Object.values(settings.reports.flagRules).find((r) => r.action === 'channel');
-      await openModal(interaction, 'sf:settings:modal:report-rules', 'Report Flag Rules', [
-        new TextInputBuilder().setCustomId('tickets').setLabel('Ticket restriction threshold (0 = off)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(ticketRule?.threshold ?? 5)),
-        new TextInputBuilder().setCustomId('server').setLabel('Server ban threshold (0 = off)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(serverRule?.threshold ?? 10)),
-        new TextInputBuilder().setCustomId('channel').setLabel('Channel restriction threshold (0 = off)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(channelRule?.threshold ?? 0)),
-        new TextInputBuilder().setCustomId('channelId').setLabel('Channel ID / mention for channel rule').setStyle(TextInputStyle.Short).setRequired(false).setValue(channelRule?.channelId ? '<#' + channelRule.channelId + '>' : ''),
+      await openModal(interaction, 'sf:settings:modal:report-rules', translate(settings.locale, 'settings.reports.modal.flagRulesTitle'), [
+        new TextInputBuilder().setCustomId('tickets').setLabel(translate(settings.locale, 'settings.reports.modal.ticketThreshold')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String(ticketRule?.threshold ?? 5)),
+        new TextInputBuilder().setCustomId('server').setLabel(translate(settings.locale, 'settings.reports.modal.serverThreshold')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String(serverRule?.threshold ?? 10)),
+        new TextInputBuilder().setCustomId('channel').setLabel(translate(settings.locale, 'settings.reports.modal.channelThreshold')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String(channelRule?.threshold ?? 0)),
+        new TextInputBuilder().setCustomId('channelId').setLabel(translate(settings.locale, 'settings.reports.modal.channelId')).setStyle(TextInputStyle.Short).setRequired(false).setValue(channelRule?.channelId ? '<#' + channelRule.channelId + '>' : ''),
       ]);
       return true;
     }
@@ -2866,8 +3117,9 @@ export async function handleSettingsInteraction(
 
     if (id.startsWith('sf:settings:reports:subcategory:add:')) {
       const categoryId = id.slice('sf:settings:reports:subcategory:add:'.length);
-      await openModal(interaction, 'sf:settings:modal:report-subcategory:add:' + categoryId, 'Add Report Subcategory', [
-        new TextInputBuilder().setCustomId('name').setLabel('Subcategory name').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
+      const locale = (await getAdvancedSettings(guild.id)).locale;
+      await openModal(interaction, 'sf:settings:modal:report-subcategory:add:' + categoryId, translate(locale, 'settings.reports.modal.addSubcategoryTitle'), [
+        new TextInputBuilder().setCustomId('name').setLabel(translate(locale, 'settings.reports.modal.subcategoryName')).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
       ]);
       return true;
     }
@@ -2889,10 +3141,12 @@ export async function handleSettingsInteraction(
 
     if (id.startsWith('sf:settings:reports:subcategory:edit:')) {
       const parts = id.split(':'); const categoryId = parts[5] ?? ''; const subcategoryId = parts[6] ?? '';
-      const sub = (await getAdvancedSettings(guild.id)).reports.categories[categoryId]?.subcategories[subcategoryId];
-      if (!sub) { await reject(interaction, '❌ Report subcategory not found.'); return true; }
-      await openModal(interaction, 'sf:settings:modal:report-subcategory:edit:' + categoryId + ':' + subcategoryId, 'Edit Report Subcategory', [
-        new TextInputBuilder().setCustomId('name').setLabel('Subcategory name').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(sub.name),
+      const settings = await getAdvancedSettings(guild.id);
+      const sub = settings.reports.categories[categoryId]?.subcategories[subcategoryId];
+      if (!sub) { await reject(interaction, '❌ ' + translate(settings.locale, 'settings.reports.error.subcategoryMissing')); return true; }
+      const locale = settings.locale;
+      await openModal(interaction, 'sf:settings:modal:report-subcategory:edit:' + categoryId + ':' + subcategoryId, translate(locale, 'settings.reports.modal.editSubcategoryTitle'), [
+        new TextInputBuilder().setCustomId('name').setLabel(translate(locale, 'settings.reports.modal.subcategoryName')).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(sub.name),
       ]);
       return true;
     }
@@ -2901,8 +3155,14 @@ export async function handleSettingsInteraction(
       const parts = id.split(':'); const categoryId = parts[5] ?? ''; const subcategoryId = parts[6] ?? '';
       const settings = await getAdvancedSettings(guild.id);
       const category = settings.reports.categories[categoryId];
-      if (!category || !category.subcategories[subcategoryId]) { await reject(interaction, '❌ Report subcategory not found.'); return true; }
-      if (Object.keys(category.subcategories).length <= 1) { await reject(interaction, '❌ Each report category must keep at least one subcategory.'); return true; }
+      if (!category || !category.subcategories[subcategoryId]) {
+        await reject(interaction, '❌ ' + translate(settings.locale, 'settings.reports.error.subcategoryMissing'));
+        return true;
+      }
+      if (Object.keys(category.subcategories).length <= 1) {
+        await reject(interaction, '❌ ' + translate(settings.locale, 'settings.reports.error.keepOneSubcategory'));
+        return true;
+      }
       await interaction.deferUpdate();
       await updateAdvancedSettings(guild.id, (current) => { const item = current.reports.categories[categoryId]; if (item) delete item.subcategories[subcategoryId]; });
       await refreshSettingsChannel(guild);
@@ -2916,8 +3176,8 @@ export async function handleSettingsInteraction(
     }
 
     if (id === 'sf:settings:defaults:edit') {
-      await openModal(interaction, 'sf:settings:modal:defaults', 'Ticket Defaults', [
-        new TextInputBuilder().setCustomId('priority').setLabel('Default priority').setPlaceholder('low, normal, high, urgent, critical').setStyle(TextInputStyle.Short).setRequired(true),
+      await openModal(interaction, 'sf:settings:modal:defaults', translate((await getAdvancedSettings(guild.id)).locale, 'settings.defaults.editTitle'), [
+        new TextInputBuilder().setCustomId('priority').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.defaults.field.priority')).setPlaceholder(translate((await getAdvancedSettings(guild.id)).locale, 'settings.defaults.priorityPlaceholder')).setStyle(TextInputStyle.Short).setRequired(true),
       ]);
       return true;
     }
@@ -2928,9 +3188,9 @@ export async function handleSettingsInteraction(
     }
 
     if (id === 'sf:settings:departments:add') {
-      await openModal(interaction, 'sf:settings:modal:department:add', 'Add Department', [
-        new TextInputBuilder().setCustomId('name').setLabel('Department name').setPlaceholder('Monetary Affairs').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
-        new TextInputBuilder().setCustomId('staff').setLabel('Staff role ID or mention (optional)').setPlaceholder('@Finance Staff').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100),
+      await openModal(interaction, 'sf:settings:modal:department:add', translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.addTitle'), [
+        new TextInputBuilder().setCustomId('name').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.namePlaceholder')).setPlaceholder(translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.namePlaceholder')).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
+        new TextInputBuilder().setCustomId('staff').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.field.staff')).setPlaceholder(translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.staffPlaceholder')).setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100),
       ]);
       return true;
     }
@@ -2943,7 +3203,7 @@ export async function handleSettingsInteraction(
     if (id.startsWith('sf:settings:departments:manage:page:')) {
       const page = Number(id.slice('sf:settings:departments:manage:page:'.length));
       if (!Number.isInteger(page)) {
-        await reject(interaction, '❌ Invalid department page.');
+        await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.invalidPage'));
         return true;
       }
       await showDepartmentPicker(interaction, page);
@@ -2958,18 +3218,18 @@ export async function handleSettingsInteraction(
     if (id.startsWith('sf:settings:department:edit:')) {
       const departmentId = id.slice('sf:settings:department:edit:'.length);
       const d = (await getGuildConfig(guild.id)).departments[departmentId];
-      if (!d) { await reject(interaction, '❌ Department not found.'); return true; }
-      await openModal(interaction, 'sf:settings:modal:department:edit:' + departmentId, 'Edit Department', [
-        new TextInputBuilder().setCustomId('name').setLabel('Department name').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(d.name),
-        new TextInputBuilder().setCustomId('staff').setLabel('Staff role ID or mention (optional)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100).setValue(d.staffRoleId ? '<@&' + d.staffRoleId + '>' : ''),
+      if (!d) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.notFound')); return true; }
+      await openModal(interaction, 'sf:settings:modal:department:edit:' + departmentId, translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.editTitle'), [
+        new TextInputBuilder().setCustomId('name').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.namePlaceholder')).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(d.name),
+        new TextInputBuilder().setCustomId('staff').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.field.staff')).setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(100).setValue(d.staffRoleId ? '<@&' + d.staffRoleId + '>' : ''),
       ]);
       return true;
     }
 
     if (id.startsWith('sf:settings:tag:add:')) {
       const departmentId = id.slice('sf:settings:tag:add:'.length);
-      await openModal(interaction, 'sf:settings:modal:tag:add:' + departmentId, 'Add Tag', [
-        new TextInputBuilder().setCustomId('name').setLabel('Tag name').setPlaceholder('Billing, Refund, Chargeback').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
+      await openModal(interaction, 'sf:settings:modal:tag:add:' + departmentId, translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.addTitle'), [
+        new TextInputBuilder().setCustomId('name').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.namePlaceholder')).setPlaceholder(translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.namePlaceholder')).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80),
       ]);
       return true;
     }
@@ -2979,7 +3239,7 @@ export async function handleSettingsInteraction(
       const departmentId = parts[5] ?? '';
       const page = Number(parts[6] ?? '0');
       if (!Number.isInteger(page)) {
-        await reject(interaction, '❌ Invalid tag page.');
+        await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.invalidPage'));
         return true;
       }
       await showTagManager(interaction, departmentId, page);
@@ -2995,9 +3255,9 @@ export async function handleSettingsInteraction(
       const parts = id.split(':');
       const departmentId = parts[5] ?? ''; const tagId = parts[6] ?? '';
       const tag = (await getGuildConfig(guild.id)).departments[departmentId]?.tags?.[tagId];
-      if (!tag) { await reject(interaction, '❌ Tag not found.'); return true; }
-      await openModal(interaction, 'sf:settings:modal:tag:edit:' + departmentId + ':' + tagId, 'Edit Tag', [
-        new TextInputBuilder().setCustomId('name').setLabel('Tag name').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(tag.name),
+      if (!tag) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.notFound')); return true; }
+      await openModal(interaction, 'sf:settings:modal:tag:edit:' + departmentId + ':' + tagId, translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.editTitle'), [
+        new TextInputBuilder().setCustomId('name').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.namePlaceholder')).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setValue(tag.name),
       ]);
       return true;
     }
@@ -3006,10 +3266,10 @@ export async function handleSettingsInteraction(
       const parts = id.split(':');
       const departmentId = parts[4] ?? ''; const tagId = parts[5] ?? '';
       const config = await getGuildConfig(guild.id); const d = config.departments[departmentId];
-      if (!d?.tags?.[tagId]) { await reject(interaction, '❌ Tag not found.'); return true; }
-      if (Object.keys(d.tags).length <= 1) { await reject(interaction, '❌ Each department must keep at least one tag.'); return true; }
+      if (!d?.tags?.[tagId]) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.notFound')); return true; }
+      if (Object.keys(d.tags).length <= 1) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.keepOne')); return true; }
       const replacement = Object.values(d.tags).find((t) => t.id !== tagId);
-      if (!replacement) { await reject(interaction, '❌ No replacement tag is available.'); return true; }
+      if (!replacement) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.replacementMissing')); return true; }
       const removedTagName = d.tags[tagId].name;
       const departmentName = d.name;
       await updateGuildConfig(guild.id, (current) => {
@@ -3025,7 +3285,7 @@ export async function handleSettingsInteraction(
       const departmentId = id.slice('sf:settings:department:remove:'.length);
       const config = await getGuildConfig(guild.id); const d = config.departments[departmentId];
       if (!d) { await reject(interaction, '❌ Department not found.'); return true; }
-      if (Object.keys(config.departments).length <= 1) { await reject(interaction, '❌ At least one department must remain.'); return true; }
+      if (Object.keys(config.departments).length <= 1) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.keepOne')); return true; }
       const active: string[] = [];
       for (const channel of guild.channels.cache.values()) {
         if (
@@ -3046,10 +3306,7 @@ export async function handleSettingsInteraction(
       }
 
       if (active.length) {
-        await reject(
-          interaction,
-          '❌ Cannot remove this department while it has active tickets. Reassign them first.',
-        );
+        await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.activeTickets'));
         return true;
       }
       await updateGuildConfig(guild.id, (current) => {
@@ -3101,29 +3358,29 @@ export async function handleSettingsInteraction(
       const deptText = settings.inactivity.exemptDepartmentIds.join(', ');
       const input = new TextInputBuilder()
         .setCustomId('departments')
-        .setLabel('Comma-separated department IDs (max 25)')
+        .setLabel(translate(settings.locale, 'settings.inactivity.modal.departments'))
         .setStyle(TextInputStyle.Paragraph)
         .setRequired(false)
         .setMaxLength(1000);
       if (deptText) input.setValue(deptText);
-      await openModal(interaction, 'sf:settings:modal:inactivity-departments', 'Department Exemptions', [input]);
+      await openModal(interaction, 'sf:settings:modal:inactivity-departments', translate(settings.locale, 'settings.inactivity.departmentsTitle'), [input]);
       return true;
     }
 
     if (id === 'sf:settings:inactivity:edit') {
       const settings = await getAdvancedSettings(guild.id);
-      await openModal(interaction, 'sf:settings:modal:inactivity', 'Ticket Inactivity', [
-        new TextInputBuilder().setCustomId('idle').setLabel('Idle hours before warning (1–720)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.inactivity.idleHours)),
-        new TextInputBuilder().setCustomId('grace').setLabel('Grace hours after warning (1–168)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.inactivity.graceHours)),
+      await openModal(interaction, 'sf:settings:modal:inactivity', translate(settings.locale, 'settings.inactivity.title'), [
+        new TextInputBuilder().setCustomId('idle').setLabel(translate(settings.locale, 'settings.inactivity.modal.idle')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.inactivity.idleHours)),
+        new TextInputBuilder().setCustomId('grace').setLabel(translate(settings.locale, 'settings.inactivity.modal.grace')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.inactivity.graceHours)),
       ]);
       return true;
     }
 
     if (id === 'sf:settings:retention:edit') {
       const settings = await getAdvancedSettings(guild.id);
-      await openModal(interaction, 'sf:settings:modal:retention', 'Ticket Retention', [
-        new TextInputBuilder().setCustomId('closed').setLabel('Closed ticket days (0–365; 0 = no timer)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.retention.closedDays)),
-        new TextInputBuilder().setCustomId('archive').setLabel('Archived ticket days (0–365; 0 = no timer)').setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.retention.archiveDays)),
+      await openModal(interaction, 'sf:settings:modal:retention', translate(settings.locale, 'settings.retention.modalTitle'), [
+        new TextInputBuilder().setCustomId('closed').setLabel(translate(settings.locale, 'settings.retention.closedLabel')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.retention.closedDays)),
+        new TextInputBuilder().setCustomId('archive').setLabel(translate(settings.locale, 'settings.retention.archiveLabel')).setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.retention.archiveDays)),
       ]);
       return true;
     }
@@ -3140,10 +3397,10 @@ export async function handleSettingsInteraction(
 
     if (id === 'sf:settings:appearance:edit') {
       const settings = await getAdvancedSettings(guild.id);
-      await openModal(interaction, 'sf:settings:modal:appearance', 'Panel Appearance', [
-        new TextInputBuilder().setCustomId('title').setLabel('Panel title').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(256).setValue(settings.appearance.panelTitle),
-        new TextInputBuilder().setCustomId('description').setLabel('Panel description').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1500).setValue(settings.appearance.panelDescription),
-        new TextInputBuilder().setCustomId('footer').setLabel('Panel footer').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(2048).setValue(settings.appearance.panelFooter),
+      await openModal(interaction, 'sf:settings:modal:appearance', translate(settings.locale, 'settings.appearance.modalTitle'), [
+        new TextInputBuilder().setCustomId('title').setLabel(translate(settings.locale, 'settings.appearance.titleLabel')).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(256).setValue(settings.appearance.panelTitle),
+        new TextInputBuilder().setCustomId('description').setLabel(translate(settings.locale, 'settings.appearance.descriptionLabel')).setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1500).setValue(settings.appearance.panelDescription),
+        new TextInputBuilder().setCustomId('footer').setLabel(translate(settings.locale, 'settings.appearance.footerLabel')).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(2048).setValue(settings.appearance.panelFooter),
       ]);
       return true;
     }
@@ -3260,16 +3517,16 @@ export async function handleSettingsInteraction(
 
     if (id.startsWith('sf:settings:retention:change-after-decline:')) {
       const settings = await getAdvancedSettings(guild.id);
-      await openModal(interaction, 'sf:settings:modal:retention', 'Ticket Retention', [
+      await openModal(interaction, 'sf:settings:modal:retention', translate(settings.locale, 'settings.retention.modalTitle'), [
         new TextInputBuilder()
           .setCustomId('closed')
-          .setLabel('Closed ticket days (0–365; 0 = no timer)')
+          .setLabel(translate(settings.locale, 'settings.retention.closedLabel'))
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
           .setValue(String(settings.retention.closedDays)),
         new TextInputBuilder()
           .setCustomId('archive')
-          .setLabel('Archived ticket days (0–365; 0 = no timer)')
+          .setLabel(translate(settings.locale, 'settings.retention.archiveLabel'))
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
           .setValue(String(settings.retention.archiveDays)),
@@ -3366,14 +3623,14 @@ export async function handleSettingsInteraction(
         const restoreMode = id !== 'sf:settings:setup';
         const result = await runSupportForgeSetup(guild, restoreMode);
         await interaction.editReply(
-          '✅ **ResolvX ' + (restoreMode ? 'restored' : 'setup/repair completed') + ' successfully.**\n\n' +
+          '✅ **QueryFixr ' + (restoreMode ? 'restored' : 'setup/repair completed') + ' successfully.**\n\n' +
           'Container: <#' + result.supportCategoryId + '>\n' +
           'Department categories: **' + result.departmentCount + '**\n' +
           (result.legacyOpenCategoryId ? 'Legacy Open bucket: <#' + result.legacyOpenCategoryId + '>\n' : '') +
           'The support panel, audit channel, Settings, transcripts, and department categories were checked and repaired.'
         );
       } catch (error) {
-        await interaction.editReply('❌ ResolvX could not complete setup/restore: ' + (error instanceof Error ? error.message : 'Unknown error.'));
+        await interaction.editReply('❌ QueryFixr could not complete setup/restore: ' + (error instanceof Error ? error.message : 'Unknown error.'));
       }
       return true;
     }
@@ -3394,7 +3651,7 @@ export async function handleSettingsInteraction(
               .setColor(repairThemeColor)
               .setTitle('🛡️ Restore & Update • Complete')
               .setDescription(
-                'The existing PostgreSQL-backed configuration and ticket records were retained. ResolvX has reconciled its managed categories, core channels, settings, transcript archive, audit panel, support panel, and department categories.\n\n' +
+                'The existing PostgreSQL-backed configuration and ticket records were retained. QueryFixr has reconciled its managed categories, core channels, settings, transcript archive, audit panel, support panel, and department categories.\n\n' +
                 'Recovered missing ticket records from surviving channel metadata: **' + result.recoveredTickets + '**.\n\n' +
                 (deployment.requested
                   ? '🚀 **Code deployment queued.** ' + deployment.reason
@@ -3405,7 +3662,7 @@ export async function handleSettingsInteraction(
           ],
           components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
         });
-        await auditSettingsAction(guild, interaction, 'RESTORE_AND_UPDATE', 'Reconciled ResolvX infrastructure; deployment requested=' + deployment.requested + '; recovered ticket records=' + result.recoveredTickets + '.');
+        await auditSettingsAction(guild, interaction, 'RESTORE_AND_UPDATE', 'Reconciled QueryFixr infrastructure; deployment requested=' + deployment.requested + '; recovered ticket records=' + result.recoveredTickets + '.');
       } catch (error) {
         console.error('❌ Restore & Update failed:', error);
         await interaction.editReply('❌ Restore & Update stopped before completion: ' + (error instanceof Error ? error.message : 'Unknown error. Existing database records were not intentionally reset.'));
@@ -3423,8 +3680,8 @@ export async function handleSettingsInteraction(
             new EmbedBuilder()
               .setTitle('✅ Normal Repair Complete')
               .setDescription(
-                'ResolvX infrastructure has been checked and repaired where required.' +
-                (recoveredTickets ? '\n\nRecovered **' + recoveredTickets + '** missing durable ticket record(s) from existing ticket-channel metadata.' : '\n\nAll existing ResolvX ticket channels already had durable records.'),
+                'QueryFixr infrastructure has been checked and repaired where required.' +
+                (recoveredTickets ? '\n\nRecovered **' + recoveredTickets + '** missing durable ticket record(s) from existing ticket-channel metadata.' : '\n\nAll existing QueryFixr ticket channels already had durable records.'),
               ),
           ],
           components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
@@ -3672,7 +3929,7 @@ export async function handleSettingsInteraction(
       const channelId = channelMention?.[1] ?? (/^\d{15,25}$/.test(rawChannel) ? rawChannel : null);
 
       if (![ticketThreshold, serverThreshold, channelThreshold].every((value) => Number.isInteger(value) && value >= 0 && value <= 100000) || (channelThreshold > 0 && !channelId)) {
-        await reject(interaction, '❌ Thresholds must be whole numbers from 0 to 100000. A channel must be supplied when channel restriction is enabled.');
+        await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.reports.error.thresholdsInvalid'));
         return true;
       }
 
@@ -3695,8 +3952,11 @@ export async function handleSettingsInteraction(
         ensureRule('channel-default', 'channel', channelThreshold, channelId);
       });
       await refreshSettingsChannel(guild);
+      const locale = (await getAdvancedSettings(guild.id)).locale;
       await interaction.editReply({
-        embeds: [new EmbedBuilder().setTitle('✅ Report Flag Rules Updated').setDescription('Automatic actions now trigger at the configured flag thresholds. Set a threshold to **0** to disable that action.')],
+        embeds: [new EmbedBuilder()
+          .setTitle(translate(locale, 'settings.reports.success.rulesTitle'))
+          .setDescription(translate(locale, 'settings.reports.success.rulesDescription'))],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
       await auditSettingsAction(guild, interaction, 'REPORT_RULES_CHANGED', 'Updated automatic report flag thresholds and actions.');
@@ -3706,7 +3966,7 @@ export async function handleSettingsInteraction(
     if (interaction.customId === 'sf:settings:modal:defaults') {
       const priority = interaction.fields.getTextInputValue('priority').trim().toLowerCase() as TicketPriority;
       if (!['low', 'normal', 'high', 'urgent', 'critical'].includes(priority)) {
-        await reject(interaction, '❌ Priority must be low, normal, high, urgent, or critical.');
+        await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.defaults.priorityInvalid'));
         return true;
       }
 
@@ -3715,8 +3975,18 @@ export async function handleSettingsInteraction(
         settings.ticketDefaults.priority = priority;
       });
       await refreshSettingsChannel(guild);
+      const locale = (await getAdvancedSettings(guild.id)).locale;
+      const priorityKey = ({
+        low: 'priority.low',
+        normal: 'priority.normal',
+        high: 'priority.high',
+        urgent: 'priority.urgent',
+        critical: 'priority.critical',
+      } as const)[priority];
       await interaction.editReply({
-        embeds: [new EmbedBuilder().setTitle('✅ Ticket Defaults Updated').setDescription('Default priority is now **' + priority + '**.')],
+        embeds: [new EmbedBuilder()
+          .setTitle('✅ ' + translate(locale, 'settings.defaults.title'))
+          .setDescription(translate(locale, 'settings.defaults.saved', { priority: translate(locale, priorityKey) }))],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
       await auditSettingsAction(guild, interaction, 'TICKET_DEFAULTS_CHANGED', 'Default ticket priority changed to ' + priority + '.');
@@ -3726,19 +3996,31 @@ export async function handleSettingsInteraction(
     if (interaction.customId.startsWith('sf:settings:modal:report-subcategory:add:')) {
       const categoryId = interaction.customId.slice('sf:settings:modal:report-subcategory:add:'.length);
       const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
-      if (!name) { await reject(interaction, '❌ Subcategory name cannot be empty.'); return true; }
-      const subId = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);
-      if (!subId) { await reject(interaction, '❌ Subcategory name must contain letters or numbers.'); return true; }
+      const locale = (await getAdvancedSettings(guild.id)).locale;
+      if (!name) {
+        await reject(interaction, '❌ ' + translate(locale, 'settings.reports.error.subcategoryEmpty'));
+        return true;
+      }
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);
+      const subId = slug || 'subcategory-' + randomBytes(6).toString('hex');
+      const normalizedName = name.normalize('NFKC').toLowerCase();
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       await updateAdvancedSettings(guild.id, (settings) => {
         const category = settings.reports.categories[categoryId];
-        if (!category) return;
-        if (category.subcategories[subId]) throw new Error('A report subcategory with that name already exists.');
+        if (!category) throw new Error(translate(locale, 'settings.reports.error.categoryMissing'));
+        const duplicateName = Object.values(category.subcategories).some((item) =>
+          item.name.normalize('NFKC').toLowerCase() === normalizedName,
+        );
+        if (duplicateName || category.subcategories[subId]) {
+          throw new Error(translate(locale, 'settings.reports.error.subcategoryExists'));
+        }
         category.subcategories[subId] = { id: subId, name, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-      }).catch(async (error) => { throw error; });
+      });
       await refreshSettingsChannel(guild);
       await interaction.editReply({
-        embeds: [new EmbedBuilder().setTitle('✅ Report Subcategory Added').setDescription('Added **' + name + '**.')],
+        embeds: [new EmbedBuilder()
+          .setTitle(translate(locale, 'settings.reports.success.addSubcategoryTitle'))
+          .setDescription(translate(locale, 'settings.reports.success.addSubcategoryDescription', { name }))],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
       await auditSettingsAction(guild, interaction, 'REPORT_SUBCATEGORY_ADDED', 'Added report subcategory ' + name + '.');
@@ -3747,15 +4029,30 @@ export async function handleSettingsInteraction(
 
     if (interaction.customId.startsWith('sf:settings:modal:report-subcategory:edit:')) {
       const parts = interaction.customId.split(':'); const categoryId = parts[5] ?? ''; const subcategoryId = parts[6] ?? '';
-      const sub = (await getAdvancedSettings(guild.id)).reports.categories[categoryId]?.subcategories[subcategoryId];
-      if (!sub) { await reject(interaction, '❌ Report subcategory not found.'); return true; }
+      const settings = await getAdvancedSettings(guild.id);
+      const sub = settings.reports.categories[categoryId]?.subcategories[subcategoryId];
+      if (!sub) { await reject(interaction, '❌ ' + translate(settings.locale, 'settings.reports.error.subcategoryMissing')); return true; }
       const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
-      if (!name) { await reject(interaction, '❌ Subcategory name cannot be empty.'); return true; }
+      if (!name) { await reject(interaction, '❌ ' + translate(settings.locale, 'settings.reports.error.subcategoryEmpty')); return true; }
+      const normalizedName = name.normalize('NFKC').toLowerCase();
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      await updateAdvancedSettings(guild.id, (settings) => { const item = settings.reports.categories[categoryId]?.subcategories[subcategoryId]; if (item) { item.name = name; item.updatedAt = new Date().toISOString(); } });
+      await updateAdvancedSettings(guild.id, (current) => {
+        const category = current.reports.categories[categoryId];
+        if (!category) throw new Error(translate(settings.locale, 'settings.reports.error.categoryMissing'));
+        const item = category.subcategories[subcategoryId];
+        if (!item) throw new Error(translate(settings.locale, 'settings.reports.error.subcategoryMissing'));
+        const duplicateName = Object.values(category.subcategories).some((other) =>
+          other.id !== subcategoryId && other.name.normalize('NFKC').toLowerCase() === normalizedName,
+        );
+        if (duplicateName) throw new Error(translate(settings.locale, 'settings.reports.error.subcategoryExists'));
+        item.name = name;
+        item.updatedAt = new Date().toISOString();
+      });
       await refreshSettingsChannel(guild);
       await interaction.editReply({
-        embeds: [new EmbedBuilder().setTitle('✅ Report Subcategory Updated').setDescription('Renamed the report subcategory to **' + name + '**.')],
+        embeds: [new EmbedBuilder()
+          .setTitle(translate(settings.locale, 'settings.reports.success.editSubcategoryTitle'))
+          .setDescription(translate(settings.locale, 'settings.reports.success.editSubcategoryDescription', { name }))],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
       return true;
@@ -3766,10 +4063,10 @@ export async function handleSettingsInteraction(
       const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
       const config = await getGuildConfig(guild.id);
       const department = config.departments[departmentId];
-      if (!department) { await reject(interaction, '❌ Department not found.'); return true; }
-      if (!name) { await reject(interaction, '❌ Tag name cannot be empty.'); return true; }
+      if (!department) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.notFound')); return true; }
+      if (!name) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.nameRequired')); return true; }
       if (Object.values(department.tags ?? {}).some((tag) => tag.name.toLowerCase() === name.toLowerCase())) {
-        await reject(interaction, '❌ A tag with that name already exists in this department.'); return true;
+        await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.duplicate')); return true;
       }
       const tagId = newTagId();
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -3782,7 +4079,7 @@ export async function handleSettingsInteraction(
       });
       await syncPanel(guild); await refreshSettingsChannel(guild);
       await interaction.editReply({
-        embeds: [new EmbedBuilder().setTitle('✅ Tag Added').setDescription('**' + name + '** is now a subcategory of **' + department.name + '**. No Discord category was created.')],
+        embeds: [new EmbedBuilder().setTitle('✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.addedTitle')).setDescription(translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.addedDescription', { name, department: department.name }))],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
       await auditSettingsAction(guild, interaction, 'TAG_ADDED', 'Added tag ' + name + ' under department ' + department.name + '.');
@@ -3794,15 +4091,15 @@ export async function handleSettingsInteraction(
       const departmentId = parts[4] ?? ''; const tagId = parts[5] ?? '';
       const config = await getGuildConfig(guild.id);
       const department = config.departments[departmentId]; const tag = department?.tags?.[tagId];
-      if (!department || !tag) { await reject(interaction, '❌ Tag not found.'); return true; }
+      if (!department || !tag) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.notFound')); return true; }
       const name = interaction.fields.getTextInputValue('name').trim().replace(/\s+/g, ' ');
-      if (!name) { await reject(interaction, '❌ Tag name cannot be empty.'); return true; }
-      if (Object.values(department.tags).some((item) => item.id !== tagId && item.name.toLowerCase() === name.toLowerCase())) { await reject(interaction, '❌ Another tag in this department already uses that name.'); return true; }
+      if (!name) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.nameRequired')); return true; }
+      if (Object.values(department.tags).some((item) => item.id !== tagId && item.name.toLowerCase() === name.toLowerCase())) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.duplicate')); return true; }
       const oldName = tag.name;
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       await updateGuildConfig(guild.id, (current) => { const item = current.departments[departmentId]?.tags?.[tagId]; if (item) item.name = name; });
       await syncPanel(guild); await refreshSettingsChannel(guild);
-      await interaction.editReply({ embeds: [new EmbedBuilder().setTitle('✅ Tag Updated').setDescription('Renamed **' + oldName + '** to **' + name + '**.')], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())] });
+      await interaction.editReply({ embeds: [new EmbedBuilder().setTitle('✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.updatedTitle')).setDescription(translate((await getAdvancedSettings(guild.id)).locale, 'settings.tags.updatedDescription', { oldName, name }))], components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())] });
       await auditSettingsAction(guild, interaction, 'TAG_CHANGED', 'Renamed tag ' + oldName + ' to ' + name + ' under department ' + department.name + '.');
       return true;
     }
@@ -3813,11 +4110,11 @@ export async function handleSettingsInteraction(
       const staffMention = rawStaff.match(/^<@&(\d+)>$/);
       const staffRoleId = staffMention?.[1] ?? (/^\d{15,25}$/.test(rawStaff) ? rawStaff : null);
       const config = await getGuildConfig(guild.id);
-      if (!name) { await reject(interaction, '❌ Department name cannot be empty.'); return true; }
-      if (Object.values(config.departments).some((d) => d.name.toLowerCase() === name.toLowerCase())) { await reject(interaction, '❌ A department with that name already exists.'); return true; }
+      if (!name) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.nameRequired')); return true; }
+      if (Object.values(config.departments).some((d) => d.name.toLowerCase() === name.toLowerCase())) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.nameDuplicate')); return true; }
       if (staffRoleId) {
         const role = guild.roles.cache.get(staffRoleId);
-        if (!role || role.managed || role.id === guild.roles.everyone.id) { await reject(interaction, '❌ The supplied staff role is invalid.'); return true; }
+        if (!role || role.managed || role.id === guild.roles.everyone.id) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.staffInvalid')); return true; }
       }
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const id = newDepartmentId(); const tagId = newTagId(); const now = new Date().toISOString();
@@ -3828,8 +4125,8 @@ export async function handleSettingsInteraction(
       await interaction.editReply({
         embeds: [
           new EmbedBuilder()
-            .setTitle('✅ Department Added')
-            .setDescription('**' + name + '** was added. Its Discord category will be created when the first ticket is opened in this department.'),
+            .setTitle('✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.addedTitle'))
+            .setDescription(translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.addedDescription', { name })),
         ],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
@@ -3844,12 +4141,12 @@ export async function handleSettingsInteraction(
       const staffMention = rawStaff.match(/^<@&(\d+)>$/);
       const staffRoleId = staffMention?.[1] ?? (/^\d{15,25}$/.test(rawStaff) ? rawStaff : null);
       const config = await getGuildConfig(guild.id); const department = config.departments[departmentId];
-      if (!department) { await reject(interaction, '❌ Department not found.'); return true; }
-      if (!name) { await reject(interaction, '❌ Department name cannot be empty.'); return true; }
-      if (Object.values(config.departments).some((d) => d.id !== departmentId && d.name.toLowerCase() === name.toLowerCase())) { await reject(interaction, '❌ Another department already uses that name.'); return true; }
+      if (!department) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.notFound')); return true; }
+      if (!name) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.nameRequired')); return true; }
+      if (Object.values(config.departments).some((d) => d.id !== departmentId && d.name.toLowerCase() === name.toLowerCase())) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.nameDuplicate')); return true; }
       if (staffRoleId) {
         const role = guild.roles.cache.get(staffRoleId);
-        if (!role || role.managed || role.id === guild.roles.everyone.id) { await reject(interaction, '❌ The supplied staff role is invalid.'); return true; }
+        if (!role || role.managed || role.id === guild.roles.everyone.id) { await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.staffInvalid')); return true; }
       }
       const oldName = department.name;
       const oldStaffRoleId = department.staffRoleId;
@@ -3859,8 +4156,8 @@ export async function handleSettingsInteraction(
         : null;
       if (category?.type === ChannelType.GuildCategory) {
         await category.edit({
-          name: ('ResolvX.' + name).slice(0, 100),
-          reason: 'ResolvX department rename',
+          name: ('QueryFixr.' + name).slice(0, 100),
+          reason: 'QueryFixr department rename',
         });
       }
       await updateGuildConfig(guild.id, (current) => {
@@ -3881,7 +4178,7 @@ export async function handleSettingsInteraction(
       await interaction.editReply({
         embeds: [
           new EmbedBuilder()
-            .setTitle('✅ Department Updated')
+            .setTitle('✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.departments.updatedTitle'))
             .setDescription(
               'Renamed **' + oldName + '** to **' + name +
               '**. Its category, tags, and existing ticket staff access were updated.',
@@ -4016,7 +4313,7 @@ export async function handleSettingsInteraction(
         !Number.isInteger(closed) || closed < 0 || closed > 365 ||
         !Number.isInteger(archive) || archive < 0 || archive > 365
       ) {
-        await reject(interaction, '❌ Retention values must be whole numbers from 0 to 365.');
+        await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.retention.invalid'));
         return true;
       }
 
@@ -4031,7 +4328,7 @@ export async function handleSettingsInteraction(
       });
       await refreshSettingsChannel(guild);
       await interaction.editReply({
-        embeds: [new EmbedBuilder().setTitle('✅ Retention Updated').setDescription('Closed: **' + (closed === 0 ? 'No timer (365-day maximum)' : closed + ' days') + '** • Archive: **' + (archive === 0 ? 'No timer (365-day maximum)' : archive + ' days') + '**.')],
+        embeds: [new EmbedBuilder().setTitle('✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.retention.updatedTitle')).setDescription(translate((await getAdvancedSettings(guild.id)).locale, 'settings.retention.updatedDescription', { closed: closed === 0 ? translate((await getAdvancedSettings(guild.id)).locale, 'settings.value.noTimer') : translate((await getAdvancedSettings(guild.id)).locale, 'settings.value.days', { days: closed }), archive: archive === 0 ? translate((await getAdvancedSettings(guild.id)).locale, 'settings.value.noTimer') : translate((await getAdvancedSettings(guild.id)).locale, 'settings.value.days', { days: archive }) }))],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
       await auditSettingsAction(guild, interaction, 'RETENTION_CHANGED', 'Closed retention=' + closed + ' days; archive retention=' + archive + ' days.');
@@ -4058,11 +4355,11 @@ export async function handleSettingsInteraction(
          * interaction which opened this modal. Therefore the ephemeral
          * @original response is not a safe place to send the final result.
          * Use a webhook follow-up instead, which is independent of the
-         * deleted ResolvX channel.
+         * deleted QueryFixr channel.
          */
         await interaction.editReply({
           content:
-            '⏳ **ResolvX reset is being completed.** All ResolvX-managed infrastructure and stored data are being removed. The final confirmation will be sent separately after the destructive operation finishes.',
+            '⏳ **QueryFixr reset is being completed.** All QueryFixr-managed infrastructure and stored data are being removed. The final confirmation will be sent separately after the destructive operation finishes.',
         });
 
         const resetResult = await performFactoryReset(
@@ -4086,8 +4383,8 @@ export async function handleSettingsInteraction(
 
           await interaction.editReply({
             content:
-              '⚠️ **ResolvX reset was only partially completed.**\n' +
-              'Some managed resources could not be deleted, so ResolvX preserved its state for a safe retry.\n\n' +
+              '⚠️ **QueryFixr reset was only partially completed.**\n' +
+              'Some managed resources could not be deleted, so QueryFixr preserved its state for a safe retry.\n\n' +
               (failures || 'No detailed failure information was returned.') +
               (resetResult.failed.length > 5
                 ? '\n\n…and ' +
@@ -4109,7 +4406,7 @@ export async function handleSettingsInteraction(
          */
         await interaction.user.send({
           content:
-            '✅ ResolvX has been completely reset. All ResolvX-managed messages, channels, categories, and stored data were deleted.',
+            '✅ QueryFixr has been completely reset. All QueryFixr-managed messages, channels, categories, and stored data were deleted.',
         }).catch((deliveryError) => {
           console.warn(
             '⚠️ Factory reset completed, but the completion DM could not be delivered:',
@@ -4117,7 +4414,7 @@ export async function handleSettingsInteraction(
           );
         });
       } catch (error) {
-        console.error('❌ ResolvX factory reset failed:', error);
+        console.error('❌ QueryFixr factory reset failed:', error);
 
         await interaction.editReply({
           content:
@@ -4130,14 +4427,14 @@ export async function handleSettingsInteraction(
     if (interaction.customId.startsWith('sf:settings:modal:dashboard-button:')) {
       const rawKey = interaction.customId.slice('sf:settings:modal:dashboard-button:'.length);
       if (!(SETTINGS_DASHBOARD_BUTTON_KEYS as readonly string[]).includes(rawKey)) {
-        await reject(interaction, 'That Settings control is not supported.');
+        await reject(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.controlUnsupported'));
         return true;
       }
       const key = rawKey as SettingsDashboardButtonKey;
       const submittedLabel = interaction.fields.getTextInputValue('label').trim();
       const submittedEmoji = interaction.fields.getTextInputValue('emoji').trim();
       if (!submittedLabel || submittedLabel.length > 80) {
-        await reject(interaction, 'Button label must contain 1–80 characters.');
+        await reject(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.buttonLabelRequired'));
         return true;
       }
       const label = submittedLabel.toLowerCase() === 'default'
@@ -4152,7 +4449,7 @@ export async function handleSettingsInteraction(
         try {
           emoji = normalizeDiscordEmoji(submittedEmoji, 'Settings button emoji') ?? null;
         } catch (error) {
-          await reject(interaction, error instanceof Error ? error.message : 'Enter a valid Unicode or Discord custom emoji.');
+          await reject(interaction, error instanceof Error ? error.message : translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.emojiInvalid'));
           return true;
         }
       }
@@ -4167,9 +4464,9 @@ export async function handleSettingsInteraction(
       await refreshSettingsChannel(guild);
       await auditSettingsAction(guild, interaction, 'SETTINGS_DASHBOARD_BUTTON_CUSTOMIZED', 'Customized the label or emoji for Settings control "' + SETTINGS_LAYOUT_LABELS[key] + '".');
       await interaction.editReply({
-        content: '✅ Settings control updated. The persistent dashboard has been refreshed.',
+        content: '✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.buttonUpdated'),
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel('Return to Settings Layout').setEmoji('🧰').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.returnLayout')).setEmoji('🧰').setStyle(ButtonStyle.Primary),
           backButton(),
         )],
       });
@@ -4181,11 +4478,11 @@ export async function handleSettingsInteraction(
       const description = interaction.fields.getTextInputValue('description').trim();
       const footer = interaction.fields.getTextInputValue('footer').trim();
       if (!title) {
-        await reject(interaction, 'Dashboard title cannot be empty.');
+        await reject(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.titleRequired'));
         return true;
       }
       if (title.length > 256 || description.length > 4000 || footer.length > 1800) {
-        await reject(interaction, 'Dashboard title, description or footer exceeds the supported Discord limit.');
+        await reject(interaction, translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.contentTooLong'));
         return true;
       }
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -4193,14 +4490,14 @@ export async function handleSettingsInteraction(
         settings.settingsDashboard.title = title;
         // Empty description intentionally falls back to the built-in helper text.
         settings.settingsDashboard.description = description;
-        settings.settingsDashboard.footer = footer || 'ResolvX • Settings Dashboard';
+        settings.settingsDashboard.footer = footer || 'QueryFixr • Settings Dashboard';
       });
       await refreshSettingsChannel(guild);
       await auditSettingsAction(guild, interaction, 'SETTINGS_DASHBOARD_BRANDING_CHANGED', 'Updated the per-server Settings dashboard title, description or footer.');
       await interaction.editReply({
-        content: '✅ Settings dashboard branding saved and refreshed for this server.',
+        content: '✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.brandingSaved'),
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel('Open Layout Builder').setEmoji('🧰').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId(SETTINGS_LAYOUT_PREFIX + ':home').setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.dashboard.openLayout')).setEmoji('🧰').setStyle(ButtonStyle.Primary),
           backButton(),
         )],
       });
@@ -4213,7 +4510,7 @@ export async function handleSettingsInteraction(
       const footer = interaction.fields.getTextInputValue('footer').trim();
 
       if (!title || !description || !footer) {
-        await reject(interaction, '❌ Panel appearance fields cannot be empty.');
+        await reject(interaction, '❌ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.appearance.emptyFields'));
         return true;
       }
 
@@ -4226,10 +4523,10 @@ export async function handleSettingsInteraction(
       await syncPanel(guild);
       await refreshSettingsChannel(guild);
       await interaction.editReply({
-        embeds: [new EmbedBuilder().setTitle('✅ Appearance Updated').setDescription('Panel title, description, and footer were saved and the support panel was refreshed.')],
+        embeds: [new EmbedBuilder().setTitle('✅ ' + translate((await getAdvancedSettings(guild.id)).locale, 'settings.appearance.savedTitle')).setDescription(translate((await getAdvancedSettings(guild.id)).locale, 'settings.appearance.savedDescription'))],
         components: [new ActionRowBuilder<ButtonBuilder>().addComponents(backButton())],
       });
-      await auditSettingsAction(guild, interaction, 'APPEARANCE_CHANGED', 'Updated the ResolvX panel appearance.');
+      await auditSettingsAction(guild, interaction, 'APPEARANCE_CHANGED', 'Updated the QueryFixr panel appearance.');
       return true;
     }
   }
@@ -4242,57 +4539,50 @@ async function showHomeAfterUpdate(interaction: ButtonInteraction): Promise<void
 }
 
 async function showRepairSystem(interaction: ButtonInteraction): Promise<void> {
-  const themeColor = getThemeColor((await getGuildConfig(interaction.guild!.id)).theme);
+  const config = await getGuildConfig(interaction.guild!.id);
+  const settings = await getAdvancedSettings(interaction.guild!.id);
+  const locale = settings.locale;
+  const themeColor = getThemeColor(config.theme);
   await renderSettingsView(
     interaction,
     [
       new EmbedBuilder()
         .setColor(themeColor)
-        .setTitle('🛠️ Repair System')
-        .setDescription(
-          'ResolvX repairs managed infrastructure without resetting Neon data. Restore & Update reconciles Discord infrastructure and requests a GitHub Actions deployment. Automatic pushes to main and the independent server watchdog deploy code without requiring this button. ' +
-          'Restore Channel handles native Discord channel deletions; Ticket Deletion Review handles only ticket-button deletions and their accidental-deletion question. Normal Repair checks infrastructure without deploying code. Storage Repair verifies the Closed and Archive storage categories.',
-        ),
+        .setTitle('🛠️ ' + translate(locale, 'settings.repair.title'))
+        .setDescription(translate(locale, 'settings.repair.description')),
     ],
     [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
           .setCustomId('sf:settings:repair:all')
-          .setLabel('Restore & Update')
-          .setEmoji('🚀')
-          .setStyle(ButtonStyle.Success),
+          .setLabel(translate(locale, 'settings.repair.action.restoreUpdate'))
+          .setEmoji('🚀').setStyle(ButtonStyle.Success),
         new ButtonBuilder()
           .setCustomId('sf:settings:repair:normal')
-          .setLabel('Normal Repair')
-          .setEmoji('🔧')
-          .setStyle(ButtonStyle.Primary),
+          .setLabel(translate(locale, 'settings.repair.action.normal'))
+          .setEmoji('🔧').setStyle(ButtonStyle.Primary),
         new ButtonBuilder()
           .setCustomId('sf:settings:repair:storage')
-          .setLabel('Storage Repair')
-          .setEmoji('🗄️')
-          .setStyle(ButtonStyle.Secondary),
+          .setLabel(translate(locale, 'settings.repair.action.storage'))
+          .setEmoji('🗄️').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
           .setCustomId('sf:settings:setup')
-          .setLabel('Setup')
-          .setEmoji('🧭')
-          .setStyle(ButtonStyle.Secondary),
+          .setLabel(translate(locale, 'settings.repair.action.setup'))
+          .setEmoji('🧭').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
           .setCustomId('sf:settings:restore')
-          .setLabel('Restore')
-          .setEmoji('♻️')
-          .setStyle(ButtonStyle.Secondary),
+          .setLabel(translate(locale, 'settings.repair.action.restore'))
+          .setEmoji('♻️').setStyle(ButtonStyle.Secondary),
       ),
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
           .setCustomId('sf:settings:recovery:channels')
-          .setLabel('Restore Channel')
-          .setEmoji('♻️')
-          .setStyle(ButtonStyle.Success),
+          .setLabel(translate(locale, 'settings.repair.action.restoreChannel'))
+          .setEmoji('♻️').setStyle(ButtonStyle.Success),
         new ButtonBuilder()
           .setCustomId('sf:settings:recovery:review')
-          .setLabel('Ticket Deletion Review')
-          .setEmoji('🛡️')
-          .setStyle(ButtonStyle.Primary),
+          .setLabel(translate(locale, 'settings.repair.action.deletionReview'))
+          .setEmoji('🛡️').setStyle(ButtonStyle.Primary),
         backButton(),
       ),
     ],

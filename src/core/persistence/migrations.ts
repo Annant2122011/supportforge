@@ -203,7 +203,7 @@ export function runMigrations(
       }
 
       throw new Error(
-        'ResolvX database migration ' +
+        'QueryFixr database migration ' +
           migration.id +
           ' (' +
           migration.name +

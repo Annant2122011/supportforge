@@ -6,7 +6,7 @@ import bnIN from './locales/bn-IN';
 export type TranslationKey = keyof typeof enUS;
 export type TranslationParams = Readonly<Record<string, string | number | boolean | null | undefined>>;
 
-const CATALOGS: Readonly<Record<SupportedLocale, Partial<Record<TranslationKey, string>>>> = {
+const CATALOGS: Readonly<Record<SupportedLocale, Record<TranslationKey, string>>> = {
   'en-US': enUS,
   'hi-IN': hiIN,
   'bn-IN': bnIN,
@@ -31,7 +31,10 @@ export function translate(
   params: TranslationParams = {},
 ): string {
   const locale = resolveLocale(localeInput);
-  const template = CATALOGS[locale][key] ?? enUS[key];
+  const template = CATALOGS[locale][key];
+  if (typeof template !== 'string' || !template.trim()) {
+    throw new Error('Missing translation for locale ' + locale + ' and key ' + key + '.');
+  }
   return interpolate(template, params);
 }
 

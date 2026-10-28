@@ -35,6 +35,8 @@ import { projectDurableTicketTopic } from './ticketTopicProjectionService';
 import { buildPrivateThreadTicketComponents, refreshPrivateThreadPanel } from './privateThreadTicketService';
 import { logTicketEvent } from './auditLogService';
 import { archiveTicketChannelSnapshot, archiveTicketMessage, beginTicketButtonDeletion, cancelTicketButtonDeletion } from './ticketArchiveService';
+import { applyQueryFixrBranding, queryFixrFooter } from '../interactions/brandPresentation';
+import { getThemeColor } from './uiThemeService';
 
 type AuxInteraction = ButtonInteraction | ChatInputCommandInteraction | StringSelectMenuInteraction | UserSelectMenuInteraction | ModalSubmitInteraction;
 type Note = { id: string; actorId: string; actorName: string; text: string; createdAt: string };
@@ -43,7 +45,7 @@ type Context = { guild: Guild; thread: ThreadChannel; ticket: PersistedTicket; t
 async function getContext(interaction: AuxInteraction): Promise<Context> {
   const guild = interaction.guild;
   const channel = interaction.channel;
-  if (!guild || channel?.type !== ChannelType.PrivateThread) throw new Error('Use this control inside a ResolveX private ticket thread.');
+  if (!guild || channel?.type !== ChannelType.PrivateThread) throw new Error('Use this control inside a QueryFixr private ticket thread.');
   const thread = channel as ThreadChannel;
   const ticket = await getPersistedTicket(thread.id);
   if (!ticket || ticket.guildId !== guild.id || ticket.deletedAt || ticket.metadata.workspaceKind !== 'private-thread') {
@@ -152,9 +154,15 @@ async function historyEmbed(context: Context): Promise<EmbedBuilder> {
     return when + ' **' + event.type.replace(/[<>]/g, '') + '**' + changed + '\nActor ID: ' + event.actorId;
   }).join('\n\n') : 'No durable ticket events are recorded yet.';
   const notes = notesFor(context.ticket).slice(-4).reverse();
-  const embed = new EmbedBuilder().setTitle('📜 Private Ticket History • #' + (context.ticket.ticketNumber ?? 'unknown'))
-    .setDescription(description.slice(0, 3800))
-    .setFooter({ text: 'Ephemeral view • Internal notes are staff-only' });
+  const theme = getThemeColor((await getGuildConfig(context.guild.id)).theme);
+  const embed = applyQueryFixrBranding(
+    new EmbedBuilder(),
+    'Private Ticket History',
+    theme,
+  )
+    .setTitle('📜 Ticket History · #' + (context.ticket.ticketNumber ?? 'unknown'))
+    .setDescription(description.slice(0, 3400))
+    .setFooter({ text: queryFixrFooter('Private history', 'Internal notes are staff-only · Ephemeral view') });
   if (notes.length) embed.addFields({
     name: 'Recent internal notes',
     value: notes.map((note) => '**' + note.actorName.slice(0, 80) + '** · ' + note.createdAt + '\n' + note.text.slice(0, 450)).join('\n\n').slice(0, 1000),
@@ -255,12 +263,16 @@ function deleteRows(threadId: string, userId: string, step: 'confirm1' | 'confir
 }
 
 function deleteEmbed(context: Context, step: 1 | 2): EmbedBuilder {
-  return new EmbedBuilder().setColor(0xD64545)
+  return applyQueryFixrBranding(
+    new EmbedBuilder(),
+    'Destructive Action',
+    0xD64545,
+  )
     .setTitle(step === 1 ? '⚠️ Delete Private Ticket?' : '🛑 Final Ticket Deletion Confirmation')
     .setDescription(step === 1
-      ? 'ResolveX will first save the channel snapshot and paginate through accessible history into Neon. Continue only if this is the intended ticket.'
+      ? 'QueryFixr will first save the channel snapshot and paginate through accessible history into Neon. Continue only if this is the intended ticket.'
       : 'Delete ticket **#' + (context.ticket.ticketNumber ?? 'unknown') + '**? The thread is deleted only after archival. Accidental deletions can be restored through Settings → Repair System → Ticket Deletion Review.')
-    .setFooter({ text: 'Confirmation bound to user ' + context.thread.id + ' and this ticket thread ID.' });
+    .setFooter({ text: queryFixrFooter('Deletion confirmation', 'Bound to this ticket thread and requesting user') });
 }
 
 async function deleteConfirm(interaction: ButtonInteraction): Promise<boolean> {
@@ -297,7 +309,7 @@ async function deleteConfirm(interaction: ButtonInteraction): Promise<boolean> {
     await archiveBeforeThreadDelete(context.thread);
     await beginTicketButtonDeletion(context.thread, interaction.user.id, interaction.user.tag);
     intent = true;
-    await context.thread.delete('ResolveX ticket Delete button after two confirmations; actor ' + interaction.user.id);
+    await context.thread.delete('QueryFixr ticket Delete button after two confirmations; actor ' + interaction.user.id);
     await interaction.editReply({ content: '✅ Ticket deleted after archival. If accidental, use Settings → Repair System → Ticket Deletion Review.', embeds: [], components: [] }).catch(() => undefined);
   } catch (error) {
     if (intent) await cancelTicketButtonDeletion(context.thread.id).catch(() => undefined);

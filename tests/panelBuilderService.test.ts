@@ -165,6 +165,17 @@ test('custom panel embed renders its configured title, description, color, and b
   assert.equal(embed.image?.url, 'https://cdn.example.com/banner.png');
 });
 
+test('custom panel fallback and preview copy follows the selected server locale', () => {
+  const panel = { ...examplePanel, description: '', footer: '', bannerUrl: undefined, thumbnailUrl: undefined };
+  const hindi = buildCustomPanelEmbed(panel, 'Example Server', 0x5865f2, true, false, 'hi-IN').toJSON();
+  assert.equal(hindi.description, 'सहायता अनुरोध शुरू करने के लिए नीचे दिया गया विकल्प चुनें।');
+  assert.equal(hindi.footer?.text, 'QueryFixr • ग्राहक सहायता');
+  assert.equal(hindi.fields?.[0]?.name, 'पूर्वावलोकन');
+  const bengali = buildCustomPanelEmbed(panel, 'Example Server', 0x5865f2, false, false, 'bn-IN').toJSON();
+  assert.equal(bengali.description, 'সাপোর্টের অনুরোধ শুরু করতে নিচের একটি বিকল্প বেছে নিন।');
+  assert.equal(bengali.footer?.text, 'QueryFixr • গ্রাহক সহায়তা');
+});
+
 test('custom panel form buttons pin an active form version and concrete tag', () => {
   const buttons = parseCustomPanelButtons([{
     targetType: 'form',
@@ -201,4 +212,26 @@ test('empty drafts are allowed only when explicitly requested and draft confirma
   assert.throws(() => parseCustomPanelButtons([{
     departmentId: 'billing', label: 'Billing', confirmationMessage: 'x'.repeat(1001),
   }], departments), /confirmationMessage/);
+});
+
+
+test('custom panel embed respects Discord text budgets for overlong saved presentation copy', () => {
+  const panel = {
+    ...examplePanel,
+    title: 'T'.repeat(400),
+    description: 'D'.repeat(4000),
+    footer: 'F'.repeat(2048),
+  };
+  const embed = buildCustomPanelEmbed(panel, 'Example Server', 0x5865f2, true).toJSON();
+  assert.ok((embed.title ?? '').length <= 256);
+  assert.ok((embed.description ?? '').length <= 4096);
+  assert.ok((embed.description ?? '').includes('shortened to fit Discord limits'));
+  assert.ok((embed.footer?.text ?? '').length <= 512);
+  const textualTotal =
+    (embed.title?.length ?? 0) +
+    (embed.description?.length ?? 0) +
+    (embed.footer?.text.length ?? 0) +
+    (embed.author?.name.length ?? 0) +
+    (embed.fields ?? []).reduce((sum, field) => sum + field.name.length + field.value.length, 0);
+  assert.ok(textualTotal <= 6000, 'embed text total must fit Discord’s 6,000 character aggregate limit');
 });

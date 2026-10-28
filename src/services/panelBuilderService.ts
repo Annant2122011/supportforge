@@ -18,6 +18,8 @@ import {
   type CustomSupportPanelTargetType,
 } from './configService';
 import { listTicketForms, type TicketFormVersion } from './ticketFormService';
+import { translate } from '../i18n/translationService';
+import { truncateDiscordText } from '../interactions/embedText';
 
 export interface CustomPanelInput {
   name: string;
@@ -303,6 +305,7 @@ export function buildCustomPanelEmbed(
   themeColor: number,
   preview = false,
   published = false,
+  locale: string = 'en-US',
 ): EmbedBuilder {
   const panel = normalizedDraft(inputPanel);
   const publishedConfig = published ? panel.publishedConfig : null;
@@ -310,11 +313,11 @@ export function buildCustomPanelEmbed(
   const color = view.color ? Number.parseInt(view.color, 16) : themeColor;
   const embed = new EmbedBuilder()
     .setColor(color)
-    .setTitle(view.title)
-    .setDescription(view.description || 'Choose an option below to start a support request.')
-    .setFooter({ text: view.footer || 'ResolvX • Customer Support' })
+    .setTitle(truncateDiscordText(view.title, 256))
+    .setDescription(truncateDiscordText(view.description || translate(locale, 'panelBuilder.fallback.description'), 3400))
+    .setFooter({ text: truncateDiscordText(view.footer || translate(locale, 'panelBuilder.fallback.footer'), 512) })
     .setAuthor({
-      name: guildName + ' • ResolvX Support',
+      name: truncateDiscordText(guildName + ' • ' + translate(locale, 'panelBuilder.authorSuffix'), 200),
       ...(view.iconUrl ? { iconURL: view.iconUrl } : {}),
     })
     .setTimestamp(new Date(panel.updatedAt));
@@ -322,8 +325,8 @@ export function buildCustomPanelEmbed(
   if (view.bannerUrl) embed.setImage(view.bannerUrl);
   if (preview) {
     embed.addFields({
-      name: 'Preview',
-      value: 'Draft preview only. Controls are disabled and the published panel is not changed.',
+      name: translate(locale, 'panelBuilder.preview.label'),
+      value: translate(locale, 'panelBuilder.preview.description'),
     });
   }
   return embed;
@@ -397,7 +400,7 @@ export async function createCustomPanel(
     name,
     title: boundedText(input.title, 'Panel title', 256),
     description: boundedText(input.description, 'Panel description', 4000, true),
-    footer: input.footer === undefined ? 'ResolvX • Customer Support' : boundedText(input.footer, 'Panel footer', 2048, true),
+    footer: input.footer === undefined ? 'QueryFixr • Customer Support' : boundedText(input.footer, 'Panel footer', 2048, true),
     color: normalizePanelColor(input.color),
     iconUrl: normalizePanelUrl(input.iconUrl, 'Panel icon URL'),
     thumbnailUrl: normalizePanelUrl(input.thumbnailUrl, 'Thumbnail URL'),

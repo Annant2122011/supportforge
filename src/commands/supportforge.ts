@@ -1,6 +1,7 @@
 
 import {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
@@ -31,6 +32,52 @@ import { executeTicketCommand } from '../interactions/ticketCommandTools';
 import { getPersistedTicketStatus } from '../services/ticketPersistenceService';
 import { UI_THEMES, getThemeColor } from '../services/uiThemeService';
 import { buildSystemDiagnosticsEmbed, runSystemDiagnostics } from '../services/systemDiagnosticsService';
+import { getTicketRecoveryPreview } from '../services/ticketArchiveService';
+import { handleStage4SlashCommand } from '../interactions/stage4SlashCommands';
+import {
+  createKnowledgeArticle,
+  getKnowledgeArticle,
+  getKnowledgeBaseMetrics,
+  listKnowledgeArticles,
+  listKnowledgeArticleRevisions,
+  recordKnowledgeArticleFeedback,
+  restoreKnowledgeArticleRevision,
+  searchKnowledgeBase,
+  setKnowledgeArticleStatus,
+  setKnowledgeSynonyms,
+  listKnowledgeSynonyms,
+  deleteKnowledgeSynonyms,
+  updateKnowledgeArticle,
+} from '../services/knowledgeBaseService';
+import {
+  deleteQuickReply,
+  getQuickReply,
+  listQuickReplies,
+  renderQuickReply,
+  saveQuickReply,
+} from '../services/quickReplyService';
+import {
+  linkRelatedTickets,
+  listRelatedTickets,
+  unlinkRelatedTickets,
+} from '../services/relatedTicketService';
+import {
+  deleteWorkflowTemplate,
+  listWorkflowTemplates,
+  previewWorkflowTemplateById,
+  saveWorkflowTemplate,
+  setWorkflowTemplateEnabled,
+} from '../services/workflowTemplateService';
+import { getPersistedTicket } from '../services/ticketPersistenceService';
+import {
+  deleteSupportSlaPolicy,
+  evaluateTicketSla,
+  getCsatSummary,
+  getSupportMetrics,
+  listSupportSlaPolicies,
+  recordCsatResponse,
+  saveSupportSlaPolicy,
+} from '../services/supportOperationsService';
 import {
   createConfigurationSnapshot,
   reviewConfigurationSnapshot,
@@ -38,6 +85,7 @@ import {
   restoreConfigurationSnapshot,
 } from '../services/configurationHistoryService';
 import { LOCALE_OPTIONS } from '../i18n/localeRegistry';
+import { translate } from '../i18n/translationService';
 import { handleSettingsSlashCommand } from '../interactions/settingsCommandTools';
 import {
   applyTicketFormTemplate,
@@ -69,7 +117,7 @@ import {
   ensureAllDepartmentCategories,
 } from '../services/departmentCategoryService';
 
-import { ensureAuditDeveloperInfrastructure, getOrCreateAuditChannel, logSettingsEvent, logSystemEvent, handleAuditSlashCommand } from '../services/auditLogService';
+import { ensureAuditDeveloperInfrastructure, getOrCreateAuditChannel, logSettingsEvent, logSystemEvent, logTicketEvent, handleAuditSlashCommand } from '../services/auditLogService';
 import { performFactoryReset } from '../services/factoryResetService';
 import { recoverMissingTicketRecords } from '../services/ticketRecoveryService';
 import { addUseCasePreset } from '../services/useCasePresetService';
@@ -86,6 +134,11 @@ import {
   updateCustomPanel,
 } from '../services/panelBuilderService';
 import { requestGitHubDeployment } from '../services/updateService';
+import { parseAnalyticsPeriod } from '../services/analyticsService';
+import { getAdvancedAnalyticsReport, buildAdvancedAnalyticsCsv, parseAnalyticsFilters } from '../services/advancedAnalyticsService';
+import { buildAdvancedAnalyticsEmbed, buildAdvancedAnalyticsComponents, type AnalyticsView } from '../interactions/advancedAnalyticsPresentation';
+import { applyQueryFixrBranding } from '../interactions/brandPresentation';
+import { composeDiscordDescription, truncateDiscordText } from '../interactions/embedText';
 
 import {
   ensureSettingsChannel,
@@ -101,7 +154,7 @@ import {
   getTicketStatus,
 } from '../services/ticketStateService';
 
-const SUPPORT_CATEGORY_NAME = 'Support Forge';
+const SUPPORT_CATEGORY_NAME = 'QueryFixr Support';
 const PANEL_CHANNEL_NAME = 'support-panel';
 const PANEL_TOPIC = 'supportforge:panel';
 const TRANSCRIPT_NAME = '📄 support-transcripts';
@@ -272,6 +325,36 @@ function isAdminLike(
   );
 }
 
+interface ServerAccess {
+  isAdmin: boolean;
+  isStaff: boolean;
+  roleIds: string[];
+}
+
+function roleIdsFromInteraction(interaction: ChatInputCommandInteraction): string[] {
+  const member = interaction.member;
+  if (!member) return [];
+  return Array.isArray(member.roles) ? member.roles : member.roles.cache.map((role) => role.id);
+}
+
+async function resolveServerAccess(interaction: ChatInputCommandInteraction): Promise<ServerAccess> {
+  const config = await getGuildConfig(interaction.guildId!);
+  const roleIds = roleIdsFromInteraction(interaction);
+  const staffRoles = new Set(
+    Object.values(config.departments).map((department) => department.staffRoleId).filter((id): id is string => Boolean(id)),
+  );
+  const isAdmin = isAdminLike(interaction);
+  const isStaff = isAdmin || roleIds.some((id) => staffRoles.has(id));
+  return { isAdmin, isStaff, roleIds };
+}
+
+function parseCommaList(value: string | null, field: string, maxItems: number): string[] {
+  if (!value?.trim()) return [];
+  const items = [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))];
+  if (items.length > maxItems) throw new Error(field + ' accepts at most ' + maxItems + ' comma-separated values.');
+  return items;
+}
+
 function categoryButton(
   departmentId: string,
   label: string,
@@ -305,16 +388,21 @@ export async function buildPanelEmbed(
         : '')
     : 'No ticket departments configured.';
 
-  return new EmbedBuilder()
-    .setColor(getThemeColor(config.theme))
-    .setTitle(settings.appearance.panelTitle)
-    .setDescription(
-      `Welcome to **${guild.name}** support.\n\n` +
-        settings.appearance.panelDescription + '\n\n' +
-        `${lines}\n\n` +
-        `🔒 Tickets are visible only to the ticket owner, assigned support staff, and administrators.`,
-    )
-    .setFooter({ text: settings.appearance.panelFooter })
+  // Reserve space for routing, pagination and the privacy note even when an
+  // administrator has saved unusually long panel copy or department labels.
+  const panelCopy = truncateDiscordText(settings.appearance.panelDescription, 1600);
+  const safeDepartmentLines = truncateDiscordText(lines, 1900);
+  const description = composeDiscordDescription([
+    `Welcome to **${guild.name}** support.`,
+    panelCopy,
+    safeDepartmentLines,
+    '🔒 Tickets are visible only to the ticket owner, assigned support staff, and administrators.',
+  ], 4096);
+
+  return applyQueryFixrBranding(new EmbedBuilder(), 'Support Center', getThemeColor(config.theme))
+    .setTitle(truncateDiscordText(settings.appearance.panelTitle, 256))
+    .setDescription(description)
+    .setFooter({ text: truncateDiscordText(settings.appearance.panelFooter, 2048) })
     .setTimestamp();
 }
 
@@ -325,7 +413,7 @@ async function ensureContainer(guild: Guild) {
 
   if (!bot) {
     throw new Error(
-      'ResolvX bot member could not be resolved.',
+      'QueryFixr bot member could not be resolved.',
     );
   }
 
@@ -357,7 +445,7 @@ async function ensureContainer(guild: Guild) {
           ViewChannel: true,
           ReadMessageHistory: true,
           SendMessages: false,
-        }, { reason: 'Repair ResolvX container permissions' });
+        }, { reason: 'Repair QueryFixr container permissions' });
       }
       if (!containerOverwriteMatches(channel, bot.id, botAllow, [])) {
         await channel.permissionOverwrites.edit(bot.id, {
@@ -368,7 +456,7 @@ async function ensureContainer(guild: Guild) {
           ManageMessages: true,
           EmbedLinks: true,
           AttachFiles: true,
-        }, { reason: 'Allow ResolvX to manage its container' });
+        }, { reason: 'Allow QueryFixr to manage its container' });
       }
       return channel;
     }
@@ -427,7 +515,7 @@ async function ensureTranscriptChannel(
 
   if (!bot) {
     throw new Error(
-      'ResolvX bot member could not be resolved.',
+      'QueryFixr bot member could not be resolved.',
     );
   }
 
@@ -452,12 +540,12 @@ async function ensureTranscriptChannel(
         parentId,
         `${TRANSCRIPT_TOPIC} guild=${guild.id}`,
         transcriptChannelOverwrites(guild, bot.id, staffRoleIds),
-        'Repair ResolvX transcript channel parent, topic and access',
+        'Repair QueryFixr transcript channel parent, topic and access',
       );
 
       await ensureChannelPurposeMessage(
         saved,
-        'This private channel is the ResolvX transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
+        'This private channel is the QueryFixr transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
       );
       return saved;
     }
@@ -479,7 +567,7 @@ async function ensureTranscriptChannel(
       parentId,
       `${TRANSCRIPT_TOPIC} guild=${guild.id}`,
       transcriptChannelOverwrites(guild, bot.id, staffRoleIds),
-      'Repair recovered ResolvX transcript channel parent, topic and access',
+      'Repair recovered QueryFixr transcript channel parent, topic and access',
     );
 
     await updateGuildConfig(
@@ -492,7 +580,7 @@ async function ensureTranscriptChannel(
 
     await ensureChannelPurposeMessage(
       existing,
-      'This private channel is the ResolvX transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
+      'This private channel is the QueryFixr transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
     );
 
     return existing;
@@ -546,7 +634,7 @@ async function ensureTranscriptChannel(
 
   await ensureChannelPurposeMessage(
     channel,
-    'This private channel is the ResolvX transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
+    'This private channel is the QueryFixr transcript archive. Closed ticket conversations are exported here as HTML transcripts for staff records, review, and historical reference.',
   );
 
   return channel;
@@ -563,7 +651,7 @@ export async function ensurePanelChannel(
 
   if (!bot) {
     throw new Error(
-      'ResolvX bot member could not be resolved.',
+      'QueryFixr bot member could not be resolved.',
     );
   }
 
@@ -580,14 +668,14 @@ export async function ensurePanelChannel(
         parentId,
         `${PANEL_TOPIC} guild=${guild.id}`,
         panelChannelOverwrites(guild, bot.id),
-        'Repair ResolvX panel channel parent, topic and access',
+        'Repair QueryFixr panel channel parent, topic and access',
       );
       return saved;
     }
   }
 
   /*
-   * A channel name is not ownership proof. Recover a previous ResolvX
+   * A channel name is not ownership proof. Recover a previous QueryFixr
    * panel only from its managed topic; otherwise create a new panel channel.
    */
   const existing = guild.channels.cache.find(
@@ -604,7 +692,7 @@ export async function ensurePanelChannel(
       parentId,
       `${PANEL_TOPIC} guild=${guild.id}`,
       panelChannelOverwrites(guild, bot.id),
-      'Repair recovered ResolvX panel channel parent, topic and access',
+      'Repair recovered QueryFixr panel channel parent, topic and access',
     );
 
     await updateGuildConfig(
@@ -773,9 +861,64 @@ export const data =
   new SlashCommandBuilder()
     .setName('supportforge')
     .setDescription(
-      'Manage ResolvX and support tickets',
+      'Manage QueryFixr and support tickets',
     )
     .setDMPermission(false)
+
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('analytics')
+        .setDescription('View operational ticket analytics and export aggregate data')
+        .addStringOption((option) => option
+          .setName('period')
+          .setDescription('UTC reporting window')
+          .setRequired(false)
+          .addChoices(
+            { name: 'Last 7 days', value: '7d' },
+            { name: 'Last 30 days', value: '30d' },
+            { name: 'Last 90 days', value: '90d' },
+          ))
+        .addStringOption((option) => option
+          .setName('view')
+          .setDescription('Analytics view or bounded CSV export')
+          .setRequired(false)
+          .addChoices(
+            { name: 'Overview and comparisons', value: 'overview' },
+            { name: 'Departments', value: 'departments' },
+            { name: 'Staff workload', value: 'staff' },
+            { name: 'Tags', value: 'tags' },
+            { name: 'Trends', value: 'trends' },
+            { name: 'Export aggregate CSV', value: 'csv' },
+          ))
+        .addStringOption((option) => option
+          .setName('department-id')
+          .setDescription('Optional department ID filter')
+          .setRequired(false)
+          .setMaxLength(64))
+        .addStringOption((option) => option
+          .setName('tag-id')
+          .setDescription('Optional tag ID filter')
+          .setRequired(false)
+          .setMaxLength(64))
+        .addStringOption((option) => option
+          .setName('priority')
+          .setDescription('Optional priority filter')
+          .setRequired(false)
+          .addChoices(
+            { name: 'Low', value: 'low' }, { name: 'Normal', value: 'normal' },
+            { name: 'High', value: 'high' }, { name: 'Urgent', value: 'urgent' },
+            { name: 'Critical', value: 'critical' },
+          ))
+        .addStringOption((option) => option
+          .setName('status')
+          .setDescription('Optional current status filter')
+          .setRequired(false)
+          .addChoices(
+            { name: 'Open', value: 'open' }, { name: 'Claimed', value: 'claimed' },
+            { name: 'Pending', value: 'pending' }, { name: 'Reopened', value: 'reopened' },
+            { name: 'Closed', value: 'closed' }, { name: 'Archived', value: 'archived' },
+          )),
+    )
 
     // ─────────────────────────────────────────────
     // SETUP
@@ -785,7 +928,7 @@ export const data =
       subcommand
         .setName('setup')
         .setDescription(
-          'Create or repair the ResolvX system',
+          'Create or repair the QueryFixr system',
         ),
     )
 
@@ -793,7 +936,227 @@ export const data =
       subcommand
         .setName('restore')
         .setDescription(
-          'Restore ResolvX after accidental deletion',
+          'Restore QueryFixr after accidental deletion',
+        ),
+    )
+
+    .addSubcommandGroup((group) =>
+      group
+        .setName('feedback')
+        .setDescription('Submit ticket feedback and review customer satisfaction')
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('rate')
+            .setDescription('Rate a closed ticket from 1 to 5; only the ticket creator can vote once')
+            .addStringOption((option) => option.setName('ticket-id').setDescription('Durable ticket ID or original ticket channel ID').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('rating').setDescription('1 = very dissatisfied, 5 = very satisfied').setRequired(true).setMinValue(1).setMaxValue(5))
+            .addStringOption((option) => option.setName('comment').setDescription('Optional private feedback, max 500 characters').setRequired(false).setMaxLength(500)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('summary')
+            .setDescription('Show privacy-aware customer satisfaction results (admin only)')
+            .addIntegerOption((option) => option.setName('days').setDescription('Reporting window in days').setRequired(false).setMinValue(1).setMaxValue(366)),
+        ),
+    )
+
+    .addSubcommandGroup((group) =>
+      group
+        .setName('knowledge')
+        .setDescription('Manage and search the deterministic, no-AI Knowledge Base')
+        .addSubcommand((subcommand) =>
+          subcommand.setName('create').setDescription('Create a draft article (admin only)')
+            .addStringOption((option) => option.setName('title').setDescription('Article title').setRequired(true).setMaxLength(160))
+            .addStringOption((option) => option.setName('body').setDescription('Article body').setRequired(true).setMaxLength(4000))
+            .addStringOption((option) => option.setName('summary').setDescription('Short search summary').setRequired(false).setMaxLength(500))
+            .addStringOption((option) => option.setName('category').setDescription('Article category').setRequired(false).setMaxLength(80))
+            .addStringOption((option) => option.setName('tags').setDescription('Comma-separated tags, max 12').setRequired(false).setMaxLength(400))
+            .addStringOption((option) => option.setName('visibility').setDescription('Who can see a published article').setRequired(false).addChoices({name:'Public',value:'public'},{name:'Staff only',value:'staff'}))
+            .addStringOption((option) => option.setName('role-ids').setDescription('Optional comma-separated allowed Discord role IDs').setRequired(false).setMaxLength(420)),
+        )
+        .addSubcommand((subcommand) => subcommand.setName('list').setDescription('List articles you are allowed to read'))
+        .addSubcommand((subcommand) =>
+          subcommand.setName('view').setDescription('View a published article or an admin-visible draft')
+            .addStringOption((option) => option.setName('article-id').setDescription('Article ID from the list or search').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('page').setDescription('Article page, 3,500 characters each').setRequired(false).setMinValue(1).setMaxValue(7)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('update').setDescription('Update an article using optimistic revision control (admin only)')
+            .addStringOption((option) => option.setName('article-id').setDescription('Article ID').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('revision').setDescription('Current revision from list/view').setRequired(true).setMinValue(1))
+            .addStringOption((option) => option.setName('title').setDescription('New title').setRequired(false).setMaxLength(160))
+            .addStringOption((option) => option.setName('summary').setDescription('New summary').setRequired(false).setMaxLength(500))
+            .addStringOption((option) => option.setName('body').setDescription('New body').setRequired(false).setMaxLength(4000))
+            .addStringOption((option) => option.setName('category').setDescription('New category').setRequired(false).setMaxLength(80))
+            .addStringOption((option) => option.setName('tags').setDescription('Replace tags with a comma-separated list').setRequired(false).setMaxLength(400))
+            .addStringOption((option) => option.setName('visibility').setDescription('public or staff').setRequired(false).addChoices({name:'Public',value:'public'},{name:'Staff only',value:'staff'}))
+            .addStringOption((option) => option.setName('role-ids').setDescription('Replace allowed roles with comma-separated IDs').setRequired(false).setMaxLength(420)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('publish').setDescription('Publish a draft article at its current revision (admin only)')
+            .addStringOption((option) => option.setName('article-id').setDescription('Article ID').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('revision').setDescription('Current revision').setRequired(true).setMinValue(1)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('archive').setDescription('Archive an article after confirming its ID and revision (admin only)')
+            .addStringOption((option) => option.setName('article-id').setDescription('Article ID').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('revision').setDescription('Current revision').setRequired(true).setMinValue(1))
+            .addBooleanOption((option) => option.setName('confirm').setDescription('Must be true to archive').setRequired(true)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('search').setDescription('Search published articles using PostgreSQL ranking and typo-tolerant fallback')
+            .addStringOption((option) => option.setName('query').setDescription('Search terms, 2–200 characters').setRequired(true).setMaxLength(200)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('suggest').setDescription('Find relevant articles and optionally share one in this ticket (staff only)')
+            .addStringOption((option) => option.setName('query').setDescription('Customer question or issue, 2–200 characters').setRequired(true).setMaxLength(200)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('share').setDescription('Share a permitted article summary in the current ticket (staff only)')
+            .addStringOption((option) => option.setName('article-id').setDescription('Published article ID').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('revisions').setDescription('List an article’s revision history (admin only)')
+            .addStringOption((option) => option.setName('article-id').setDescription('Article ID').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('restore-revision').setDescription('Restore content from an earlier article revision (admin only)')
+            .addStringOption((option) => option.setName('article-id').setDescription('Article ID').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('target-revision').setDescription('Revision whose content should be copied').setRequired(true).setMinValue(1))
+            .addIntegerOption((option) => option.setName('current-revision').setDescription('Current revision, to reject stale edits').setRequired(true).setMinValue(1)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('rate').setDescription('Rate whether a published article was helpful')
+            .addStringOption((option) => option.setName('article-id').setDescription('Article ID').setRequired(true).setMaxLength(36))
+            .addBooleanOption((option) => option.setName('helpful').setDescription('Was this article helpful?').setRequired(true)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('synonyms-set').setDescription('Set deterministic search synonyms for a term (admin only)')
+            .addStringOption((option) => option.setName('term').setDescription('Canonical term').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('synonyms').setDescription('Comma-separated alternatives, max 20').setRequired(true).setMaxLength(1600)),
+        )
+        .addSubcommand((subcommand) => subcommand.setName('synonyms-list').setDescription('List configured search synonyms'))
+        .addSubcommand((subcommand) =>
+          subcommand.setName('synonyms-delete').setDescription('Remove synonym mapping (admin only)')
+            .addStringOption((option) => option.setName('term').setDescription('Canonical term to remove').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('metrics').setDescription('Show article searches, views, shares and helpful votes (admin only)')
+            .addIntegerOption((option) => option.setName('days').setDescription('Window in days').setRequired(false).setMinValue(1).setMaxValue(366)),
+        ),
+    )
+    .addSubcommandGroup((group) =>
+      group
+        .setName('quick-reply')
+        .setDescription('Manage permission-controlled canned staff responses')
+        .addSubcommand((subcommand) =>
+          subcommand.setName('list').setDescription('List quick replies available to you using server-side filters and pagination')
+            .addStringOption((option) => option.setName('category').setDescription('Optional category filter').setRequired(false).setMaxLength(80))
+            .addStringOption((option) => option.setName('tag').setDescription('Optional exact tag filter').setRequired(false).setMaxLength(32))
+            .addStringOption((option) => option.setName('query').setDescription('Optional name/category/tag search text').setRequired(false).setMaxLength(80))
+            .addIntegerOption((option) => option.setName('page').setDescription('Page number, starting at 1').setRequired(false).setMinValue(1).setMaxValue(100000)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('show').setDescription('Preview a quick reply and its supported placeholders')
+            .addStringOption((option) => option.setName('name-or-id').setDescription('Name or ID').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('save').setDescription('Create a quick reply, or update one using its current version (admin only)')
+            .addStringOption((option) => option.setName('name').setDescription('Name shown to staff').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('body').setDescription('Response text; max 1,800 characters').setRequired(true).setMaxLength(1800))
+            .addStringOption((option) => option.setName('category').setDescription('Category').setRequired(false).setMaxLength(80))
+            .addStringOption((option) => option.setName('tags').setDescription('Comma-separated tags').setRequired(false).setMaxLength(400))
+            .addStringOption((option) => option.setName('role-ids').setDescription('Optional comma-separated roles allowed to use it').setRequired(false).setMaxLength(420))
+            .addBooleanOption((option) => option.setName('enabled').setDescription('Explicitly enable or disable the reply; omit to preserve its current state').setRequired(false))
+            .addIntegerOption((option) => option.setName('expected-version').setDescription('Required to update an existing quick reply; current v# from quick-reply list').setRequired(false).setMinValue(1)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('history').setDescription('Show revision and deletion history for a quick reply (admin only)')
+            .addStringOption((option) => option.setName('name-or-id').setDescription('Quick reply name or ID, including deleted replies').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('restore-revision').setDescription('Restore historical quick-reply content as a new version (admin only)')
+            .addStringOption((option) => option.setName('name-or-id').setDescription('Current or deleted quick reply name or ID').setRequired(true).setMaxLength(80))
+            .addIntegerOption((option) => option.setName('revision').setDescription('Historical revision number from quick-reply history').setRequired(true).setMinValue(1))
+            .addIntegerOption((option) => option.setName('expected-version').setDescription('Current record version, including a deleted tombstone version').setRequired(true).setMinValue(1)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('delete').setDescription('Delete a quick reply using its current version (admin only)')
+            .addStringOption((option) => option.setName('name-or-id').setDescription('Name or ID').setRequired(true).setMaxLength(80))
+            .addIntegerOption((option) => option.setName('expected-version').setDescription('Current version shown by quick-reply list').setRequired(true).setMinValue(1))
+            .addBooleanOption((option) => option.setName('confirm').setDescription('Must be true to delete').setRequired(true)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('send').setDescription('Send a permitted quick reply in the current ticket (staff only)')
+            .addStringOption((option) => option.setName('name-or-id').setDescription('Name or ID').setRequired(true).setMaxLength(80)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('metrics').setDescription('Show privacy-safe aggregate quick reply usage (admin only)')
+            .addIntegerOption((option) => option.setName('days').setDescription('Window in days').setRequired(false).setMinValue(1).setMaxValue(366)),
+        ),
+    )
+    .addSubcommandGroup((group) =>
+      group
+        .setName('related')
+        .setDescription('Link related tickets in this server')
+        .addSubcommand((subcommand) =>
+          subcommand.setName('link').setDescription('Link the current ticket to another ticket (admin only)')
+            .addStringOption((option) => option.setName('other-ticket-id').setDescription('Durable ticket ID of the related ticket').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) => subcommand.setName('list').setDescription('List related tickets for the current ticket'))
+        .addSubcommand((subcommand) =>
+          subcommand.setName('unlink').setDescription('Remove the relationship to another ticket (admin only)')
+            .addStringOption((option) => option.setName('other-ticket-id').setDescription('Durable ticket ID of the related ticket').setRequired(true).setMaxLength(36))
+            .addBooleanOption((option) => option.setName('confirm').setDescription('Must be true to unlink').setRequired(true)),
+        ),
+    )
+    .addSubcommandGroup((group) =>
+      group
+        .setName('workflow')
+        .setDescription('Manage safe workflow templates and manually execute reviewed actions')
+        .addSubcommand((subcommand) => subcommand.setName('list').setDescription('List workflow templates (admin only)'))
+        .addSubcommand((subcommand) =>
+          subcommand.setName('save').setDescription('Create a template, or update one using its current version (admin only)')
+            .addStringOption((option) => option.setName('name').setDescription('Template name').setRequired(true).setMaxLength(80))
+            .addStringOption((option) => option.setName('definition-json').setDescription('JSON with conditions and allowlisted actions').setRequired(true).setMaxLength(4000))
+            .addIntegerOption((option) => option.setName('expected-version').setDescription('Required to update an existing template; current v# from workflow list').setRequired(false).setMinValue(1)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('preview').setDescription('Preview safety warnings for a stored template (admin only)')
+            .addStringOption((option) => option.setName('template-id').setDescription('Template ID').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('execute').setDescription('Run a reviewed workflow in this active ticket (admin confirmation required)')
+            .addStringOption((option) => option.setName('template-id').setDescription('Enabled workflow template ID').setRequired(true).setMaxLength(36))
+            .addBooleanOption((option) => option.setName('confirm').setDescription('Must be true to execute the workflow').setRequired(true)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('resume').setDescription('Resume an interrupted workflow run (admin confirmation required)')
+            .addStringOption((option) => option.setName('run-id').setDescription('Workflow run ID shown by execute or runs').setRequired(true).setMaxLength(36))
+            .addBooleanOption((option) => option.setName('confirm').setDescription('Must be true to resume the workflow').setRequired(true)),
+        )
+        .addSubcommand((subcommand) => subcommand.setName('runs').setDescription('List recent workflow runs for this ticket (admin only)'))
+        .addSubcommand((subcommand) =>
+          subcommand.setName('enable').setDescription('Enable a reviewed template for manual execution; never automatic')
+            .addStringOption((option) => option.setName('template-id').setDescription('Template ID').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('version').setDescription('Current version from workflow list').setRequired(true).setMinValue(1))
+            .addBooleanOption((option) => option.setName('enabled').setDescription('Enable/disable the template catalogue item').setRequired(true)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('history').setDescription('Show version and deletion history for a workflow template (admin only)')
+            .addStringOption((option) => option.setName('template-id').setDescription('Workflow template ID, including deleted templates').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('restore-revision').setDescription('Restore a historical template revision as a new disabled version (admin only)')
+            .addStringOption((option) => option.setName('template-id').setDescription('Workflow template ID, including soft-deleted templates').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('revision').setDescription('Historical revision number from workflow history').setRequired(true).setMinValue(1))
+            .addIntegerOption((option) => option.setName('expected-version').setDescription('Current record version, including a deleted tombstone version').setRequired(true).setMinValue(1)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('delete').setDescription('Delete a template catalogue entry using its current version (admin only)')
+            .addStringOption((option) => option.setName('template-id').setDescription('Template ID').setRequired(true).setMaxLength(36))
+            .addIntegerOption((option) => option.setName('version').setDescription('Current version').setRequired(true).setMinValue(1))
+            .addBooleanOption((option) => option.setName('confirm').setDescription('Must be true to delete').setRequired(true)),
         ),
     )
 
@@ -1296,7 +1659,7 @@ export const data =
     .addSubcommandGroup((group) =>
       group
         .setName('settings')
-        .setDescription('Manage ResolvX settings from slash commands')
+        .setDescription('Manage QueryFixr settings from slash commands')
         .addSubcommand((subcommand) =>
           subcommand.setName('overview').setDescription('Show a Settings overview and current configuration'),
         )
@@ -1315,7 +1678,7 @@ export const data =
         .addSubcommand((subcommand) =>
           subcommand
             .setName('theme')
-            .setDescription('View or change this server’s ResolvX color theme')
+            .setDescription('View or change this server’s QueryFixr color theme')
             .addStringOption((option) => option.setName('action').setDescription('Show the current theme or set a new one').setRequired(true).addChoices(
               { name: 'Show current theme', value: 'show' },
               { name: 'Set server theme', value: 'set' },
@@ -1461,7 +1824,7 @@ export const data =
         .addSubcommand((subcommand) =>
           subcommand
             .setName('priority-role')
-            .setDescription('Create or delete a ResolvX-managed priority role')
+            .setDescription('Create or delete a QueryFixr-managed priority role')
             .addStringOption((option) => option.setName('action').setDescription('Role action').setRequired(true).addChoices(
               { name: 'Show current roles', value: 'status' },
               { name: 'Create role', value: 'create' },
@@ -1475,7 +1838,7 @@ export const data =
         .addSubcommand((subcommand) =>
           subcommand
             .setName('repair')
-            .setDescription('Repair ResolvX infrastructure')
+            .setDescription('Repair QueryFixr infrastructure')
             .addStringOption((option) => option.setName('mode').setDescription('Repair mode').setRequired(true).addChoices(
               { name: 'Normal infrastructure repair', value: 'normal' },
               { name: 'Closed/Archive storage repair', value: 'storage' },
@@ -1555,7 +1918,7 @@ export const data =
         .addSubcommand((subcommand) =>
           subcommand
             .setName('reset')
-            .setDescription('Factory-reset ResolvX after typed confirmation')
+            .setDescription('Factory-reset QueryFixr after typed confirmation')
             .addStringOption((option) => option.setName('confirmation').setDescription('Type DELETE SUPPORT FORGE exactly').setRequired(true).setMinLength(20).setMaxLength(20))
             .addBooleanOption((option) => option.setName('accumulate-audit').setDescription('Keep individual audit events for future summaries').setRequired(true)),
         ),
@@ -1609,6 +1972,58 @@ export const data =
             .setName('setup-doctor')
             .setDescription('Run detailed configuration and permission checks without applying changes')
             .addIntegerOption((option) => option.setName('page').setDescription('Diagnostic results page (10 checks per page)').setMinValue(1).setMaxValue(999)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('recovery-preview')
+            .setDescription('Preview archived ticket data and recovery limitations without changing anything')
+            .addStringOption((option) => option.setName('ticket-id').setDescription('Durable ticket ID or original channel ID from the recovery list').setRequired(true).setMaxLength(36))
+            .addStringOption((option) => option.setName('source').setDescription('Which deletion path should be inspected').setRequired(true).addChoices(
+              { name: 'Native Discord deletion', value: 'discord_native' },
+              { name: 'Ticket Delete button', value: 'ticket_button' },
+            )),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('metrics')
+            .setDescription('Show measured ticket volume, response/resolution time and backlog (admin only)')
+            .addIntegerOption((option) => option.setName('days').setDescription('Reporting window in days').setRequired(false).setMinValue(1).setMaxValue(366)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('sla-list')
+            .setDescription('List this server’s SLA policies')
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('sla-set')
+            .setDescription('Create or update an SLA policy for a department and priority')
+            .addIntegerOption((option) => option.setName('first-response-minutes').setDescription('Target minutes for first human response').setRequired(true).setMinValue(1).setMaxValue(43200))
+            .addIntegerOption((option) => option.setName('resolution-minutes').setDescription('Target minutes to resolve a ticket').setRequired(true).setMinValue(1).setMaxValue(43200))
+            .addStringOption((option) => option.setName('department-id').setDescription('Department ID; omit or use * for all').setRequired(false).setMaxLength(80))
+            .addStringOption((option) => option.setName('priority').setDescription('Priority scope; omit or use * for all').setRequired(false).addChoices(
+              { name: 'All priorities', value: '*' },
+              { name: 'Low', value: 'low' },
+              { name: 'Normal', value: 'normal' },
+              { name: 'High', value: 'high' },
+              { name: 'Urgent', value: 'urgent' },
+              { name: 'Critical', value: 'critical' },
+            ))
+            .addIntegerOption((option) => option.setName('claim-minutes').setDescription('Target minutes for staff to claim the ticket (default 60)').setRequired(false).setMinValue(1).setMaxValue(43200))
+            .addBooleanOption((option) => option.setName('pause-while-pending').setDescription('Pause both clocks while status is Pending (default true)').setRequired(false))
+            .addNumberOption((option) => option.setName('warning-ratio').setDescription('Warning fraction of target, from 0.5 to 0.99 (default 0.8)').setRequired(false).setMinValue(0.5).setMaxValue(0.99)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('sla-delete')
+            .setDescription('Delete an SLA policy by ID')
+            .addStringOption((option) => option.setName('policy-id').setDescription('Policy ID from sla-list').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('sla-check')
+            .setDescription('Evaluate first-response and resolution clocks for one ticket')
+            .addStringOption((option) => option.setName('ticket-id').setDescription('Durable ticket ID').setRequired(true).setMaxLength(36)),
         )
         .addSubcommand((subcommand) =>
           subcommand
@@ -1721,7 +2136,7 @@ export async function runSupportForgeSetup(
     guild,
     supportCategory.id,
     restoreMode ? 'SUPPORTFORGE_RESTORED' : 'SETUP_COMPLETED',
-    (restoreMode ? 'ResolvX restore completed.' : 'ResolvX setup/repair completed.') +
+    (restoreMode ? 'QueryFixr restore completed.' : 'QueryFixr setup/repair completed.') +
       ' Support Forge=' + supportCategory.id +
       '; Open=' + (legacyOpenCategory?.id ?? 'not-created') +
       '; departments=' + Object.keys(config.departments).length + '.',
@@ -1821,7 +2236,7 @@ export async function execute(
     }
     if (!allowedDepartmentStaff) {
       await interaction.reply({
-        content: '❌ You need **Manage Server** or **Administrator** to use ResolvX settings. The Staff Manual is also available to configured department staff.',
+        content: '❌ You need **Manage Server** or **Administrator** to use QueryFixr settings. The Staff Manual is also available to configured department staff.',
         flags: MessageFlags.Ephemeral,
       });
       return;
@@ -1831,12 +2246,17 @@ export async function execute(
   // Administrative commands
   if (
     (!group &&
-      (subcommand === 'setup' || subcommand === 'restore')) ||
+      (subcommand === 'setup' || subcommand === 'restore' || subcommand === 'analytics')) ||
     group === 'category' ||
     group === 'premium' ||
     group === 'form' ||
     group === 'panel' ||
-    group === 'diagnostics'
+    group === 'diagnostics' ||
+    group === 'workflow' ||
+    group === 'related' ||
+    (group === 'quick-reply' && ['save', 'delete'].includes(subcommand)) ||
+    (group === 'knowledge' && ['create', 'update', 'publish', 'archive', 'revisions', 'restore-revision', 'synonyms-set', 'synonyms-delete', 'metrics'].includes(subcommand)) ||
+    (group === 'feedback' && subcommand === 'summary')
   ) {
     if (!isAdminLike(interaction)) {
       await interaction.reply({
@@ -1850,8 +2270,245 @@ export async function execute(
   }
 
   try {
+    if (await handleStage4SlashCommand(interaction)) return;
+
+    if (subcommand === 'analytics' && !group) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const locale = (await getAdvancedSettings(guild.id)).locale;
+      const period = parseAnalyticsPeriod(interaction.options.getString('period'));
+      const viewValue = interaction.options.getString('view') ?? 'overview';
+      const filters = parseAnalyticsFilters({
+        departmentId: interaction.options.getString('department-id'),
+        tagId: interaction.options.getString('tag-id'),
+        priority: interaction.options.getString('priority'),
+        status: interaction.options.getString('status'),
+      });
+      const report = await getAdvancedAnalyticsReport(guild.id, period, filters);
+      if (viewValue === 'csv') {
+        const csv = buildAdvancedAnalyticsCsv(report);
+        await interaction.editReply({
+          content: translate(locale, 'analytics.advanced.exportReady'),
+          files: [new AttachmentBuilder(Buffer.from(csv, 'utf8'), { name: 'queryfixr-analytics-' + period + 'd.csv' })],
+        });
+        return;
+      }
+      const view = viewValue as AnalyticsView;
+      await interaction.editReply({
+        embeds: [buildAdvancedAnalyticsEmbed(report, view, 0, getThemeColor((await getGuildConfig(guild.id)).theme), locale)],
+        components: buildAdvancedAnalyticsComponents(report, view, 0, locale),
+      });
+      return;
+    }
+
+    if (group === 'feedback') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        if (subcommand === 'rate') {
+          const response = await recordCsatResponse(
+            guild.id,
+            interaction.options.getString('ticket-id', true).trim(),
+            interaction.user.id,
+            interaction.options.getInteger('rating', true),
+            interaction.options.getString('comment') ?? '',
+          );
+          await interaction.editReply(
+            'Thank you for your feedback. Your rating of **' + response.rating + '/5** was saved for ticket ' +
+            response.ticketId + '. A second vote for the same ticket is not allowed.',
+          );
+          return;
+        }
+
+        if (subcommand === 'summary') {
+          const days = interaction.options.getInteger('days') ?? 30;
+          const now = Date.now();
+          const from = new Date(now - days * 24 * 60 * 60 * 1000).toISOString();
+          const to = new Date(now + 1000).toISOString();
+          const summary = await getCsatSummary(guild.id, from, to);
+          const config = await getGuildConfig(guild.id);
+          await interaction.editReply({
+            embeds: [new EmbedBuilder()
+              .setColor(getThemeColor(config.theme))
+              .setTitle('📬 Customer Satisfaction')
+              .setDescription(
+                '**Window:** ' + days + ' days\n' +
+                '**Responses:** ' + summary.responses + '\n' +
+                '**Average rating:** ' + (summary.averageRating === null ? 'No ratings yet' : summary.averageRating.toFixed(2) + '/5') + '\n\n' +
+                'Positive (4–5): **' + summary.positiveCount + '**\n' +
+                'Neutral (3): **' + summary.neutralCount + '**\n' +
+                'Negative (1–2): **' + summary.negativeCount + '**\n\n' +
+                'Only aggregate counts are shown. Comments and individual customers are not exposed in this report.',
+              )
+              .setFooter({ text: 'QueryFixr • CSAT definitions: positive >=4, neutral 3, negative <=2' })],
+          });
+          return;
+        }
+      } catch (error) {
+        await interaction.editReply(
+          error instanceof Error ? error.message : 'The feedback operation failed safely. Please retry later.',
+        );
+        return;
+      }
+    }
+
     if (group === 'diagnostics') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+      if (subcommand === 'recovery-preview') {
+        const ticketId = interaction.options.getString('ticket-id', true).trim();
+        const sourceValue = interaction.options.getString('source', true);
+        if (sourceValue !== 'discord_native' && sourceValue !== 'ticket_button') {
+          await interaction.editReply('Invalid recovery source. Choose a supported deletion path.');
+          return;
+        }
+        const preview = await getTicketRecoveryPreview(guild.id, ticketId, sourceValue);
+        const config = await getGuildConfig(guild.id);
+        const lines = [
+          '**Read-only recovery preview**',
+          'Source: **' + (sourceValue === 'discord_native' ? 'native Discord deletion' : 'ticket Delete button') + '**',
+          'Eligibility: **' + (preview.eligibleToRestore ? 'eligible' : 'not eligible') + '**',
+          'Channel snapshot: **' + (preview.channelSnapshotAvailable ? 'available' : 'missing; safe defaults will be used') + '**',
+          'Historic message scan: **' + (preview.historicalBackfillComplete ? 'complete' : 'incomplete') + '**',
+          'Archived message records: **' + preview.archivedMessageCount + '** (source-deleted: ' + preview.deletedMessageCount + ')',
+          'Attachments: **' + preview.totalAttachmentCount + '** metadata; **' + preview.restorableAttachmentCount + '** with archived bytes; **' + preview.tooLargeAttachmentCount + '** oversized; **' + preview.metadataOnlyAttachmentCount + '** metadata-only; **' + preview.pendingAttachmentCount + '** pending; **' + preview.failedAttachmentCount + '** failed',
+          'Attachment archive rows: **' + preview.trackedAttachmentCount + ' / ' + preview.totalAttachmentCount + '**; missing rows: **' + preview.attachmentRecordsMissing + '**',
+          'Previously replayed message records: **' + preview.alreadyReplayedMessageCount + '**',
+          ...(preview.latestArchivedAt ? ['Latest archived message: <t:' + Math.floor(Date.parse(preview.latestArchivedAt) / 1000) + ':F>'] : []),
+          ...(preview.warnings.length ? ['', '**Limitations**', ...preview.warnings.map((warning) => '• ' + warning)] : []),
+          '',
+          'Restore creates a replacement channel with a new Discord ID. Replayed content is posted by the bot and labelled with original author/channel/message IDs and timestamp; original users are never impersonated.',
+        ];
+        await interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setColor(getThemeColor(config.theme))
+            .setTitle('🧰 Ticket Recovery Preview')
+            .setDescription(lines.join('\n').slice(0, 4000))
+            .setFooter({ text: 'Read-only. This command does not restore, delete, or mutate ticket data.' })],
+        });
+        return;
+      }
+
+      if (subcommand === 'metrics') {
+        const days = interaction.options.getInteger('days') ?? 30;
+        const now = Date.now();
+        const summary = await getSupportMetrics(
+          guild.id,
+          new Date(now - days * 24 * 60 * 60 * 1000).toISOString(),
+          new Date(now + 1000).toISOString(),
+        );
+        const minutes = (value: number | null): string => value === null ? 'Not enough archived data' : value.toFixed(1) + ' minutes';
+        const config = await getGuildConfig(guild.id);
+        await interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setColor(getThemeColor(config.theme))
+            .setTitle('📈 Support Operations • ' + days + '-day window')
+            .setDescription(
+              '**Tickets created:** ' + summary.createdTickets + '\n' +
+              '**Closed during window:** ' + summary.closedTickets + '\n' +
+              '**Current active backlog:** ' + summary.activeBacklog + '\n' +
+              '**Reopened backlog:** ' + summary.reopenedBacklog + '\n' +
+              '**Active tickets older than 24h:** ' + summary.agedBacklog + '\n' +
+              '**Failed outbox events now:** ' + summary.failedOutboxEvents,
+            )
+            .addFields(
+              { name: 'First response', value: 'Measured: ' + summary.measuredFirstResponses + '\nAverage: ' + minutes(summary.averageFirstResponseMinutes) + '\nMedian: ' + minutes(summary.medianFirstResponseMinutes), inline: true },
+              { name: 'Resolution duration', value: 'Average: ' + minutes(summary.averageResolutionMinutes) + '\nMedian: ' + minutes(summary.medianResolutionMinutes), inline: true },
+              { name: 'Metric definitions', value: summary.metricDefinitions.slice(0, 4).map((line) => '• ' + line).join('\n').slice(0, 1000) },
+            )
+            .setFooter({ text: 'Counts are server-scoped. First response relies on archived non-bot messages and may be incomplete for historic tickets.' })],
+        });
+        return;
+      }
+
+      if (subcommand === 'sla-list') {
+        const policies = await listSupportSlaPolicies(guild.id);
+        const config = await getGuildConfig(guild.id);
+        const description = policies.length
+          ? policies.slice(0, 18).map((policy) =>
+              '**' + policy.id + '** • department: ' + policy.departmentId + ' • priority: **' + policy.priority + '**\n' +
+              'First response: ' + policy.firstResponseMinutes + ' min • claim: ' + policy.claimMinutes + ' min • resolution: ' + policy.resolutionMinutes + ' min • pending pauses: ' + (policy.pauseWhilePending ? 'yes' : 'no') +
+              ' • warning: ' + Math.round(policy.warningRatio * 100) + '% • ' + (policy.enabled ? 'enabled' : 'disabled') +
+              ' • version ' + policy.version,
+            ).join('\n\n')
+          : 'No SLA policies exist yet. Use /supportforge diagnostics sla-set to create one.';
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setColor(getThemeColor(config.theme)).setTitle('⏱️ SLA Policies')
+            .setDescription(description.slice(0, 4000))
+            .setFooter({ text: policies.length + ' policy/policies • showing up to 18 • changes are versioned' })],
+        });
+        return;
+      }
+
+      if (subcommand === 'sla-set') {
+        const policy = await saveSupportSlaPolicy(
+          guild.id,
+          {
+            departmentId: interaction.options.getString('department-id'),
+            priority: (interaction.options.getString('priority') ?? '*') as '*' | 'low' | 'normal' | 'high' | 'urgent' | 'critical',
+            firstResponseMinutes: interaction.options.getInteger('first-response-minutes', true),
+            claimMinutes: interaction.options.getInteger('claim-minutes') ?? 60,
+            resolutionMinutes: interaction.options.getInteger('resolution-minutes', true),
+            pauseWhilePending: interaction.options.getBoolean('pause-while-pending') ?? true,
+            warningRatio: interaction.options.getNumber('warning-ratio') ?? 0.8,
+            enabled: true,
+          },
+          interaction.user.id,
+        );
+        const config = await getGuildConfig(guild.id);
+        if (config.supportCategoryId) {
+          await logSettingsEvent(guild, config.supportCategoryId, {
+            action: 'SUPPORT_SLA_POLICY_SAVED',
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Saved SLA policy ' + policy.id + ' for department=' + policy.departmentId + ', priority=' + policy.priority + ', first-response=' + policy.firstResponseMinutes + 'm, claim=' + policy.claimMinutes + 'm, resolution=' + policy.resolutionMinutes + 'm, pending-pauses=' + policy.pauseWhilePending + ', version=' + policy.version + '.',
+          });
+        }
+        await interaction.editReply('Saved SLA policy ' + policy.id + ' (version ' + policy.version + '). First response: ' + policy.firstResponseMinutes + ' minutes; claim: ' + policy.claimMinutes + ' minutes; resolution: ' + policy.resolutionMinutes + ' minutes; pending pause: ' + policy.pauseWhilePending + '.');
+        return;
+      }
+
+      if (subcommand === 'sla-delete') {
+        const policyId = interaction.options.getString('policy-id', true).trim();
+        const deleted = await deleteSupportSlaPolicy(guild.id, policyId);
+        if (!deleted) {
+          await interaction.editReply('No SLA policy with that ID exists in this server.');
+          return;
+        }
+        const config = await getGuildConfig(guild.id);
+        if (config.supportCategoryId) {
+          await logSettingsEvent(guild, config.supportCategoryId, {
+            action: 'SUPPORT_SLA_POLICY_DELETED',
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Deactivated SLA policy ' + policyId + '; policy/alert history is retained.',
+          });
+        }
+        await interaction.editReply('Deactivated SLA policy ' + policyId + '. Historical SLA alert records are retained.');
+        return;
+      }
+
+      if (subcommand === 'sla-check') {
+        const ticketId = interaction.options.getString('ticket-id', true).trim();
+        const evaluation = await evaluateTicketSla(guild.id, ticketId);
+        const config = await getGuildConfig(guild.id);
+        if (!evaluation.policy || !evaluation.firstResponse || !evaluation.claim || !evaluation.resolution) {
+          await interaction.editReply(evaluation.warning ?? 'No SLA policy applies to this ticket.');
+          return;
+        }
+        const fmt = (result: { progress: string; elapsedMinutes: number; targetMinutes: number; remainingMinutes: number; pausedMinutes: number }) =>
+          '**' + result.progress.toUpperCase() + '** • elapsed ' + result.elapsedMinutes + 'm / target ' + result.targetMinutes + 'm • remaining ' + result.remainingMinutes + 'm • paused ' + result.pausedMinutes + 'm';
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setColor(getThemeColor(config.theme)).setTitle('⏱️ Ticket SLA Evaluation')
+            .setDescription(
+              'Ticket: <#' + evaluation.channelId + '>\nStatus: **' + evaluation.status + '**\nPolicy: ' + evaluation.policy.id + ' (version ' + evaluation.policy.version + ')\n\n' +
+              '**First response**\n' + fmt(evaluation.firstResponse) + '\n\n' +
+              '**Claim**\n' + fmt(evaluation.claim) + '\n\n' +
+              '**Resolution**\n' + fmt(evaluation.resolution) + '\n\n' +
+              (evaluation.warning ? 'Warning: ' + evaluation.warning : 'No active SLA warning.'),
+            )
+            .setFooter({ text: 'Pending pauses and reopen resets follow the selected SLA policy; this command is read-only.' })],
+        });
+        return;
+      }
 
       if (subcommand === 'snapshot') {
         const snapshot = await createConfigurationSnapshot(
@@ -2051,7 +2708,7 @@ export async function execute(
               ' · ' + panel.buttons.length + ' button(s)',
             ).join('\n')
           : 'No custom panels have been created. Use `/supportforge panel create` to build the first one.';
-        const embed = new EmbedBuilder().setColor(themeColor).setTitle('ResolvX • Custom Panels').setDescription(description.slice(0, 4096)).setFooter({ text: panels.length + ' saved panel(s) • ordered buttons persist in Neon' });
+        const embed = new EmbedBuilder().setColor(themeColor).setTitle('QueryFixr • Custom Panels').setDescription(description.slice(0, 4096)).setFooter({ text: panels.length + ' saved panel(s) • ordered buttons persist in Neon' });
         if (panels.length > 25) embed.addFields({ name: 'More panels', value: 'Showing the first 25 of ' + panels.length + ' panels. Use Show with a panel ID to inspect an individual panel.' });
         await interaction.editReply({ embeds: [embed] });
         return;
@@ -2069,7 +2726,7 @@ export async function execute(
           (item.allowedRoleIds?.length ? ' · role-restricted' : '') +
           (item.confirmationMessage ? ' · confirmation enabled' : ''),
         );
-        const embed = buildCustomPanelEmbed(panel, guild.name, themeColor, true)
+        const embed = buildCustomPanelEmbed(panel, guild.name, themeColor, true, false, (await getAdvancedSettings(guild.id)).locale)
           .setTitle(panel.name + ' · ' + panel.title)
           .addFields({ name: 'Panel ID', value: '`' + panel.id + '`', inline: true }, { name: 'Status', value: panel.publishedMessageId ? 'Published' : 'Draft', inline: true }, { name: 'Ordered ticket buttons', value: buttonLines.join('\n').slice(0, 1024) });
         await interaction.editReply({ embeds: [embed] });
@@ -2103,7 +2760,7 @@ export async function execute(
       }
 
       if (action === 'preview') {
-        const embed = buildCustomPanelEmbed(panel, guild.name, themeColor, true);
+        const embed = buildCustomPanelEmbed(panel, guild.name, themeColor, true, false, (await getAdvancedSettings(guild.id)).locale);
         await interaction.editReply({ embeds: [embed], components: buildCustomPanelComponents(panel, true) });
         return;
       }
@@ -2114,7 +2771,7 @@ export async function execute(
         const targetChannel = channel as TextChannel;
         const oldChannelId = panel.publishedChannelId;
         const oldMessageId = panel.publishedMessageId;
-        const payload = { embeds: [buildCustomPanelEmbed(panel, guild.name, themeColor)], components: buildCustomPanelComponents(panel, false) };
+        const payload = { embeds: [buildCustomPanelEmbed(panel, guild.name, themeColor, false, false, (await getAdvancedSettings(guild.id)).locale)], components: buildCustomPanelComponents(panel, false) };
         // Preserve the last known-good public panel until the new publication
         // has a durable Neon snapshot and channel/message pointer.
         const message = await targetChannel.send(payload);
@@ -2234,7 +2891,7 @@ export async function execute(
           : '⚠️ **Discord restore completed; code deployment was not queued.** ' + deployment.reason);
       }
       await interaction.editReply(
-        (restoreMode ? '✅ **ResolvX restored successfully.**' : '✅ **ResolvX setup complete.**') +
+        (restoreMode ? '✅ **QueryFixr restored successfully.**' : '✅ **QueryFixr setup complete.**') +
         '\n\n📁 Container: <#' + result.supportCategoryId + '>\n' +
         '📂 Department categories: **' + result.departmentCount + '**\n' +
         (result.legacyOpenCategoryId ? '🟢 Legacy Open bucket: <#' + result.legacyOpenCategoryId + '>\n' : '') +
@@ -2416,7 +3073,7 @@ export async function execute(
         return;
       }
       await interaction.editReply(
-        '**ResolvX Departments · Page ' + requestedPage + ' / ' + pages.length + '**\n\n' +
+        '**QueryFixr Departments · Page ' + requestedPage + ' / ' + pages.length + '**\n\n' +
         pages[requestedPage - 1],
       );
       return;
@@ -2932,12 +3589,12 @@ export async function execute(
 
     await interaction.reply({
       content:
-        '❌ Unsupported ResolvX command.',
+        '❌ Unsupported QueryFixr command.',
       flags: MessageFlags.Ephemeral,
     });
   } catch (error) {
     console.error(
-      '❌ ResolvX command failed:',
+      '❌ QueryFixr command failed:',
       error,
     );
 

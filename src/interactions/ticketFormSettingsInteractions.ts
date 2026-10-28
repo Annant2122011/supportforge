@@ -17,6 +17,9 @@ import {
 
 import { getGuildConfig } from '../services/configService';
 import { getGuildTheme } from '../services/uiThemeService';
+import { getAdvancedSettings } from '../services/advancedSettingsService';
+import { translate } from '../i18n/translationService';
+import { localizeFormSettingsMessage, localizeFormSettingsText } from '../i18n/formSettingsCopy';
 import { logSettingsEvent } from '../services/auditLogService';
 import {
   applyTicketFormTemplate,
@@ -64,34 +67,48 @@ async function prepare(interaction: FormSettingsInteraction): Promise<void> {
 }
 
 async function render(interaction: FormSettingsInteraction, content: string, components: ViewComponents = []): Promise<void> {
+  const locale = interaction.guild ? (await getAdvancedSettings(interaction.guild.id)).locale : 'en-US';
   const theme = interaction.guild
     ? await getGuildTheme(interaction.guild.id)
     : { label: 'Midnight Indigo', color: 0x5865f2 };
-  const heading = content.match(/^\*\*(.{1,240}?)\*\*/m);
-  const title = heading?.[1]?.slice(0, 256) ?? 'Ticket Forms & Templates';
-  const description = heading ? content.replace(heading[0], '').trim() : content;
+  const localizedContent = localizeFormSettingsMessage(locale, content);
+  const heading = localizedContent.match(/^\*\*(.{1,240}?)\*\*/m);
+  const title = heading?.[1]?.slice(0, 256) ?? translate(locale, 'forms.settings.home.title');
+  const description = heading ? localizedContent.replace(heading[0], '').trim() : localizedContent;
+  for (const row of components) {
+    for (const component of row.components) {
+      if (component instanceof ButtonBuilder) {
+        const label = (component.toJSON() as { label?: string }).label;
+        if (label) component.setLabel(localizeFormSettingsText(locale, label));
+      } else if (component instanceof StringSelectMenuBuilder) {
+        const placeholder = (component.toJSON() as { placeholder?: string }).placeholder;
+        if (placeholder) component.setPlaceholder(localizeFormSettingsText(locale, placeholder));
+      }
+    }
+  }
   const embed = new EmbedBuilder()
     .setColor(theme.color)
-    .setAuthor({ name: 'ResolvX • Forms & Templates' })
+    .setAuthor({ name: translate(locale, 'forms.settings.embed.author') })
     .setTitle(title)
-    .setDescription((description || 'Use the controls below to continue.').slice(0, 4096))
-    .setFooter({ text: theme.label + ' theme • Guided setup and advanced schema tools' });
+    .setDescription((description || translate(locale, 'forms.settings.embed.continue')).slice(0, 4096))
+    .setFooter({ text: theme.label + ' theme • ' + (locale === 'hi-IN' ? 'निर्देशित सेटअप और उन्नत schema टूल' : locale === 'bn-IN' ? 'নির্দেশিত সেটআপ ও উন্নত schema টুল' : 'Guided setup and advanced schema tools') });
   await interaction.editReply({ content: '', embeds: [embed], components });
 }
 
 async function showFailure(interaction: FormSettingsInteraction, error: unknown): Promise<void> {
-  const detail = error instanceof Error ? error.message : 'Unknown error.';
+  const locale = interaction.guild ? (await getAdvancedSettings(interaction.guild.id)).locale : 'en-US';
+  const detail = localizeFormSettingsText(locale, error instanceof Error ? error.message : 'Unknown error.');
   const theme = interaction.guild
     ? await getGuildTheme(interaction.guild.id)
     : { label: 'Midnight Indigo', color: 0x5865f2 };
   const embed = new EmbedBuilder()
     .setColor(theme.color)
-    .setTitle('Could not complete that action')
+    .setTitle(translate(locale, 'forms.settings.error.failureTitle'))
     .setDescription(detail.slice(0, 4096))
     .setFooter({ text: theme.label + ' theme • Ticket Forms' });
   const components = [buttonRow(
-    button(PREFIX + 'home', 'Ticket Forms Home', ButtonStyle.Primary, '🧾'),
-    button('sf:settings:home', 'Return to Settings', ButtonStyle.Secondary, '↩️'),
+    button(PREFIX + 'home', translate(locale, 'forms.settings.button.backTicketFormsHome'), ButtonStyle.Primary, '🧾'),
+    button('sf:settings:home', translate(locale, 'forms.settings.button.returnSettings'), ButtonStyle.Secondary, '↩️'),
   )];
   if (interaction.deferred || interaction.replied) {
     await interaction.editReply({ content: '', embeds: [embed], components }).catch(() => undefined);

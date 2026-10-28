@@ -1763,9 +1763,9 @@ export function startTicketFormSubmissionRecovery(client: Client, intervalMs = 6
     running = true;
     void runTrackedOperationalTask('ticket-form-submission-recovery', null, () => recoverPendingTicketFormSubmissions(client))
       .then((count) => {
-        if (count > 0) console.info('Recovered ' + count + ' pending ResolvX form submission(s).');
+        if (count > 0) console.info('Recovered ' + count + ' pending QueryFixr form submission(s).');
       })
-      .catch((error) => console.warn('ResolvX form submission recovery is temporarily unavailable:', error instanceof Error ? error.message : 'unknown database error'))
+      .catch((error) => console.warn('QueryFixr form submission recovery is temporarily unavailable:', error instanceof Error ? error.message : 'unknown database error'))
       .finally(() => { running = false; });
   };
   tick();

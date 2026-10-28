@@ -8,6 +8,7 @@ import {
   type APIEmbed,
   type Guild,
   type Message,
+  type MessageCreateOptions,
   type PermissionResolvable,
   type TextChannel,
   type ThreadChannel,
@@ -16,6 +17,8 @@ import { randomUUID } from 'node:crypto';
 import type { QueryResult, QueryResultRow } from 'pg';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
+import { extractRecoverySegmentMarkers, recoverySegmentMarker } from '../core/domain/recoveryReplayMarkers';
+import { withPostgresAdvisoryLock } from '../core/persistence/operationLock';
 import { getGuildConfig } from './configService';
 import { getThemeColor } from './uiThemeService';
 import {
@@ -26,10 +29,11 @@ import {
 import { getField, isTicketTopic, removeField, setField } from './ticketStateService';
 import { refreshTicketPanel } from './ticketPanelService';
 import { runTrackedOperationalTask } from './operationalTaskTelemetry';
+import { buildRecoveryPreviewSummary, type RecoveryPreviewSummary, type RecoverySource } from '../core/domain/recoveryPreview';
 
 const ARCHIVE_PAGE_SIZE = 100;
 const DEFAULT_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
-const RECOVERY_FOOTER_PREFIX = 'ResolvX Recovery Archive';
+const RECOVERY_FOOTER_PREFIX = 'QueryFixr Recovery Archive';
 
 interface ChannelArchiveRow extends QueryResultRow {
   ticket_id: string;
@@ -277,7 +281,7 @@ async function archiveAttachment(
 
   try {
     const response = await fetch(attachment.url, {
-      headers: { 'User-Agent': 'ResolvX-Ticket-Archive/1.0' },
+      headers: { 'User-Agent': 'QueryFixr-Ticket-Archive/1.0' },
       signal: AbortSignal.timeout(15_000),
       redirect: 'error',
     });
@@ -301,7 +305,7 @@ async function archiveAttachment(
       'UPDATE ticket_message_archive_attachments SET archive_status=$2, archive_error=$3, updated_at=NOW() WHERE attachment_id=$1',
       [attachment.id, 'failed', detail],
     );
-    console.warn('ResolvX could not archive attachment ' + attachment.id + ': ' + detail);
+    console.warn('QueryFixr could not archive attachment ' + attachment.id + ': ' + detail);
   }
 }
 
@@ -444,7 +448,7 @@ export async function startTicketArchiveBackfill(client: { guilds: { cache: Map<
     try {
       await runTrackedOperationalTask('ticket-archive-backfill', null, () => backfillTicketArchiveBatch(client));
     } catch (error) {
-      console.warn('ResolvX ticket archive backfill will retry:', error instanceof Error ? error.message : 'unknown error');
+      console.warn('QueryFixr ticket archive backfill will retry:', error instanceof Error ? error.message : 'unknown error');
     } finally {
       running = false;
     }
@@ -607,6 +611,117 @@ export async function recordTicketChannelDeleted(channel: TextChannel | ThreadCh
   );
 }
 
+/** Return a read-only, privacy-safe preview of what a recovery can reconstruct. */
+export async function getTicketRecoveryPreview(
+  guildId: string,
+  ticketIdOrChannelId: string,
+  source: RecoverySource,
+): Promise<RecoveryPreviewSummary> {
+  let ticket = await getPersistedTicketById(ticketIdOrChannelId);
+  if (!ticket) ticket = await getPersistedTicket(ticketIdOrChannelId);
+  const pool = getPostgresPool();
+  if (!ticket) {
+    const archivedChannel = await pool.query<QueryResultRow & { ticket_id: string }>(
+      'SELECT ticket_id FROM ticket_channel_archive WHERE guild_id=$1 AND original_channel_id=$2 LIMIT 1',
+      [guildId, ticketIdOrChannelId],
+    );
+    if (archivedChannel.rows[0]) {
+      ticket = await getPersistedTicketById(archivedChannel.rows[0].ticket_id);
+    }
+  }
+  if (!ticket || ticket.guildId !== guildId) {
+    throw new Error('Ticket recovery record was not found in this server.');
+  }
+  const ticketId = ticket.id;
+  const eventResult = await pool.query<QueryResultRow & {
+    status: string;
+    accidental_answer: 'yes' | 'no' | null;
+    id: string;
+  }>(
+    'SELECT id,status,accidental_answer FROM ticket_recovery_events ' +
+      'WHERE ticket_id=$1 AND guild_id=$2 AND source=$3 ORDER BY created_at DESC LIMIT 1',
+    [ticketId, guildId, source],
+  );
+  const recoveryEvent = eventResult.rows[0];
+  if (!recoveryEvent) {
+    throw new Error('No recovery record exists for this ticket and deletion path.');
+  }
+
+  const [snapshotResult, messageResult, attachmentResult, replayResult] = await Promise.all([
+    pool.query<QueryResultRow & { backfill_complete: boolean }>(
+      'SELECT backfill_complete FROM ticket_channel_archive WHERE ticket_id=$1 AND guild_id=$2 LIMIT 1',
+      [ticketId, guildId],
+    ),
+    pool.query<QueryResultRow & {
+      message_count: number | string;
+      deleted_message_count: number | string;
+      attachment_count: number | string;
+      latest_archived_at: Date | string | null;
+    }>(
+      'SELECT COUNT(*)::int AS message_count, ' +
+        'COUNT(*) FILTER (WHERE deleted_at IS NOT NULL)::int AS deleted_message_count, ' +
+        "COALESCE(SUM(CASE WHEN jsonb_typeof(attachments)='array' THEN jsonb_array_length(attachments) ELSE 0 END),0)::int AS attachment_count, " +
+        'MAX(created_at) AS latest_archived_at ' +
+        'FROM ticket_message_archive WHERE ticket_id=$1 AND guild_id=$2',
+      [ticketId, guildId],
+    ),
+    pool.query<QueryResultRow & {
+      tracked_attachment_count: number | string;
+      restorable_attachment_count: number | string;
+      too_large_attachment_count: number | string;
+      metadata_only_attachment_count: number | string;
+      pending_attachment_count: number | string;
+      failed_attachment_count: number | string;
+    }>(
+      'SELECT COUNT(*)::int AS tracked_attachment_count, ' +
+        "COUNT(*) FILTER (WHERE archive_status='archived' AND archived_bytes IS NOT NULL)::int AS restorable_attachment_count, " +
+        "COUNT(*) FILTER (WHERE archive_status='too_large')::int AS too_large_attachment_count, " +
+        "COUNT(*) FILTER (WHERE archive_status='metadata_only')::int AS metadata_only_attachment_count, " +
+        "COUNT(*) FILTER (WHERE archive_status='pending')::int AS pending_attachment_count, " +
+        "COUNT(*) FILTER (WHERE archive_status='failed' OR (archive_error IS NOT NULL AND archive_status NOT IN ('too_large','metadata_only')))::int AS failed_attachment_count " +
+        'FROM ticket_message_archive_attachments WHERE guild_id=$1 AND message_id IN ' +
+        '(SELECT message_id FROM ticket_message_archive WHERE ticket_id=$2 AND guild_id=$1)',
+      [guildId, ticketId],
+    ),
+    pool.query<QueryResultRow & { already_replayed_message_count: number | string }>(
+      "SELECT COUNT(DISTINCT replay.original_message_id)::int AS already_replayed_message_count " +
+        'FROM ticket_recovery_replay_items replay ' +
+        'JOIN ticket_message_archive archived ON archived.message_id=replay.original_message_id ' +
+        "WHERE replay.recovery_event_id=$1 AND replay.status='completed' AND archived.ticket_id=$2 AND archived.guild_id=$3",
+      [recoveryEvent.id, ticketId, guildId],
+    ),
+  ]);
+
+  const snapshot = snapshotResult.rows[0];
+  const messages = messageResult.rows[0];
+  const attachments = attachmentResult.rows[0];
+  const replay = replayResult.rows[0];
+  const isoDate = (value: Date | string | null | undefined): string | null => {
+    if (value == null) return null;
+    const timestamp = value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+    return Number.isFinite(Date.parse(timestamp)) ? timestamp : null;
+  };
+
+  return buildRecoveryPreviewSummary({
+    source,
+    status: recoveryEvent.status,
+    accidentalAnswer: recoveryEvent.accidental_answer,
+    channelSnapshotAvailable: Boolean(snapshot),
+    historicalBackfillComplete: snapshot?.backfill_complete === true,
+    archivedMessageCount: Number(messages?.message_count ?? 0),
+    deletedMessageCount: Number(messages?.deleted_message_count ?? 0),
+    latestArchivedAt: isoDate(messages?.latest_archived_at),
+    totalAttachmentCount: Number(messages?.attachment_count ?? 0),
+    trackedAttachmentCount: Number(attachments?.tracked_attachment_count ?? 0),
+    restorableAttachmentCount: Number(attachments?.restorable_attachment_count ?? 0),
+    tooLargeAttachmentCount: Number(attachments?.too_large_attachment_count ?? 0),
+    metadataOnlyAttachmentCount: Number(attachments?.metadata_only_attachment_count ?? 0),
+    pendingAttachmentCount: Number(attachments?.pending_attachment_count ?? 0),
+    failedAttachmentCount: Number(attachments?.failed_attachment_count ?? 0),
+    alreadyReplayedMessageCount: Number(replay?.already_replayed_message_count ?? 0),
+  });
+}
+
 export async function listTicketRecoveryCandidates(
   guildId: string,
   source: 'discord_native' | 'ticket_button',
@@ -737,11 +852,152 @@ async function permissionOverwritePayload(
   return Array.from(map.values());
 }
 
+function recoveryMarkersInMessage(message: Message): string[] {
+  return extractRecoverySegmentMarkers([
+    message.content,
+    ...message.embeds.map((embed) => embed.footer?.text ?? ''),
+  ]);
+}
+
+function recoveryMarkerMessageMap(messages: Iterable<Message>): Map<string, string> {
+  const markers = new Map<string, string>();
+  for (const message of messages) {
+    for (const marker of recoveryMarkersInMessage(message)) markers.set(marker, message.id);
+  }
+  return markers;
+}
+
+async function findRecoveryMarkerInHistory(
+  channel: TextChannel,
+  marker: string,
+  notBefore: Date,
+): Promise<string | null> {
+  const minimumTimestamp = notBefore.getTime();
+  let before: string | undefined;
+  while (true) {
+    const options: { limit: number; before?: string } = { limit: 100 };
+    if (before) options.before = before;
+    const page = await channel.messages.fetch(options);
+    if (page.size === 0) return null;
+
+    for (const message of page.values()) {
+      if (message.createdTimestamp < minimumTimestamp) continue;
+      if (recoveryMarkersInMessage(message).includes(marker)) return message.id;
+    }
+
+    const oldest = Array.from(page.values()).reduce((current, candidate) =>
+      BigInt(candidate.id) < BigInt(current.id) ? candidate : current,
+    );
+    if (oldest.createdTimestamp < minimumTimestamp || page.size < 100) return null;
+    before = oldest.id;
+  }
+}
+
+class RecoverySegmentPersistenceError extends Error {
+  public constructor(message: string, cause: unknown) {
+    super(message, { cause });
+    this.name = 'RecoverySegmentPersistenceError';
+  }
+}
+
+async function persistRecoverySegment<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    throw new RecoverySegmentPersistenceError('Could not persist ticket recovery segment state.', error);
+  }
+}
+
+/**
+ * Persist intent before sending and completion after Discord accepts the send.
+ * If the completion write fails, a retry searches channel history from the
+ * previous attempt timestamp for the invisible deterministic marker.
+ */
+async function sendRecoverySegment(
+  channel: TextChannel,
+  payload: MessageCreateOptions,
+  recoveryEventId: string,
+  originalMessageId: string,
+  segmentKey: string,
+  seenMarkers: Map<string, string>,
+): Promise<void> {
+  const pool = getPostgresPool();
+  const marker = recoverySegmentMarker(recoveryEventId, originalMessageId, segmentKey);
+  await persistRecoverySegment(() => pool.query(
+    'INSERT INTO ticket_recovery_replay_segments ' +
+      '(recovery_event_id,original_message_id,segment_key,status,attempts,attempt_started_at,created_at,updated_at) ' +
+      "VALUES ($1,$2,$3,'pending',0,NOW(),NOW(),NOW()) ON CONFLICT (recovery_event_id,original_message_id,segment_key) DO NOTHING",
+    [recoveryEventId, originalMessageId, segmentKey],
+  ));
+  const state = await persistRecoverySegment(() => pool.query<QueryResultRow & {
+    status: 'pending' | 'completed';
+    discord_message_id: string | null;
+    attempt_started_at: Date | string;
+  }>(
+    'SELECT status,discord_message_id,attempt_started_at FROM ticket_recovery_replay_segments ' +
+      'WHERE recovery_event_id=$1 AND original_message_id=$2 AND segment_key=$3 LIMIT 1',
+    [recoveryEventId, originalMessageId, segmentKey],
+  ));
+  const saved = state.rows[0];
+  if (!saved) throw new RecoverySegmentPersistenceError('Recovery segment intent was not returned by PostgreSQL.', new Error('Missing row'));
+  if (saved.status === 'completed') {
+    if (saved.discord_message_id) seenMarkers.set(marker, saved.discord_message_id);
+    return;
+  }
+
+  const knownMessageId = seenMarkers.get(marker) ??
+    await findRecoveryMarkerInHistory(
+      channel,
+      marker,
+      saved.attempt_started_at instanceof Date ? saved.attempt_started_at : new Date(saved.attempt_started_at),
+    );
+  if (knownMessageId) {
+    await persistRecoverySegment(() => pool.query(
+      "UPDATE ticket_recovery_replay_segments SET status='completed',discord_message_id=$4,last_error=NULL,updated_at=NOW() " +
+        'WHERE recovery_event_id=$1 AND original_message_id=$2 AND segment_key=$3',
+      [recoveryEventId, originalMessageId, segmentKey, knownMessageId],
+    ));
+    seenMarkers.set(marker, knownMessageId);
+    return;
+  }
+
+  // Persist the search lower bound before the send. A retry can then search
+  // every message created since this attempt, not just the newest 100.
+  await persistRecoverySegment(() => pool.query(
+    'UPDATE ticket_recovery_replay_segments SET attempts=attempts+1,attempt_started_at=NOW(),last_error=NULL,updated_at=NOW() ' +
+      "WHERE recovery_event_id=$1 AND original_message_id=$2 AND segment_key=$3 AND status='pending'",
+    [recoveryEventId, originalMessageId, segmentKey],
+  ));
+
+  try {
+    const sent = await channel.send(payload);
+    seenMarkers.set(marker, sent.id);
+    await persistRecoverySegment(() => pool.query(
+      "UPDATE ticket_recovery_replay_segments SET status='completed',discord_message_id=$4,last_error=NULL,updated_at=NOW() " +
+        'WHERE recovery_event_id=$1 AND original_message_id=$2 AND segment_key=$3',
+      [recoveryEventId, originalMessageId, segmentKey, sent.id],
+    ));
+  } catch (error) {
+    if (!(error instanceof RecoverySegmentPersistenceError)) {
+      const safeError = error instanceof Error ? error.name.slice(0, 80) : 'UnknownError';
+      await pool.query(
+        'UPDATE ticket_recovery_replay_segments SET last_error=$4,updated_at=NOW() ' +
+          'WHERE recovery_event_id=$1 AND original_message_id=$2 AND segment_key=$3',
+        [recoveryEventId, originalMessageId, segmentKey, safeError],
+      ).catch(() => undefined);
+    }
+    throw error;
+  }
+}
+
 async function replayArchivedMessages(channel: TextChannel, ticketId: string, recoveryEventId: string): Promise<{ restored: number; failed: number }> {
   const pool = getPostgresPool();
   let restored = 0;
   let failed = 0;
   const botId = channel.client.user?.id;
+  // Recover markers from recent history before sending anything. Stop after a failed item so these remain searchable.
+  const recentMessages = await channel.messages.fetch({ limit: 100 });
+  const seenMarkers = recoveryMarkerMessageMap(recentMessages.values());
   let cursorCreatedAt: string | null = null;
   let cursorMessageId: string | null = null;
 
@@ -778,9 +1034,9 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
         const customId = String(component.custom_id ?? component.customId ?? '');
         return customId.startsWith('ticket:');
       });
-    }) && archivedEmbeds.some((entry) => /(?:ResolvX|SupportForge) Ticket #/.test(String((entry as Record<string, unknown>).title ?? '')));
+    }) && archivedEmbeds.some((entry) => /(?:QueryFixr|SupportForge) Ticket #/.test(String((entry as Record<string, unknown>).title ?? '')));
     if (isPanel || (botId && archived.author_id === botId && archivedComponents.length > 0 && archivedEmbeds.length > 0 &&
-      archivedEmbeds.some((entry) => /(?:ResolvX|SupportForge) Ticket #/.test(String((entry as Record<string, unknown>).title ?? ''))))) {
+      archivedEmbeds.some((entry) => /(?:QueryFixr|SupportForge) Ticket #/.test(String((entry as Record<string, unknown>).title ?? ''))))) {
       continue;
     }
 
@@ -801,13 +1057,13 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
         .setColor(color)
         .setTitle(('Recovered message • ' + author).slice(0, 256))
         .setDescription(
-          'This content was reposted by ResolvX from its durable archive. It is not an original Discord message authored by the user.\n\n' +
+          'This content was reposted by QueryFixr from its durable archive. It is not an original Discord message authored by the user.\n\n' +
           '**Original author:** ' + author + ' (user ID: ' + archived.author_id + ')\n' +
           '**Original channel ID:** ' + archived.original_channel_id + '\n' +
           '**Original message ID:** ' + archived.message_id + '\n' +
           '**Original timestamp (UTC):** ' + originalCreatedAt,
         )
-        .setFooter({ text: RECOVERY_FOOTER_PREFIX + ' • Original message ID ' + archived.message_id });
+        .setFooter({ text: RECOVERY_FOOTER_PREFIX + ' • Original message ID ' + archived.message_id + recoverySegmentMarker(recoveryEventId, archived.message_id, 'header') });
       try {
         if (archived.author_avatar_url) header.setAuthor({ name: author.slice(0, 256), iconURL: archived.author_avatar_url });
       } catch { /* An expired avatar URL does not block message replay. */ }
@@ -824,7 +1080,7 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
           value: componentCount + ' control(s) were present. Historical controls are not reactivated during replay; the live ticket panel has been rebuilt with current safe actions.',
         });
       }
-      await channel.send({ embeds: [header], allowedMentions: { parse: [] } });
+      await sendRecoverySegment(channel, { embeds: [header], allowedMentions: { parse: [] } }, recoveryEventId, archived.message_id, 'header', seenMarkers);
 
       const content = archived.content ?? '';
       if (content) {
@@ -832,16 +1088,18 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
         for (let part = 0; part < chunks.length; part += 1) {
           const partLabel = chunks.length > 1 ? ' • part ' + (part + 1) + '/' + chunks.length : '';
           const prefix = attribution + partLabel + '\n';
-          await channel.send({
-            content: prefix + chunks[part],
+          const marker = recoverySegmentMarker(recoveryEventId, archived.message_id, 'content:' + part);
+          await sendRecoverySegment(channel, {
+            content: prefix + chunks[part] + marker,
             allowedMentions: { parse: [] },
-          });
+          }, recoveryEventId, archived.message_id, 'content:' + part, seenMarkers);
         }
       } else if (archivedEmbeds.length === 0 && archivedComponents.length === 0) {
-        await channel.send({
-          content: attribution + '\n[The original message contained no text content.]',
+        const marker = recoverySegmentMarker(recoveryEventId, archived.message_id, 'empty-content');
+        await sendRecoverySegment(channel, {
+          content: attribution + '\n[The original message contained no text content.]' + marker,
           allowedMentions: { parse: [] },
-        });
+        }, recoveryEventId, archived.message_id, 'empty-content', seenMarkers);
       }
 
       // Embeds are replayed separately so recovery attribution cannot push an
@@ -850,11 +1108,12 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
         try { return [EmbedBuilder.from(entry as APIEmbed)]; } catch { return []; }
       });
       for (let index = 0; index < originalEmbeds.length; index += 5) {
-        await channel.send({
-          content: attribution + (originalEmbeds.length > 5 ? ' • archived embed ' + (index + 1) + '-' + Math.min(index + 5, originalEmbeds.length) + '/' + originalEmbeds.length : ' • original embed'),
+        const marker = recoverySegmentMarker(recoveryEventId, archived.message_id, 'embeds:' + index);
+        await sendRecoverySegment(channel, {
+          content: attribution + (originalEmbeds.length > 5 ? ' • archived embed ' + (index + 1) + '-' + Math.min(index + 5, originalEmbeds.length) + '/' + originalEmbeds.length : ' • original embed') + marker,
           embeds: originalEmbeds.slice(index, index + 5),
           allowedMentions: { parse: [] },
-        });
+        }, recoveryEventId, archived.message_id, 'embeds:' + index, seenMarkers);
       }
 
       const attachmentRows = await pool.query<AttachmentArchiveRow>(
@@ -865,13 +1124,15 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
       for (const attachment of attachmentRows.rows) {
         if (attachment.archived_bytes && attachment.archive_status === 'archived') {
           try {
-            await channel.send({
-              content: attribution + '\n📎 Recovered attachment: ' + attachment.original_filename,
+            const marker = recoverySegmentMarker(recoveryEventId, archived.message_id, 'attachment:' + attachment.attachment_id);
+            await sendRecoverySegment(channel, {
+              content: attribution + '\n📎 Recovered attachment: ' + attachment.original_filename + marker,
               files: [new AttachmentBuilder(attachment.archived_bytes, { name: safeFilename(attachment.original_filename) })],
               allowedMentions: { parse: [] },
-            });
+            }, recoveryEventId, archived.message_id, 'attachment:' + attachment.attachment_id, seenMarkers);
           } catch (error) {
-            unavailable.push(attachment.original_filename + ' (upload failed: ' + (error instanceof Error ? error.message : 'unknown error') + ')');
+            if (error instanceof RecoverySegmentPersistenceError) throw error;
+            unavailable.push(attachment.original_filename + ' (upload failed: ' + (error instanceof Error ? error.name : 'unknown error') + ')');
           }
         } else {
           unavailable.push(attachment.original_filename + (attachment.archive_error ? ' (' + attachment.archive_error + ')' : ' (file bytes were not archived)'));
@@ -879,11 +1140,14 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
       }
       if (unavailable.length) {
         const unavailableParts = chunkText(unavailable.join('\n'), 1500);
-        for (const part of unavailableParts) {
-          await channel.send({
-            content: attribution + '\nAttachments that could not be restored:\n' + part,
+        for (let partIndex = 0; partIndex < unavailableParts.length; partIndex += 1) {
+          const part = unavailableParts[partIndex]!;
+          const segmentKey = 'unavailable-attachments:' + partIndex;
+          const marker = recoverySegmentMarker(recoveryEventId, archived.message_id, segmentKey);
+          await sendRecoverySegment(channel, {
+            content: attribution + '\nAttachments that could not be restored:\n' + part + marker,
             allowedMentions: { parse: [] },
-          });
+          }, recoveryEventId, archived.message_id, segmentKey, seenMarkers);
         }
       }
       await pool.query(
@@ -894,7 +1158,9 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
       restored += 1;
     } catch (error) {
       failed += 1;
-      console.warn('ResolvX could not replay archived message ' + archived.message_id + ':', error instanceof Error ? error.message : 'unknown error');
+      console.warn('QueryFixr could not replay archived message ' + archived.message_id + ':', error instanceof Error ? error.message : 'unknown error');
+      // Fail fast: don't push an uncertain partial replay out of the recent-history retry window.
+      return { restored, failed };
     }
     }
 
@@ -908,7 +1174,7 @@ async function replayArchivedMessages(channel: TextChannel, ticketId: string, re
 }
 
 /** Recreate a deleted ticket in a new channel and replay its archived conversation. */
-export async function restoreArchivedTicket(
+async function restoreArchivedTicketUnlocked(
   guild: Guild,
   ticketId: string,
   source: 'discord_native' | 'ticket_button',
@@ -1010,7 +1276,7 @@ export async function restoreArchivedTicket(
       position: snapshot?.position,
       nsfw: snapshot?.nsfw ?? false,
       rateLimitPerUser: snapshot?.rate_limit_per_user ?? 0,
-      reason: 'ResolvX ticket recovery; original channel ID ' + recoveryEvent.original_channel_id,
+      reason: 'QueryFixr ticket recovery; original channel ID ' + recoveryEvent.original_channel_id,
     });
     await pool.query(
       "UPDATE ticket_recovery_events SET status='restoring', replacement_channel_id=$2, updated_at=NOW(), resolved_at=NULL WHERE id=$1",
@@ -1065,4 +1331,18 @@ export async function restoreArchivedTicket(
     failedMessages: replay.failed,
     ticketNumber: ticket.ticketNumber ?? ticketId.slice(0, 8),
   };
+}
+
+
+/** Serialize restore attempts for this ticket/deletion path across bot processes. */
+export async function restoreArchivedTicket(
+  guild: Guild,
+  ticketId: string,
+  source: 'discord_native' | 'ticket_button',
+): Promise<{ channelId: string; restoredMessages: number; failedMessages: number; ticketNumber: string }> {
+  return withPostgresAdvisoryLock(
+    'resolvx:ticket-restore:' + guild.id + ':' + ticketId + ':' + source,
+    'A restoration for this ticket is already running in another process. Check the recovery record before retrying.',
+    () => restoreArchivedTicketUnlocked(guild, ticketId, source),
+  );
 }

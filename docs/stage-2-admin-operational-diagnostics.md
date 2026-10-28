@@ -100,3 +100,11 @@ The following checks require an authorized non-production Discord guild/bot or a
 - Diagnostics use the existing configuration-reader APIs; on a completely new guild, those APIs may initialize default JSON configuration documents. They do not repair or delete Discord resources.
 - Discord and PostgreSQL cannot share a single atomic transaction. Configuration restore uses a checkpoint plus compensation, but operators must still inspect logs when compensation itself reports failure.
 - Real-guild acceptance and a non-production Neon restore drill cannot be performed from CI alone.
+
+
+## Re-audit addendum — 2026-10-23
+
+The current Stage 2 candidate is [PR #32](https://github.com/Annant2122011/supportforge/pull/32), head `d305308cd7d1fee896f5466f3419995c08e7e12a`, still a draft stacked on Stage 1 PR #31. Recorded CI [#2065](https://github.com/Annant2122011/supportforge/actions/runs/39974451567) passed build, 172/172 tests with zero skipped, and disposable PostgreSQL verification. This does not verify production Neon or live Discord.
+
+Still open: live Discord role/permission/interaction acceptance; large-guild and concurrent-admin stress; injected failure testing for restore compensation; isolated non-production Neon backup/restore; and remaining Stage H2 Settings/panel-preview/report locale coverage. Operational task telemetry is process-local and resets on restart; it is not persistent monitoring. Stage 2 is not production-accepted until these gates are recorded. Keep review order #33 → #31 → #32 and do not merge Stage 2 independently.
+
