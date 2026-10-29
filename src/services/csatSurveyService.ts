@@ -348,13 +348,16 @@ async function deliverSurvey(survey: CsatSurveyRow, client: Client): Promise<voi
   const ticket = await pool.query<QueryResultRow & {
     status: string; deleted_at: Date | string | null; owner_id: string | null; ticket_number: string | null;
   }>(
-    'SELECT status,deleted_at,owner_id,ticket_number FROM tickets WHERE id=$1 AND guild_id=$2',
+    'SELECT t.status,t.deleted_at,t.owner_id,t.ticket_number, ' +
+      '(SELECT e.id FROM ticket_events e WHERE e.ticket_id=t.id AND e.guild_id=t.guild_id ' +
+      "AND e.event_type='ticket.status_changed' AND e.payload->>'to'='closed' ORDER BY e.created_at DESC,e.id DESC LIMIT 1) AS latest_closure_event_id " +
+      'FROM tickets t WHERE t.id=$1 AND t.guild_id=$2',
     [survey.ticket_id, survey.guild_id],
   );
   const ticketRow = ticket.rows[0];
   if (!ticketRow || ticketRow.deleted_at || !ticketRow.owner_id || ticketRow.owner_id !== survey.owner_id ||
-      !['closed', 'archived'].includes(ticketRow.status)) {
-    await cancelSurvey(survey.id, 'Ticket is no longer eligible for a customer satisfaction survey.');
+      !['closed', 'archived'].includes(ticketRow.status) || ticketRow.latest_closure_event_id !== survey.closure_event_id) {
+    await cancelSurvey(survey.id, 'Ticket is no longer eligible for a customer satisfaction survey or its close cycle changed.');
     return;
   }
 
