@@ -137,7 +137,7 @@ export async function setCsatSurveysEnabled(
     if (!enabled) {
       await connection.query(
         "UPDATE support_csat_surveys SET status='cancelled',processing_until=NULL,updated_at=NOW() " +
-          "WHERE guild_id=$1 AND status IN ('pending','sending','failed')",
+          "WHERE guild_id=$1 AND status IN ('pending','failed')",
         [guildId],
       );
     }
@@ -548,7 +548,7 @@ export async function submitCsatSurveyRating(
         alreadySubmitted: true,
       };
     }
-    if (row.status !== 'sent' && row.status !== 'responded') {
+    if (row.status !== 'sent') {
       throw new Error('This survey is not currently accepting a response.');
     }
     const responseId = randomUUID();
