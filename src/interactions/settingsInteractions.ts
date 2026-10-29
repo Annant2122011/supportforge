@@ -653,6 +653,7 @@ const SETTINGS_LAYOUT_LABELS: Record<SettingsDashboardButtonKey, string> = {
   tags: 'Tags / Departments',
   usecases: 'Use Cases',
   reports: 'Safety & Reports',
+  sla: 'SLA & Queue',
   analytics: 'Analytics',
   retention: 'Retention',
   appearance: 'Public Panel Appearance',
@@ -676,7 +677,7 @@ const SETTINGS_LAYOUT_LABELS: Record<SettingsDashboardButtonKey, string> = {
 
 const SETTINGS_LAYOUT_DEFAULT_EMOJIS: Record<SettingsDashboardButtonKey, string> = {
   panel: '🎛️', defaults: '🎟️', tags: '🏷️', usecases: '🧩', reports: '🚩',
-  analytics: '📊',
+  sla: '⏱️', analytics: '📊',
   retention: '🧹', appearance: '🎨', storage: '🗄️', rules: '🛡️', repair: '🛠️',
   team: '👥', manual: '📖', forms: '🧾', refresh: '🔄', reset: '🚨', theme: '🌈',
   premium: '💎', panels: '🧱', 'dashboard-builder': '🧰', 'support-hours': '🕒', 'ticket-workspace': '🧵',
