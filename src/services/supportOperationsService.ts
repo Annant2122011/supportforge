@@ -591,10 +591,18 @@ export async function createSupportQueueSnapshot(
   const id = randomUUID();
   const createdAt = new Date().toISOString();
   const snapshot = { id, guildId, createdAt, items };
-  await getPostgresPool().query(
+  const pool = getPostgresPool();
+  await pool.query(
     'INSERT INTO support_sla_queue_snapshots (id,guild_id,created_by,filters,items,item_count,created_at) ' +
       'VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7::timestamptz)',
     [id, guildId, actorId, JSON.stringify({ limit: safeLimit, sort: 'priority_then_age' }), JSON.stringify(items), items.length, createdAt],
+  );
+  // Keep a useful rolling history without allowing a frequently refreshed UI
+  // to grow durable snapshot storage without bound.
+  await pool.query(
+    'DELETE FROM support_sla_queue_snapshots WHERE guild_id=$1 AND id NOT IN (' +
+      'SELECT id FROM support_sla_queue_snapshots WHERE guild_id=$1 ORDER BY created_at DESC,id DESC OFFSET 500)',
+    [guildId],
   );
   return snapshot;
 }
