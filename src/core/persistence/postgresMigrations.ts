@@ -1030,6 +1030,24 @@ const MIGRATIONS: readonly PostgresMigration[] = [
         );
         CREATE INDEX IF NOT EXISTS idx_support_sla_policy_versions_guild_created
           ON support_sla_policy_versions (guild_id, created_at DESC);
+        INSERT INTO support_sla_policy_versions
+          (id,guild_id,policy_id,policy_version,snapshot,actor_id,created_at)
+        SELECT
+          'baseline:' || p.id || ':' || p.version,
+          p.guild_id,
+          p.id,
+          p.version,
+          jsonb_build_object(
+            'id',p.id,'guildId',p.guild_id,'departmentId',p.department_id,'priority',p.priority,
+            'firstResponseMinutes',p.first_response_minutes,'claimMinutes',p.claim_minutes,
+            'resolutionMinutes',p.resolution_minutes,'pauseWhilePending',p.pause_while_pending,
+            'useBusinessHours',p.use_business_hours,'warningRatio',p.warning_ratio,
+            'enabled',p.enabled,'version',p.version,'updatedAt',p.updated_at,'updatedBy',p.updated_by
+          ),
+          COALESCE(p.updated_by,'system'),
+          p.updated_at
+        FROM support_sla_policies p
+        ON CONFLICT (policy_id,policy_version) DO NOTHING;
 
         CREATE TABLE IF NOT EXISTS support_sla_monitor_state (
           guild_id TEXT PRIMARY KEY,
