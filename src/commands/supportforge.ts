@@ -2691,7 +2691,7 @@ export async function execute(
 
       if (subcommand === 'escalation-send') {
         const previewId = interaction.options.getString('preview-id', true).trim();
-        const outcome = await executeSupportSlaEscalationPreview(client, guild.id, previewId, interaction.user.id);
+        const outcome = await executeSupportSlaEscalationPreview(interaction.client, guild.id, previewId, interaction.user.id);
         const config = await getGuildConfig(guild.id);
         if (config.supportCategoryId) {
           await logSettingsEvent(guild, config.supportCategoryId, {
