@@ -31,7 +31,7 @@ function parseJson(payload: string, key: string): unknown {
     return JSON.parse(payload) as unknown;
   } catch (error) {
     throw new Error(
-      'ResolvX database document "' + key + '" contains invalid JSON.',
+      'QueryFixr database document "' + key + '" contains invalid JSON.',
       { cause: error },
     );
   }
@@ -40,7 +40,7 @@ function parseJson(payload: string, key: string): unknown {
 function serialized(value: unknown): string {
   const result = JSON.stringify(value);
   if (result === undefined) {
-    throw new Error('ResolvX JSON documents cannot store undefined.');
+    throw new Error('QueryFixr JSON documents cannot store undefined.');
   }
   return result;
 }
@@ -122,7 +122,7 @@ function readLegacyDocument(path: string): unknown {
     parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
   } catch (error) {
     throw new Error(
-      'ResolvX cannot import legacy file "' + path +
+      'QueryFixr cannot import legacy file "' + path +
       '" because it is invalid JSON. The source file was not modified.',
       { cause: error },
     );
@@ -130,7 +130,7 @@ function readLegacyDocument(path: string): unknown {
 
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(
-      'ResolvX cannot import legacy file "' + path +
+      'QueryFixr cannot import legacy file "' + path +
       '" because the root value must be a JSON object. The source file was not modified.',
     );
   }
@@ -194,7 +194,7 @@ export async function importLegacyJsonDocuments(
         lastError = error;
         if (candidatePath !== candidates[candidates.length - 1]) {
           console.warn(
-            '⚠️ Legacy ResolvX file could not be imported; trying its configured backup: ' +
+            '⚠️ Legacy QueryFixr file could not be imported; trying its configured backup: ' +
             candidatePath,
           );
         }
@@ -203,7 +203,7 @@ export async function importLegacyJsonDocuments(
 
     if (!selectedPath) {
       throw new Error(
-        'ResolvX could not import legacy document "' + document.key +
+        'QueryFixr could not import legacy document "' + document.key +
         '". All available source files were invalid; no source was modified.',
         { cause: lastError },
       );
@@ -224,7 +224,7 @@ export async function importLegacyJsonDocuments(
 
   if (imported.length) {
     console.info(
-      '✅ Imported legacy ResolvX JSON documents into durable storage: ' +
+      '✅ Imported legacy QueryFixr JSON documents into durable storage: ' +
       imported.join(', ') + '. Legacy files and backups were retained.',
     );
   }
