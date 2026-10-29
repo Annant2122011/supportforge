@@ -2856,7 +2856,7 @@ export async function handleSettingsInteraction(
         description += '\n\n' + (route?.enabled
           ? translate(locale, 'settings.sla.route.configured') + ': <#' + route.channelId + '>'
           : translate(locale, 'settings.sla.route.missing')) +
-          '\n\nCommands: /supportforge diagnostics sla-set, sla-route-set, queue, sla-alerts, sla-ack, escalation-preview.';
+          '\n\nCommands: /supportforge diagnostics sla-set, sla-route-set, queue, sla-alerts, sla-report, sla-ack, escalation-preview.';
         extraRows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
           new ButtonBuilder().setCustomId('sf:settings:sla:route-edit')
             .setLabel(translate(locale, 'settings.sla.configureRoute')).setEmoji('📣').setStyle(ButtonStyle.Primary),
