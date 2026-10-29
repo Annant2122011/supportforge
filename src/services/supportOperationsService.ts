@@ -234,6 +234,31 @@ export async function evaluateTicketSla(
     };
   }
 
+  let businessTime: { timezone: string; weeklySchedule: import('./supportHoursService').SupportHoursWeeklySchedule } | undefined;
+  if (policy.useBusinessHours) {
+    const supportHoursPolicies = await getSupportHoursPolicies(guildId);
+    const effectiveHours = resolveEffectiveSupportHoursPolicy(supportHoursPolicies, {
+      departmentId: ticket.departmentId ?? undefined,
+    });
+    if (!effectiveHours || !effectiveHours.enabled) {
+      return {
+        ticketId: ticket.id,
+        channelId: ticket.channelId,
+        ticketNumber: ticket.ticketNumber,
+        status: ticket.status,
+        policy,
+        firstResponseAt: null,
+        claimedAt: null,
+        resolvedAt: null,
+        firstResponse: null,
+        claim: null,
+        resolution: null,
+        warning: 'This SLA policy uses business time, but no enabled support-hours policy applies to this ticket. The clock is not inferred.',
+      };
+    }
+    businessTime = { timezone: effectiveHours.timezone, weeklySchedule: effectiveHours.weeklySchedule };
+  }
+
   const pool = getPostgresPool();
   const [eventsResult, firstResponseResult] = await Promise.all([
     pool.query<QueryResultRow & { event_type: string; created_at: Date | string; payload: Record<string, unknown> | null }>(
@@ -270,6 +295,7 @@ export async function evaluateTicketSla(
     warningRatio: policy.warningRatio,
     pauseWhilePending: policy.pauseWhilePending,
     events,
+    businessTime,
   });
   const claim = evaluateSlaTarget({
     clockKind: 'claim',
@@ -281,6 +307,7 @@ export async function evaluateTicketSla(
     warningRatio: policy.warningRatio,
     pauseWhilePending: policy.pauseWhilePending,
     events,
+    businessTime,
   });
   const resolution = evaluateSlaTarget({
     clockKind: 'resolution',
@@ -292,6 +319,7 @@ export async function evaluateTicketSla(
     warningRatio: policy.warningRatio,
     pauseWhilePending: policy.pauseWhilePending,
     events,
+    businessTime,
   });
 
   const warning = firstResponse.progress === 'breached'
