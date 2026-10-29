@@ -652,6 +652,99 @@ export async function listRecentSupportSlaAlerts(guildId: string, limit = 10): P
   }));
 }
 
+export interface SupportSlaOperationalSummary {
+  from: string;
+  to: string;
+  activePolicies: number;
+  totalAlerts: number;
+  warningAlerts: number;
+  breachAlerts: number;
+  deliverySent: number;
+  deliveryPending: number;
+  deliveryFailed: number;
+  legacyUntracked: number;
+  acknowledgedAlerts: number;
+  unacknowledgedAlerts: number;
+  latestAlertAt: string | null;
+  targetCounts: { firstResponse: number; claim: number; resolution: number };
+}
+
+/**
+ * Report measured SLA alert activity and delivery outcomes. This intentionally
+ * does not fabricate an SLA-compliance percentage from the absence of alerts:
+ * historical coverage can be incomplete, and "no alert" is not proof of "met".
+ */
+export async function getSupportSlaOperationalSummary(
+  guildId: string,
+  from: string,
+  to: string,
+): Promise<SupportSlaOperationalSummary> {
+  const fromMs = Date.parse(from);
+  const toMs = Date.parse(to);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs >= toMs) {
+    throw new Error('SLA report window must contain valid timestamps with the end after the start.');
+  }
+  const pool = getPostgresPool();
+  const [policyResult, alertsResult] = await Promise.all([
+    pool.query<QueryResultRow & { count: string | number }>(
+      'SELECT COUNT(*)::text AS count FROM support_sla_policies WHERE guild_id=$1 AND enabled=TRUE',
+      [guildId],
+    ),
+    pool.query<QueryResultRow & {
+      total_alerts: string | number;
+      warning_alerts: string | number;
+      breach_alerts: string | number;
+      delivery_sent: string | number;
+      delivery_pending: string | number;
+      delivery_failed: string | number;
+      legacy_untracked: string | number;
+      acknowledged_alerts: string | number;
+      latest_alert_at: Date | string | null;
+      first_response_count: string | number;
+      claim_count: string | number;
+      resolution_count: string | number;
+    }>(
+      'SELECT COUNT(*)::text AS total_alerts, ' +
+        "COUNT(*) FILTER (WHERE progress='warning')::text AS warning_alerts, " +
+        "COUNT(*) FILTER (WHERE progress='breached')::text AS breach_alerts, " +
+        "COUNT(*) FILTER (WHERE delivery_status='sent')::text AS delivery_sent, " +
+        "COUNT(*) FILTER (WHERE delivery_status='pending')::text AS delivery_pending, " +
+        "COUNT(*) FILTER (WHERE delivery_status='failed')::text AS delivery_failed, " +
+        "COUNT(*) FILTER (WHERE delivery_status='legacy')::text AS legacy_untracked, " +
+        "COUNT(*) FILTER (WHERE acknowledged_at IS NOT NULL)::text AS acknowledged_alerts, " +
+        'MAX(observed_at) AS latest_alert_at, ' +
+        "COUNT(*) FILTER (WHERE target_type='first_response')::text AS first_response_count, " +
+        "COUNT(*) FILTER (WHERE target_type='claim')::text AS claim_count, " +
+        "COUNT(*) FILTER (WHERE target_type='resolution')::text AS resolution_count " +
+        'FROM support_sla_alerts WHERE guild_id=$1 AND observed_at >= $2::timestamptz AND observed_at < $3::timestamptz',
+      [guildId, new Date(fromMs).toISOString(), new Date(toMs).toISOString()],
+    ),
+  ]);
+  const row = alertsResult.rows[0]!;
+  const count = (value: string | number | null | undefined) => Math.max(0, Number(value ?? 0));
+  const latestAlertAt = toIso(row.latest_alert_at);
+  return {
+    from: new Date(fromMs).toISOString(),
+    to: new Date(toMs).toISOString(),
+    activePolicies: count(policyResult.rows[0]?.count),
+    totalAlerts: count(row.total_alerts),
+    warningAlerts: count(row.warning_alerts),
+    breachAlerts: count(row.breach_alerts),
+    deliverySent: count(row.delivery_sent),
+    deliveryPending: count(row.delivery_pending),
+    deliveryFailed: count(row.delivery_failed),
+    legacyUntracked: count(row.legacy_untracked),
+    acknowledgedAlerts: count(row.acknowledged_alerts),
+    unacknowledgedAlerts: Math.max(0, count(row.total_alerts) - count(row.acknowledged_alerts)),
+    latestAlertAt,
+    targetCounts: {
+      firstResponse: count(row.first_response_count),
+      claim: count(row.claim_count),
+      resolution: count(row.resolution_count),
+    },
+  };
+}
+
 export async function acknowledgeSupportSlaAlert(
   guildId: string,
   alertId: string,
