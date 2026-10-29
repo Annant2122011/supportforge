@@ -515,6 +515,16 @@ function localMinuteToInstant(
   throw new Error('Could not resolve a scheduled local time in time zone ' + timezone + '.');
 }
 
+export function getSupportHoursIntervalInstants(
+  year: number,
+  month: number,
+  day: number,
+  interval: SupportHoursInterval,
+  timezone: string,
+): { start: Date; end: Date } {
+  return intervalInstants(year, month, day, interval, timezone);
+}
+
 function intervalInstants(
   year: number,
   month: number,

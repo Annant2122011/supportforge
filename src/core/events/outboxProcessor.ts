@@ -193,7 +193,7 @@ export function startOutboxProcessor(
 
     void runTrackedOperationalTask('outbox-processor', null, () => processOutboxBatch(publisher))
       .catch((error) => {
-        console.error('ResolvX outbox processor failed:', error);
+        console.error('QueryFixr outbox processor failed:', error);
       })
       .finally(() => {
         running = false;

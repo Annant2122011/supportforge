@@ -84,7 +84,7 @@ async function main(): Promise<void> {
   await mkdir(directory, { recursive: true });
 
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
-  const filename = 'resolvx-neon-' + stamp + '-' + randomUUID().slice(0, 8) + '.dump';
+  const filename = 'queryfixr-neon-' + stamp + '-' + randomUUID().slice(0, 8) + '.dump';
   if (!isSafeBackupFilename(filename)) throw new Error('Generated backup filename failed validation.');
   const finalPath = join(directory, filename);
   const temporaryPath = join(directory, '.' + filename + '.partial');

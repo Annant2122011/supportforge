@@ -1010,6 +1010,140 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+  {
+    id: 22,
+    name: 'stage_l_sla_versions_monitor_delivery_and_queue_snapshots',
+    up: async (db) => {
+      await db.query(`
+        ALTER TABLE support_sla_policies
+          ADD COLUMN IF NOT EXISTS use_business_hours BOOLEAN NOT NULL DEFAULT FALSE;
+
+        CREATE TABLE IF NOT EXISTS support_sla_policy_versions (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          policy_id TEXT NOT NULL REFERENCES support_sla_policies(id),
+          policy_version INTEGER NOT NULL CHECK (policy_version > 0),
+          snapshot JSONB NOT NULL,
+          actor_id TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (policy_id, policy_version)
+        );
+        CREATE INDEX IF NOT EXISTS idx_support_sla_policy_versions_guild_created
+          ON support_sla_policy_versions (guild_id, created_at DESC);
+        INSERT INTO support_sla_policy_versions
+          (id,guild_id,policy_id,policy_version,snapshot,actor_id,created_at)
+        SELECT
+          'baseline:' || p.id || ':' || p.version,
+          p.guild_id,
+          p.id,
+          p.version,
+          jsonb_build_object(
+            'id',p.id,'guildId',p.guild_id,'departmentId',p.department_id,'priority',p.priority,
+            'firstResponseMinutes',p.first_response_minutes,'claimMinutes',p.claim_minutes,
+            'resolutionMinutes',p.resolution_minutes,'pauseWhilePending',p.pause_while_pending,
+            'useBusinessHours',p.use_business_hours,'warningRatio',p.warning_ratio,
+            'enabled',p.enabled,'version',p.version,'updatedAt',p.updated_at,'updatedBy',p.updated_by
+          ),
+          COALESCE(p.updated_by,'system'),
+          p.updated_at
+        FROM support_sla_policies p
+        ON CONFLICT (policy_id,policy_version) DO NOTHING;
+
+        CREATE TABLE IF NOT EXISTS support_sla_monitor_state (
+          guild_id TEXT PRIMARY KEY,
+          cursor_ticket_id TEXT,
+          lease_owner TEXT,
+          lease_until TIMESTAMPTZ,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          CHECK ((lease_owner IS NULL) = (lease_until IS NULL))
+        );
+        CREATE INDEX IF NOT EXISTS idx_support_sla_monitor_lease
+          ON support_sla_monitor_state (lease_until);
+
+        ALTER TABLE support_sla_alerts
+          ADD COLUMN IF NOT EXISTS delivery_status TEXT NOT NULL DEFAULT 'legacy';
+        ALTER TABLE support_sla_alerts
+          ADD COLUMN IF NOT EXISTS delivery_attempts INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE support_sla_alerts
+          ADD COLUMN IF NOT EXISTS delivery_next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+        ALTER TABLE support_sla_alerts
+          ADD COLUMN IF NOT EXISTS delivery_last_error TEXT;
+        ALTER TABLE support_sla_alerts
+          ADD COLUMN IF NOT EXISTS delivery_message_id TEXT;
+        ALTER TABLE support_sla_alerts
+          ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ;
+        -- Existing alert rows predate receipt tracking and must not be replayed
+        -- as if they were new notifications when Stage L is first deployed.
+        UPDATE support_sla_alerts
+          SET delivery_status='legacy'
+          WHERE delivery_message_id IS NULL AND delivered_at IS NULL AND delivery_attempts=0;
+        ALTER TABLE support_sla_alerts
+          ADD COLUMN IF NOT EXISTS acknowledged_by TEXT;
+        ALTER TABLE support_sla_alerts
+          ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMPTZ;
+        ALTER TABLE support_sla_alerts
+          DROP CONSTRAINT IF EXISTS support_sla_alerts_delivery_status_check;
+        ALTER TABLE support_sla_alerts
+          ADD CONSTRAINT support_sla_alerts_delivery_status_check
+          CHECK (delivery_status IN ('legacy','pending','sent','failed'));
+        CREATE INDEX IF NOT EXISTS idx_support_sla_alerts_delivery_due
+          ON support_sla_alerts (guild_id, delivery_status, delivery_next_attempt_at)
+          WHERE delivery_status IN ('pending','failed');
+
+        CREATE TABLE IF NOT EXISTS support_sla_notification_routes (
+          guild_id TEXT PRIMARY KEY,
+          channel_id TEXT NOT NULL,
+          supervisor_role_id TEXT,
+          enabled BOOLEAN NOT NULL DEFAULT TRUE,
+          updated_by TEXT NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS support_sla_queue_snapshots (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          created_by TEXT NOT NULL,
+          filters JSONB NOT NULL DEFAULT '{}'::jsonb,
+          items JSONB NOT NULL,
+          item_count INTEGER NOT NULL CHECK (item_count >= 0),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_support_sla_queue_snapshots_guild_created
+          ON support_sla_queue_snapshots (guild_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS support_sla_escalation_previews (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          ticket_id TEXT NOT NULL REFERENCES tickets(id),
+          policy_id TEXT NOT NULL REFERENCES support_sla_policies(id),
+          policy_version INTEGER NOT NULL,
+          lifecycle_cycle_started_at TIMESTAMPTZ NOT NULL,
+          preview JSONB NOT NULL,
+          created_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          expires_at TIMESTAMPTZ NOT NULL,
+          CHECK (expires_at > created_at)
+        );
+        CREATE INDEX IF NOT EXISTS idx_support_sla_escalation_previews_due
+          ON support_sla_escalation_previews (guild_id, expires_at DESC);
+        ALTER TABLE support_sla_escalation_previews
+          ADD COLUMN IF NOT EXISTS execution_status TEXT NOT NULL DEFAULT 'preview';
+        ALTER TABLE support_sla_escalation_previews
+          ADD COLUMN IF NOT EXISTS executed_by TEXT;
+        ALTER TABLE support_sla_escalation_previews
+          ADD COLUMN IF NOT EXISTS executed_at TIMESTAMPTZ;
+        ALTER TABLE support_sla_escalation_previews
+          ADD COLUMN IF NOT EXISTS delivery_message_id TEXT;
+        ALTER TABLE support_sla_escalation_previews
+          ADD COLUMN IF NOT EXISTS execution_error TEXT;
+        ALTER TABLE support_sla_escalation_previews
+          DROP CONSTRAINT IF EXISTS support_sla_escalation_previews_execution_status_check;
+        ALTER TABLE support_sla_escalation_previews
+          ADD CONSTRAINT support_sla_escalation_previews_execution_status_check
+          CHECK (execution_status IN ('preview','attempted','delivered','failed'));
+      `);
+    },
+  },
 ];
 
 /** Latest migration identifier required by this application version. */

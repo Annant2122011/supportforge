@@ -70,7 +70,7 @@ test('Stage C lifecycle policy accepts valid transitions and rejects invalid one
 
   assert.throws(
     () => assertTicketStatusTransition('archived', 'open'),
-    /Invalid ResolvX ticket lifecycle transition/,
+    /Invalid QueryFixr ticket lifecycle transition/,
   );
 });
 
@@ -246,7 +246,7 @@ test('invalid status transitions do not mutate durable state or create events', 
           'open',
           '2026-10-06T12:02:00.000Z',
         ),
-      /Invalid ResolvX ticket lifecycle transition/,
+      /Invalid QueryFixr ticket lifecycle transition/,
     );
 
     assert.equal(tickets.getByChannelId('channel-c-1')?.status, 'archived');
