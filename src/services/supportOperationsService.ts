@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ChannelType, type Client } from 'discord.js';
+import { ChannelType, EmbedBuilder, type Client } from 'discord.js';
 import type { QueryResultRow } from 'pg';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
@@ -183,7 +183,7 @@ export async function saveSupportSlaPolicy(
   return saved;
 }
 
-export async function deleteSupportSlaPolicy(guildId: string, policyId: string): Promise<boolean> {
+export async function deleteSupportSlaPolicy(guildId: string, policyId: string, actorId = 'system'): Promise<boolean> {
   // Retire rather than physically delete. The new version snapshot is committed
   // atomically with the state change; policy edits must remain auditable.
   const pool = getPostgresPool();
@@ -196,11 +196,11 @@ export async function deleteSupportSlaPolicy(guildId: string, policyId: string):
       pause_while_pending: boolean; use_business_hours: boolean; warning_ratio: string | number;
       enabled: boolean; version: number; updated_at: Date | string; updated_by: string | null;
     }>(
-      'UPDATE support_sla_policies SET enabled=FALSE,version=version+1,updated_at=NOW() ' +
+      'UPDATE support_sla_policies SET enabled=FALSE,version=version+1,updated_by=$3,updated_at=NOW() ' +
         'WHERE guild_id=$1 AND id=$2 AND enabled=TRUE ' +
         'RETURNING id,guild_id,department_id,priority,first_response_minutes,claim_minutes,resolution_minutes,' +
         'pause_while_pending,use_business_hours,warning_ratio,enabled,version,updated_at,updated_by',
-      [guildId, policyId],
+      [guildId, policyId, actorId],
     );
     const row = updated.rows[0];
     if (!row) {
