@@ -1061,7 +1061,7 @@ const MIGRATIONS: readonly PostgresMigration[] = [
           ON support_sla_monitor_state (lease_until);
 
         ALTER TABLE support_sla_alerts
-          ADD COLUMN IF NOT EXISTS delivery_status TEXT NOT NULL DEFAULT 'pending';
+          ADD COLUMN IF NOT EXISTS delivery_status TEXT NOT NULL DEFAULT 'legacy';
         ALTER TABLE support_sla_alerts
           ADD COLUMN IF NOT EXISTS delivery_attempts INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE support_sla_alerts
@@ -1072,6 +1072,11 @@ const MIGRATIONS: readonly PostgresMigration[] = [
           ADD COLUMN IF NOT EXISTS delivery_message_id TEXT;
         ALTER TABLE support_sla_alerts
           ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ;
+        -- Existing alert rows predate receipt tracking and must not be replayed
+        -- as if they were new notifications when Stage L is first deployed.
+        UPDATE support_sla_alerts
+          SET delivery_status='legacy'
+          WHERE delivery_message_id IS NULL AND delivered_at IS NULL AND delivery_attempts=0;
         ALTER TABLE support_sla_alerts
           ADD COLUMN IF NOT EXISTS acknowledged_by TEXT;
         ALTER TABLE support_sla_alerts
@@ -1080,7 +1085,7 @@ const MIGRATIONS: readonly PostgresMigration[] = [
           DROP CONSTRAINT IF EXISTS support_sla_alerts_delivery_status_check;
         ALTER TABLE support_sla_alerts
           ADD CONSTRAINT support_sla_alerts_delivery_status_check
-          CHECK (delivery_status IN ('pending','sent','failed'));
+          CHECK (delivery_status IN ('legacy','pending','sent','failed'));
         CREATE INDEX IF NOT EXISTS idx_support_sla_alerts_delivery_due
           ON support_sla_alerts (guild_id, delivery_status, delivery_next_attempt_at)
           WHERE delivery_status IN ('pending','failed');
