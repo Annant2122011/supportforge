@@ -888,7 +888,7 @@ export async function handleSettingsSlashCommand(
 
     if (action === 'reset') {
       const confirmation = interaction.options.getString('confirmation', true).trim().toUpperCase();
-      if (confirmation !== 'DELETE SUPPORT FORGE') throw new Error('Confirmation must be exactly DELETE SUPPORT FORGE. Nothing was deleted.');
+      if (confirmation !== 'DELETE QUERYFIXR') throw new Error('Confirmation must be exactly DELETE QUERYFIXR. Nothing was deleted.');
       const accumulate = interaction.options.getBoolean('accumulate-audit', true);
       await interaction.editReply('QueryFixr factory reset started. This is destructive and cannot be undone.');
       const result = await performFactoryReset(guild, accumulate);
