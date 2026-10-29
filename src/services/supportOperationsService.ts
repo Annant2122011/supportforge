@@ -184,14 +184,43 @@ export async function saveSupportSlaPolicy(
 }
 
 export async function deleteSupportSlaPolicy(guildId: string, policyId: string): Promise<boolean> {
-  // Retire rather than physically delete. Alert rows and their policy-version references
-  // are historical evidence and must not disappear via ON DELETE CASCADE.
-  const result = await getPostgresPool().query(
-    'UPDATE support_sla_policies SET enabled=FALSE,version=version+1,updated_at=NOW() ' +
-      'WHERE guild_id=$1 AND id=$2 AND enabled=TRUE',
-    [guildId, policyId],
-  );
-  return (result.rowCount ?? 0) > 0;
+  // Retire rather than physically delete. The new version snapshot is committed
+  // atomically with the state change; policy edits must remain auditable.
+  const pool = getPostgresPool();
+  const connection = await pool.connect();
+  try {
+    await connection.query('BEGIN');
+    const updated = await connection.query<QueryResultRow & {
+      id: string; guild_id: string; department_id: string; priority: string;
+      first_response_minutes: number; claim_minutes: number; resolution_minutes: number;
+      pause_while_pending: boolean; use_business_hours: boolean; warning_ratio: string | number;
+      enabled: boolean; version: number; updated_at: Date | string; updated_by: string | null;
+    }>(
+      'UPDATE support_sla_policies SET enabled=FALSE,version=version+1,updated_at=NOW() ' +
+        'WHERE guild_id=$1 AND id=$2 AND enabled=TRUE ' +
+        'RETURNING id,guild_id,department_id,priority,first_response_minutes,claim_minutes,resolution_minutes,' +
+        'pause_while_pending,use_business_hours,warning_ratio,enabled,version,updated_at,updated_by',
+      [guildId, policyId],
+    );
+    const row = updated.rows[0];
+    if (!row) {
+      await connection.query('ROLLBACK');
+      return false;
+    }
+    const snapshot = fromSlaRow(row);
+    await connection.query(
+      'INSERT INTO support_sla_policy_versions (id,guild_id,policy_id,policy_version,snapshot,actor_id) ' +
+        'VALUES ($1,$2,$3,$4,$5::jsonb,$6) ON CONFLICT (policy_id,policy_version) DO NOTHING',
+      [randomUUID(), guildId, snapshot.id, snapshot.version, JSON.stringify(snapshot), snapshot.updatedBy ?? 'system'],
+    );
+    await connection.query('COMMIT');
+    return true;
+  } catch (error) {
+    await connection.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 async function getMatchingSlaPolicy(
