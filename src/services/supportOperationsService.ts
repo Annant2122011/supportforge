@@ -858,12 +858,30 @@ async function deliverPendingSlaAlerts(guildId: string, client: Client): Promise
       if (!channel || channel.type !== ChannelType.GuildText) {
         throw new Error('Configured SLA notification destination is missing or is not a text channel.');
       }
+      const receiptMarker = 'QueryFixr SLA alert receipt: ' + alert.id;
+      // Discord can accept a message even when the following database write times out.
+      // A persistent marker lets the next pass reconcile the receipt without posting twice.
+      const recentMessages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+      const existingReceipt = recentMessages?.find((message) =>
+        message.author.id === client.user?.id &&
+        message.embeds.some((embed) => embed.footer?.text === receiptMarker),
+      );
+      if (existingReceipt) {
+        await pool.query(
+          "UPDATE support_sla_alerts SET delivery_status='sent',delivery_attempts=delivery_attempts+1," +
+            'delivery_message_id=$2,delivered_at=COALESCE(delivered_at,NOW()),delivery_last_error=NULL ' +
+            'WHERE id=$1 AND guild_id=$3',
+          [alert.id, existingReceipt.id, guildId],
+        );
+        continue;
+      }
       const roleMention = route.supervisorRoleId ? '<@&' + route.supervisorRoleId + '> ' : '';
       const message = roleMention + '⏱️ **QueryFixr SLA ' + alert.progress.toUpperCase() + '**\n' +
         alert.detail + '\nTicket: <#' + alert.channel_id + '> (' +
         (alert.ticket_number ? '#' + alert.ticket_number : alert.ticket_id.slice(0, 8)) + ').';
       const sent = await channel.send({
         content: message.slice(0, 1900),
+        embeds: [new EmbedBuilder().setColor(0xD97706).setFooter({ text: receiptMarker })],
         allowedMentions: { parse: [], roles: route.supervisorRoleId ? [route.supervisorRoleId] : [] },
       });
       await pool.query(
