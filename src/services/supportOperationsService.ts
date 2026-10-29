@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Client } from 'discord.js';
+import { ChannelType, EmbedBuilder, type Client } from 'discord.js';
 import type { QueryResultRow } from 'pg';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
@@ -9,6 +9,7 @@ import { runTrackedOperationalTask } from './operationalTaskTelemetry';
 import { evaluateSlaTarget, findFirstClaimAt, findFirstResolutionAt, isValidSlaScope, type SlaLifecycleEvent, type SlaTargetResult } from '../core/domain/supportSla';
 import { normalizeCsatResponse } from '../core/domain/csatPolicy';
 import { getPersistedTicket, getPersistedTicketById } from './ticketPersistenceService';
+import { getSupportHoursPolicies, resolveEffectiveSupportHoursPolicy } from './supportHoursService';
 
 export type SlaPriority = 'low' | 'normal' | 'high' | 'urgent' | 'critical' | '*';
 
@@ -21,6 +22,7 @@ export interface SupportSlaPolicy {
   claimMinutes: number;
   resolutionMinutes: number;
   pauseWhilePending: boolean;
+  useBusinessHours: boolean;
   warningRatio: number;
   enabled: boolean;
   version: number;
@@ -35,6 +37,7 @@ export interface SupportSlaPolicyInput {
   claimMinutes?: number;
   resolutionMinutes: number;
   pauseWhilePending?: boolean;
+  useBusinessHours?: boolean;
   warningRatio?: number;
   enabled?: boolean;
 }
@@ -95,7 +98,7 @@ function boundedMinutes(value: number, field: string): number {
 function fromSlaRow(row: QueryResultRow & {
   id: string; guild_id: string; department_id: string; priority: string;
   first_response_minutes: number; claim_minutes: number; resolution_minutes: number;
-  pause_while_pending: boolean; warning_ratio: string | number; enabled: boolean;
+  pause_while_pending: boolean; use_business_hours: boolean; warning_ratio: string | number; enabled: boolean;
   version: number; updated_at: Date | string; updated_by: string | null;
 }): SupportSlaPolicy {
   return {
@@ -107,6 +110,7 @@ function fromSlaRow(row: QueryResultRow & {
     claimMinutes: Number(row.claim_minutes),
     resolutionMinutes: Number(row.resolution_minutes),
     pauseWhilePending: Boolean(row.pause_while_pending),
+    useBusinessHours: Boolean(row.use_business_hours),
     warningRatio: Number(row.warning_ratio),
     enabled: Boolean(row.enabled),
     version: Number(row.version),
@@ -116,7 +120,7 @@ function fromSlaRow(row: QueryResultRow & {
 }
 
 const SLA_SELECT = 'SELECT id,guild_id,department_id,priority,first_response_minutes,claim_minutes,resolution_minutes,' +
-  'pause_while_pending,warning_ratio,enabled,version,updated_at,updated_by FROM support_sla_policies ';
+  'pause_while_pending,use_business_hours,warning_ratio,enabled,version,updated_at,updated_by FROM support_sla_policies ';
 
 export async function listSupportSlaPolicies(guildId: string): Promise<SupportSlaPolicy[]> {
   const result = await getPostgresPool().query(SLA_SELECT + 'WHERE guild_id=$1 ORDER BY department_id,priority', [guildId]);
@@ -144,21 +148,38 @@ export async function saveSupportSlaPolicy(
     throw new Error('Warning threshold must be between 0.50 and 0.99 of the target.');
   }
   const pool = getPostgresPool();
-  const result = await pool.query(
-    'INSERT INTO support_sla_policies ' +
-      '(id,guild_id,department_id,priority,first_response_minutes,claim_minutes,resolution_minutes,pause_while_pending,warning_ratio,enabled,version,updated_by,created_at,updated_at) ' +
-      'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,$11,NOW(),NOW()) ' +
-      'ON CONFLICT (guild_id,department_id,priority) DO UPDATE SET ' +
-      'first_response_minutes=EXCLUDED.first_response_minutes,claim_minutes=EXCLUDED.claim_minutes,resolution_minutes=EXCLUDED.resolution_minutes,' +
-      'pause_while_pending=EXCLUDED.pause_while_pending,warning_ratio=EXCLUDED.warning_ratio,enabled=EXCLUDED.enabled,' +
-      'version=support_sla_policies.version+1,updated_by=EXCLUDED.updated_by,updated_at=NOW() ' +
-      'RETURNING id,guild_id,department_id,priority,first_response_minutes,claim_minutes,resolution_minutes,pause_while_pending,warning_ratio,enabled,version,updated_at,updated_by',
-    [
-      randomUUID(), guildId, departmentId, priority, firstResponseMinutes, claimMinutes, resolutionMinutes,
-      input.pauseWhilePending ?? true, warningRatio, input.enabled ?? true, actorId,
-    ],
-  );
-  return fromSlaRow(result.rows[0] as Parameters<typeof fromSlaRow>[0]);
+  const connection = await pool.connect();
+  let saved: SupportSlaPolicy;
+  try {
+    await connection.query('BEGIN');
+    const result = await connection.query(
+      'INSERT INTO support_sla_policies ' +
+        '(id,guild_id,department_id,priority,first_response_minutes,claim_minutes,resolution_minutes,pause_while_pending,use_business_hours,warning_ratio,enabled,version,updated_by,created_at,updated_at) ' +
+        'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,1,$12,NOW(),NOW()) ' +
+        'ON CONFLICT (guild_id,department_id,priority) DO UPDATE SET ' +
+        'first_response_minutes=EXCLUDED.first_response_minutes,claim_minutes=EXCLUDED.claim_minutes,resolution_minutes=EXCLUDED.resolution_minutes,' +
+        'pause_while_pending=EXCLUDED.pause_while_pending,use_business_hours=EXCLUDED.use_business_hours,warning_ratio=EXCLUDED.warning_ratio,enabled=EXCLUDED.enabled,' +
+        'version=support_sla_policies.version+1,updated_by=EXCLUDED.updated_by,updated_at=NOW() ' +
+        'RETURNING id,guild_id,department_id,priority,first_response_minutes,claim_minutes,resolution_minutes,pause_while_pending,use_business_hours,warning_ratio,enabled,version,updated_at,updated_by',
+      [
+        randomUUID(), guildId, departmentId, priority, firstResponseMinutes, claimMinutes, resolutionMinutes,
+        input.pauseWhilePending ?? true, input.useBusinessHours ?? false, warningRatio, input.enabled ?? true, actorId,
+      ],
+    );
+    saved = fromSlaRow(result.rows[0] as Parameters<typeof fromSlaRow>[0]);
+    await connection.query(
+      'INSERT INTO support_sla_policy_versions (id,guild_id,policy_id,policy_version,snapshot,actor_id) ' +
+        'VALUES ($1,$2,$3,$4,$5::jsonb,$6) ON CONFLICT (policy_id,policy_version) DO NOTHING',
+      [randomUUID(), guildId, saved.id, saved.version, JSON.stringify(saved), actorId],
+    );
+    await connection.query('COMMIT');
+  } catch (error) {
+    await connection.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    connection.release();
+  }
+  return saved;
 }
 
 export async function deleteSupportSlaPolicy(guildId: string, policyId: string): Promise<boolean> {
