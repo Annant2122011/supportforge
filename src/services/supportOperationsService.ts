@@ -631,6 +631,7 @@ export async function acknowledgeSupportSlaAlert(
 export interface SupportSlaEscalationPreview {
   id: string;
   ticketId: string;
+  channelId: string;
   policyId: string;
   policyVersion: number;
   status: string;
@@ -678,7 +679,7 @@ export async function createSupportSlaEscalationPreview(
       evaluation.resolution.startedAt, JSON.stringify(preview), actorId, expiresAt],
   );
   return {
-    id, ticketId: evaluation.ticketId, policyId: evaluation.policy.id,
+    id, ticketId: evaluation.ticketId, channelId: evaluation.channelId, policyId: evaluation.policy.id,
     policyVersion: evaluation.policy.version, status: evaluation.status,
     warning: evaluation.warning, findings, expiresAt,
   };
