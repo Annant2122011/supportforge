@@ -1919,7 +1919,7 @@ export const data =
           subcommand
             .setName('reset')
             .setDescription('Factory-reset QueryFixr after typed confirmation')
-            .addStringOption((option) => option.setName('confirmation').setDescription('Type DELETE SUPPORT FORGE exactly').setRequired(true).setMinLength(20).setMaxLength(20))
+            .addStringOption((option) => option.setName('confirmation').setDescription('Type DELETE QUERYFIXR exactly').setRequired(true).setMinLength(16).setMaxLength(16))
             .addBooleanOption((option) => option.setName('accumulate-audit').setDescription('Keep individual audit events for future summaries').setRequired(true)),
         ),
     )
