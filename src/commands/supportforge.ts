@@ -80,6 +80,7 @@ import {
   getCsatSummary,
   getSupportMetrics,
   getSupportSlaNotificationRoute,
+  getSupportSlaOperationalSummary,
   listRecentSupportSlaAlerts,
   listSupportSlaPolicies,
   recordCsatResponse,
@@ -2048,6 +2049,12 @@ export const data =
         )
         .addSubcommand((subcommand) =>
           subcommand
+            .setName('sla-report')
+            .setDescription('Report observed SLA alerts and delivery outcomes without inventing a compliance percentage')
+            .addIntegerOption((option) => option.setName('days').setDescription('Reporting window in days (default 30)').setMinValue(1).setMaxValue(366)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
             .setName('sla-ack')
             .setDescription('Acknowledge one SLA alert in this server')
             .addStringOption((option) => option.setName('alert-id').setDescription('Alert ID from sla-alerts').setRequired(true).setMaxLength(36)),
@@ -2597,6 +2604,31 @@ export async function execute(
           embeds: [new EmbedBuilder().setColor(getThemeColor(config.theme)).setTitle('🔔 Recent SLA Alerts')
             .setDescription((lines.length ? lines.join('\n\n') : 'No SLA alert records exist for this server yet.').slice(0, 4000))
             .setFooter({ text: 'Delivery receipts and acknowledgements are persisted in PostgreSQL.' })],
+        });
+        return;
+      }
+
+      if (subcommand === 'sla-report') {
+        const days = interaction.options.getInteger('days') ?? 30;
+        const end = new Date();
+        const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
+        const summary = await getSupportSlaOperationalSummary(guild.id, start.toISOString(), end.toISOString());
+        const config = await getGuildConfig(guild.id);
+        await interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setColor(getThemeColor(config.theme))
+            .setTitle('📊 QueryFixr SLA Operations • ' + days + '-day window')
+            .setDescription(
+              '**Active policies:** ' + summary.activePolicies + '\\n' +
+              '**Alert records observed:** ' + summary.totalAlerts + '\\n' +
+              '**Warnings / breaches:** ' + summary.warningAlerts + ' / ' + summary.breachAlerts + '\\n' +
+              '**Delivery sent / pending / failed:** ' + summary.deliverySent + ' / ' + summary.deliveryPending + ' / ' + summary.deliveryFailed + '\\n' +
+              '**Legacy alerts without delivery tracking:** ' + summary.legacyUntracked + '\\n' +
+              '**Acknowledged / unacknowledged:** ' + summary.acknowledgedAlerts + ' / ' + summary.unacknowledgedAlerts + '\\n' +
+              '**Targets:** first response ' + summary.targetCounts.firstResponse + ', claim ' + summary.targetCounts.claim + ', resolution ' + summary.targetCounts.resolution +
+              (summary.latestAlertAt ? '\\n**Latest alert:** <t:' + Math.floor(Date.parse(summary.latestAlertAt) / 1000) + ':R>' : ''),
+            )
+            .setFooter({ text: 'Observed alert and delivery counts only. No compliance percentage is inferred from incomplete historical coverage.' })],
         });
         return;
       }
