@@ -19,6 +19,11 @@ async function main(): Promise<void> {
     'support_sla_policies',
     'support_csat_responses',
     'support_sla_alerts',
+    'support_sla_policy_versions',
+    'support_sla_monitor_state',
+    'support_sla_notification_routes',
+    'support_sla_queue_snapshots',
+    'support_sla_escalation_previews',
     'ticket_recovery_replay_segments',
     'knowledge_base_articles',
     'knowledge_base_article_revisions',
@@ -53,6 +58,11 @@ async function main(): Promise<void> {
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_sla_policies'),
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_csat_responses'),
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_sla_alerts'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_sla_policy_versions'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_sla_monitor_state'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_sla_notification_routes'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_sla_queue_snapshots'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_sla_escalation_previews'),
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM knowledge_base_articles'),
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM knowledge_base_article_revisions'),
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM knowledge_base_synonyms'),
@@ -164,6 +174,8 @@ async function main(): Promise<void> {
   console.log(`SLA policies: ${counts[4].rows[0]?.count ?? '0'}`);
   console.log(`CSAT responses: ${counts[5].rows[0]?.count ?? '0'}`);
   console.log(`SLA alert records: ${counts[6].rows[0]?.count ?? '0'}`);
+  console.log(`SLA policy versions / monitor states: ${counts[7].rows[0]?.count ?? '0'} / ${counts[8].rows[0]?.count ?? '0'}`);
+  console.log(`SLA routes / queue snapshots / escalation previews: ${counts[9].rows[0]?.count ?? '0'} / ${counts[10].rows[0]?.count ?? '0'} / ${counts[11].rows[0]?.count ?? '0'}`);
   console.log(`Knowledge Base articles: ${counts[7].rows[0]?.count ?? '0'}`);
   console.log(`Knowledge Base revisions: ${counts[8].rows[0]?.count ?? '0'}`);
   console.log(`Knowledge synonyms/usage/feedback: ${counts[9].rows[0]?.count ?? '0'}/${counts[10].rows[0]?.count ?? '0'}/${counts[11].rows[0]?.count ?? '0'}`);
@@ -194,6 +206,33 @@ async function main(): Promise<void> {
   if (!claimSlaSchema.rows[0]?.claim_column || !claimSlaSchema.rows[0]?.claim_target) {
     throw new Error('Claim SLA migration is incomplete: the claim target column or alert constraint is missing.');
   }
+  const stageLSchema = await pool.query<{ business_hours: boolean; policy_version_table: boolean; monitor_cursor: boolean; alert_delivery_state: boolean; preview_execution_state: boolean }>(`
+    SELECT
+      EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema=current_schema() AND table_name='support_sla_policies' AND column_name='use_business_hours'
+      ) AS business_hours,
+      to_regclass('public.support_sla_policy_versions') IS NOT NULL AS policy_version_table,
+      EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema=current_schema() AND table_name='support_sla_monitor_state' AND column_name='cursor_ticket_id'
+      ) AS monitor_cursor,
+      EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema=current_schema() AND table_name='support_sla_alerts' AND column_name='delivery_status'
+      ) AS alert_delivery_state,
+      EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema=current_schema() AND table_name='support_sla_escalation_previews' AND column_name='execution_status'
+      ) AS preview_execution_state
+  `);
+  const stageL = stageLSchema.rows[0];
+  if (!stageL?.business_hours || !stageL.policy_version_table || !stageL.monitor_cursor ||
+      !stageL.alert_delivery_state || !stageL.preview_execution_state) {
+    throw new Error('Stage L schema is incomplete: business-time policy, immutable versions, durable cursor/lease, delivery receipt, or one-time escalation execution state is missing.');
+  }
+  console.log('Stage L schema: business-hours mode, immutable policy versions, durable monitor progress, alert delivery state and escalation execution state verified.');
+
   console.log('Claim SLA policy column and alert target constraint: verified.');
 
   // Exercise Stage K's SQL against the migrated schema, not only mock executors.
