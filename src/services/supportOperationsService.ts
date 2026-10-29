@@ -414,6 +414,264 @@ export async function getCsatSummary(guildId: string, from: string, to: string):
 }
 
 
+export interface SupportQueueItem {
+  ticketId: string;
+  channelId: string;
+  ticketNumber: string | null;
+  status: string;
+  priority: string;
+  departmentId: string | null;
+  claimedByIds: string[];
+  createdAt: string;
+  ageMinutes: number;
+  riskScore: number;
+}
+
+export interface SupportQueueSnapshot {
+  id: string;
+  guildId: string;
+  createdAt: string;
+  items: SupportQueueItem[];
+}
+
+export interface SupportSlaNotificationRoute {
+  guildId: string;
+  channelId: string;
+  supervisorRoleId: string | null;
+  enabled: boolean;
+  updatedBy: string;
+  updatedAt: string;
+}
+
+export async function getSupportSlaNotificationRoute(guildId: string): Promise<SupportSlaNotificationRoute | null> {
+  const result = await getPostgresPool().query<QueryResultRow & {
+    guild_id: string; channel_id: string; supervisor_role_id: string | null;
+    enabled: boolean; updated_by: string; updated_at: Date | string;
+  }>(
+    'SELECT guild_id,channel_id,supervisor_role_id,enabled,updated_by,updated_at ' +
+      'FROM support_sla_notification_routes WHERE guild_id=$1',
+    [guildId],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    guildId: row.guild_id,
+    channelId: row.channel_id,
+    supervisorRoleId: row.supervisor_role_id,
+    enabled: Boolean(row.enabled),
+    updatedBy: row.updated_by,
+    updatedAt: toIso(row.updated_at) ?? new Date(0).toISOString(),
+  };
+}
+
+export async function saveSupportSlaNotificationRoute(
+  guildId: string,
+  channelId: string,
+  supervisorRoleId: string | null,
+  actorId: string,
+): Promise<SupportSlaNotificationRoute> {
+  const channel = channelId.trim();
+  const role = supervisorRoleId?.trim() || null;
+  if (!/^\d{17,20}$/.test(channel)) throw new Error('Choose a valid Discord text-channel ID.');
+  if (role !== null && !/^\d{17,20}$/.test(role)) throw new Error('Choose a valid Discord supervisor-role ID or leave it blank.');
+  const result = await getPostgresPool().query<QueryResultRow & {
+    guild_id: string; channel_id: string; supervisor_role_id: string | null;
+    enabled: boolean; updated_by: string; updated_at: Date | string;
+  }>(
+    'INSERT INTO support_sla_notification_routes (guild_id,channel_id,supervisor_role_id,enabled,updated_by,updated_at) ' +
+      'VALUES ($1,$2,$3,TRUE,$4,NOW()) ON CONFLICT (guild_id) DO UPDATE SET ' +
+      'channel_id=EXCLUDED.channel_id,supervisor_role_id=EXCLUDED.supervisor_role_id,enabled=TRUE,' +
+      'updated_by=EXCLUDED.updated_by,updated_at=NOW() ' +
+      'RETURNING guild_id,channel_id,supervisor_role_id,enabled,updated_by,updated_at',
+    [guildId, channel, role, actorId],
+  );
+  const row = result.rows[0]!;
+  return {
+    guildId: row.guild_id, channelId: row.channel_id, supervisorRoleId: row.supervisor_role_id,
+    enabled: Boolean(row.enabled), updatedBy: row.updated_by,
+    updatedAt: toIso(row.updated_at) ?? new Date().toISOString(),
+  };
+}
+
+export async function disableSupportSlaNotificationRoute(guildId: string, actorId: string): Promise<boolean> {
+  const result = await getPostgresPool().query(
+    'UPDATE support_sla_notification_routes SET enabled=FALSE,updated_by=$2,updated_at=NOW() WHERE guild_id=$1 AND enabled=TRUE',
+    [guildId, actorId],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function createSupportQueueSnapshot(
+  guildId: string,
+  actorId: string,
+  limit = 20,
+): Promise<SupportQueueSnapshot> {
+  const safeLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
+  const result = await getPostgresPool().query<QueryResultRow & {
+    id: string; channel_id: string; ticket_number: string | null; status: string;
+    priority: string | null; department_id: string | null; claimed_by_ids: string[] | null;
+    created_at: Date | string;
+  }>(
+    "SELECT id,channel_id,ticket_number,status,priority,department_id,claimed_by_ids,created_at " +
+      "FROM tickets WHERE guild_id=$1 AND deleted_at IS NULL " +
+      "AND status IN ('open','claimed','pending','reopened') " +
+      "ORDER BY CASE priority WHEN 'critical' THEN 5 WHEN 'urgent' THEN 4 WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END DESC," +
+      "created_at ASC LIMIT $2",
+    [guildId, safeLimit],
+  );
+  const now = Date.now();
+  const items: SupportQueueItem[] = result.rows.map((row) => {
+    const createdAt = toIso(row.created_at) ?? new Date(0).toISOString();
+    const ageMinutes = Math.max(0, Math.floor((now - Date.parse(createdAt)) / 60_000));
+    const priority = ['low', 'normal', 'high', 'urgent', 'critical'].includes(String(row.priority))
+      ? String(row.priority)
+      : 'normal';
+    const priorityWeight: Record<string, number> = { low: 1, normal: 2, high: 3, urgent: 4, critical: 5 };
+    return {
+      ticketId: row.id,
+      channelId: row.channel_id,
+      ticketNumber: row.ticket_number,
+      status: row.status,
+      priority,
+      departmentId: row.department_id,
+      claimedByIds: Array.isArray(row.claimed_by_ids) ? row.claimed_by_ids : [],
+      createdAt,
+      ageMinutes,
+      riskScore: (priorityWeight[priority] ?? 2) * 1_000_000 + Math.min(ageMinutes, 999_999),
+    };
+  }).sort((a, b) => b.riskScore - a.riskScore);
+  const id = randomUUID();
+  const createdAt = new Date().toISOString();
+  const snapshot = { id, guildId, createdAt, items };
+  await getPostgresPool().query(
+    'INSERT INTO support_sla_queue_snapshots (id,guild_id,created_by,filters,items,item_count,created_at) ' +
+      'VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7::timestamptz)',
+    [id, guildId, actorId, JSON.stringify({ limit: safeLimit, sort: 'priority_then_age' }), JSON.stringify(items), items.length, createdAt],
+  );
+  return snapshot;
+}
+
+export async function acknowledgeSupportSlaAlert(
+  guildId: string,
+  alertId: string,
+  actorId: string,
+): Promise<boolean> {
+  const result = await getPostgresPool().query(
+    'UPDATE support_sla_alerts SET acknowledged_by=$3,acknowledged_at=NOW() ' +
+      'WHERE guild_id=$1 AND id=$2 AND acknowledged_at IS NULL',
+    [guildId, alertId, actorId],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+export interface SupportSlaEscalationPreview {
+  id: string;
+  ticketId: string;
+  policyId: string;
+  policyVersion: number;
+  status: string;
+  warning: string | null;
+  findings: string[];
+  expiresAt: string;
+}
+
+export async function createSupportSlaEscalationPreview(
+  guildId: string,
+  ticketId: string,
+  actorId: string,
+): Promise<SupportSlaEscalationPreview> {
+  const evaluation = await evaluateTicketSla(guildId, ticketId);
+  if (!evaluation.policy || !evaluation.firstResponse || !evaluation.claim || !evaluation.resolution) {
+    throw new Error(evaluation.warning ?? 'A complete SLA evaluation is required before escalation preview.');
+  }
+  if (['closed', 'archived'].includes(evaluation.status)) {
+    throw new Error('Escalation preview is available only for active tickets.');
+  }
+  const findings: string[] = [];
+  for (const [label, result] of [
+    ['First response', evaluation.firstResponse],
+    ['Staff claim', evaluation.claim],
+    ['Resolution', evaluation.resolution],
+  ] as const) {
+    if (result.progress === 'breached') findings.push(label + ' target is breached by ' + Math.max(0, result.elapsedMinutes - result.targetMinutes) + ' minutes.');
+    else if (result.progress === 'warning') findings.push(label + ' target is approaching its warning threshold.');
+    else if (result.progress === 'paused') findings.push(label + ' clock is paused.');
+  }
+  if (!findings.length) findings.push('No warning/breach is currently supported by the recorded SLA clocks.');
+  const id = randomUUID();
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  const preview = {
+    ticketId: evaluation.ticketId, channelId: evaluation.channelId, status: evaluation.status,
+    policyId: evaluation.policy.id, policyVersion: evaluation.policy.version, findings,
+    allowlistedActions: ['notify_configured_sla_route'],
+    blockedActions: ['automatic_reassignment', 'automatic_priority_change'],
+  };
+  await getPostgresPool().query(
+    'INSERT INTO support_sla_escalation_previews ' +
+      '(id,guild_id,ticket_id,policy_id,policy_version,lifecycle_cycle_started_at,preview,created_by,expires_at) ' +
+      'VALUES ($1,$2,$3,$4,$5,$6::timestamptz,$7::jsonb,$8,$9::timestamptz)',
+    [id, guildId, evaluation.ticketId, evaluation.policy.id, evaluation.policy.version,
+      evaluation.resolution.startedAt, JSON.stringify(preview), actorId, expiresAt],
+  );
+  return {
+    id, ticketId: evaluation.ticketId, policyId: evaluation.policy.id,
+    policyVersion: evaluation.policy.version, status: evaluation.status,
+    warning: evaluation.warning, findings, expiresAt,
+  };
+}
+
+export async function executeSupportSlaEscalationPreview(
+  client: Client,
+  guildId: string,
+  previewId: string,
+  actorId: string,
+): Promise<{ delivered: boolean; message: string }> {
+  const pool = getPostgresPool();
+  const result = await pool.query<QueryResultRow & {
+    id: string; ticket_id: string; policy_id: string; policy_version: number;
+    lifecycle_cycle_started_at: Date | string; preview: Record<string, unknown>; expires_at: Date | string;
+  }>(
+    'SELECT id,ticket_id,policy_id,policy_version,lifecycle_cycle_started_at,preview,expires_at ' +
+      'FROM support_sla_escalation_previews WHERE guild_id=$1 AND id=$2',
+    [guildId, previewId],
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error('No escalation preview with that ID exists in this server.');
+  if (Date.parse(toIso(row.expires_at) ?? '') <= Date.now()) throw new Error('This escalation preview expired. Create a fresh preview.');
+  const evaluation = await evaluateTicketSla(guildId, row.ticket_id);
+  if (!evaluation.policy || evaluation.policy.id !== row.policy_id || evaluation.policy.version !== Number(row.policy_version)) {
+    throw new Error('The SLA policy changed after this preview. Create a fresh preview.');
+  }
+  if (['closed', 'archived'].includes(evaluation.status)) throw new Error('The ticket is no longer active; escalation was not sent.');
+  const route = await getSupportSlaNotificationRoute(guildId);
+  if (!route || !route.enabled) throw new Error('No enabled SLA notification route is configured. Preview is still available; no action was sent.');
+  const guild = client.guilds.cache.get(guildId) ?? await client.guilds.fetch(guildId);
+  const channel = await guild.channels.fetch(route.channelId);
+  if (!channel || channel.type !== ChannelType.GuildText) throw new Error('The configured SLA alert destination is missing or is not a text channel.');
+  const roleMention = route.supervisorRoleId ? '<@&' + route.supervisorRoleId + '> ' : '';
+  const message = roleMention + 'QueryFixr SLA escalation for <#' + evaluation.channelId + '> (' +
+    (evaluation.ticketNumber ? '#' + evaluation.ticketNumber : evaluation.ticketId.slice(0, 8)) + ').\n' +
+    'Requested manually by <@' + actorId + '>. ' +
+    'Policy ' + evaluation.policy.id + ' v' + evaluation.policy.version + '.\n' +
+    (Array.isArray((row.preview as Record<string, unknown>).findings)
+      ? ((row.preview as Record<string, unknown>).findings as string[]).join('\n')
+      : 'Review the ticket SLA clocks.');
+  const sent = await channel.send({
+    content: message.slice(0, 1900),
+    allowedMentions: { parse: [], roles: route.supervisorRoleId ? [route.supervisorRoleId] : [] },
+  });
+  await pool.query(
+    'INSERT INTO support_sla_escalation_previews ' +
+      '(id,guild_id,ticket_id,policy_id,policy_version,lifecycle_cycle_started_at,preview,created_by,expires_at) ' +
+      'VALUES ($1,$2,$3,$4,$5,$6::timestamptz,$7::jsonb,$8,$9::timestamptz)',
+    [randomUUID(), guildId, evaluation.ticketId, evaluation.policy.id, evaluation.policy.version,
+      evaluation.resolution?.startedAt ?? evaluation.firstResponse?.startedAt ?? evaluation.ticketId,
+      JSON.stringify({ sourcePreviewId: previewId, outcome: 'delivered', deliveryMessageId: sent.id, deliveredBy: actorId }),
+      actorId, new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()],
+  );
+  return { delivered: true, message: 'Escalation sent to the configured SLA route. Message ID: ' + sent.id };
+}
+
 let slaScheduler: ReturnType<typeof setInterval> | null = null;
 const slaSweepCursorByGuild = new Map<string, string>();
 
