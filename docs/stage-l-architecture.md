@@ -1,7 +1,7 @@
 # Stage L — SLA, Escalation and Queue Operations
 
-**Status:** architecture and implementation contract  
-**Target PR:** the next alphabetical stage after consolidated Stage A–K  
+**Status:** implementation candidate in PR #43; automated and live acceptance gates remain open  
+**Implementation PR:** [#43 — Stage L: durable QueryFixr SLA, queue and escalation operations](https://github.com/Annant2122011/supportforge/pull/43)  
 **Depends on:** the Stage 3 recovery/SLA foundation in PR #34 and the consolidated Stage A–K candidate in PR #39  
 **Persistence:** Neon PostgreSQL remains authoritative. New schema changes must be forward-only and must not renumber existing migration IDs.  
 **Non-goal:** no AI requirement, arbitrary executable workflows, or implicit destructive reassignment.
@@ -33,7 +33,7 @@ Stage L turns the foundation into an operationally configurable and measurable s
 ### Durable scheduling and alert delivery
 
 - The monitor evaluates bounded batches and persists its cursor/lease so a restart cannot endlessly restart from the same first page or skip records.
-- Alert intents are persisted before Discord delivery and reconciled through the existing durable outbox. A worker failure must be visible as degraded/failed, never silently reported healthy.
+- Alert intents are persisted before Discord delivery in the SLA-specific durable queue (`support_sla_alerts`). This queue is intentionally separate from the ticket-materialization outbox because SLA notifications target a configured guild channel rather than mutating ticket-channel state. Delivery retries use bounded backoff, receipt markers reconcile ambiguous Discord/database outcomes, and a worker failure must be visible as failed rather than silently healthy.
 - De-duplication keys include guild, ticket, policy ID/version, target, lifecycle cycle and severity. Retrying delivery must not create a second logical alert.
 - Notifications are configurable and explicit: assigned staff, supervisor role, department manager and/or designated channel. Defaults are non-destructive.
 - Every warning, breach, policy edit, acknowledgement and escalation attempt is audit-recorded with actor attribution and outcome.
@@ -87,4 +87,4 @@ Restore a verified backup into a newly created empty non-production Neon branch/
 
 Stage L is code-complete only when the integrated branch, migrations, exact-head CI, and the full automated matrix pass. It is release-ready only after the controlled Discord acceptance and isolated Neon restore drill are recorded independently.
 
-The current PR #34/#39 claim-SLA extension is an early foundation, not a substitute for these Stage L exit criteria.
+The PR #34/#39 claim-SLA extension was the early foundation. PR #43 adds the Stage L operational layer, but it is not considered complete or release-ready until its exact-head CI, controlled Discord acceptance and isolated non-production Neon restore drill are recorded.
