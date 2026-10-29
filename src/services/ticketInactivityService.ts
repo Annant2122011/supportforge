@@ -411,8 +411,8 @@ async function synchronizePrivateThreadClosure(
     if (!thread.locked) await thread.setLocked(true, 'QueryFixr inactivity auto-close read-only protection');
     await refreshPrivateThreadPanel(thread, closedTicket, closedTopic);
     // Panel recovery can wake a thread. Reassert durable closure after repair.
-    if (!thread.archived) await thread.setArchived(true, 'ResolveX reassert inactivity closure after panel refresh');
-    if (!thread.locked) await thread.setLocked(true, 'ResolveX reassert inactivity lock after panel refresh');
+    if (!thread.archived) await thread.setArchived(true, 'QueryFixr reassert inactivity closure after panel refresh');
+    if (!thread.locked) await thread.setLocked(true, 'QueryFixr reassert inactivity lock after panel refresh');
   } catch (error) {
     console.warn('Private-thread inactivity closure is durable; outbox reconciliation will retry Discord synchronization:', error);
   }
