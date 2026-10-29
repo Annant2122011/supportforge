@@ -2380,30 +2380,217 @@ export async function handleSettingsInteraction(
     return true;
   }
 
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('sf:settings:sla:modal:')) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const guild = interaction.guild!;
+    let locale = 'en-US';
+    try {
+      locale = (await getAdvancedSettings(guild.id)).locale;
+      const parts = interaction.customId.split(':');
+      const kind = parts[4];
+
+      if (kind === 'route') {
+        const channelId = interaction.fields.getTextInputValue('channel-id').trim();
+        const roleId = interaction.fields.getTextInputValue('supervisor-role-id').trim();
+        const channel = await guild.channels.fetch(channelId).catch(() => null);
+        if (!channel || channel.type !== ChannelType.GuildText) {
+          throw new Error('Choose a valid text-channel ID from this server.');
+        }
+        let role = null;
+        if (roleId) {
+          role = await guild.roles.fetch(roleId).catch(() => null);
+          if (!role || role.managed) throw new Error('Choose a valid, assignable supervisor role from this server or leave the field blank.');
+        }
+        const saved = await saveSupportSlaNotificationRoute(guild.id, channel.id, role?.id ?? null, interaction.user.id);
+        const config = await getGuildConfig(guild.id);
+        if (config.supportCategoryId) {
+          await logSettingsEvent(guild, config.supportCategoryId, {
+            action: 'SUPPORT_SLA_NOTIFICATION_ROUTE_UPDATED',
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'SLA route set to channel=' + saved.channelId + ', supervisor-role=' + (saved.supervisorRoleId ?? 'none') + '.',
+          }).catch(() => undefined);
+        }
+        await interaction.editReply({
+          content: translate(locale, 'settings.sla.route.saved') + ' <#' + saved.channelId + '>.',
+        });
+        return true;
+      }
+
+      if (kind === 'policy') {
+        const mode = parts[5] ?? 'create';
+        const policyId = mode === 'edit' ? (parts[6] ?? '') : '';
+        const departmentId = interaction.fields.getTextInputValue('department-id').trim() || '*';
+        const priorityValue = interaction.fields.getTextInputValue('priority').trim().toLowerCase();
+        const validPriorities = ['*', 'low', 'normal', 'high', 'urgent', 'critical'];
+        if (!validPriorities.includes(priorityValue)) {
+          throw new Error('Priority must be *, low, normal, high, urgent, or critical.');
+        }
+        const firstResponseMinutes = Number(interaction.fields.getTextInputValue('first-response-minutes').trim());
+        const claimResolution = interaction.fields.getTextInputValue('claim-resolution-minutes').split(',').map((part) => part.trim());
+        if (claimResolution.length !== 2) {
+          throw new Error('Enter claim and resolution targets as two comma-separated whole numbers, for example 60,240.');
+        }
+        const claimMinutes = Number(claimResolution[0]);
+        const resolutionMinutes = Number(claimResolution[1]);
+        const optionsText = interaction.fields.getTextInputValue('clock-options').trim();
+        const parsedOptions = new Map<string, string>();
+        for (const option of optionsText.split(';').map((part) => part.trim()).filter(Boolean)) {
+          const equals = option.indexOf('=');
+          if (equals <= 0) throw new Error('Clock options must use key=value pairs separated by semicolons.');
+          const key = option.slice(0, equals).trim();
+          const value = option.slice(equals + 1).trim();
+          if (!['businessHours', 'pauseWhilePending', 'warningRatio'].includes(key)) {
+            throw new Error('Unknown clock option: ' + key + '.');
+          }
+          if (parsedOptions.has(key)) throw new Error('Clock option was supplied more than once: ' + key + '.');
+          parsedOptions.set(key, value);
+        }
+        const readBoolean = (key: string, fallback: boolean): boolean => {
+          const value = parsedOptions.get(key);
+          if (value === undefined) return fallback;
+          if (value !== 'true' && value !== 'false') throw new Error(key + ' must be true or false.');
+          return value === 'true';
+        };
+        const warningRatioText = parsedOptions.get('warningRatio');
+        const warningRatio = warningRatioText === undefined ? 0.8 : Number(warningRatioText);
+        const policy = await saveSupportSlaPolicy(guild.id, {
+          departmentId,
+          priority: priorityValue as '*' | 'low' | 'normal' | 'high' | 'urgent' | 'critical',
+          firstResponseMinutes,
+          claimMinutes,
+          resolutionMinutes,
+          pauseWhilePending: readBoolean('pauseWhilePending', true),
+          useBusinessHours: readBoolean('businessHours', false),
+          warningRatio,
+          enabled: true,
+        }, interaction.user.id);
+        const config = await getGuildConfig(guild.id);
+        if (config.supportCategoryId) {
+          await logSettingsEvent(guild, config.supportCategoryId, {
+            action: mode === 'edit' ? 'SUPPORT_SLA_POLICY_UPDATED' : 'SUPPORT_SLA_POLICY_CREATED',
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Saved SLA policy ' + policy.id + ' version ' + policy.version + ', department=' + policy.departmentId +
+              ', priority=' + policy.priority + ', business-hours=' + policy.useBusinessHours + '.',
+          }).catch(() => undefined);
+        }
+        await interaction.editReply({
+          content: translate(locale, 'settings.sla.policy.saved') + '\nID: ' + policy.id + ' • version ' + policy.version + '.',
+        });
+        return true;
+      }
+
+      throw new Error('Unknown SLA settings form. Reopen the Settings panel and try again.');
+    } catch (error) {
+      console.error('QueryFixr SLA settings modal failed for guild ' + guild.id + ':', error);
+      await interaction.editReply({
+        content: (error instanceof Error ? error.message : 'SLA settings could not be saved.').slice(0, 1800),
+      }).catch(() => undefined);
+    }
+    return true;
+  }
+
   if (interaction.isButton() && (
-    interaction.customId === 'sf:settings:sla' ||
-    interaction.customId.startsWith('sf:settings:sla:')
+    interaction.customId === 'sf:settings:sla:policy-create' ||
+    interaction.customId.startsWith('sf:settings:sla:policy-edit:') ||
+    interaction.customId === 'sf:settings:sla:route-edit'
   )) {
+    const guild = interaction.guild!;
     const customId = interaction.customId;
-    const initial = customId === 'sf:settings:sla';
+    if (customId === 'sf:settings:sla:route-edit') {
+      const modal = new ModalBuilder()
+        .setCustomId('sf:settings:sla:modal:route')
+        .setTitle(translate((await getAdvancedSettings(guild.id)).locale, 'settings.sla.modal.routeTitle'))
+        .addComponents(
+          new ActionRowBuilder<TextInputBuilder>().addComponents(
+            new TextInputBuilder().setCustomId('channel-id')
+              .setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.sla.modal.channel'))
+              .setStyle(TextInputStyle.Short).setPlaceholder('123456789012345678').setRequired(true).setMaxLength(20),
+          ),
+          new ActionRowBuilder<TextInputBuilder>().addComponents(
+            new TextInputBuilder().setCustomId('supervisor-role-id')
+              .setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.sla.modal.role'))
+              .setStyle(TextInputStyle.Short).setPlaceholder('123456789012345678')
+              .setRequired(false).setMaxLength(20),
+          ),
+        );
+      await interaction.showModal(modal);
+      return true;
+    }
+
+    const isEdit = customId.startsWith('sf:settings:sla:policy-edit:');
+    const modalId = isEdit
+      ? 'sf:settings:sla:modal:policy:edit:' + customId.slice('sf:settings:sla:policy-edit:'.length)
+      : 'sf:settings:sla:modal:policy:create';
+    const locale = (await getAdvancedSettings(guild.id)).locale;
+    const modal = new ModalBuilder()
+      .setCustomId(modalId)
+      .setTitle(translate(locale, isEdit ? 'settings.sla.modal.policyEditTitle' : 'settings.sla.modal.policyCreateTitle'))
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder().setCustomId('department-id')
+            .setLabel(translate(locale, 'settings.sla.modal.department')).setStyle(TextInputStyle.Short)
+            .setPlaceholder('*').setRequired(true).setMaxLength(80),
+        ),
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder().setCustomId('priority')
+            .setLabel(translate(locale, 'settings.sla.modal.priority')).setStyle(TextInputStyle.Short)
+            .setPlaceholder('*').setRequired(true).setMaxLength(10),
+        ),
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder().setCustomId('first-response-minutes')
+            .setLabel(translate(locale, 'settings.sla.modal.firstResponse')).setStyle(TextInputStyle.Short)
+            .setPlaceholder('15').setRequired(true).setMaxLength(5),
+        ),
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder().setCustomId('claim-resolution-minutes')
+            .setLabel(translate(locale, 'settings.sla.modal.claimResolution')).setStyle(TextInputStyle.Short)
+            .setPlaceholder('60,240').setRequired(true).setMaxLength(11),
+        ),
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder().setCustomId('clock-options')
+            .setLabel(translate(locale, 'settings.sla.modal.options')).setStyle(TextInputStyle.Paragraph)
+            .setPlaceholder('businessHours=false; pauseWhilePending=true; warningRatio=0.8')
+            .setRequired(true).setMaxLength(120),
+        ),
+      );
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  if (
+    (interaction.isButton() || interaction.isStringSelectMenu()) &&
+    (interaction.customId === 'sf:settings:sla' || interaction.customId.startsWith('sf:settings:sla:'))
+  ) {
+    const customId = interaction.customId;
+    const initial = interaction.isButton() && customId === 'sf:settings:sla';
     const parts = customId.split(':');
     let view = initial ? 'home' : (parts[3] ?? 'home');
     let notice = '';
-    const guild = interaction.guild;
+    let selectedPolicyId: string | null = null;
+    let evaluation: Awaited<ReturnType<typeof evaluateTicketSla>> | null = null;
+    let escalationPreview: Awaited<ReturnType<typeof createSupportSlaEscalationPreview>> | null = null;
+    const guild = interaction.guild!;
     let locale = 'en-US';
 
     if (initial) await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    else await interaction.deferUpdate();
+    else if (interaction.isButton()) await interaction.deferUpdate();
 
     try {
       locale = (await getAdvancedSettings(guild.id)).locale;
+      if (interaction.isStringSelectMenu() && customId === 'sf:settings:sla:policy-select') {
+        selectedPolicyId = interaction.values[0] ?? null;
+        view = 'policy-selected';
+      }
+
       if (view === 'ack') {
         const alertId = parts.slice(4).join(':');
         const acknowledged = alertId
           ? await acknowledgeSupportSlaAlert(guild.id, alertId, interaction.user.id)
           : false;
+        notice = translate(locale, acknowledged ? 'settings.sla.acknowledged' : 'settings.sla.alreadyAcknowledged');
         if (acknowledged) {
-          notice = translate(locale, 'settings.sla.acknowledged');
           const config = await getGuildConfig(guild.id);
           if (config.supportCategoryId) {
             await logSettingsEvent(guild, config.supportCategoryId, {
@@ -2413,8 +2600,36 @@ export async function handleSettingsInteraction(
               detail: 'Acknowledged SLA alert ' + alertId + ' from the Settings dashboard.',
             }).catch(() => undefined);
           }
-        } else {
-          notice = translate(locale, 'settings.sla.alreadyAcknowledged');
+        }
+        view = 'alerts';
+      } else if (view === 'route-disable') {
+        const disabled = await disableSupportSlaNotificationRoute(guild.id, interaction.user.id);
+        notice = translate(locale, disabled ? 'settings.sla.route.disabled' : 'settings.sla.route.missing');
+        view = 'home';
+      } else if (view === 'policy-disable') {
+        const policyId = parts.slice(4).join(':');
+        const disabled = await deleteSupportSlaPolicy(guild.id, policyId, interaction.user.id);
+        notice = disabled
+          ? translate(locale, 'settings.sla.policy.disabled')
+          : 'No active SLA policy with that ID exists in this server.';
+        view = 'policies';
+      } else if (view === 'check') {
+        evaluation = await evaluateTicketSla(guild.id, parts.slice(4).join(':'));
+        view = 'check-result';
+      } else if (view === 'preview') {
+        escalationPreview = await createSupportSlaEscalationPreview(guild.id, parts.slice(4).join(':'), interaction.user.id);
+        view = 'preview-result';
+      } else if (view === 'send') {
+        const result = await executeSupportSlaEscalationPreview(client, guild.id, parts.slice(4).join(':'), interaction.user.id);
+        notice = translate(locale, 'settings.sla.escalation.sent') + ' ' + result.message;
+        const config = await getGuildConfig(guild.id);
+        if (config.supportCategoryId) {
+          await logSettingsEvent(guild, config.supportCategoryId, {
+            action: 'SUPPORT_SLA_ESCALATION_ATTEMPT',
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Escalation preview delivered from Settings. ' + result.message,
+          }).catch(() => undefined);
         }
         view = 'alerts';
       }
@@ -2427,20 +2642,58 @@ export async function handleSettingsInteraction(
         ? translate(locale, 'settings.sla.route.configured') + ' • <#' + route.channelId + '>' +
           (route.supervisorRoleId ? ' • <@&' + route.supervisorRoleId + '>' : '')
         : translate(locale, 'settings.sla.route.missing');
-      let extraRows: ActionRowBuilder<ButtonBuilder>[] = [];
+      const extraRows: Array<ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>> = [];
 
-      if (view === 'policies') {
+      if (view === 'policies' || view === 'policy-selected') {
         const policies = (await listSupportSlaPolicies(guild.id)).filter((policy) => policy.enabled);
         title = translate(locale, 'settings.sla.title') + ' • Policies';
-        description = policies.length
-          ? policies.slice(0, 12).map((policy) =>
-              '**' + policy.priority.toUpperCase() + '** • department `' + policy.departmentId + '` • v' + policy.version + '\n' +
-              'First response ' + policy.firstResponseMinutes + 'm • claim ' + policy.claimMinutes + 'm • resolution ' + policy.resolutionMinutes + 'm • ' +
-              (policy.useBusinessHours ? 'support-hours clock' : 'elapsed-time clock') + ' • pending pause ' + (policy.pauseWhilePending ? 'on' : 'off') +
-              ' • warning ' + Math.round(policy.warningRatio * 100) + '%',
-            ).join('\n\n')
-          : translate(locale, 'settings.sla.policy.none');
-        footer = policies.length + ' active policy/policies • policy edits retain immutable versions';
+        if (view === 'policy-selected') {
+          const selected = policies.find((policy) => policy.id === selectedPolicyId);
+          if (!selected) {
+            notice = 'That policy is no longer active. Refresh the policy list and choose another one.';
+            view = 'policies';
+          } else {
+            description = '**' + selected.priority.toUpperCase() + '** • department ' + selected.departmentId + ' • policy ' + selected.id + '\n' +
+              'First response ' + selected.firstResponseMinutes + 'm • claim ' + selected.claimMinutes + 'm • resolution ' + selected.resolutionMinutes + 'm\n' +
+              (selected.useBusinessHours ? 'Clock: configured support hours' : 'Clock: elapsed time') +
+              ' • pending pause ' + (selected.pauseWhilePending ? 'on' : 'off') + ' • warning ' + Math.round(selected.warningRatio * 100) +
+              '% • version ' + selected.version;
+            extraRows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+              new ButtonBuilder().setCustomId('sf:settings:sla:policy-edit:' + selected.id)
+                .setLabel(translate(locale, 'settings.sla.editPolicy')).setEmoji('✏️').setStyle(ButtonStyle.Primary),
+              new ButtonBuilder().setCustomId('sf:settings:sla:policy-disable:' + selected.id)
+                .setLabel(translate(locale, 'settings.sla.disablePolicy')).setEmoji('⏸️').setStyle(ButtonStyle.Danger),
+            ));
+          }
+        }
+        if (view === 'policies') {
+          description = policies.length
+            ? policies.slice(0, 25).map((policy) =>
+                '**' + policy.priority.toUpperCase() + '** • department ' + policy.departmentId + ' • policy ' + policy.id + '\n' +
+                'First response ' + policy.firstResponseMinutes + 'm • claim ' + policy.claimMinutes + 'm • resolution ' + policy.resolutionMinutes + 'm • ' +
+                (policy.useBusinessHours ? 'support-hours clock' : 'elapsed-time clock') + ' • pending pause ' + (policy.pauseWhilePending ? 'on' : 'off') +
+                ' • warning ' + Math.round(policy.warningRatio * 100) + '% • v' + policy.version,
+              ).join('\n\n')
+            : translate(locale, 'settings.sla.policy.none');
+          footer = policies.length + ' active policy/policies • policy edits retain immutable versions';
+          extraRows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId('sf:settings:sla:policy-create')
+              .setLabel(translate(locale, 'settings.sla.newPolicy')).setEmoji('➕').setStyle(ButtonStyle.Success),
+          ));
+          if (policies.length) {
+            extraRows.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+              new StringSelectMenuBuilder().setCustomId('sf:settings:sla:policy-select')
+                .setPlaceholder(translate(locale, 'settings.sla.selectPolicy'))
+                .setMinValues(1).setMaxValues(1)
+                .addOptions(policies.slice(0, 25).map((policy) => ({
+                  label: (policy.priority.toUpperCase() + ' • ' + policy.departmentId).slice(0, 100),
+                  description: ('v' + policy.version + ' • ' + policy.firstResponseMinutes + 'm / ' + policy.claimMinutes + 'm / ' + policy.resolutionMinutes + 'm').slice(0, 100),
+                  value: policy.id,
+                }))),
+            ));
+          }
+          if (policies.length > 25) footer += ' • use the slash command for additional policies beyond the first 25.';
+        }
       } else if (view === 'queue') {
         const snapshot = await createSupportQueueSnapshot(guild.id, interaction.user.id, 10);
         title = translate(locale, 'settings.sla.title') + ' • Queue';
@@ -2452,6 +2705,48 @@ export async function handleSettingsInteraction(
             ).join('\n')
           : translate(locale, 'settings.sla.queue.none');
         footer = 'Saved queue snapshot ' + snapshot.id + ' • ' + snapshot.items.length + ' ticket(s) • priority then age';
+        if (snapshot.items.length) {
+          extraRows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+            ...snapshot.items.slice(0, 4).map((item, index) => new ButtonBuilder()
+              .setCustomId('sf:settings:sla:check:' + item.ticketId)
+              .setLabel(translate(locale, 'settings.sla.checkTicket') + ' ' + (index + 1))
+              .setStyle(ButtonStyle.Secondary)),
+          ));
+        }
+      } else if (view === 'check-result' && evaluation) {
+        title = translate(locale, 'settings.sla.title') + ' • Ticket Evaluation';
+        const fmt = (result: { progress: string; elapsedMinutes: number; targetMinutes: number; remainingMinutes: number; pausedMinutes: number } | null) =>
+          result
+            ? '**' + result.progress.toUpperCase() + '** • elapsed ' + result.elapsedMinutes + 'm / target ' + result.targetMinutes +
+              'm • remaining ' + result.remainingMinutes + 'm • paused ' + result.pausedMinutes + 'm'
+            : '**UNKNOWN** • first-response attribution/history is incomplete; no breach is inferred';
+        description = 'Ticket: <#' + evaluation.channelId + '> • status ' + evaluation.status + '\n' +
+          'Policy: ' + (evaluation.policy?.id ?? 'none') + (evaluation.policy ? ' v' + evaluation.policy.version : '') + '\n\n' +
+          '**First response**\n' + fmt(evaluation.firstResponse) + '\n\n' +
+          '**Staff claim**\n' + fmt(evaluation.claim) + '\n\n' +
+          '**Resolution**\n' + fmt(evaluation.resolution) + '\n\n' +
+          (evaluation.warning ?? 'No active SLA warning.');
+        footer = 'Read-only evaluation • business-hours and pending-pause rules are applied exactly as configured';
+        if (evaluation.policy && evaluation.claim && evaluation.resolution && !['closed','archived'].includes(evaluation.status)) {
+          extraRows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId('sf:settings:sla:preview:' + evaluation.ticketId)
+              .setLabel(translate(locale, 'settings.sla.previewEscalation')).setEmoji('🔎').setStyle(ButtonStyle.Primary),
+          ));
+        }
+      } else if (view === 'preview-result' && escalationPreview) {
+        title = translate(locale, 'settings.sla.title') + ' • Escalation Preview';
+        description = 'Ticket: <#' + escalationPreview.channelId + '>\nPreview ID: ' + escalationPreview.id +
+          '\nPolicy: ' + escalationPreview.policyId + ' v' + escalationPreview.policyVersion +
+          '\nExpires: <t:' + Math.floor(Date.parse(escalationPreview.expiresAt) / 1000) + ':R>\n\n' +
+          escalationPreview.findings.map((finding) => '• ' + finding).join('\n') +
+          '\n\nOnly a supervisor notification is allowed. No assignment or priority change will be performed.';
+        footer = 'Read-only until you choose Send Supervisor Notice. Policy or lifecycle changes invalidate this preview.';
+        extraRows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId('sf:settings:sla:send:' + escalationPreview.id)
+            .setLabel(translate(locale, 'settings.sla.sendEscalation')).setEmoji('📣').setStyle(ButtonStyle.Danger),
+          new ButtonBuilder().setCustomId('sf:settings:sla:alerts')
+            .setLabel(translate(locale, 'settings.sla.cancel')).setStyle(ButtonStyle.Secondary),
+        ));
       } else if (view === 'alerts') {
         const alerts = await listRecentSupportSlaAlerts(guild.id, 8);
         title = translate(locale, 'settings.sla.title') + ' • Alerts';
@@ -2460,40 +2755,46 @@ export async function handleSettingsInteraction(
               (index + 1) + '. **' + alert.progress.toUpperCase() + '** • ' + alert.targetType.replace('_', ' ') +
               ' • delivery ' + alert.deliveryStatus + ' • ' +
               (alert.acknowledgedAt ? 'acknowledged by <@' + (alert.acknowledgedBy ?? 'unknown') + '>' : '**not acknowledged**') +
-              '\n<#' + alert.channelId + '> • ' + alert.detail + '\nID: `' + alert.id + '`',
+              '\n<#' + alert.channelId + '> • ' + alert.detail + '\nID: ' + alert.id,
             ).join('\n\n')
           : translate(locale, 'settings.sla.alert.none');
-        footer = 'Alert delivery and acknowledgement state are durable in PostgreSQL.';
+        footer = 'Historical legacy alerts are not automatically replayed; new delivery receipts and acknowledgements are persisted.';
         const unacknowledged = alerts.filter((alert) => !alert.acknowledgedAt).slice(0, 4);
         if (unacknowledged.length) {
-          extraRows = [new ActionRowBuilder<ButtonBuilder>().addComponents(
+          extraRows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
             ...unacknowledged.map((alert, index) => new ButtonBuilder()
               .setCustomId('sf:settings:sla:ack:' + alert.id)
               .setLabel(translate(locale, 'settings.sla.acknowledge') + ' ' + (index + 1))
               .setStyle(ButtonStyle.Success)),
-          )];
+          ));
         }
+      }
+
+      if (view === 'home') {
+        description += '\n\n' + (route?.enabled
+          ? translate(locale, 'settings.sla.route.configured') + ': <#' + route.channelId + '>'
+          : translate(locale, 'settings.sla.route.missing')) +
+          '\n\nCommands: /supportforge diagnostics sla-set, sla-route-set, queue, sla-alerts, sla-ack, escalation-preview.';
+        extraRows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId('sf:settings:sla:route-edit')
+            .setLabel(translate(locale, 'settings.sla.configureRoute')).setEmoji('📣').setStyle(ButtonStyle.Primary),
+          ...(route?.enabled ? [new ButtonBuilder().setCustomId('sf:settings:sla:route-disable')
+            .setLabel(translate(locale, 'settings.sla.disableRoute')).setEmoji('🔕').setStyle(ButtonStyle.Danger)] : []),
+        ));
       }
 
       const navigation = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId('sf:settings:sla:home').setLabel('Overview').setEmoji('⏱️').setStyle(view === 'home' ? ButtonStyle.Primary : ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('sf:settings:sla:policies').setLabel('Policies').setEmoji('📋').setStyle(view === 'policies' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('sf:settings:sla:policies').setLabel('Policies').setEmoji('📋').setStyle(view === 'policies' || view === 'policy-selected' ? ButtonStyle.Primary : ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('sf:settings:sla:queue').setLabel('Queue').setEmoji('📥').setStyle(view === 'queue' ? ButtonStyle.Primary : ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('sf:settings:sla:alerts').setLabel('Alerts').setEmoji('🔔').setStyle(view === 'alerts' ? ButtonStyle.Primary : ButtonStyle.Secondary),
       );
-      const body = [notice, description, ...(view === 'home' ? [
-        '',
-        route?.enabled
-          ? translate(locale, 'settings.sla.route.configured') + ': <#' + route.channelId + '>'
-          : translate(locale, 'settings.sla.route.missing'),
-        '',
-        'Commands: `/supportforge diagnostics sla-set`, `sla-route-set`, `queue`, `sla-alerts`, `sla-ack`, `escalation-preview`.',
-      ] : [])].filter(Boolean).join('\n\n');
+      const body = [notice, description].filter(Boolean).join('\n\n');
       await interaction.editReply({
         embeds: [new EmbedBuilder().setColor(getThemeColor(config.theme)).setTitle(title)
           .setDescription(body.slice(0, 4000))
           .setFooter({ text: footer.slice(0, 2000) })],
-        components: [navigation, ...extraRows],
+        components: [navigation, ...extraRows].slice(0, 5),
       });
     } catch (error) {
       console.error('QueryFixr SLA Settings view failed for guild ' + guild.id + ':', error);
