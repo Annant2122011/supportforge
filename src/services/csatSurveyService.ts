@@ -253,7 +253,7 @@ async function claimDueSurveys(): Promise<CsatSurveyRow[]> {
     const selected = await connection.query<QueryResultRow & { id: string }>(
       "SELECT id FROM support_csat_surveys WHERE status IN ('pending','failed') " +
         'AND due_at<=NOW() AND delivery_next_attempt_at<=NOW() AND expires_at>NOW() ' +
-        'AND delivery_attempts<$1 ORDER BY due_at ASC FOR UPDATE SKIP LOCKED LIMIT $2',
+        'AND delivery_attempts<$1 ORDER BY due_at ASC LIMIT $2 FOR UPDATE SKIP LOCKED',
       [CSAT_SURVEY_MAX_DELIVERY_ATTEMPTS, MAX_DELIVERY_BATCH],
     );
     const ids = selected.rows.map((row) => row.id);
@@ -279,7 +279,7 @@ async function claimDueSurveys(): Promise<CsatSurveyRow[]> {
   }
 }
 
-function buildSurveyComponents(surveyId: string, disabled = false): ActionRowBuilder<ButtonBuilder>[] {
+export function buildCsatSurveyComponents(surveyId: string, disabled = false): ActionRowBuilder<ButtonBuilder>[] {
   const ratings = new ActionRowBuilder<ButtonBuilder>().addComponents(
     ...[1, 2, 3, 4, 5].map((rating) => new ButtonBuilder()
       .setCustomId('qf:csat:rate:' + surveyId + ':' + rating)
@@ -344,9 +344,9 @@ async function cancelSurvey(surveyId: string, reason: string): Promise<void> {
 async function deliverSurvey(survey: CsatSurveyRow, client: Client): Promise<void> {
   const pool = getPostgresPool();
   const ticket = await pool.query<QueryResultRow & {
-    status: string; deleted_at: Date | string | null; owner_id: string | null;
+    status: string; deleted_at: Date | string | null; owner_id: string | null; ticket_number: string | null;
   }>(
-    'SELECT status,deleted_at,owner_id FROM tickets WHERE id=$1 AND guild_id=$2',
+    'SELECT status,deleted_at,owner_id,ticket_number FROM tickets WHERE id=$1 AND guild_id=$2',
     [survey.ticket_id, survey.guild_id],
   );
   const ticketRow = ticket.rows[0];
@@ -380,7 +380,7 @@ async function deliverSurvey(survey: CsatSurveyRow, client: Client): Promise<voi
     }
     const user = client.users.cache.get(survey.owner_id) ?? await client.users.fetch(survey.owner_id);
     const description = 'Your QueryFixr ticket ' +
-      (survey.ticket_number ? '#' + survey.ticket_number : survey.ticket_id.slice(0, 8)) +
+      (ticketRow.ticket_number ? '#' + ticketRow.ticket_number : survey.ticket_id.slice(0, 8)) +
       ' is closed. Please rate your support experience from 1 (poor) to 5 (excellent). ' +
       'Your rating is private and may be submitted once for this ticket.';
     const message = await user.send({
@@ -390,7 +390,7 @@ async function deliverSurvey(survey: CsatSurveyRow, client: Client): Promise<voi
         .setTitle('How was your support experience?')
         .setDescription(description)
         .setFooter({ text: receiptMarker(survey.id) })],
-      components: buildSurveyComponents(survey.id),
+      components: buildCsatSurveyComponents(survey.id),
       allowedMentions: { parse: [] },
     });
     await markSurveySent(survey, dm.id, message.id);
