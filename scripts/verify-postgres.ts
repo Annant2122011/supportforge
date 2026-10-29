@@ -176,18 +176,18 @@ async function main(): Promise<void> {
   console.log(`SLA alert records: ${counts[6].rows[0]?.count ?? '0'}`);
   console.log(`SLA policy versions / monitor states: ${counts[7].rows[0]?.count ?? '0'} / ${counts[8].rows[0]?.count ?? '0'}`);
   console.log(`SLA routes / queue snapshots / escalation previews: ${counts[9].rows[0]?.count ?? '0'} / ${counts[10].rows[0]?.count ?? '0'} / ${counts[11].rows[0]?.count ?? '0'}`);
-  console.log(`Knowledge Base articles: ${counts[7].rows[0]?.count ?? '0'}`);
-  console.log(`Knowledge Base revisions: ${counts[8].rows[0]?.count ?? '0'}`);
-  console.log(`Knowledge synonyms/usage/feedback: ${counts[9].rows[0]?.count ?? '0'}/${counts[10].rows[0]?.count ?? '0'}/${counts[11].rows[0]?.count ?? '0'}`);
-  console.log(`Quick replies/revisions: ${counts[12].rows[0]?.count ?? '0'}/${counts[13].rows[0]?.count ?? '0'}`);
-  console.log(`Workflow templates/revisions: ${counts[14].rows[0]?.count ?? '0'}/${counts[15].rows[0]?.count ?? '0'}`);
-  console.log(`Related ticket links: ${counts[16].rows[0]?.count ?? '0'}`);
+  console.log(`Knowledge Base articles: ${counts[12].rows[0]?.count ?? '0'}`);
+  console.log(`Knowledge Base revisions: ${counts[13].rows[0]?.count ?? '0'}`);
+  console.log(`Knowledge synonyms/usage/feedback: ${counts[14].rows[0]?.count ?? '0'}/${counts[15].rows[0]?.count ?? '0'}/${counts[16].rows[0]?.count ?? '0'}`);
+  console.log(`Quick replies/revisions: ${counts[17].rows[0]?.count ?? '0'}/${counts[18].rows[0]?.count ?? '0'}`);
+  console.log(`Workflow templates/revisions: ${counts[19].rows[0]?.count ?? '0'}/${counts[20].rows[0]?.count ?? '0'}`);
+  console.log(`Related ticket links: ${counts[21].rows[0]?.count ?? '0'}`);
   console.log(`Orphan events: ${orphanEvents.rows[0]?.count ?? '0'}`);
   console.log(`Orphan outbox records: ${orphanOutbox.rows[0]?.count ?? '0'}`);
   console.log(`Orphan productivity revision records: ${orphanProductivityRevisions.rows[0]?.count ?? '0'}`);
   console.log(`Stale processing records: ${invalidProcessing.rows[0]?.count ?? '0'}`);
-  console.log(`Recovery replay segments: ${counts[17].rows[0]?.count ?? '0'}`);
-  console.log(`Quick Reply send intents / usage events: ${counts[18].rows[0]?.count ?? '0'} / ${counts[19].rows[0]?.count ?? '0'}`);
+  console.log(`Recovery replay segments: ${counts[22].rows[0]?.count ?? '0'}`);
+  console.log(`Quick Reply send intents / usage events: ${counts[23].rows[0]?.count ?? '0'} / ${counts[24].rows[0]?.count ?? '0'}`);
   const claimSlaSchema = await pool.query<{ claim_column: boolean; claim_target: boolean }>(`
     SELECT
       EXISTS (
