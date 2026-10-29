@@ -2542,7 +2542,7 @@ export async function execute(
         const ticketId = interaction.options.getString('ticket-id', true).trim();
         const evaluation = await evaluateTicketSla(guild.id, ticketId);
         const config = await getGuildConfig(guild.id);
-        if (!evaluation.policy || !evaluation.firstResponse || !evaluation.claim || !evaluation.resolution) {
+        if (!evaluation.policy || !evaluation.claim || !evaluation.resolution) {
           await interaction.editReply(evaluation.warning ?? 'No SLA policy applies to this ticket.');
           return;
         }
@@ -2552,7 +2552,7 @@ export async function execute(
           embeds: [new EmbedBuilder().setColor(getThemeColor(config.theme)).setTitle('⏱️ Ticket SLA Evaluation')
             .setDescription(
               'Ticket: <#' + evaluation.channelId + '>\nStatus: **' + evaluation.status + '**\nPolicy: ' + evaluation.policy.id + ' (version ' + evaluation.policy.version + ')\n\n' +
-              '**First response**\n' + fmt(evaluation.firstResponse) + '\n\n' +
+              '**First response**\n' + (evaluation.firstResponse ? fmt(evaluation.firstResponse) : '**UNKNOWN** • first-response coverage incomplete; archived message attribution is missing') + '\n\n' +
               '**Claim**\n' + fmt(evaluation.claim) + '\n\n' +
               '**Resolution**\n' + fmt(evaluation.resolution) + '\n\n' +
               (evaluation.warning ? 'Warning: ' + evaluation.warning : 'No active SLA warning.'),
