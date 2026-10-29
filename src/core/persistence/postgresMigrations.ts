@@ -1121,6 +1121,21 @@ const MIGRATIONS: readonly PostgresMigration[] = [
         );
         CREATE INDEX IF NOT EXISTS idx_support_sla_escalation_previews_due
           ON support_sla_escalation_previews (guild_id, expires_at DESC);
+        ALTER TABLE support_sla_escalation_previews
+          ADD COLUMN IF NOT EXISTS execution_status TEXT NOT NULL DEFAULT 'preview';
+        ALTER TABLE support_sla_escalation_previews
+          ADD COLUMN IF NOT EXISTS executed_by TEXT;
+        ALTER TABLE support_sla_escalation_previews
+          ADD COLUMN IF NOT EXISTS executed_at TIMESTAMPTZ;
+        ALTER TABLE support_sla_escalation_previews
+          ADD COLUMN IF NOT EXISTS delivery_message_id TEXT;
+        ALTER TABLE support_sla_escalation_previews
+          ADD COLUMN IF NOT EXISTS execution_error TEXT;
+        ALTER TABLE support_sla_escalation_previews
+          DROP CONSTRAINT IF EXISTS support_sla_escalation_previews_execution_status_check;
+        ALTER TABLE support_sla_escalation_previews
+          ADD CONSTRAINT support_sla_escalation_previews_execution_status_check
+          CHECK (execution_status IN ('preview','attempted','delivered','failed'));
       `);
     },
   },
