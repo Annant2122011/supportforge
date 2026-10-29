@@ -19,7 +19,7 @@ async function fetchLatestSha(): Promise<string | null> {
     const response = await fetch(UPDATE_URL, {
       headers: {
         Accept: 'application/vnd.github+json',
-        'User-Agent': 'ResolvX',
+        'User-Agent': 'QueryFixr',
       },
       signal: AbortSignal.timeout(20_000),
     });
@@ -29,7 +29,7 @@ async function fetchLatestSha(): Promise<string | null> {
     const payload = await response.json() as { sha?: string };
     return payload.sha ?? null;
   } catch (error) {
-    console.warn('⚠️ ResolvX update check failed:', error);
+    console.warn('⚠️ QueryFixr update check failed:', error);
     return null;
   }
 }
