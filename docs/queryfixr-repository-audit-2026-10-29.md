@@ -3,7 +3,7 @@
 **Review scope:** current consolidated Stage A–K baseline plus the Stage L implementation branch  
 **Implementation PR:** [#43 — Stage L: durable QueryFixr SLA, queue and escalation operations](https://github.com/Annant2122011/supportforge/pull/43)  
 **Production data store:** Neon PostgreSQL  
-**Audit status:** remediation in progress; release acceptance is not yet complete
+**Audit status:** Stage L implementation candidate passes the recorded exact-head Build and QueryFixr CI checks; controlled Discord and isolated-Neon release acceptance remain open
 
 This report records repository issues confirmed during the current source review. It is not a claim that every line has received a formal security review. The repository has substantial existing functionality, and source presence alone is not treated as proof that a feature works against a real Discord guild or a restored database.
 
@@ -18,7 +18,7 @@ The most important issues were reliability and truthfulness problems rather than
 5. SLA notifications needed explicit durable delivery state, controlled retry, and a way to reconcile the case where Discord accepts a message but the database receipt write times out.
 6. Historical alerts needed to be kept from being replayed as new alerts on first deployment of receipt tracking.
 7. Business-hours SLA timing, Settings/button parity for Stage L, and an actual PostgreSQL smoke test for the new operational tables were missing from the baseline.
-8. The first attempts to integrate the new Settings controls had TypeScript errors. CI surfaced these. Those errors were corrected and CI is being rerun on the latest PR head.
+8. The first attempts to integrate the new Settings controls had TypeScript errors and a stale Settings-order expectation. CI surfaced these; the source and test fixes were applied, and the current PR head's Build and QueryFixr CI checks passed.
 
 ## Findings by severity
 
@@ -46,7 +46,7 @@ The most important issues were reliability and truthfulness problems rather than
 - **Unknown historical response data must remain obvious.** Command and Settings SLA views show first response as unknown when the archive cannot support a reliable measure. This is more honest than displaying a fabricated “met” or “breached” status.
 - **Queue and alert views need understandable states.** The Settings views show policy version, clock mode, pause mode, target values, notification route, delivery state, acknowledgement and preview expiry; empty states and failure messages are supplied through the strict locale keys.
 - **Custom Settings layouts have to know about the new button.** The SLA section is registered in the configurable dashboard key set and now has a layout label and default emoji. Without those values, TypeScript correctly failed the build.
-- **CI must be run on the exact head.** An initial Stage L build exposed a bad client reference and missing Settings layout mappings. These source errors were corrected. Do not interpret an earlier green baseline or an in-progress workflow as a pass for a later commit.
+- **Exact-head CI was verified.** Commit `a73f77682bc003a197a340211a50424b0abc0335` passed [Build](https://github.com/Annant2122011/supportforge/actions/runs/40889985662) and [QueryFixr CI](https://github.com/Annant2122011/supportforge/actions/runs/40889985405). Earlier builds had surfaced a bad client reference, missing Settings layout mappings, incomplete locale keys and a stale Settings-order test; those were corrected before the passing head.
 
 ### Low / maintenance notes
 
@@ -71,7 +71,7 @@ The most important issues were reliability and truthfulness problems rather than
 
 The following are release gates, not work that can truthfully be declared passed from editing source files:
 
-1. **Exact-head GitHub Actions:** TypeScript build, unit tests and disposable-PostgreSQL verification must pass after the final branch commit. Some checks on earlier commits failed; they are not evidence for the latest head.
+1. **Exact-head GitHub Actions:** TypeScript build, unit tests and disposable-PostgreSQL verification passed on PR head `a73f77682bc003a197a340211a50424b0abc0335` through [Build](https://github.com/Annant2122011/supportforge/actions/runs/40889985662) and [QueryFixr CI](https://github.com/Annant2122011/supportforge/actions/runs/40889985405). Any subsequent code commit must rerun the checks.
 2. **Controlled Discord acceptance:** use a disposable test guild to exercise policy create/edit/disable, support-hour clock behavior, private permissions, route delivery, alert acknowledgement, stale/expired preview rejection and repeated send attempts.
 3. **Isolated Neon restore drill:** restore a verified backup into a new, empty non-production Neon branch/database, record checksum/migration level/row counts/orphan checks and complete an application smoke test. Do not run this drill against production.
 4. **Dependency vulnerability review:** resolve the two high-severity npm audit findings after inspecting the advisories and compatibility impact. Do not apply an unreviewed major upgrade simply to make the warning disappear.
@@ -79,4 +79,4 @@ The following are release gates, not work that can truthfully be declared passed
 
 ## Release decision
 
-**Do not merge or deploy solely on the basis of this document.** The branch is proposed in PR #43. Code status becomes complete only after exact-head CI passes; release status also needs the controlled Discord acceptance and isolated Neon restore record. Neon PostgreSQL remains authoritative and no SQLite production migration is proposed.
+**Automated code checks pass, but do not deploy yet.** PR #43 remains open and unmerged. The Stage L implementation has passed exact-head Build, automated tests and disposable-PostgreSQL verification. Release acceptance still needs the controlled Discord test-guild scenarios and an isolated non-production Neon restore drill. Neon PostgreSQL remains authoritative; no SQLite production migration is proposed.
