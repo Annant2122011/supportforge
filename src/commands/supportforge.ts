@@ -2416,7 +2416,7 @@ export async function execute(
         if (subcommand === 'survey-disable') {
           const settings = await setCsatSurveysEnabled(guild.id, false, interaction.user.id);
           await interaction.editReply(
-            '✅ Automatic CSAT survey DMs are disabled. Queued but unsent surveys were cancelled; already delivered surveys remain answerable until they expire. Existing ratings and comments were not deleted. Delay: ' +
+            '✅ Automatic CSAT survey DMs are disabled. Queued surveys were cancelled; an already in-flight DM may still complete, and delivered surveys remain answerable until expiry. Existing ratings and comments were not deleted. Delay: ' +
             settings.delayMinutes + ' minute(s); expiry: ' + settings.expiryDays + ' day(s).',
           );
           return;
