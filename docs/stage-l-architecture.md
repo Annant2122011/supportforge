@@ -1,6 +1,6 @@
 # Stage L — SLA, Escalation and Queue Operations
 
-**Status:** implementation candidate in PR #43; automated and live acceptance gates remain open  
+**Status:** implementation candidate in PR #43; exact-head automated CI passed; controlled Discord and isolated-Neon release gates remain open  
 **Implementation PR:** [#43 — Stage L: durable QueryFixr SLA, queue and escalation operations](https://github.com/Annant2122011/supportforge/pull/43)  
 **Depends on:** the Stage 3 recovery/SLA foundation in PR #34 and the consolidated Stage A–K candidate in PR #39  
 **Persistence:** Neon PostgreSQL remains authoritative. New schema changes must be forward-only and must not renumber existing migration IDs.  
@@ -71,7 +71,7 @@ Stage L turns the foundation into an operationally configurable and measurable s
 2. PostgreSQL integration tests for versioned policy writes, migration upgrades from the existing Stage A–K schema, cross-guild isolation, cursor rotation, concurrent monitors, alert uniqueness and outbox reconciliation.
 3. Failure-injection tests for database loss, Discord 429/retry-after, lost permissions, alert delivery succeeding before receipt persistence, restart during warning/breach and policy edits during an active evaluation.
 4. Command schema/registration tests, permission tests, localization catalog/placeholder parity and Settings/slash-command service parity.
-5. Exact-head CI must pass after the final base is refreshed.
+5. Exact-head CI passed for PR head `a73f77682bc003a197a340211a50424b0abc0335` ([Build](https://github.com/Annant2122011/supportforge/actions/runs/40889985662), [QueryFixr CI](https://github.com/Annant2122011/supportforge/actions/runs/40889985405)); every later code commit must be rechecked.
 
 ### Controlled Discord acceptance
 
