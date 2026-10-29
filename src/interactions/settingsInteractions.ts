@@ -114,9 +114,16 @@ import { getAdvancedAnalyticsReport, buildAdvancedAnalyticsCsv } from '../servic
 import {
   acknowledgeSupportSlaAlert,
   createSupportQueueSnapshot,
+  createSupportSlaEscalationPreview,
+  deleteSupportSlaPolicy,
+  disableSupportSlaNotificationRoute,
+  evaluateTicketSla,
+  executeSupportSlaEscalationPreview,
   getSupportSlaNotificationRoute,
   listRecentSupportSlaAlerts,
   listSupportSlaPolicies,
+  saveSupportSlaNotificationRoute,
+  saveSupportSlaPolicy,
 } from '../services/supportOperationsService';
 import { buildAdvancedAnalyticsComponents, buildAdvancedAnalyticsEmbed, type AnalyticsView } from './advancedAnalyticsPresentation';
 
