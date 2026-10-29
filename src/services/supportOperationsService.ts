@@ -696,19 +696,20 @@ export async function executeSupportSlaEscalationPreview(
 }
 
 let slaScheduler: ReturnType<typeof setInterval> | null = null;
-const slaSweepCursorByGuild = new Map<string, string>();
+
+type SlaAlertTarget = 'first_response' | 'claim' | 'resolution';
 
 /**
- * Persist one alert per policy version, lifecycle cycle, target and severity.
- * This prevents alert spam after process restarts or when multiple workers race.
+ * Return the durable alert ID whether newly inserted or already present.
+ * An existing intent is still eligible for delivery retry after process failure.
  */
 async function persistSlaAlert(
   guildId: string,
   ticket: SupportSlaEvaluation,
-  targetType: 'first_response' | 'claim' | 'resolution',
+  targetType: SlaAlertTarget,
   result: SlaTargetResult,
-): Promise<boolean> {
-  if (!ticket.policy || (result.progress !== 'warning' && result.progress !== 'breached')) return false;
+): Promise<{ id: string; created: boolean } | null> {
+  if (!ticket.policy || (result.progress !== 'warning' && result.progress !== 'breached')) return null;
   const policy = ticket.policy;
   const cycleStartedAt = result.startedAt;
   const targetLabel = targetType === 'first_response' ? 'First-response' : targetType === 'claim' ? 'Claim' : 'Resolution';
@@ -717,97 +718,203 @@ async function persistSlaAlert(
     ' for ticket ' + (ticket.ticketNumber ?? ticket.ticketId) + '; elapsed=' + result.elapsedMinutes +
     'm; target=' + result.targetMinutes + 'm; paused=' + result.pausedMinutes + 'm; policy=' + policy.id +
     '; policyVersion=' + policy.version + '.';
-  const inserted = await getPostgresPool().query<QueryResultRow & { id: string }>(
+  const pool = getPostgresPool();
+  const inserted = await pool.query<QueryResultRow & { id: string }>(
     'INSERT INTO support_sla_alerts ' +
-      '(id,guild_id,ticket_id,policy_id,target_type,progress,policy_version,cycle_started_at,observed_at,detail) ' +
-      'VALUES ($1,$2,$3,$4,$5,$6,$7,$8::timestamptz,NOW(),$9) ' +
+      '(id,guild_id,ticket_id,policy_id,target_type,progress,policy_version,cycle_started_at,observed_at,detail,delivery_status,delivery_next_attempt_at) ' +
+      "VALUES ($1,$2,$3,$4,$5,$6,$7,$8::timestamptz,NOW(),$9,'pending',NOW()) " +
       'ON CONFLICT (guild_id,ticket_id,policy_id,target_type,progress,policy_version,cycle_started_at) DO NOTHING ' +
       'RETURNING id',
     [randomUUID(), guildId, ticket.ticketId, policy.id, targetType, result.progress, policy.version, cycleStartedAt, detail],
   );
-  return inserted.rows.length > 0;
+  if (inserted.rows[0]) return { id: inserted.rows[0].id, created: true };
+  const existing = await pool.query<QueryResultRow & { id: string }>(
+    'SELECT id FROM support_sla_alerts WHERE guild_id=$1 AND ticket_id=$2 AND policy_id=$3 AND target_type=$4 ' +
+      'AND progress=$5 AND policy_version=$6 AND cycle_started_at=$7::timestamptz LIMIT 1',
+    [guildId, ticket.ticketId, policy.id, targetType, result.progress, policy.version, cycleStartedAt],
+  );
+  return existing.rows[0] ? { id: existing.rows[0].id, created: false } : null;
 }
 
-/** Evaluate a bounded set of active tickets and publish newly crossed SLA thresholds to the audit stream. */
+async function deliverPendingSlaAlerts(guildId: string, client: Client): Promise<number> {
+  const route = await getSupportSlaNotificationRoute(guildId);
+  // Keep pending intents queued when a server has not configured a destination.
+  if (!route || !route.enabled) return 0;
+
+  const pool = getPostgresPool();
+  const due = await pool.query<QueryResultRow & {
+    id: string; ticket_id: string; target_type: string; progress: string;
+    policy_version: number; detail: string; delivery_attempts: number;
+    channel_id: string; ticket_number: string | null;
+  }>(
+    "SELECT a.id,a.ticket_id,a.target_type,a.progress,a.policy_version,a.detail,a.delivery_attempts," +
+      "t.channel_id,t.ticket_number " +
+      "FROM support_sla_alerts a JOIN tickets t ON t.id=a.ticket_id " +
+      "WHERE a.guild_id=$1 AND a.delivery_status IN ('pending','failed') AND a.delivery_next_attempt_at<=NOW() " +
+      "ORDER BY a.observed_at ASC LIMIT 20",
+    [guildId],
+  );
+  if (!due.rows.length) return 0;
+
+  const guild = client.guilds.cache.get(guildId) ?? await client.guilds.fetch(guildId);
+  let failures = 0;
+  for (const alert of due.rows) {
+    try {
+      const channel = await guild.channels.fetch(route.channelId);
+      if (!channel || channel.type !== ChannelType.GuildText) {
+        throw new Error('Configured SLA notification destination is missing or is not a text channel.');
+      }
+      const roleMention = route.supervisorRoleId ? '<@&' + route.supervisorRoleId + '> ' : '';
+      const message = roleMention + '⏱️ **QueryFixr SLA ' + alert.progress.toUpperCase() + '**\n' +
+        alert.detail + '\nTicket: <#' + alert.channel_id + '> (' +
+        (alert.ticket_number ? '#' + alert.ticket_number : alert.ticket_id.slice(0, 8)) + ').';
+      const sent = await channel.send({
+        content: message.slice(0, 1900),
+        allowedMentions: { parse: [], roles: route.supervisorRoleId ? [route.supervisorRoleId] : [] },
+      });
+      await pool.query(
+        "UPDATE support_sla_alerts SET delivery_status='sent',delivery_attempts=delivery_attempts+1," +
+          'delivery_message_id=$2,delivered_at=NOW(),delivery_last_error=NULL ' +
+          'WHERE id=$1 AND guild_id=$3',
+        [alert.id, sent.id, guildId],
+      );
+    } catch (error) {
+      failures += 1;
+      const reason = (error instanceof Error ? error.message : 'Unknown Discord delivery error').slice(0, 1000);
+      await pool.query(
+        "UPDATE support_sla_alerts SET delivery_status='failed',delivery_attempts=delivery_attempts+1," +
+          "delivery_last_error=$2,delivery_next_attempt_at=NOW() + (LEAST(delivery_attempts + 1,60) * INTERVAL '1 minute') " +
+          'WHERE id=$1 AND guild_id=$3',
+        [alert.id, reason, guildId],
+      ).catch((persistError) => {
+        console.error('QueryFixr could not persist an SLA delivery failure for alert ' + alert.id + ':', persistError);
+      });
+      console.warn('QueryFixr SLA delivery failed for alert ' + alert.id + '; retry is scheduled:', reason);
+    }
+  }
+  return failures;
+}
+
+async function acquireSlaMonitorLease(guildId: string, owner: string): Promise<string | null | undefined> {
+  const result = await getPostgresPool().query<QueryResultRow & { cursor_ticket_id: string | null }>(
+    'INSERT INTO support_sla_monitor_state (guild_id,cursor_ticket_id,lease_owner,lease_until,updated_at) ' +
+      "VALUES ($1,NULL,$2,NOW()+INTERVAL '4 minutes',NOW()) " +
+      'ON CONFLICT (guild_id) DO UPDATE SET lease_owner=EXCLUDED.lease_owner,' +
+      'lease_until=EXCLUDED.lease_until,updated_at=NOW() ' +
+      'WHERE support_sla_monitor_state.lease_until IS NULL OR support_sla_monitor_state.lease_until<NOW() ' +
+      'RETURNING cursor_ticket_id',
+    [guildId, owner],
+  );
+  return result.rows.length ? result.rows[0].cursor_ticket_id : undefined;
+}
+
+async function updateSlaMonitorCursor(guildId: string, owner: string, cursor: string | null): Promise<void> {
+  const result = await getPostgresPool().query(
+    "UPDATE support_sla_monitor_state SET cursor_ticket_id=$3,lease_until=NOW()+INTERVAL '4 minutes',updated_at=NOW() " +
+      'WHERE guild_id=$1 AND lease_owner=$2',
+    [guildId, owner, cursor],
+  );
+  if ((result.rowCount ?? 0) !== 1) throw new Error('SLA monitor lease expired or was acquired by another worker.');
+}
+
+/** Evaluate a bounded, persisted queue page and retry due delivery intents. */
 export async function sweepSupportSlaAlerts(client: Client): Promise<number> {
   let alerts = 0;
+  const leaseOwner = randomUUID();
   for (const guild of client.guilds.cache.values()) {
+    let leased = false;
     try {
       await runTrackedOperationalTask('ticket-sla-monitor', guild.id, async () => {
-      const pool = getPostgresPool();
-      let cursor = slaSweepCursorByGuild.get(guild.id) ?? null;
-      let active = await pool.query<QueryResultRow & { id: string }>(
-        "SELECT id FROM tickets WHERE guild_id=$1 AND deleted_at IS NULL " +
-          "AND status IN ('open','claimed','pending','reopened') AND ($2::text IS NULL OR id > $2) ORDER BY id ASC LIMIT 250",
-        [guild.id, cursor],
-      );
-      if (!active.rows.length && cursor !== null) {
-        cursor = null;
-        slaSweepCursorByGuild.delete(guild.id);
-        active = await pool.query<QueryResultRow & { id: string }>(
+        const pool = getPostgresPool();
+        let cursor = await acquireSlaMonitorLease(guild.id, leaseOwner);
+        if (cursor === undefined) return; // Another live worker owns this guild's monitor lease.
+        leased = true;
+        let active = await pool.query<QueryResultRow & { id: string }>(
           "SELECT id FROM tickets WHERE guild_id=$1 AND deleted_at IS NULL " +
-            "AND status IN ('open','claimed','pending','reopened') ORDER BY id ASC LIMIT 250",
-          [guild.id],
+            "AND status IN ('open','claimed','pending','reopened') AND ($2::text IS NULL OR id > $2) ORDER BY id ASC LIMIT 250",
+          [guild.id, cursor],
         );
-      }
-      if (!active.rows.length) {
-        slaSweepCursorByGuild.delete(guild.id);
-        return;
-      }
-      const lastId = active.rows[active.rows.length - 1]?.id;
-      if (active.rows.length === 250 && lastId) slaSweepCursorByGuild.set(guild.id, lastId);
-      else slaSweepCursorByGuild.delete(guild.id);
-      const config = await getGuildConfig(guild.id);
-      let failedTicketChecks = 0;
-      for (const row of active.rows) {
-        try {
-          const evaluation = await evaluateTicketSla(guild.id, row.id);
-          if (!evaluation.policy || !evaluation.firstResponse || !evaluation.claim || !evaluation.resolution) continue;
-          const candidates: Array<{ type: 'first_response' | 'claim' | 'resolution'; result: SlaTargetResult }> = [
-            { type: 'first_response', result: evaluation.firstResponse },
-            { type: 'claim', result: evaluation.claim },
-            { type: 'resolution', result: evaluation.resolution },
-          ];
-          for (const candidate of candidates) {
-            const inserted = await persistSlaAlert(guild.id, evaluation, candidate.type, candidate.result);
-            if (!inserted) continue;
-            alerts += 1;
-            if (config.supportCategoryId) {
-              await logTicketEvent(guild, config.supportCategoryId, {
-                ticketNumber: evaluation.ticketNumber ?? evaluation.ticketId.slice(0, 8),
-                ticketChannelId: evaluation.channelId,
-                event: 'SUPPORT_SLA_' + candidate.type.toUpperCase() + '_' + candidate.result.progress.toUpperCase(),
-                actorId: 'supportforge-system',
-                actor: 'QueryFixr SLA monitor',
-                actorName: 'QueryFixr SLA monitor',
-                detail: candidate.type + ' SLA ' + candidate.result.progress + '; elapsed ' +
-                  candidate.result.elapsedMinutes + ' of ' + candidate.result.targetMinutes + ' minutes; policy ' +
-                  evaluation.policy.id + ' v' + evaluation.policy.version + '.',
-                category: 'ticket',
-              });
-            }
-          }
-        } catch (error) {
-          failedTicketChecks += 1;
-          console.warn(
-            'QueryFixr SLA monitor could not evaluate ticket ' + row.id + ':',
-            error instanceof Error ? error.message : 'unknown error',
+        if (!active.rows.length && cursor !== null) {
+          cursor = null;
+          await updateSlaMonitorCursor(guild.id, leaseOwner, null);
+          active = await pool.query<QueryResultRow & { id: string }>(
+            "SELECT id FROM tickets WHERE guild_id=$1 AND deleted_at IS NULL " +
+              "AND status IN ('open','claimed','pending','reopened') ORDER BY id ASC LIMIT 250",
+            [guild.id],
           );
         }
-      }
-      if (failedTicketChecks > 0) {
-        throw new Error(
-          'The SLA sweep could not evaluate ' + failedTicketChecks + ' of ' + active.rows.length +
-          ' tickets. Any successfully stored alerts remain durable; the next scheduled pass will retry the batch.',
-        );
-      }
+
+        const config = await getGuildConfig(guild.id);
+        let failedTicketChecks = 0;
+        for (const row of active.rows) {
+          try {
+            const evaluation = await evaluateTicketSla(guild.id, row.id);
+            if (evaluation.policy && evaluation.firstResponse && evaluation.claim && evaluation.resolution) {
+              const candidates: Array<{ type: SlaAlertTarget; result: SlaTargetResult }> = [
+                { type: 'first_response', result: evaluation.firstResponse },
+                { type: 'claim', result: evaluation.claim },
+                { type: 'resolution', result: evaluation.resolution },
+              ];
+              for (const candidate of candidates) {
+                const persisted = await persistSlaAlert(guild.id, evaluation, candidate.type, candidate.result);
+                if (!persisted) continue;
+                if (persisted.created) alerts += 1;
+                if (persisted.created && config.supportCategoryId) {
+                  // The SLA table is the authoritative event record. Audit-stream delivery
+                  // is best-effort here; notification delivery has its own durable receipt.
+                  await logTicketEvent(guild, config.supportCategoryId, {
+                    ticketNumber: evaluation.ticketNumber ?? evaluation.ticketId.slice(0, 8),
+                    ticketChannelId: evaluation.channelId,
+                    event: 'SUPPORT_SLA_' + candidate.type.toUpperCase() + '_' + candidate.result.progress.toUpperCase(),
+                    actorId: 'supportforge-system',
+                    actor: 'QueryFixr SLA monitor',
+                    actorName: 'QueryFixr SLA monitor',
+                    detail: candidate.type + ' SLA ' + candidate.result.progress + '; elapsed ' +
+                      candidate.result.elapsedMinutes + ' of ' + candidate.result.targetMinutes + ' minutes; policy ' +
+                      evaluation.policy.id + ' v' + evaluation.policy.version + '.',
+                    category: 'ticket',
+                  }).catch((error) => console.warn(
+                    'QueryFixr SLA record is durable but audit-channel publication failed for ' + persisted.id + ':',
+                    error instanceof Error ? error.message : 'unknown error',
+                  ));
+                }
+              }
+            }
+            cursor = row.id;
+            await updateSlaMonitorCursor(guild.id, leaseOwner, cursor);
+          } catch (error) {
+            failedTicketChecks += 1;
+            console.warn(
+              'QueryFixr SLA monitor could not evaluate ticket ' + row.id + '; cursor will remain before this ticket:',
+              error instanceof Error ? error.message : 'unknown error',
+            );
+            break;
+          }
+        }
+        if (failedTicketChecks > 0) {
+          throw new Error(
+            'The SLA sweep could not evaluate ' + failedTicketChecks + ' ticket(s). The durable cursor remains before the failed item so the next pass retries it.',
+          );
+        }
+        if (active.rows.length < 250) await updateSlaMonitorCursor(guild.id, leaseOwner, null);
+        const deliveryFailures = await deliverPendingSlaAlerts(guild.id, client);
+        if (deliveryFailures > 0) {
+          throw new Error(deliveryFailures + ' SLA alert delivery attempt(s) failed. Delivery receipts are retained and retries are scheduled.');
+        }
       });
     } catch (error) {
-      // Keep one guild's transient failure from preventing other guilds being scanned.
       console.warn(
         'QueryFixr SLA monitor did not complete for guild ' + guild.id + ':',
         error instanceof Error ? error.message : 'unknown error',
       );
+    } finally {
+      if (leased) {
+        await getPostgresPool().query(
+          'UPDATE support_sla_monitor_state SET lease_owner=NULL,lease_until=NULL,updated_at=NOW() ' +
+            'WHERE guild_id=$1 AND lease_owner=$2',
+          [guild.id, leaseOwner],
+        ).catch((error) => console.warn('QueryFixr could not release SLA monitor lease for guild ' + guild.id + ':', error));
+      }
     }
   }
   return alerts;
