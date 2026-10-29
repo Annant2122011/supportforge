@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ChannelType, EmbedBuilder, type Client } from 'discord.js';
+import { ChannelType, type Client } from 'discord.js';
 import type { QueryResultRow } from 'pg';
 
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
@@ -629,47 +629,70 @@ export async function executeSupportSlaEscalationPreview(
   const pool = getPostgresPool();
   const result = await pool.query<QueryResultRow & {
     id: string; ticket_id: string; policy_id: string; policy_version: number;
-    lifecycle_cycle_started_at: Date | string; preview: Record<string, unknown>; expires_at: Date | string;
+    lifecycle_cycle_started_at: Date | string; preview: Record<string, unknown>;
+    expires_at: Date | string; execution_status: string;
   }>(
-    'SELECT id,ticket_id,policy_id,policy_version,lifecycle_cycle_started_at,preview,expires_at ' +
+    'SELECT id,ticket_id,policy_id,policy_version,lifecycle_cycle_started_at,preview,expires_at,execution_status ' +
       'FROM support_sla_escalation_previews WHERE guild_id=$1 AND id=$2',
     [guildId, previewId],
   );
   const row = result.rows[0];
   if (!row) throw new Error('No escalation preview with that ID exists in this server.');
   if (Date.parse(toIso(row.expires_at) ?? '') <= Date.now()) throw new Error('This escalation preview expired. Create a fresh preview.');
+  if (row.execution_status !== 'preview') throw new Error('This escalation preview has already been used. Create a fresh preview before another attempt.');
+
   const evaluation = await evaluateTicketSla(guildId, row.ticket_id);
   if (!evaluation.policy || evaluation.policy.id !== row.policy_id || evaluation.policy.version !== Number(row.policy_version)) {
     throw new Error('The SLA policy changed after this preview. Create a fresh preview.');
   }
   if (['closed', 'archived'].includes(evaluation.status)) throw new Error('The ticket is no longer active; escalation was not sent.');
-  const route = await getSupportSlaNotificationRoute(guildId);
-  if (!route || !route.enabled) throw new Error('No enabled SLA notification route is configured. Preview is still available; no action was sent.');
-  const guild = client.guilds.cache.get(guildId) ?? await client.guilds.fetch(guildId);
-  const channel = await guild.channels.fetch(route.channelId);
-  if (!channel || channel.type !== ChannelType.GuildText) throw new Error('The configured SLA alert destination is missing or is not a text channel.');
-  const roleMention = route.supervisorRoleId ? '<@&' + route.supervisorRoleId + '> ' : '';
-  const message = roleMention + 'QueryFixr SLA escalation for <#' + evaluation.channelId + '> (' +
-    (evaluation.ticketNumber ? '#' + evaluation.ticketNumber : evaluation.ticketId.slice(0, 8)) + ').\n' +
-    'Requested manually by <@' + actorId + '>. ' +
-    'Policy ' + evaluation.policy.id + ' v' + evaluation.policy.version + '.\n' +
-    (Array.isArray((row.preview as Record<string, unknown>).findings)
-      ? ((row.preview as Record<string, unknown>).findings as string[]).join('\n')
-      : 'Review the ticket SLA clocks.');
-  const sent = await channel.send({
-    content: message.slice(0, 1900),
-    allowedMentions: { parse: [], roles: route.supervisorRoleId ? [route.supervisorRoleId] : [] },
-  });
-  await pool.query(
-    'INSERT INTO support_sla_escalation_previews ' +
-      '(id,guild_id,ticket_id,policy_id,policy_version,lifecycle_cycle_started_at,preview,created_by,expires_at) ' +
-      'VALUES ($1,$2,$3,$4,$5,$6::timestamptz,$7::jsonb,$8,$9::timestamptz)',
-    [randomUUID(), guildId, evaluation.ticketId, evaluation.policy.id, evaluation.policy.version,
-      evaluation.resolution?.startedAt ?? evaluation.firstResponse?.startedAt ?? evaluation.ticketId,
-      JSON.stringify({ sourcePreviewId: previewId, outcome: 'delivered', deliveryMessageId: sent.id, deliveredBy: actorId }),
-      actorId, new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()],
+  const expectedCycle = toIso(row.lifecycle_cycle_started_at);
+  const currentCycle = evaluation.resolution?.startedAt ?? null;
+  if (!expectedCycle || !currentCycle || Date.parse(expectedCycle) !== Date.parse(currentCycle)) {
+    throw new Error('The ticket lifecycle changed after this preview. Create a fresh preview.');
+  }
+
+  const claimed = await pool.query(
+    "UPDATE support_sla_escalation_previews SET execution_status='attempted',executed_at=NOW(),executed_by=$3,execution_error=NULL " +
+      "WHERE guild_id=$1 AND id=$2 AND execution_status='preview' AND expires_at>NOW() RETURNING id",
+    [guildId, previewId, actorId],
   );
-  return { delivered: true, message: 'Escalation sent to the configured SLA route. Message ID: ' + sent.id };
+  if (!claimed.rows.length) throw new Error('This preview expired or was already used by another request.');
+
+  try {
+    const route = await getSupportSlaNotificationRoute(guildId);
+    if (!route || !route.enabled) throw new Error('No enabled SLA notification route is configured. Create a new preview after configuring one.');
+    const guild = client.guilds.cache.get(guildId) ?? await client.guilds.fetch(guildId);
+    const channel = await guild.channels.fetch(route.channelId);
+    if (!channel || channel.type !== ChannelType.GuildText) throw new Error('The configured SLA alert destination is missing or is not a text channel.');
+
+    const roleMention = route.supervisorRoleId ? '<@&' + route.supervisorRoleId + '> ' : '';
+    const findings = Array.isArray(row.preview.findings)
+      ? (row.preview.findings as unknown[]).filter((item): item is string => typeof item === 'string')
+      : [];
+    const message = roleMention + 'QueryFixr SLA escalation for <#' + evaluation.channelId + '> (' +
+      (evaluation.ticketNumber ? '#' + evaluation.ticketNumber : evaluation.ticketId.slice(0, 8)) + ').\n' +
+      'Requested manually by <@' + actorId + '>. Policy ' + evaluation.policy.id + ' v' + evaluation.policy.version + '.\n' +
+      (findings.length ? findings.join('\n') : 'Review the ticket SLA clocks.');
+    const sent = await channel.send({
+      content: message.slice(0, 1900),
+      allowedMentions: { parse: [], roles: route.supervisorRoleId ? [route.supervisorRoleId] : [] },
+    });
+    await pool.query(
+      "UPDATE support_sla_escalation_previews SET execution_status='delivered',delivery_message_id=$3,execution_error=NULL " +
+        'WHERE guild_id=$1 AND id=$2',
+      [guildId, previewId, sent.id],
+    );
+    return { delivered: true, message: 'Escalation sent to the configured SLA route. Message ID: ' + sent.id };
+  } catch (error) {
+    const reason = (error instanceof Error ? error.message : 'Unknown delivery error').slice(0, 1000);
+    await pool.query(
+      "UPDATE support_sla_escalation_previews SET execution_status='failed',execution_error=$3 " +
+        'WHERE guild_id=$1 AND id=$2',
+      [guildId, previewId, reason],
+    ).catch(() => undefined);
+    throw error;
+  }
 }
 
 let slaScheduler: ReturnType<typeof setInterval> | null = null;
