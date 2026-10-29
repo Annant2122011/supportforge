@@ -49,6 +49,7 @@ export interface SupportSlaEvaluation {
   status: string;
   policy: SupportSlaPolicy | null;
   firstResponseAt: string | null;
+  firstResponseCoverage?: 'complete' | 'incomplete';
   claimedAt: string | null;
   resolvedAt: string | null;
   firstResponse: SlaTargetResult | null;
@@ -265,9 +266,19 @@ export async function evaluateTicketSla(
       'SELECT event_type,created_at,payload FROM ticket_events WHERE ticket_id=$1 AND guild_id=$2 ORDER BY created_at ASC',
       [ticket.id, guildId],
     ),
-    pool.query<QueryResultRow & { first_response_at: Date | string | null }>(
-      'SELECT MIN(created_at) AS first_response_at FROM ticket_message_archive ' +
-        'WHERE ticket_id=$1 AND guild_id=$2 AND is_bot=FALSE AND author_id<>$3 AND created_at >= $4::timestamptz',
+    pool.query<QueryResultRow & {
+      first_response_at: Date | string | null;
+      backfill_complete: boolean;
+      author_classification_complete: boolean;
+    }>(
+      'SELECT MIN(m.created_at) FILTER (WHERE m.is_bot=FALSE AND m.author_id<>$3 AND EXISTS (' +
+        "SELECT 1 FROM ticket_events e WHERE e.ticket_id=m.ticket_id AND e.guild_id=m.guild_id " +
+        "AND e.payload->>'messageId'=m.message_id AND e.payload->>'messageAuthorType'='staff')) AS first_response_at, " +
+        'COALESCE((SELECT a.backfill_complete FROM ticket_channel_archive a WHERE a.ticket_id=$1 AND a.guild_id=$2 LIMIT 1),FALSE) AS backfill_complete, ' +
+        "NOT EXISTS (SELECT 1 FROM ticket_message_archive m2 WHERE m2.ticket_id=$1 AND m2.guild_id=$2 AND m2.is_bot=FALSE AND m2.author_id<>$3 " +
+        "AND NOT EXISTS (SELECT 1 FROM ticket_events e2 WHERE e2.ticket_id=m2.ticket_id AND e2.guild_id=m2.guild_id " +
+        "AND e2.payload->>'messageId'=m2.message_id AND e2.payload ? 'messageAuthorType')) AS author_classification_complete " +
+        'FROM ticket_message_archive m WHERE m.ticket_id=$1 AND m.guild_id=$2 AND m.created_at >= $4::timestamptz',
       [ticket.id, guildId, ticket.ownerId ?? '', ticket.createdAt],
     ),
   ]);
@@ -276,7 +287,10 @@ export async function evaluateTicketSla(
     occurredAt: toIso(row.created_at) ?? ticket.createdAt,
     payload: row.payload ?? {},
   }));
-  const firstResponseAt = toIso(firstResponseResult.rows[0]?.first_response_at);
+  const firstResponseRow = firstResponseResult.rows[0];
+  const firstResponseAt = toIso(firstResponseRow?.first_response_at);
+  const firstResponseCoverage: 'complete' | 'incomplete' =
+    firstResponseRow?.backfill_complete && firstResponseRow?.author_classification_complete ? 'complete' : 'incomplete';
   const claimedAt = findFirstClaimAt(events, ticket.createdAt);
   const reopenedEvents = events.filter((event) => event.type === 'ticket.reopened' || event.payload?.to === 'reopened');
   const latestReopen = reopenedEvents[reopenedEvents.length - 1]?.occurredAt;
@@ -285,18 +299,20 @@ export async function evaluateTicketSla(
     ? findFirstResolutionAt(events, resolutionStartedAt)
     : null;
 
-  const firstResponse = evaluateSlaTarget({
-    clockKind: 'first-response',
-    startedAt: ticket.createdAt,
-    observedAt: now,
-    completedAt: firstResponseAt,
-    currentStatus: ticket.status,
-    targetMinutes: policy.firstResponseMinutes,
-    warningRatio: policy.warningRatio,
-    pauseWhilePending: policy.pauseWhilePending,
-    events,
-    businessTime,
-  });
+  const firstResponse = firstResponseAt || firstResponseCoverage === 'complete'
+    ? evaluateSlaTarget({
+        clockKind: 'first-response',
+        startedAt: ticket.createdAt,
+        observedAt: now,
+        completedAt: firstResponseAt,
+        currentStatus: ticket.status,
+        targetMinutes: policy.firstResponseMinutes,
+        warningRatio: policy.warningRatio,
+        pauseWhilePending: policy.pauseWhilePending,
+        events,
+        businessTime,
+      })
+    : null;
   const claim = evaluateSlaTarget({
     clockKind: 'claim',
     startedAt: ticket.createdAt,
@@ -322,9 +338,11 @@ export async function evaluateTicketSla(
     businessTime,
   });
 
-  const warning = firstResponse.progress === 'breached'
-    ? 'First-response SLA is breached.'
-    : claim.progress === 'breached'
+  const warning = !firstResponse
+    ? 'First-response SLA coverage is incomplete because archived human-message attribution is missing; no first-response breach is inferred.'
+    : firstResponse.progress === 'breached'
+      ? 'First-response SLA is breached.'
+      : claim.progress === 'breached'
       ? 'Claim SLA is breached.'
       : resolution.progress === 'breached'
         ? 'Resolution SLA is breached.'
@@ -341,6 +359,7 @@ export async function evaluateTicketSla(
     status: ticket.status,
     policy,
     firstResponseAt,
+    firstResponseCoverage,
     claimedAt,
     resolvedAt,
     firstResponse,
