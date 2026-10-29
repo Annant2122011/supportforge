@@ -70,12 +70,20 @@ import {
 } from '../services/workflowTemplateService';
 import { getPersistedTicket } from '../services/ticketPersistenceService';
 import {
+  acknowledgeSupportSlaAlert,
+  createSupportQueueSnapshot,
+  createSupportSlaEscalationPreview,
   deleteSupportSlaPolicy,
+  disableSupportSlaNotificationRoute,
   evaluateTicketSla,
+  executeSupportSlaEscalationPreview,
   getCsatSummary,
   getSupportMetrics,
+  getSupportSlaNotificationRoute,
+  listRecentSupportSlaAlerts,
   listSupportSlaPolicies,
   recordCsatResponse,
+  saveSupportSlaNotificationRoute,
   saveSupportSlaPolicy,
 } from '../services/supportOperationsService';
 import {
@@ -2011,6 +2019,7 @@ export const data =
             ))
             .addIntegerOption((option) => option.setName('claim-minutes').setDescription('Target minutes for staff to claim the ticket (default 60)').setRequired(false).setMinValue(1).setMaxValue(43200))
             .addBooleanOption((option) => option.setName('pause-while-pending').setDescription('Pause both clocks while status is Pending (default true)').setRequired(false))
+            .addBooleanOption((option) => option.setName('business-hours').setDescription('Count only configured support hours (default false)').setRequired(false))
             .addNumberOption((option) => option.setName('warning-ratio').setDescription('Warning fraction of target, from 0.5 to 0.99 (default 0.8)').setRequired(false).setMinValue(0.5).setMaxValue(0.99)),
         )
         .addSubcommand((subcommand) =>
@@ -2022,8 +2031,50 @@ export const data =
         .addSubcommand((subcommand) =>
           subcommand
             .setName('sla-check')
-            .setDescription('Evaluate first-response and resolution clocks for one ticket')
-            .addStringOption((option) => option.setName('ticket-id').setDescription('Durable ticket ID').setRequired(true).setMaxLength(36)),
+            .setDescription('Evaluate first-response, claim and resolution clocks for one ticket')
+            .addStringOption((option) => option.setName('ticket-id').setDescription('Durable ticket ID or ticket channel ID').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('queue')
+            .setDescription('Save and display a guild-scoped snapshot of the active ticket queue')
+            .addIntegerOption((option) => option.setName('limit').setDescription('Maximum tickets to include (default 20)').setMinValue(1).setMaxValue(50)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('sla-alerts')
+            .setDescription('List recent SLA alert records, delivery state and acknowledgements')
+            .addIntegerOption((option) => option.setName('limit').setDescription('Number of recent alerts (default 10)').setMinValue(1).setMaxValue(30)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('sla-ack')
+            .setDescription('Acknowledge one SLA alert in this server')
+            .addStringOption((option) => option.setName('alert-id').setDescription('Alert ID from sla-alerts').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('sla-route-set')
+            .setDescription('Set the SLA notification text channel and optional supervisor role')
+            .addChannelOption((option) => option.setName('channel').setDescription('Text channel for SLA warnings and escalations').addChannelTypes(ChannelType.GuildText).setRequired(true))
+            .addRoleOption((option) => option.setName('supervisor-role').setDescription('Optional supervisor role to ping for each alert').setRequired(false)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('sla-route-disable')
+            .setDescription('Disable SLA notification delivery without deleting alert history'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('escalation-preview')
+            .setDescription('Create a read-only, ten-minute escalation preview for an active ticket')
+            .addStringOption((option) => option.setName('ticket-id').setDescription('Durable ticket ID or ticket channel ID').setRequired(true).setMaxLength(36)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('escalation-send')
+            .setDescription('Send a supervisor notification from an unexpired, unused escalation preview')
+            .addStringOption((option) => option.setName('preview-id').setDescription('Preview ID returned by escalation-preview').setRequired(true).setMaxLength(36)),
         )
         .addSubcommand((subcommand) =>
           subcommand
