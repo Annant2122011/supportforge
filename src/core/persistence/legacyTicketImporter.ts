@@ -171,7 +171,7 @@ export async function importLegacyJsonTickets(
   });
 
   console.info(
-    '✅ Legacy ResolvX tickets processed: imported=' + imported +
+    '✅ Legacy QueryFixr tickets processed: imported=' + imported +
     ', restoredCreationEvents=' + recoveredCreationEvents +
     ', existingDatabaseRecordsPreserved=' + skippedCurrentRecords + '.',
   );
