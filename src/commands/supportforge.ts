@@ -2520,7 +2520,7 @@ export async function execute(
 
       if (subcommand === 'sla-delete') {
         const policyId = interaction.options.getString('policy-id', true).trim();
-        const deleted = await deleteSupportSlaPolicy(guild.id, policyId);
+        const deleted = await deleteSupportSlaPolicy(guild.id, policyId, interaction.user.id);
         if (!deleted) {
           await interaction.editReply('No SLA policy with that ID exists in this server.');
           return;
