@@ -120,6 +120,7 @@ import {
   evaluateTicketSla,
   executeSupportSlaEscalationPreview,
   getSupportSlaNotificationRoute,
+  getSupportSlaOperationalSummary,
   listRecentSupportSlaAlerts,
   listSupportSlaPolicies,
   saveSupportSlaNotificationRoute,
@@ -2811,6 +2812,23 @@ export async function handleSettingsInteraction(
           new ButtonBuilder().setCustomId('sf:settings:sla:alerts')
             .setLabel(translate(locale, 'settings.sla.cancel')).setStyle(ButtonStyle.Secondary),
         ));
+      } else if (view === 'report') {
+        const reportTo = new Date();
+        const reportFrom = new Date(reportTo.getTime() - 30 * 24 * 60 * 60 * 1000);
+        const summary = await getSupportSlaOperationalSummary(guild.id, reportFrom.toISOString(), reportTo.toISOString());
+        title = translate(locale, 'settings.sla.report.title');
+        description = [
+          '**' + translate(locale, 'settings.sla.report.activePolicies') + ':** ' + summary.activePolicies,
+          '**' + translate(locale, 'settings.sla.report.totalAlerts') + ':** ' + summary.totalAlerts,
+          '**' + translate(locale, 'settings.sla.report.warningsBreaches') + ':** ' + summary.warningAlerts + ' / ' + summary.breachAlerts,
+          '**' + translate(locale, 'settings.sla.report.delivery') + ':** ' + summary.deliverySent + ' / ' + summary.deliveryPending + ' / ' + summary.deliveryFailed,
+          '**' + translate(locale, 'settings.sla.report.legacy') + ':** ' + summary.legacyUntracked,
+          '**' + translate(locale, 'settings.sla.report.acknowledgements') + ':** ' + summary.acknowledgedAlerts + ' / ' + summary.unacknowledgedAlerts,
+          '**' + translate(locale, 'settings.sla.report.targets') + ':** ' +
+            summary.targetCounts.firstResponse + ' / ' + summary.targetCounts.claim + ' / ' + summary.targetCounts.resolution,
+          ...(summary.latestAlertAt ? ['**' + translate(locale, 'settings.sla.report.latest') + ':** <t:' + Math.floor(Date.parse(summary.latestAlertAt) / 1000) + ':R>'] : []),
+        ].join('\\n');
+        footer = translate(locale, 'settings.sla.report.footer');
       } else if (view === 'alerts') {
         const alerts = await listRecentSupportSlaAlerts(guild.id, 8);
         title = translate(locale, 'settings.sla.title') + ' • Alerts';
@@ -2852,6 +2870,7 @@ export async function handleSettingsInteraction(
         new ButtonBuilder().setCustomId('sf:settings:sla:policies').setLabel('Policies').setEmoji('📋').setStyle(view === 'policies' || view === 'policy-selected' ? ButtonStyle.Primary : ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('sf:settings:sla:queue').setLabel('Queue').setEmoji('📥').setStyle(view === 'queue' ? ButtonStyle.Primary : ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('sf:settings:sla:alerts').setLabel('Alerts').setEmoji('🔔').setStyle(view === 'alerts' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('sf:settings:sla:report').setLabel(translate(locale, 'settings.sla.report')).setEmoji('📊').setStyle(view === 'report' ? ButtonStyle.Primary : ButtonStyle.Secondary),
       );
       const body = [notice, description].filter(Boolean).join('\n\n');
       await interaction.editReply({
