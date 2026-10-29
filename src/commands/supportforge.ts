@@ -2477,7 +2477,7 @@ export async function execute(
           ? policies.slice(0, 18).map((policy) =>
               '**' + policy.id + '** • department: ' + policy.departmentId + ' • priority: **' + policy.priority + '**\n' +
               'First response: ' + policy.firstResponseMinutes + ' min • claim: ' + policy.claimMinutes + ' min • resolution: ' + policy.resolutionMinutes + ' min • pending pauses: ' + (policy.pauseWhilePending ? 'yes' : 'no') +
-              ' • warning: ' + Math.round(policy.warningRatio * 100) + '% • ' + (policy.enabled ? 'enabled' : 'disabled') +
+              ' • clock: ' + (policy.useBusinessHours ? 'business hours' : 'elapsed time') + ' • warning: ' + Math.round(policy.warningRatio * 100) + '% • ' + (policy.enabled ? 'enabled' : 'disabled') +
               ' • version ' + policy.version,
             ).join('\n\n')
           : 'No SLA policies exist yet. Use /supportforge diagnostics sla-set to create one.';
@@ -2499,6 +2499,7 @@ export async function execute(
             claimMinutes: interaction.options.getInteger('claim-minutes') ?? 60,
             resolutionMinutes: interaction.options.getInteger('resolution-minutes', true),
             pauseWhilePending: interaction.options.getBoolean('pause-while-pending') ?? true,
+            useBusinessHours: interaction.options.getBoolean('business-hours') ?? false,
             warningRatio: interaction.options.getNumber('warning-ratio') ?? 0.8,
             enabled: true,
           },
@@ -2510,10 +2511,10 @@ export async function execute(
             action: 'SUPPORT_SLA_POLICY_SAVED',
             actorId: interaction.user.id,
             actorName: interaction.user.tag,
-            detail: 'Saved SLA policy ' + policy.id + ' for department=' + policy.departmentId + ', priority=' + policy.priority + ', first-response=' + policy.firstResponseMinutes + 'm, claim=' + policy.claimMinutes + 'm, resolution=' + policy.resolutionMinutes + 'm, pending-pauses=' + policy.pauseWhilePending + ', version=' + policy.version + '.',
+            detail: 'Saved SLA policy ' + policy.id + ' for department=' + policy.departmentId + ', priority=' + policy.priority + ', first-response=' + policy.firstResponseMinutes + 'm, claim=' + policy.claimMinutes + 'm, resolution=' + policy.resolutionMinutes + 'm, pending-pauses=' + policy.pauseWhilePending + ', business-hours=' + policy.useBusinessHours + ', version=' + policy.version + '.',
           });
         }
-        await interaction.editReply('Saved SLA policy ' + policy.id + ' (version ' + policy.version + '). First response: ' + policy.firstResponseMinutes + ' minutes; claim: ' + policy.claimMinutes + ' minutes; resolution: ' + policy.resolutionMinutes + ' minutes; pending pause: ' + policy.pauseWhilePending + '.');
+        await interaction.editReply('Saved SLA policy ' + policy.id + ' (version ' + policy.version + '). First response: ' + policy.firstResponseMinutes + ' minutes; claim: ' + policy.claimMinutes + ' minutes; resolution: ' + policy.resolutionMinutes + ' minutes; pending pause: ' + policy.pauseWhilePending + '; clock: ' + (policy.useBusinessHours ? 'configured business hours' : 'elapsed time') + '.');
         return;
       }
 
@@ -2558,6 +2559,149 @@ export async function execute(
             )
             .setFooter({ text: 'Pending pauses and reopen resets follow the selected SLA policy; this command is read-only.' })],
         });
+        return;
+      }
+
+      if (subcommand === 'queue') {
+        const snapshot = await createSupportQueueSnapshot(
+          guild.id,
+          interaction.user.id,
+          interaction.options.getInteger('limit') ?? 20,
+        );
+        const config = await getGuildConfig(guild.id);
+        const lines = snapshot.items.slice(0, 18).map((item, index) =>
+          (index + 1) + '. **' + item.priority.toUpperCase() + '** • <#' + item.channelId + '> • ' +
+          item.status + ' • ' + item.ageMinutes + 'm old • ' + (item.claimedByIds.length ? item.claimedByIds.map((id) => '<@' + id + '>').join(', ') : 'unclaimed'),
+        );
+        await interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setColor(getThemeColor(config.theme))
+            .setTitle('📥 Queue Snapshot')
+            .setDescription((lines.length ? lines.join('\n') : 'There are no active tickets in this server.') +
+              '\n\n**Snapshot ID:** `' + snapshot.id + '`')
+            .setFooter({ text: snapshot.items.length + ' item(s) • priority then age • durable snapshot • guild-scoped' })],
+        });
+        return;
+      }
+
+      if (subcommand === 'sla-alerts') {
+        const alerts = await listRecentSupportSlaAlerts(guild.id, interaction.options.getInteger('limit') ?? 10);
+        const config = await getGuildConfig(guild.id);
+        const lines = alerts.map((alert) =>
+          '**' + alert.id + '** • ' + alert.targetType.replace('_', ' ') + ' ' + alert.progress +
+          ' • delivery: ' + alert.deliveryStatus +
+          ' • ' + (alert.acknowledgedAt ? 'acknowledged by <@' + alert.acknowledgedBy + '>' : 'unacknowledged') +
+          '\nTicket: <#' + alert.channelId + '> • ' + alert.detail,
+        );
+        await interaction.editReply({
+          embeds: [new EmbedBuilder().setColor(getThemeColor(config.theme)).setTitle('🔔 Recent SLA Alerts')
+            .setDescription((lines.length ? lines.join('\n\n') : 'No SLA alert records exist for this server yet.').slice(0, 4000))
+            .setFooter({ text: 'Delivery receipts and acknowledgements are persisted in PostgreSQL.' })],
+        });
+        return;
+      }
+
+      if (subcommand === 'sla-ack') {
+        const alertId = interaction.options.getString('alert-id', true).trim();
+        const changed = await acknowledgeSupportSlaAlert(guild.id, alertId, interaction.user.id);
+        if (!changed) {
+          const known = await listRecentSupportSlaAlerts(guild.id, 30);
+          const alert = known.find((item) => item.id === alertId);
+          await interaction.editReply(alert
+            ? 'This SLA alert was already acknowledged by <@' + (alert.acknowledgedBy ?? 'unknown') + '>.'
+            : 'No SLA alert with that ID was found among the latest 30 records in this server.');
+          return;
+        }
+        const config = await getGuildConfig(guild.id);
+        if (config.supportCategoryId) {
+          await logSettingsEvent(guild, config.supportCategoryId, {
+            action: 'SUPPORT_SLA_ALERT_ACKNOWLEDGED',
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Acknowledged SLA alert ' + alertId + '.',
+          }).catch(() => undefined);
+        }
+        await interaction.editReply('✅ SLA alert `' + alertId + '` acknowledged. The alert history and delivery receipt remain unchanged.');
+        return;
+      }
+
+      if (subcommand === 'sla-route-set') {
+        const selectedChannel = interaction.options.getChannel('channel', true);
+        if (selectedChannel.type !== ChannelType.GuildText) {
+          await interaction.editReply('The SLA destination must be a regular text channel in this server.');
+          return;
+        }
+        const selectedRole = interaction.options.getRole('supervisor-role');
+        if (selectedRole && !guild.roles.cache.has(selectedRole.id)) {
+          await interaction.editReply('The selected supervisor role does not belong to this server.');
+          return;
+        }
+        const route = await saveSupportSlaNotificationRoute(
+          guild.id,
+          selectedChannel.id,
+          selectedRole?.id ?? null,
+          interaction.user.id,
+        );
+        const config = await getGuildConfig(guild.id);
+        if (config.supportCategoryId) {
+          await logSettingsEvent(guild, config.supportCategoryId, {
+            action: 'SUPPORT_SLA_NOTIFICATION_ROUTE_UPDATED',
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'SLA notification route set to channel=' + route.channelId + ', supervisor-role=' + (route.supervisorRoleId ?? 'none') + '.',
+          }).catch(() => undefined);
+        }
+        await interaction.editReply('SLA notifications will be delivered to <#' + route.channelId + '>' +
+          (route.supervisorRoleId ? ' with a controlled ping to <@&' + route.supervisorRoleId + '>' : ' without a role ping') +
+          '. Pending alert intents will be retried on the next monitor pass.');
+        return;
+      }
+
+      if (subcommand === 'sla-route-disable') {
+        const disabled = await disableSupportSlaNotificationRoute(guild.id, interaction.user.id);
+        await interaction.editReply(disabled
+          ? 'SLA notification delivery is disabled. Policy and alert history has been retained; no records were deleted.'
+          : 'No enabled SLA notification route was configured. No data was changed.');
+        return;
+      }
+
+      if (subcommand === 'escalation-preview') {
+        const preview = await createSupportSlaEscalationPreview(
+          guild.id,
+          interaction.options.getString('ticket-id', true).trim(),
+          interaction.user.id,
+        );
+        const config = await getGuildConfig(guild.id);
+        await interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setColor(getThemeColor(config.theme))
+            .setTitle('🔎 SLA Escalation Preview')
+            .setDescription(
+              '**Ticket:** <#' + (await getPersistedTicket(preview.ticketId))?.channelId + '>\n' +
+              '**Preview ID:** `' + preview.id + '`\n' +
+              '**Policy:** `' + preview.policyId + '` v' + preview.policyVersion + '\n' +
+              '**Expires:** <t:' + Math.floor(Date.parse(preview.expiresAt) / 1000) + ':R>\n\n' +
+              preview.findings.map((finding) => '• ' + finding).join('\n') +
+              '\n\nOnly a supervisor notification is allowlisted. Automatic reassignment and priority changes remain disabled.',
+            )
+            .setFooter({ text: 'Read-only until /supportforge diagnostics escalation-send is used. Preview becomes invalid after a policy or ticket-cycle change.' })],
+        });
+        return;
+      }
+
+      if (subcommand === 'escalation-send') {
+        const previewId = interaction.options.getString('preview-id', true).trim();
+        const outcome = await executeSupportSlaEscalationPreview(client, guild.id, previewId, interaction.user.id);
+        const config = await getGuildConfig(guild.id);
+        if (config.supportCategoryId) {
+          await logSettingsEvent(guild, config.supportCategoryId, {
+            action: 'SUPPORT_SLA_ESCALATION_ATTEMPT',
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Escalation preview ' + previewId + ' delivered through the configured SLA route. ' + outcome.message,
+          }).catch(() => undefined);
+        }
+        await interaction.editReply(outcome.message);
         return;
       }
 
