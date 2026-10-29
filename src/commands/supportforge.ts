@@ -2659,6 +2659,15 @@ export async function execute(
 
       if (subcommand === 'sla-route-disable') {
         const disabled = await disableSupportSlaNotificationRoute(guild.id, interaction.user.id);
+        const config = await getGuildConfig(guild.id);
+        if (disabled && config.supportCategoryId) {
+          await logSettingsEvent(guild, config.supportCategoryId, {
+            action: 'SUPPORT_SLA_NOTIFICATION_ROUTE_DISABLED',
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Disabled SLA notification route. Policies, pending alert intents and alert history were retained.',
+          }).catch(() => undefined);
+        }
         await interaction.editReply(disabled
           ? 'SLA notification delivery is disabled. Policy and alert history has been retained; no records were deleted.'
           : 'No enabled SLA notification route was configured. No data was changed.');
@@ -2672,6 +2681,15 @@ export async function execute(
           interaction.user.id,
         );
         const config = await getGuildConfig(guild.id);
+        if (config.supportCategoryId) {
+          await logSettingsEvent(guild, config.supportCategoryId, {
+            action: 'SUPPORT_SLA_ESCALATION_PREVIEWED',
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Created escalation preview ' + preview.id + ' for ticket ' + preview.ticketId +
+              ', policy ' + preview.policyId + ' v' + preview.policyVersion + ', expires at ' + preview.expiresAt + '.',
+          }).catch(() => undefined);
+        }
         await interaction.editReply({
           embeds: [new EmbedBuilder()
             .setColor(getThemeColor(config.theme))
@@ -2691,7 +2709,22 @@ export async function execute(
 
       if (subcommand === 'escalation-send') {
         const previewId = interaction.options.getString('preview-id', true).trim();
-        const outcome = await executeSupportSlaEscalationPreview(interaction.client, guild.id, previewId, interaction.user.id);
+        let outcome: Awaited<ReturnType<typeof executeSupportSlaEscalationPreview>>;
+        try {
+          outcome = await executeSupportSlaEscalationPreview(interaction.client, guild.id, previewId, interaction.user.id);
+        } catch (error) {
+          const config = await getGuildConfig(guild.id);
+          if (config.supportCategoryId) {
+            await logSettingsEvent(guild, config.supportCategoryId, {
+              action: 'SUPPORT_SLA_ESCALATION_ATTEMPT_FAILED',
+              actorId: interaction.user.id,
+              actorName: interaction.user.tag,
+              detail: 'Escalation preview ' + previewId + ' failed. ' +
+                (error instanceof Error ? error.message : 'Unknown delivery error'),
+            }).catch(() => undefined);
+          }
+          throw error;
+        }
         const config = await getGuildConfig(guild.id);
         if (config.supportCategoryId) {
           await logSettingsEvent(guild, config.supportCategoryId, {
