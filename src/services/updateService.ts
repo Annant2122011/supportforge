@@ -73,7 +73,7 @@ export async function requestGitHubDeployment(): Promise<GitHubDeployRequestResu
         Authorization: `Bearer ${token}`,
         'X-GitHub-Api-Version': '2022-11-28',
         'Content-Type': 'application/json',
-        'User-Agent': 'ResolvX-Deployment-Control',
+        'User-Agent': 'QueryFixr-Deployment-Control',
       },
       body: JSON.stringify({ ref: 'main' }),
       signal: AbortSignal.timeout(20_000),
@@ -101,7 +101,7 @@ export async function refreshAllSupportForgeUi(client: Client): Promise<void> {
   try {
     for (const guild of client.guilds.cache.values()) {
       await refreshGuildUi(guild).catch((error) => {
-        console.warn(`⚠️ ResolvX UI refresh failed for ${guild.id}:`, error);
+        console.warn(`⚠️ QueryFixr UI refresh failed for ${guild.id}:`, error);
       });
     }
   } finally {
@@ -127,9 +127,9 @@ async function checkForUpdate(client: Client): Promise<void> {
     reason: error instanceof Error ? error.message : 'GitHub deployment request failed.',
   }));
   if (deployment.requested) {
-    console.info('ResolvX deployment workflow accepted the detected commit: ' + deployment.reason);
+    console.info('QueryFixr deployment workflow accepted the detected commit: ' + deployment.reason);
   } else {
-    console.warn('ResolvX did not dispatch a deployment from the bot monitor: ' + deployment.reason + ' The push-triggered workflow and server-side watchdog remain the automatic update paths.');
+    console.warn('QueryFixr did not dispatch a deployment from the bot monitor: ' + deployment.reason + ' The push-triggered workflow and server-side watchdog remain the automatic update paths.');
   }
   // UI reconciliation is separate from fetching/building/restarting code. The
   // GitHub workflow and the independent server watchdog perform the deployment.
@@ -146,11 +146,11 @@ export function startSupportForgeUpdateMonitor(client: Client): void {
    * an update event, while the separate server watchdog handles deployments.
    */
   void runTrackedOperationalTask('github-update-monitor', null, () => checkForUpdate(client))
-    .catch((error) => console.warn('⚠️ ResolvX update monitor task failed:', error instanceof Error ? error.name : 'unknown error'));
+    .catch((error) => console.warn('⚠️ QueryFixr update monitor task failed:', error instanceof Error ? error.name : 'unknown error'));
 
   scheduler = setInterval(() => {
     void runTrackedOperationalTask('github-update-monitor', null, () => checkForUpdate(client))
-      .catch((error) => console.warn('⚠️ ResolvX update monitor task failed:', error instanceof Error ? error.name : 'unknown error'));
+      .catch((error) => console.warn('⚠️ QueryFixr update monitor task failed:', error instanceof Error ? error.name : 'unknown error'));
   }, UPDATE_CHECK_INTERVAL_MS);
 
   scheduler.unref();
