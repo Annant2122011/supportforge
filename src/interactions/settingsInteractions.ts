@@ -2621,6 +2621,17 @@ export async function handleSettingsInteraction(
       } else if (view === 'route-disable') {
         const disabled = await disableSupportSlaNotificationRoute(guild.id, interaction.user.id);
         notice = translate(locale, disabled ? 'settings.sla.route.disabled' : 'settings.sla.route.missing');
+        if (disabled) {
+          const config = await getGuildConfig(guild.id);
+          if (config.supportCategoryId) {
+            await logSettingsEvent(guild, config.supportCategoryId, {
+              action: 'SUPPORT_SLA_NOTIFICATION_ROUTE_DISABLED',
+              actorId: interaction.user.id,
+              actorName: interaction.user.tag,
+              detail: 'Disabled SLA notification route from the Settings dashboard; policies and alert history retained.',
+            }).catch(() => undefined);
+          }
+        }
         view = 'home';
       } else if (view === 'policy-disable') {
         const policyId = parts.slice(4).join(':');
@@ -2628,15 +2639,52 @@ export async function handleSettingsInteraction(
         notice = disabled
           ? translate(locale, 'settings.sla.policy.disabled')
           : 'No active SLA policy with that ID exists in this server.';
+        if (disabled) {
+          const config = await getGuildConfig(guild.id);
+          if (config.supportCategoryId) {
+            await logSettingsEvent(guild, config.supportCategoryId, {
+              action: 'SUPPORT_SLA_POLICY_DEACTIVATED',
+              actorId: interaction.user.id,
+              actorName: interaction.user.tag,
+              detail: 'Deactivated SLA policy ' + policyId + ' from Settings. Policy versions and historical alerts were retained.',
+            }).catch(() => undefined);
+          }
+        }
         view = 'policies';
       } else if (view === 'check') {
         evaluation = await evaluateTicketSla(guild.id, parts.slice(4).join(':'));
         view = 'check-result';
       } else if (view === 'preview') {
         escalationPreview = await createSupportSlaEscalationPreview(guild.id, parts.slice(4).join(':'), interaction.user.id);
+        const config = await getGuildConfig(guild.id);
+        if (config.supportCategoryId) {
+          await logSettingsEvent(guild, config.supportCategoryId, {
+            action: 'SUPPORT_SLA_ESCALATION_PREVIEWED',
+            actorId: interaction.user.id,
+            actorName: interaction.user.tag,
+            detail: 'Created SLA escalation preview ' + escalationPreview.id + ' for ticket ' + escalationPreview.ticketId +
+              ', policy ' + escalationPreview.policyId + ' v' + escalationPreview.policyVersion + ', expires at ' + escalationPreview.expiresAt + '.',
+          }).catch(() => undefined);
+        }
         view = 'preview-result';
       } else if (view === 'send') {
-        const result = await executeSupportSlaEscalationPreview(interaction.client, guild.id, parts.slice(4).join(':'), interaction.user.id);
+        const previewId = parts.slice(4).join(':');
+        let result: Awaited<ReturnType<typeof executeSupportSlaEscalationPreview>>;
+        try {
+          result = await executeSupportSlaEscalationPreview(interaction.client, guild.id, previewId, interaction.user.id);
+        } catch (error) {
+          const config = await getGuildConfig(guild.id);
+          if (config.supportCategoryId) {
+            await logSettingsEvent(guild, config.supportCategoryId, {
+              action: 'SUPPORT_SLA_ESCALATION_ATTEMPT_FAILED',
+              actorId: interaction.user.id,
+              actorName: interaction.user.tag,
+              detail: 'Settings escalation preview ' + previewId + ' failed. ' +
+                (error instanceof Error ? error.message : 'Unknown delivery error'),
+            }).catch(() => undefined);
+          }
+          throw error;
+        }
         notice = translate(locale, 'settings.sla.escalation.sent') + ' ' + result.message;
         const config = await getGuildConfig(guild.id);
         if (config.supportCategoryId) {
