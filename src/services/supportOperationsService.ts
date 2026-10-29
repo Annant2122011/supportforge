@@ -600,7 +600,7 @@ export async function createSupportQueueSnapshot(
   // Keep a useful rolling history without allowing a frequently refreshed UI
   // to grow durable snapshot storage without bound.
   await pool.query(
-    'DELETE FROM support_sla_queue_snapshots WHERE guild_id=$1 AND id NOT IN (' +
+    'DELETE FROM support_sla_queue_snapshots WHERE guild_id=$1 AND id IN (' +
       'SELECT id FROM support_sla_queue_snapshots WHERE guild_id=$1 ORDER BY created_at DESC,id DESC OFFSET 500)',
     [guildId],
   );
