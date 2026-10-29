@@ -5,6 +5,7 @@ import { migratePostgres } from '../src/core/persistence/migrationRunner';
 import { getPostgresPool, closePostgresDatabase } from '../src/core/persistence/postgresDatabase';
 import { PostgresAnalyticsRepository } from '../src/repositories/postgresAnalyticsRepository';
 import { PostgresAdvancedAnalyticsRepository } from '../src/repositories/postgresAdvancedAnalyticsRepository';
+import { getSupportSlaOperationalSummary } from '../src/services/supportOperationsService';
 
 async function main(): Promise<void> {
   await migratePostgres();
@@ -345,6 +346,21 @@ async function main(): Promise<void> {
     stageLClient.release();
   }
   console.log('Stage L PostgreSQL integration smoke tests: versioned policy, idempotent alert, durable cursor/lease, guild isolation, queue snapshot and single-use escalation passed (rolled back).');
+
+  const reportGuildId = 'queryfixr-stage-l-sla-report-' + randomUUID();
+  const reportTo = new Date();
+  const reportFrom = new Date(reportTo.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const slaReport = await getSupportSlaOperationalSummary(
+    reportGuildId,
+    reportFrom.toISOString(),
+    new Date(reportTo.getTime() + 1000).toISOString(),
+  );
+  if (slaReport.activePolicies !== 0 || slaReport.totalAlerts !== 0 ||
+      slaReport.deliverySent !== 0 || slaReport.deliveryPending !== 0 || slaReport.deliveryFailed !== 0) {
+    throw new Error('Stage L SLA report leaked policy or alert records across guild boundaries.');
+  }
+  console.log('Stage L SLA operations report query: verified zero-record guild isolation.');
+
 
 
   // Exercise Stage K's SQL against the migrated schema, not only mock executors.
