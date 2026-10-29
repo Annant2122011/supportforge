@@ -111,6 +111,13 @@ import {
 import { clearTicketInactivityWarningsForGuild } from '../services/ticketInactivityService';
 import { parseAnalyticsPeriod } from '../services/analyticsService';
 import { getAdvancedAnalyticsReport, buildAdvancedAnalyticsCsv } from '../services/advancedAnalyticsService';
+import {
+  acknowledgeSupportSlaAlert,
+  createSupportQueueSnapshot,
+  getSupportSlaNotificationRoute,
+  listRecentSupportSlaAlerts,
+  listSupportSlaPolicies,
+} from '../services/supportOperationsService';
 import { buildAdvancedAnalyticsComponents, buildAdvancedAnalyticsEmbed, type AnalyticsView } from './advancedAnalyticsPresentation';
 
 import {
@@ -2360,6 +2367,133 @@ export async function handleSettingsInteraction(
       await interaction.editReply({
         content: translate(locale, 'analytics.advanced.loadFailed'),
         embeds: [],
+        components: [],
+      }).catch(() => undefined);
+    }
+    return true;
+  }
+
+  if (interaction.isButton() && (
+    interaction.customId === 'sf:settings:sla' ||
+    interaction.customId.startsWith('sf:settings:sla:')
+  )) {
+    const customId = interaction.customId;
+    const initial = customId === 'sf:settings:sla';
+    const parts = customId.split(':');
+    let view = initial ? 'home' : (parts[3] ?? 'home');
+    let notice = '';
+    const guild = interaction.guild;
+    let locale = 'en-US';
+
+    if (initial) await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    else await interaction.deferUpdate();
+
+    try {
+      locale = (await getAdvancedSettings(guild.id)).locale;
+      if (view === 'ack') {
+        const alertId = parts.slice(4).join(':');
+        const acknowledged = alertId
+          ? await acknowledgeSupportSlaAlert(guild.id, alertId, interaction.user.id)
+          : false;
+        if (acknowledged) {
+          notice = translate(locale, 'settings.sla.acknowledged');
+          const config = await getGuildConfig(guild.id);
+          if (config.supportCategoryId) {
+            await logSettingsEvent(guild, config.supportCategoryId, {
+              action: 'SUPPORT_SLA_ALERT_ACKNOWLEDGED',
+              actorId: interaction.user.id,
+              actorName: interaction.user.tag,
+              detail: 'Acknowledged SLA alert ' + alertId + ' from the Settings dashboard.',
+            }).catch(() => undefined);
+          }
+        } else {
+          notice = translate(locale, 'settings.sla.alreadyAcknowledged');
+        }
+        view = 'alerts';
+      }
+
+      const config = await getGuildConfig(guild.id);
+      const route = await getSupportSlaNotificationRoute(guild.id);
+      let title = translate(locale, 'settings.sla.title');
+      let description = translate(locale, 'settings.sla.description');
+      let footer = route?.enabled
+        ? translate(locale, 'settings.sla.route.configured') + ' • <#' + route.channelId + '>' +
+          (route.supervisorRoleId ? ' • <@&' + route.supervisorRoleId + '>' : '')
+        : translate(locale, 'settings.sla.route.missing');
+      let extraRows: ActionRowBuilder<ButtonBuilder>[] = [];
+
+      if (view === 'policies') {
+        const policies = (await listSupportSlaPolicies(guild.id)).filter((policy) => policy.enabled);
+        title = translate(locale, 'settings.sla.title') + ' • Policies';
+        description = policies.length
+          ? policies.slice(0, 12).map((policy) =>
+              '**' + policy.priority.toUpperCase() + '** • department `' + policy.departmentId + '` • v' + policy.version + '\n' +
+              'First response ' + policy.firstResponseMinutes + 'm • claim ' + policy.claimMinutes + 'm • resolution ' + policy.resolutionMinutes + 'm • ' +
+              (policy.useBusinessHours ? 'support-hours clock' : 'elapsed-time clock') + ' • pending pause ' + (policy.pauseWhilePending ? 'on' : 'off') +
+              ' • warning ' + Math.round(policy.warningRatio * 100) + '%',
+            ).join('\n\n')
+          : translate(locale, 'settings.sla.policy.none');
+        footer = policies.length + ' active policy/policies • policy edits retain immutable versions';
+      } else if (view === 'queue') {
+        const snapshot = await createSupportQueueSnapshot(guild.id, interaction.user.id, 10);
+        title = translate(locale, 'settings.sla.title') + ' • Queue';
+        description = snapshot.items.length
+          ? snapshot.items.map((item, index) =>
+              (index + 1) + '. **' + item.priority.toUpperCase() + '** • <#' + item.channelId + '> • ' +
+              item.status + ' • ' + item.ageMinutes + 'm old • ' +
+              (item.claimedByIds.length ? item.claimedByIds.map((id) => '<@' + id + '>').join(', ') : 'unclaimed'),
+            ).join('\n')
+          : translate(locale, 'settings.sla.queue.none');
+        footer = 'Saved queue snapshot ' + snapshot.id + ' • ' + snapshot.items.length + ' ticket(s) • priority then age';
+      } else if (view === 'alerts') {
+        const alerts = await listRecentSupportSlaAlerts(guild.id, 8);
+        title = translate(locale, 'settings.sla.title') + ' • Alerts';
+        description = alerts.length
+          ? alerts.map((alert, index) =>
+              (index + 1) + '. **' + alert.progress.toUpperCase() + '** • ' + alert.targetType.replace('_', ' ') +
+              ' • delivery ' + alert.deliveryStatus + ' • ' +
+              (alert.acknowledgedAt ? 'acknowledged by <@' + (alert.acknowledgedBy ?? 'unknown') + '>' : '**not acknowledged**') +
+              '\n<#' + alert.channelId + '> • ' + alert.detail + '\nID: `' + alert.id + '`',
+            ).join('\n\n')
+          : translate(locale, 'settings.sla.alert.none');
+        footer = 'Alert delivery and acknowledgement state are durable in PostgreSQL.';
+        const unacknowledged = alerts.filter((alert) => !alert.acknowledgedAt).slice(0, 4);
+        if (unacknowledged.length) {
+          extraRows = [new ActionRowBuilder<ButtonBuilder>().addComponents(
+            ...unacknowledged.map((alert, index) => new ButtonBuilder()
+              .setCustomId('sf:settings:sla:ack:' + alert.id)
+              .setLabel(translate(locale, 'settings.sla.acknowledge') + ' ' + (index + 1))
+              .setStyle(ButtonStyle.Success)),
+          )];
+        }
+      }
+
+      const navigation = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId('sf:settings:sla:home').setLabel('Overview').setEmoji('⏱️').setStyle(view === 'home' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('sf:settings:sla:policies').setLabel('Policies').setEmoji('📋').setStyle(view === 'policies' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('sf:settings:sla:queue').setLabel('Queue').setEmoji('📥').setStyle(view === 'queue' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('sf:settings:sla:alerts').setLabel('Alerts').setEmoji('🔔').setStyle(view === 'alerts' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      );
+      const body = [notice, description, ...(view === 'home' ? [
+        '',
+        route?.enabled
+          ? translate(locale, 'settings.sla.route.configured') + ': <#' + route.channelId + '>'
+          : translate(locale, 'settings.sla.route.missing'),
+        '',
+        'Commands: `/supportforge diagnostics sla-set`, `sla-route-set`, `queue`, `sla-alerts`, `sla-ack`, `escalation-preview`.',
+      ] : [])].filter(Boolean).join('\n\n');
+      await interaction.editReply({
+        embeds: [new EmbedBuilder().setColor(getThemeColor(config.theme)).setTitle(title)
+          .setDescription(body.slice(0, 4000))
+          .setFooter({ text: footer.slice(0, 2000) })],
+        components: [navigation, ...extraRows],
+      });
+    } catch (error) {
+      console.error('QueryFixr SLA Settings view failed for guild ' + guild.id + ':', error);
+      await interaction.editReply({
+        embeds: [new EmbedBuilder().setColor(0xD64545)
+          .setTitle(translate(locale, 'settings.sla.title'))
+          .setDescription(translate(locale, 'settings.sla.loadFailed'))],
         components: [],
       }).catch(() => undefined);
     }
