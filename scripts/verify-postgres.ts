@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { randomUUID } from 'node:crypto';
 
 import { migratePostgres } from '../src/core/persistence/migrationRunner';
 import { getPostgresPool, closePostgresDatabase } from '../src/core/persistence/postgresDatabase';
@@ -234,6 +235,117 @@ async function main(): Promise<void> {
   console.log('Stage L schema: business-hours mode, immutable policy versions, durable monitor progress, alert delivery state and escalation execution state verified.');
 
   console.log('Claim SLA policy column and alert target constraint: verified.');
+
+  // Stage L integration smoke test: execute real policy-version, alert-intent,
+  // monitor lease/cursor, notification-route, queue-snapshot and escalation
+  // state SQL on the configured database, then roll every fixture back.
+  const stageLClient = await pool.connect();
+  const stageLRunId = randomUUID();
+  const stageLGuildId = 'queryfixr-stage-l-verification-' + stageLRunId;
+  const stageLTicketId = 'queryfixr-stage-l-ticket-' + stageLRunId;
+  const stageLChannelId = 'queryfixr-stage-l-channel-' + stageLRunId;
+  const stageLPolicyId = 'queryfixr-stage-l-policy-' + stageLRunId;
+  const stageLAlertId = 'queryfixr-stage-l-alert-' + stageLRunId;
+  const stageLSnapshotId = 'queryfixr-stage-l-snapshot-' + stageLRunId;
+  const stageLPreviewId = 'queryfixr-stage-l-preview-' + stageLRunId;
+  const stageLStartedAt = new Date(Date.now() - 60_000).toISOString();
+  try {
+    await stageLClient.query('BEGIN');
+    await stageLClient.query(
+      'INSERT INTO tickets (id,guild_id,channel_id,ticket_number,status,department_id,owner_id,priority,created_at,updated_at) ' +
+        "VALUES ($1,$2,$3,'verify-L','open','verify-department','verify-customer','urgent',$4::timestamptz,$4::timestamptz)",
+      [stageLTicketId, stageLGuildId, stageLChannelId, stageLStartedAt],
+    );
+    await stageLClient.query(
+      'INSERT INTO support_sla_policies ' +
+        '(id,guild_id,department_id,priority,first_response_minutes,claim_minutes,resolution_minutes,pause_while_pending,' +
+        'use_business_hours,warning_ratio,enabled,version,updated_by,created_at,updated_at) ' +
+        'VALUES ($1,$2,\'verify-department\',\'urgent\',10,20,60,TRUE,FALSE,0.8,TRUE,1,\'verification\',NOW(),NOW())',
+      [stageLPolicyId, stageLGuildId],
+    );
+    await stageLClient.query(
+      'INSERT INTO support_sla_policy_versions (id,guild_id,policy_id,policy_version,snapshot,actor_id) ' +
+        'VALUES ($1,$2,$3,1,$4::jsonb,\'verification\')',
+      [stageLRunId, stageLGuildId, stageLPolicyId, JSON.stringify({ version: 1, useBusinessHours: false })],
+    );
+    const versionRow = await stageLClient.query(
+      'SELECT snapshot FROM support_sla_policy_versions WHERE guild_id=$1 AND policy_id=$2 AND policy_version=1',
+      [stageLGuildId, stageLPolicyId],
+    );
+    if (versionRow.rowCount !== 1) throw new Error('Stage L policy version snapshot did not round-trip.');
+
+    const alertInsert = 
+      'INSERT INTO support_sla_alerts ' +
+      '(id,guild_id,ticket_id,policy_id,target_type,progress,policy_version,cycle_started_at,observed_at,detail,delivery_status) ' +
+      "VALUES ($1,$2,$3,$4,'claim','warning',1,$5::timestamptz,NOW(),'verification alert','pending') " +
+      'ON CONFLICT (guild_id,ticket_id,policy_id,target_type,progress,policy_version,cycle_started_at) DO NOTHING RETURNING id';
+    const firstAlert = await stageLClient.query(alertInsert, [
+      stageLAlertId, stageLGuildId, stageLTicketId, stageLPolicyId, stageLStartedAt,
+    ]);
+    const duplicateAlert = await stageLClient.query(alertInsert, [
+      'duplicate:' + stageLAlertId, stageLGuildId, stageLTicketId, stageLPolicyId, stageLStartedAt,
+    ]);
+    if (firstAlert.rowCount !== 1 || duplicateAlert.rowCount !== 0) {
+      throw new Error('Stage L idempotent alert intent did not suppress a duplicate delivery intent.');
+    }
+
+    await stageLClient.query(
+      'INSERT INTO support_sla_monitor_state (guild_id,cursor_ticket_id,lease_owner,lease_until,updated_at) ' +
+        "VALUES ($1,$2,$3,NOW()+INTERVAL '1 minute',NOW())",
+      [stageLGuildId, stageLTicketId, stageLRunId],
+    );
+    const monitorState = await stageLClient.query(
+      'SELECT cursor_ticket_id,lease_owner FROM support_sla_monitor_state WHERE guild_id=$1',
+      [stageLGuildId],
+    );
+    if (monitorState.rows[0]?.cursor_ticket_id !== stageLTicketId || monitorState.rows[0]?.lease_owner !== stageLRunId) {
+      throw new Error('Stage L monitor lease/cursor did not round-trip.');
+    }
+
+    await stageLClient.query(
+      'INSERT INTO support_sla_notification_routes (guild_id,channel_id,supervisor_role_id,enabled,updated_by) ' +
+        'VALUES ($1,$2,$3,TRUE,$4)',
+      [stageLGuildId, '12345678901234567', '12345678901234568', stageLRunId],
+    );
+    const routeIsolation = await stageLClient.query(
+      'SELECT 1 FROM support_sla_notification_routes WHERE guild_id=$1',
+      ['another-guild-' + stageLRunId],
+    );
+    if (routeIsolation.rowCount !== 0) throw new Error('Stage L route unexpectedly crossed the guild boundary.');
+
+    await stageLClient.query(
+      'INSERT INTO support_sla_queue_snapshots (id,guild_id,created_by,filters,items,item_count) ' +
+        'VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,1)',
+      [stageLSnapshotId, stageLGuildId, stageLRunId, JSON.stringify({ limit: 1 }), JSON.stringify([{ ticketId: stageLTicketId }])],
+    );
+    await stageLClient.query(
+      'INSERT INTO support_sla_escalation_previews ' +
+        '(id,guild_id,ticket_id,policy_id,policy_version,lifecycle_cycle_started_at,preview,created_by,expires_at) ' +
+        "VALUES ($1,$2,$3,$4,1,$5::timestamptz,$6::jsonb,$7,NOW()+INTERVAL '10 minutes')",
+      [stageLPreviewId, stageLGuildId, stageLTicketId, stageLPolicyId, stageLStartedAt, JSON.stringify({ findings: [] }), stageLRunId],
+    );
+    const claimedPreview = await stageLClient.query(
+      "UPDATE support_sla_escalation_previews SET execution_status='attempted',executed_by=$3,executed_at=NOW() " +
+        "WHERE guild_id=$1 AND id=$2 AND execution_status='preview' RETURNING execution_status",
+      [stageLGuildId, stageLPreviewId, stageLRunId],
+    );
+    const duplicatePreviewClaim = await stageLClient.query(
+      "UPDATE support_sla_escalation_previews SET execution_status='attempted' " +
+        "WHERE guild_id=$1 AND id=$2 AND execution_status='preview' RETURNING id",
+      [stageLGuildId, stageLPreviewId],
+    );
+    if (claimedPreview.rowCount !== 1 || duplicatePreviewClaim.rowCount !== 0) {
+      throw new Error('Stage L one-time escalation preview execution was not enforced.');
+    }
+    await stageLClient.query('ROLLBACK');
+  } catch (error) {
+    await stageLClient.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    stageLClient.release();
+  }
+  console.log('Stage L PostgreSQL integration smoke tests: versioned policy, idempotent alert, durable cursor/lease, guild isolation, queue snapshot and single-use escalation passed (rolled back).');
+
 
   // Exercise Stage K's SQL against the migrated schema, not only mock executors.
   // The synthetic guild ID is used for read-only queries; these checks never mutate production data.
