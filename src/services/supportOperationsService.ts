@@ -551,6 +551,51 @@ export async function createSupportQueueSnapshot(
   return snapshot;
 }
 
+export interface SupportSlaAlertSummary {
+  id: string;
+  ticketId: string;
+  channelId: string;
+  ticketNumber: string | null;
+  targetType: string;
+  progress: string;
+  policyVersion: number;
+  deliveryStatus: string;
+  acknowledgedBy: string | null;
+  acknowledgedAt: string | null;
+  observedAt: string;
+  detail: string;
+}
+
+export async function listRecentSupportSlaAlerts(guildId: string, limit = 10): Promise<SupportSlaAlertSummary[]> {
+  const safeLimit = Math.max(1, Math.min(30, Math.trunc(limit)));
+  const result = await getPostgresPool().query<QueryResultRow & {
+    id: string; ticket_id: string; channel_id: string; ticket_number: string | null;
+    target_type: string; progress: string; policy_version: number; delivery_status: string;
+    acknowledged_by: string | null; acknowledged_at: Date | string | null;
+    observed_at: Date | string; detail: string;
+  }>(
+    'SELECT a.id,a.ticket_id,t.channel_id,t.ticket_number,a.target_type,a.progress,a.policy_version,a.delivery_status,' +
+      'a.acknowledged_by,a.acknowledged_at,a.observed_at,a.detail ' +
+      'FROM support_sla_alerts a JOIN tickets t ON t.id=a.ticket_id ' +
+      'WHERE a.guild_id=$1 ORDER BY a.observed_at DESC LIMIT $2',
+    [guildId, safeLimit],
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    ticketId: row.ticket_id,
+    channelId: row.channel_id,
+    ticketNumber: row.ticket_number,
+    targetType: row.target_type,
+    progress: row.progress,
+    policyVersion: Number(row.policy_version),
+    deliveryStatus: row.delivery_status,
+    acknowledgedBy: row.acknowledged_by,
+    acknowledgedAt: toIso(row.acknowledged_at),
+    observedAt: toIso(row.observed_at) ?? new Date(0).toISOString(),
+    detail: row.detail,
+  }));
+}
+
 export async function acknowledgeSupportSlaAlert(
   guildId: string,
   alertId: string,
