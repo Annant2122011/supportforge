@@ -40,7 +40,8 @@ test('default Settings layout groups navigation and leaves destructive reset at 
     'sf:settings:defaults',
     'sf:settings:tags',
   ]);
-  assert.equal(ids[2]?.[0], 'sf:settings:analytics');
+  assert.equal(ids[2]?.[0], 'sf:settings:sla');
+  assert.equal(ids[2]?.[1], 'sf:settings:analytics');
   assert.equal(ids.at(-1)?.at(-1), 'sf:settings:reset');
   assert.equal(rows.at(-1)?.components.find((button) => button.data.custom_id === 'sf:settings:reset')?.data.style, ButtonStyle.Danger);
 });
