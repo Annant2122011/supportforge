@@ -20,6 +20,8 @@ import {
   type CsatSurveyStatus,
 } from '../core/domain/csatSurvey';
 import { normalizeCsatResponse } from '../core/domain/csatPolicy';
+import { getAdvancedSettings } from './advancedSettingsService';
+import { translate } from '../i18n/translationService';
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
 
 const MAX_ENQUEUE_BATCH = 250;
@@ -279,7 +281,7 @@ async function claimDueSurveys(): Promise<CsatSurveyRow[]> {
   }
 }
 
-export function buildCsatSurveyComponents(surveyId: string, disabled = false): ActionRowBuilder<ButtonBuilder>[] {
+export function buildCsatSurveyComponents(surveyId: string, locale: unknown = 'en-US', disabled = false): ActionRowBuilder<ButtonBuilder>[] {
   const ratings = new ActionRowBuilder<ButtonBuilder>().addComponents(
     ...[1, 2, 3, 4, 5].map((rating) => new ButtonBuilder()
       .setCustomId('qf:csat:rate:' + surveyId + ':' + rating)
@@ -290,7 +292,7 @@ export function buildCsatSurveyComponents(surveyId: string, disabled = false): A
   const comment = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId('qf:csat:comment:' + surveyId)
-      .setLabel('Add optional comment')
+      .setLabel(translate(locale, 'csat.survey.comment.button'))
       .setEmoji('💬')
       .setStyle(ButtonStyle.Primary),
   );
@@ -379,18 +381,16 @@ async function deliverSurvey(survey: CsatSurveyRow, client: Client): Promise<voi
       return;
     }
     const user = client.users.cache.get(survey.owner_id) ?? await client.users.fetch(survey.owner_id);
-    const description = 'Your QueryFixr ticket ' +
-      (ticketRow.ticket_number ? '#' + ticketRow.ticket_number : survey.ticket_id.slice(0, 8)) +
-      ' is closed. Please rate your support experience from 1 (poor) to 5 (excellent). ' +
-      'Your rating is private and may be submitted once for this ticket.';
+    const locale = (await getAdvancedSettings(survey.guild_id)).locale;
+    const ticketLabel = ticketRow.ticket_number ? '#' + ticketRow.ticket_number : survey.ticket_id.slice(0, 8);
     const message = await user.send({
-      content: '📬 **QueryFixr feedback**',
+      content: '📬 **' + translate(locale, 'csat.survey.dm.heading') + '**',
       embeds: [new EmbedBuilder()
         .setColor(0x4F46E5)
-        .setTitle('How was your support experience?')
-        .setDescription(description)
+        .setTitle(translate(locale, 'csat.survey.dm.title'))
+        .setDescription(translate(locale, 'csat.survey.dm.content', { ticket: ticketLabel }))
         .setFooter({ text: receiptMarker(survey.id) })],
-      components: buildCsatSurveyComponents(survey.id),
+      components: buildCsatSurveyComponents(survey.id, locale),
       allowedMentions: { parse: [] },
     });
     await markSurveySent(survey, dm.id, message.id);
@@ -481,8 +481,18 @@ export function startCsatSurveyMonitor(client: Client, intervalMs = 60_000): voi
   csatMonitor.unref?.();
 }
 
+export async function getCsatSurveyLocale(surveyId: string): Promise<string> {
+  const result = await getPostgresPool().query<QueryResultRow & { guild_id: string }>(
+    'SELECT guild_id FROM support_csat_surveys WHERE id=$1',
+    [surveyId],
+  );
+  if (!result.rows[0]) throw new Error('This feedback survey was not found or is no longer available.');
+  return (await getAdvancedSettings(result.rows[0].guild_id)).locale;
+}
+
 export interface CsatSurveySubmission {
   id: string;
+  guildId: string;
   surveyId: string;
   ticketId: string;
   rating: number;
@@ -542,6 +552,7 @@ export async function submitCsatSurveyRating(
       await connection.query('COMMIT');
       return {
         id: existing.rows[0].id,
+        guildId: row.guild_id,
         surveyId,
         ticketId: row.ticket_id,
         rating: Number(existing.rows[0].rating),
@@ -561,7 +572,7 @@ export async function submitCsatSurveyRating(
       [surveyId, responseId],
     );
     await connection.query('COMMIT');
-    return { id: responseId, surveyId, ticketId: row.ticket_id, rating: normalized.rating, alreadySubmitted: false };
+    return { id: responseId, guildId: row.guild_id, surveyId, ticketId: row.ticket_id, rating: normalized.rating, alreadySubmitted: false };
   } catch (error) {
     await connection.query('ROLLBACK').catch(() => undefined);
     throw error;
