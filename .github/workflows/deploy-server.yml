@@ -1,4 +1,4 @@
-name: Deploy ResolvX Server
+name: Deploy QueryFixr Server
 
 on:
   push:
@@ -122,7 +122,7 @@ jobs:
           set -Eeuo pipefail
           cd "$DEPLOY_PATH"
           if [[ ! -d .git ]]; then
-            echo "DEPLOY_PATH must point to the existing ResolvX Git clone."
+            echo "DEPLOY_PATH must point to the existing QueryFixr Git clone."
             exit 2
           fi
           exec 9>/tmp/resolvex-deploy.lock
