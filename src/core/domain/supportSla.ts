@@ -1,3 +1,5 @@
+import { calculateBusinessElapsedMinutes, type BusinessTimePolicy, type BusinessPauseInterval } from './supportBusinessTime';
+
 export type SlaProgress = 'running' | 'warning' | 'paused' | 'met' | 'breached';
 
 export interface SlaLifecycleEvent {
@@ -16,6 +18,7 @@ export interface SlaTargetInput {
   warningRatio: number;
   pauseWhilePending: boolean;
   events: readonly SlaLifecycleEvent[];
+  businessTime?: BusinessTimePolicy;
 }
 
 export interface SlaTargetResult {
@@ -75,6 +78,37 @@ function pausedDurationMs(
   return Math.min(Math.max(0, endMs - startMs), total);
 }
 
+function businessPauseIntervals(
+  startMs: number,
+  endMs: number,
+  events: readonly SlaLifecycleEvent[],
+): BusinessPauseInterval[] {
+  const ordered = events
+    .map((event) => ({ event, at: timestamp(event.occurredAt) }))
+    .filter((entry): entry is { event: SlaLifecycleEvent; at: number } =>
+      entry.at !== null && entry.at >= startMs && entry.at <= endMs,
+    )
+    .sort((a, b) => a.at - b.at);
+  const pauses: BusinessPauseInterval[] = [];
+  let pauseStartedAt: number | null = null;
+  for (const { event, at } of ordered) {
+    if (eventChangesToPending(event)) {
+      if (pauseStartedAt === null) pauseStartedAt = at;
+      continue;
+    }
+    if (eventResumesFromPending(event) && pauseStartedAt !== null) {
+      if (at > pauseStartedAt) {
+        pauses.push({ startAt: new Date(pauseStartedAt).toISOString(), endAt: new Date(at).toISOString() });
+      }
+      pauseStartedAt = null;
+    }
+  }
+  if (pauseStartedAt !== null && endMs > pauseStartedAt) {
+    pauses.push({ startAt: new Date(pauseStartedAt).toISOString(), endAt: new Date(endMs).toISOString() });
+  }
+  return pauses;
+}
+
 function resolutionStart(input: SlaTargetInput): number | null {
   const created = timestamp(input.startedAt);
   if (created === null) return null;
@@ -123,7 +157,19 @@ export function evaluateSlaTarget(input: SlaTargetInput): SlaTargetResult {
     : baseStart;
   const safeStart = Math.min(end, Math.max(baseStart, start));
   const pausedMs = pausedDurationMs(safeStart, end, input.events, input.pauseWhilePending);
-  const elapsedMinutes = Math.max(0, Math.floor((end - safeStart - pausedMs) / 60_000));
+  let elapsedMinutes = Math.max(0, Math.floor((end - safeStart - pausedMs) / 60_000));
+  let pausedMinutes = Math.floor(pausedMs / 60_000);
+  if (input.businessTime) {
+    const pauses = input.pauseWhilePending ? businessPauseIntervals(safeStart, end, input.events) : [];
+    const measured = calculateBusinessElapsedMinutes(
+      new Date(safeStart).toISOString(),
+      new Date(end).toISOString(),
+      input.businessTime,
+      pauses,
+    );
+    elapsedMinutes = measured.elapsedMinutes;
+    pausedMinutes = measured.pausedMinutes;
+  }
   const isPending = input.currentStatus === 'pending';
   const completed = input.completedAt !== undefined && input.completedAt !== null;
   const progress: SlaProgress = completed
@@ -142,7 +188,7 @@ export function evaluateSlaTarget(input: SlaTargetInput): SlaTargetResult {
     targetMinutes,
     remainingMinutes: Math.max(0, targetMinutes - elapsedMinutes),
     warningAtMinutes: Math.ceil(targetMinutes * warningRatio),
-    pausedMinutes: Math.floor(pausedMs / 60_000),
+    pausedMinutes,
     startedAt: new Date(safeStart).toISOString(),
     completedAt: input.completedAt ?? null,
   };
