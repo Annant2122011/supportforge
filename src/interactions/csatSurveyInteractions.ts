@@ -18,8 +18,21 @@ import { translate } from '../i18n/translationService';
 
 type CsatSurveyInteraction = ButtonInteraction | ModalSubmitInteraction;
 
-function safeError(error: unknown): string {
-  return error instanceof Error ? error.message : translate('en-US', 'csat.survey.error.generic');
+function safeError(error: unknown, locale: unknown = 'en-US'): string {
+  const message = error instanceof Error ? error.message : '';
+  const safeMessages = new Set([
+    'This feedback survey was not found or is no longer available.',
+    'Only the ticket creator can submit this feedback.',
+    'This ticket is no longer closed. The feedback survey has been cancelled.',
+    'This feedback survey has expired.',
+    'This survey is not currently accepting a response.',
+    'Rating must be a whole number from 1 to 5.',
+    'Feedback comment must be text.',
+    'Feedback comments must be 500 characters or fewer.',
+    'Enter a comment or cancel the optional comment form.',
+    'The optional comment window has expired or a comment was already saved.',
+  ]);
+  return safeMessages.has(message) ? message : translate(locale, 'csat.survey.error.generic');
 }
 
 /** Handles private CSAT DM components before general ticket interaction routing. */
@@ -33,8 +46,9 @@ export async function handleCsatSurveyInteraction(interaction: CsatSurveyInterac
       const surveyId = ratingMatch[1]!;
       const rating = Number(ratingMatch[2]);
       await interaction.deferUpdate();
+      let locale: string = 'en-US';
       try {
-        const locale = await getCsatSurveyLocale(surveyId);
+        locale = await getCsatSurveyLocale(surveyId);
         const submission = await submitCsatSurveyRating(surveyId, interaction.user.id, rating);
         await interaction.editReply({
           content: '✅ ' + (submission.alreadySubmitted
@@ -43,7 +57,7 @@ export async function handleCsatSurveyInteraction(interaction: CsatSurveyInterac
           components: buildCsatSurveyComponents(surveyId, locale, true),
         });
       } catch (error) {
-        await interaction.followUp({ content: safeError(error) }).catch(() => undefined);
+        await interaction.followUp({ content: safeError(error, locale) }).catch(() => undefined);
       }
       return true;
     }
@@ -51,8 +65,9 @@ export async function handleCsatSurveyInteraction(interaction: CsatSurveyInterac
     const commentMatch = /^qf:csat:comment:([0-9a-f-]{36})$/i.exec(id);
     if (commentMatch) {
       const surveyId = commentMatch[1]!;
+      let locale: string = 'en-US';
       try {
-        const locale = await getCsatSurveyLocale(surveyId);
+        locale = await getCsatSurveyLocale(surveyId);
         if (!(await canAddCsatSurveyComment(surveyId, interaction.user.id))) {
           await interaction.reply({
             content: translate(locale, 'csat.survey.comment.unavailable'),
@@ -75,7 +90,7 @@ export async function handleCsatSurveyInteraction(interaction: CsatSurveyInterac
           );
         await interaction.showModal(modal);
       } catch (error) {
-        await interaction.reply({ content: safeError(error) }).catch(() => undefined);
+        await interaction.reply({ content: safeError(error, locale) }).catch(() => undefined);
       }
       return true;
     }
@@ -91,8 +106,9 @@ export async function handleCsatSurveyInteraction(interaction: CsatSurveyInterac
       return true;
     }
     await interaction.deferReply();
+    let locale: string = 'en-US';
     try {
-      const locale = await getCsatSurveyLocale(surveyId);
+      locale = await getCsatSurveyLocale(surveyId);
       await submitCsatSurveyComment(
         surveyId,
         interaction.user.id,
@@ -100,7 +116,7 @@ export async function handleCsatSurveyInteraction(interaction: CsatSurveyInterac
       );
       await interaction.editReply('✅ ' + translate(locale, 'csat.survey.comment.saved'));
     } catch (error) {
-      await interaction.editReply(safeError(error));
+      await interaction.editReply(safeError(error, locale));
     }
     return true;
   }
