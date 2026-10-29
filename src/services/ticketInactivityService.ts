@@ -136,9 +136,7 @@ async function findWarningMessage(
   marker: string,
   knownMessageId: string | null,
 ): Promise<Message | null> {
-  if (knownMessageId) {
-    const known = await channel.messages.fetch(knownMessageId).catch(() => null);
-    const legacyMarker = marker.replace(WARNING_MARKER_PREFIX, LEGACY_WARNING_MARKER_PREFIX);
+  const legacyMarker = marker.replace(WARNING_MARKER_PREFIX, LEGACY_WARNING_MARKER_PREFIX);
   const matchesMarker = (message: Message): boolean => {
     if (message.author.id !== client.user?.id) return false;
     const footer = embedFooter(message);
@@ -151,7 +149,6 @@ async function findWarningMessage(
   const recent = await channel.messages.fetch({ limit: 100 });
   return recent.find(matchesMarker) ?? null;
 }
-
 async function cancelVisibleWarnings(
   channel: InactivityChannel,
   client: Client,
