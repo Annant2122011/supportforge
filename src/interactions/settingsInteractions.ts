@@ -2396,10 +2396,9 @@ export async function handleSettingsInteraction(
         if (!channel || channel.type !== ChannelType.GuildText) {
           throw new Error('Choose a valid text-channel ID from this server.');
         }
-        let role = null;
-        if (roleId) {
-          role = await guild.roles.fetch(roleId).catch(() => null);
-          if (!role || role.managed) throw new Error('Choose a valid, assignable supervisor role from this server or leave the field blank.');
+        const role = roleId ? await guild.roles.fetch(roleId).catch(() => null) : null;
+        if (roleId && (!role || role.managed)) {
+          throw new Error('Choose a valid, assignable supervisor role from this server or leave the field blank.');
         }
         const saved = await saveSupportSlaNotificationRoute(guild.id, channel.id, role?.id ?? null, interaction.user.id);
         const config = await getGuildConfig(guild.id);
@@ -2499,18 +2498,19 @@ export async function handleSettingsInteraction(
     const guild = interaction.guild!;
     const customId = interaction.customId;
     if (customId === 'sf:settings:sla:route-edit') {
+      const locale = (await getAdvancedSettings(guild.id)).locale;
       const modal = new ModalBuilder()
         .setCustomId('sf:settings:sla:modal:route')
-        .setTitle(translate((await getAdvancedSettings(guild.id)).locale, 'settings.sla.modal.routeTitle'))
+        .setTitle(translate(locale, 'settings.sla.modal.routeTitle'))
         .addComponents(
           new ActionRowBuilder<TextInputBuilder>().addComponents(
             new TextInputBuilder().setCustomId('channel-id')
-              .setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.sla.modal.channel'))
+              .setLabel(translate(locale, 'settings.sla.modal.channel'))
               .setStyle(TextInputStyle.Short).setPlaceholder('123456789012345678').setRequired(true).setMaxLength(20),
           ),
           new ActionRowBuilder<TextInputBuilder>().addComponents(
             new TextInputBuilder().setCustomId('supervisor-role-id')
-              .setLabel(translate((await getAdvancedSettings(guild.id)).locale, 'settings.sla.modal.role'))
+              .setLabel(translate(locale, 'settings.sla.modal.role'))
               .setStyle(TextInputStyle.Short).setPlaceholder('123456789012345678')
               .setRequired(false).setMaxLength(20),
           ),
@@ -2620,7 +2620,7 @@ export async function handleSettingsInteraction(
         escalationPreview = await createSupportSlaEscalationPreview(guild.id, parts.slice(4).join(':'), interaction.user.id);
         view = 'preview-result';
       } else if (view === 'send') {
-        const result = await executeSupportSlaEscalationPreview(client, guild.id, parts.slice(4).join(':'), interaction.user.id);
+        const result = await executeSupportSlaEscalationPreview(interaction.client, guild.id, parts.slice(4).join(':'), interaction.user.id);
         notice = translate(locale, 'settings.sla.escalation.sent') + ' ' + result.message;
         const config = await getGuildConfig(guild.id);
         if (config.supportCategoryId) {
