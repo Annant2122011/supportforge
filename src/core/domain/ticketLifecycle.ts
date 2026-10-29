@@ -31,7 +31,7 @@ export function assertTicketStatusTransition(
   }
 
   throw new Error(
-    `Invalid ResolvX ticket lifecycle transition: ${from} -> ${to}.`,
+    `Invalid QueryFixr ticket lifecycle transition: ${from} -> ${to}.`,
   );
 }
 
