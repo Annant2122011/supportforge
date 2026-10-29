@@ -913,12 +913,13 @@ export async function sweepSupportSlaAlerts(client: Client): Promise<number> {
         for (const row of active.rows) {
           try {
             const evaluation = await evaluateTicketSla(guild.id, row.id);
-            if (evaluation.policy && evaluation.firstResponse && evaluation.claim && evaluation.resolution) {
-              const candidates: Array<{ type: SlaAlertTarget; result: SlaTargetResult }> = [
-                { type: 'first_response', result: evaluation.firstResponse },
+            if (evaluation.policy && evaluation.claim && evaluation.resolution) {
+              const candidates: Array<{ type: SlaAlertTarget; result: SlaTargetResult }> = [];
+              if (evaluation.firstResponse) candidates.push({ type: 'first_response', result: evaluation.firstResponse });
+              candidates.push(
                 { type: 'claim', result: evaluation.claim },
                 { type: 'resolution', result: evaluation.resolution },
-              ];
+              );
               for (const candidate of candidates) {
                 const persisted = await persistSlaAlert(guild.id, evaluation, candidate.type, candidate.result);
                 if (!persisted) continue;
