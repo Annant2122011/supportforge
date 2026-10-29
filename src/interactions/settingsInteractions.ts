@@ -2453,6 +2453,21 @@ export async function handleSettingsInteraction(
         };
         const warningRatioText = parsedOptions.get('warningRatio');
         const warningRatio = warningRatioText === undefined ? 0.8 : Number(warningRatioText);
+        const allPolicies = await listSupportSlaPolicies(guild.id);
+        if (mode === 'edit') {
+          const existing = allPolicies.find((candidate) => candidate.id === policyId && candidate.enabled);
+          if (!existing) throw new Error('This policy is no longer active. Refresh the policy list and select it again.');
+          if (existing.departmentId !== departmentId || existing.priority !== priorityValue) {
+            throw new Error('An edit cannot silently move a policy to another scope. Keep its department and priority unchanged; create a new policy for a different scope, then disable the old one.');
+          }
+        } else {
+          const sameScope = allPolicies.find((candidate) =>
+            candidate.enabled && candidate.departmentId === departmentId && candidate.priority === priorityValue,
+          );
+          if (sameScope) {
+            throw new Error('An active policy already exists for this department/priority scope. Select it and choose Edit Policy instead of creating a duplicate.');
+          }
+        }
         const policy = await saveSupportSlaPolicy(guild.id, {
           departmentId,
           priority: priorityValue as '*' | 'low' | 'normal' | 'high' | 'urgent' | 'critical',
