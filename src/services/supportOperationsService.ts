@@ -675,15 +675,21 @@ export async function createSupportSlaEscalationPreview(
   actorId: string,
 ): Promise<SupportSlaEscalationPreview> {
   const evaluation = await evaluateTicketSla(guildId, ticketId);
-  if (!evaluation.policy || !evaluation.firstResponse || !evaluation.claim || !evaluation.resolution) {
-    throw new Error(evaluation.warning ?? 'A complete SLA evaluation is required before escalation preview.');
+  if (!evaluation.policy || !evaluation.claim || !evaluation.resolution) {
+    throw new Error(evaluation.warning ?? 'Claim and resolution SLA clocks are required before escalation preview.');
   }
   if (['closed', 'archived'].includes(evaluation.status)) {
     throw new Error('Escalation preview is available only for active tickets.');
   }
   const findings: string[] = [];
+  if (evaluation.firstResponse) {
+    if (evaluation.firstResponse.progress === 'breached') findings.push('First response target is breached by ' + Math.max(0, evaluation.firstResponse.elapsedMinutes - evaluation.firstResponse.targetMinutes) + ' minutes.');
+    else if (evaluation.firstResponse.progress === 'warning') findings.push('First response target is approaching its warning threshold.');
+    else if (evaluation.firstResponse.progress === 'paused') findings.push('First response clock is paused.');
+  } else {
+    findings.push('First response is UNKNOWN because archived staff attribution is incomplete; no breach is inferred.');
+  }
   for (const [label, result] of [
-    ['First response', evaluation.firstResponse],
     ['Staff claim', evaluation.claim],
     ['Resolution', evaluation.resolution],
   ] as const) {
