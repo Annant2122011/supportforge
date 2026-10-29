@@ -766,6 +766,20 @@ export async function executeSupportSlaEscalationPreview(
     const channel = await guild.channels.fetch(route.channelId);
     if (!channel || channel.type !== ChannelType.GuildText) throw new Error('The configured SLA alert destination is missing or is not a text channel.');
 
+    const receiptMarker = 'QueryFixr SLA escalation preview receipt: ' + previewId;
+    const recentMessages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+    const existingReceipt = recentMessages?.find((message) =>
+      message.author.id === client.user?.id &&
+      message.embeds.some((embed) => embed.footer?.text === receiptMarker),
+    );
+    if (existingReceipt) {
+      await pool.query(
+        "UPDATE support_sla_escalation_previews SET execution_status='delivered',delivery_message_id=$3,execution_error=NULL " +
+          'WHERE guild_id=$1 AND id=$2',
+        [guildId, previewId, existingReceipt.id],
+      );
+      return { delivered: true, message: 'This escalation preview was already delivered. Message ID: ' + existingReceipt.id };
+    }
     const roleMention = route.supervisorRoleId ? '<@&' + route.supervisorRoleId + '> ' : '';
     const findings = Array.isArray(row.preview.findings)
       ? (row.preview.findings as unknown[]).filter((item): item is string => typeof item === 'string')
@@ -776,6 +790,7 @@ export async function executeSupportSlaEscalationPreview(
       (findings.length ? findings.join('\n') : 'Review the ticket SLA clocks.');
     const sent = await channel.send({
       content: message.slice(0, 1900),
+      embeds: [new EmbedBuilder().setColor(0xD97706).setFooter({ text: receiptMarker })],
       allowedMentions: { parse: [], roles: route.supervisorRoleId ? [route.supervisorRoleId] : [] },
     });
     await pool.query(
@@ -785,6 +800,33 @@ export async function executeSupportSlaEscalationPreview(
     );
     return { delivered: true, message: 'Escalation sent to the configured SLA route. Message ID: ' + sent.id };
   } catch (error) {
+    // An ambiguous timeout after Discord accepts the message must reconcile the
+    // marker before the preview is labelled failed, to avoid duplicate pings.
+    const route = await getSupportSlaNotificationRoute(guildId).catch(() => null);
+    if (route?.enabled) {
+      const guild = client.guilds.cache.get(guildId) ?? await client.guilds.fetch(guildId).catch(() => null);
+      const channel = guild ? await guild.channels.fetch(route.channelId).catch(() => null) : null;
+      const receiptMarker = 'QueryFixr SLA escalation preview receipt: ' + previewId;
+      if (channel?.type === ChannelType.GuildText) {
+        const recentMessages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+        const existingReceipt = recentMessages?.find((message) =>
+          message.author.id === client.user?.id &&
+          message.embeds.some((embed) => embed.footer?.text === receiptMarker),
+        );
+        if (existingReceipt) {
+          try {
+            await pool.query(
+              "UPDATE support_sla_escalation_previews SET execution_status='delivered',delivery_message_id=$3,execution_error=NULL " +
+                'WHERE guild_id=$1 AND id=$2',
+              [guildId, previewId, existingReceipt.id],
+            );
+            return { delivered: true, message: 'Escalation delivery was reconciled. Message ID: ' + existingReceipt.id };
+          } catch (receiptError) {
+            console.error('QueryFixr could not reconcile the delivered escalation receipt for preview ' + previewId + ':', receiptError);
+          }
+        }
+      }
+    }
     const reason = (error instanceof Error ? error.message : 'Unknown delivery error').slice(0, 1000);
     await pool.query(
       "UPDATE support_sla_escalation_previews SET execution_status='failed',execution_error=$3 " +
