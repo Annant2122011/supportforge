@@ -2276,7 +2276,7 @@ export async function handleSettingsInteraction(
       locale = (await getAdvancedSettings(guild.id)).locale;
       const readWholeNumber = (id: string, min: number, max: number): number => {
         const raw = interaction.fields.getTextInputValue(id).trim();
-        if (!/^\\d+$/.test(raw)) throw new Error('Enter a whole number from ' + min + ' to ' + max + '.');
+        if (!/^\d+$/.test(raw)) throw new Error('Enter a whole number from ' + min + ' to ' + max + '.');
         const value = Number(raw);
         if (!Number.isSafeInteger(value) || value < min || value > max) {
           throw new Error('Enter a whole number from ' + min + ' to ' + max + '.');
