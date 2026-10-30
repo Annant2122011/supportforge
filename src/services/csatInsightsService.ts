@@ -17,7 +17,6 @@ import {
 } from '../core/domain/csatReporting';
 import { getAdvancedSettings } from './advancedSettingsService';
 import { getGuildConfig } from './configService';
-import { getCsatSurveySettings } from './csatSurveyService';
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
 
 const MAX_RETRIES = 8;
@@ -290,12 +289,19 @@ export async function getCsatInsightsReport(
   const currentStart = new Date(now.getTime() - days * 24 * 60 * 60_000);
   const previousEnd = currentStart;
   const previousStart = new Date(currentStart.getTime() - days * 24 * 60 * 60_000);
-  const settings = await getCsatSurveySettings(guildId);
+  const settingsResult = await getPostgresPool().query<QueryResultRow & { minimum_cohort_size: number }>(
+    'SELECT minimum_cohort_size FROM support_csat_survey_settings WHERE guild_id=$1',
+    [guildId],
+  );
+  const configuredMinimum = Number(settingsResult.rows[0]?.minimum_cohort_size ?? 5);
+  const minimumCohortSize = Number.isInteger(configuredMinimum) && configuredMinimum >= 1 && configuredMinimum <= 100
+    ? configuredMinimum
+    : 5;
   const [currentCounts, previousCounts, grouped] = await Promise.all([
-    loadSurveyCounts(guildId, currentStart.toISOString(), currentEnd.toISOString(), filters, settings.minimumCohortSize),
-    loadSurveyCounts(guildId, previousStart.toISOString(), previousEnd.toISOString(), filters, settings.minimumCohortSize),
+    loadSurveyCounts(guildId, currentStart.toISOString(), currentEnd.toISOString(), filters, minimumCohortSize),
+    loadSurveyCounts(guildId, previousStart.toISOString(), previousEnd.toISOString(), filters, minimumCohortSize),
     groupBy
-      ? loadGroups(guildId, currentStart.toISOString(), currentEnd.toISOString(), filters, settings.minimumCohortSize, groupBy)
+      ? loadGroups(guildId, currentStart.toISOString(), currentEnd.toISOString(), filters, minimumCohortSize, groupBy)
       : Promise.resolve({ groups: [], suppressed: 0 }),
   ]);
   return {
@@ -304,7 +310,7 @@ export async function getCsatInsightsReport(
     generatedAt: now.toISOString(),
     filters,
     groupBy,
-    minimumCohortSize: settings.minimumCohortSize,
+    minimumCohortSize,
     current: period(currentStart.toISOString(), currentEnd.toISOString(), currentCounts),
     previous: period(previousStart.toISOString(), previousEnd.toISOString(), previousCounts),
     comparison: {
