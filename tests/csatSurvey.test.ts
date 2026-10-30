@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   assertCsatSurveyTransition,
+  getCsatSurveyErrorTranslationKey,
   calculateCsatSurveyRetryDelayMs,
   canTransitionCsatSurvey,
   isCsatSurveyExpired,
@@ -43,4 +44,20 @@ test('CSAT timing has explicit bounds and disallows delay beyond expiry', () => 
   assert.throws(() => validateCsatSurveyTiming(10081, 30), /delay must be a whole number/);
   assert.throws(() => validateCsatSurveyTiming(0, 0), /expiry must be a whole number/);
   assert.throws(() => validateCsatSurveyTiming(1440, 1), /shorter than the survey expiry window/);
+});
+
+
+test('CSAT interaction errors resolve to safe localized keys', () => {
+  assert.equal(
+    getCsatSurveyErrorTranslationKey('Only the ticket creator can submit this feedback.'),
+    'csat.survey.error.ownerOnly',
+  );
+  assert.equal(
+    getCsatSurveyErrorTranslationKey('This feedback survey has expired.'),
+    'csat.survey.error.expired',
+  );
+  assert.equal(
+    getCsatSurveyErrorTranslationKey('database password=secret'),
+    'csat.survey.error.generic',
+  );
 });
