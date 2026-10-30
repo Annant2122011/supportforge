@@ -7,6 +7,7 @@ import {
   type ModalSubmitInteraction,
 } from 'discord.js';
 
+import { getCsatSurveyErrorTranslationKey } from '../core/domain/csatSurvey';
 import {
   buildCsatSurveyComponents,
   canAddCsatSurveyComment,
@@ -20,19 +21,7 @@ type CsatSurveyInteraction = ButtonInteraction | ModalSubmitInteraction;
 
 function safeError(error: unknown, locale: unknown = 'en-US'): string {
   const message = error instanceof Error ? error.message : '';
-  const safeMessages = new Set([
-    'This feedback survey was not found or is no longer available.',
-    'Only the ticket creator can submit this feedback.',
-    'This ticket is no longer closed. The feedback survey has been cancelled.',
-    'This feedback survey has expired.',
-    'This survey is not currently accepting a response.',
-    'Rating must be a whole number from 1 to 5.',
-    'Feedback comment must be text.',
-    'Feedback comments must be 500 characters or fewer.',
-    'Enter a comment or cancel the optional comment form.',
-    'The optional comment window has expired or a comment was already saved.',
-  ]);
-  return safeMessages.has(message) ? message : translate(locale, 'csat.survey.error.generic');
+  return translate(locale, getCsatSurveyErrorTranslationKey(message));
 }
 
 /** Handles private CSAT DM components before general ticket interaction routing. */
@@ -95,7 +84,7 @@ export async function handleCsatSurveyInteraction(interaction: CsatSurveyInterac
       return true;
     }
 
-    await interaction.reply({ content: 'This feedback control is invalid or has expired.' }).catch(() => undefined);
+    await interaction.reply({ content: translate('en-US', 'csat.survey.invalid') }).catch(() => undefined);
     return true;
   }
 
