@@ -369,6 +369,23 @@ async function resolveServerAccess(interaction: ChatInputCommandInteraction): Pr
   return { isAdmin, isStaff, roleIds };
 }
 
+function safeCsatFeedbackError(error: unknown, locale: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  const safePrefixes = [
+    'CSAT report window', 'Department filter', 'Tag filter', 'Priority filter',
+    'CSAT grouping', 'Comment page', 'Comment review window',
+    'The minimum CSAT cohort', 'Comment retention', 'The comment-review role',
+    'You are not authorized', 'Ticket was not found', 'Only the ticket creator',
+    'Feedback is available', 'Feedback has already', 'Rating must',
+    'Feedback comment', 'Supply at least one CSAT', 'Choose a reviewer role ID',
+    'Survey delay must',
+  ];
+  if (message.length > 0 && message.length <= 250 && safePrefixes.some((prefix) => message.startsWith(prefix))) {
+    return message;
+  }
+  return translate(locale, 'csat.survey.error.generic');
+}
+
 function parseCommaList(value: string | null, field: string, maxItems: number): string[] {
   if (!value?.trim()) return [];
   const items = [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))];
@@ -2594,9 +2611,8 @@ export async function execute(
         }
 
       } catch (error) {
-        await interaction.editReply(
-          error instanceof Error ? error.message : 'The feedback operation failed safely. Please retry later.',
-        );
+        const locale = await getAdvancedSettings(guild.id).then((value) => value.locale).catch(() => 'en-US');
+        await interaction.editReply(safeCsatFeedbackError(error, locale));
         return;
       }
     }
