@@ -138,7 +138,9 @@ export async function setCsatSurveysEnabled(
     await connection.query('BEGIN');
     const result = await connection.query<QueryResultRow & {
       guild_id: string; enabled: boolean; enabled_at: Date | string | null;
-      delay_minutes: number; expiry_days: number; updated_by: string | null; updated_at: Date | string | null;
+      delay_minutes: number; expiry_days: number; minimum_cohort_size: number;
+      comment_retention_days: number; comment_review_role_id: string | null;
+      updated_by: string | null; updated_at: Date | string | null;
     }>(
       'INSERT INTO support_csat_survey_settings (guild_id,enabled,enabled_at,updated_by,updated_at) ' +
         'VALUES ($1,$2,CASE WHEN $2 THEN NOW() ELSE NULL END,$3,NOW()) ' +
