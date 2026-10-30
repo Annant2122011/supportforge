@@ -18,8 +18,38 @@ const CSAT_SURVEY_TRANSITIONS: Record<CsatSurveyStatus, readonly CsatSurveyStatu
 };
 
 export const CSAT_SURVEY_MAX_DELIVERY_ATTEMPTS = 8;
-export const CSAT_SURVEY_PROCESSING_LEASE_MS = 2 * 60_000;
+export const CSAT_SURVEY_PROCESSING_LEASE_MS = 10 * 60_000;
 export const CSAT_SURVEY_COMMENT_WINDOW_MS = 15 * 60_000;
+
+export type CsatSurveyErrorTranslationKey =
+  | 'csat.survey.error.notFound'
+  | 'csat.survey.error.ownerOnly'
+  | 'csat.survey.error.ticketNotClosed'
+  | 'csat.survey.error.expired'
+  | 'csat.survey.error.notAccepting'
+  | 'csat.survey.error.invalidRating'
+  | 'csat.survey.error.commentType'
+  | 'csat.survey.error.commentTooLong'
+  | 'csat.survey.error.commentEmpty'
+  | 'csat.survey.error.commentUnavailable'
+  | 'csat.survey.error.generic';
+
+/** Map known domain failures to localized copy without ever returning raw infrastructure errors. */
+export function getCsatSurveyErrorTranslationKey(message: string): CsatSurveyErrorTranslationKey {
+  const keys: Record<string, CsatSurveyErrorTranslationKey> = {
+    'This feedback survey was not found or is no longer available.': 'csat.survey.error.notFound',
+    'Only the ticket creator can submit this feedback.': 'csat.survey.error.ownerOnly',
+    'This ticket is no longer closed. The feedback survey has been cancelled.': 'csat.survey.error.ticketNotClosed',
+    'This feedback survey has expired.': 'csat.survey.error.expired',
+    'This survey is not currently accepting a response.': 'csat.survey.error.notAccepting',
+    'Rating must be a whole number from 1 to 5.': 'csat.survey.error.invalidRating',
+    'Feedback comment must be text.': 'csat.survey.error.commentType',
+    'Feedback comments must be 500 characters or fewer.': 'csat.survey.error.commentTooLong',
+    'Enter a comment or cancel the optional comment form.': 'csat.survey.error.commentEmpty',
+    'The optional comment window has expired or a comment was already saved.': 'csat.survey.error.commentUnavailable',
+  };
+  return keys[message] ?? 'csat.survey.error.generic';
+}
 
 export function canTransitionCsatSurvey(
   from: CsatSurveyStatus,
