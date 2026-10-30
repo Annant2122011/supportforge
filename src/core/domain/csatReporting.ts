@@ -79,8 +79,8 @@ export function compareCsatMetric(current: number | null, previous: number | nul
 export function neutralizeCsatCsvCell(value: unknown): string {
   if (value === undefined || value === null) return '';
   let text = typeof value === 'string' ? value : String(value);
-  if (typeof value === 'string' && /^[\\t\\r\\n ]*[=+\\-@]/.test(text)) text = "'" + text;
-  if (/[",\\r\\n]/.test(text)) return '"' + text.replace(/"/g, '""') + '"';
+  if (typeof value === 'string' && /^[\t\r\n ]*[=+\-@]/.test(text)) text = "'" + text;
+  if (/[",\r\n]/.test(text)) return '"' + text.replace(/"/g, '""') + '"';
   return text;
 }
 
