@@ -183,7 +183,8 @@ async function enqueueClosedTickets(): Promise<number> {
     existing_response_at: Date | string | null;
   }>(
     'SELECT t.id AS ticket_id,t.guild_id,t.channel_id AS ticket_channel_id,t.ticket_number,t.owner_id,' +
-      'closure.id AS closure_event_id,closure.created_at AS closed_at,s.delay_minutes,s.expiry_days ' +
+      'closure.id AS closure_event_id,closure.created_at AS closed_at,s.delay_minutes,s.expiry_days,' +
+      'existing_response.id AS existing_response_id,existing_response.created_at AS existing_response_at ' +
       'FROM tickets t ' +
       'JOIN support_csat_survey_settings s ON s.guild_id=t.guild_id AND s.enabled=TRUE AND s.enabled_at IS NOT NULL ' +
       'JOIN LATERAL (' +
