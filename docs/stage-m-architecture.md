@@ -72,3 +72,41 @@ Part 1 establishes a reliable, private, observable lifecycle. Part 2 adds the ma
 - Missing invitation history means coverage is unknown, not that satisfaction is high.
 - No production deployment or production database mutation is part of this stage's implementation branch.
 - The Stage L PR #43 must be merged/accepted before this stacked Stage M PR is merged into `main`.
+
+
+## Part 2 implementation — reporting, manager UX and privacy governance
+
+Part 2 is implemented additively on top of Part 1 and uses PostgreSQL migration 24. It does not replace the existing response table or the /feedback rate path.
+
+### Reporting definitions
+
+- **Eligible closed tickets** are the persisted survey-ledger entries plus currently eligible, post-enable closed tickets that have not yet been swept into the ledger. Deleted tickets are excluded.
+- **Invitations sent** count only survey rows with a confirmed sent_at receipt.
+- **Survey responses** count an owner's rating only when the invitation has a confirmed delivery time and the response was recorded at or after that time.
+- **Response rate** is survey responses divided by invitations sent. It is null when no invitation was delivered.
+- **Delivery coverage** is invitations sent divided by eligible closed tickets. The report displays both numerator and denominator.
+- Existing/manual ratings remain visible in the total ratings aggregate but are never misclassified as responses to an invitation that was not sent.
+- Reports compare the selected window with the immediately preceding equal-length window and support department, tag and priority filters/breakdowns.
+
+### Privacy, comments and governance
+
+- A per-guild minimum cohort size defaults to 5 and is configurable from 1 to 100. Rating averages, distributions and group rows below the configured threshold are suppressed.
+- Aggregate CSV exports contain no customer IDs, ticket IDs, comments or per-user data. Cells are protected against spreadsheet formula injection; exports are limited to 1,000 rows and 1 MB.
+- Raw comments are excluded from all aggregate reports and exports. A separately permissioned comment-review command shows at most five records per page. Access is granted to Manage Server/Administrator or the configured reviewer role, and each successful review is audited without copying comment text into the audit record.
+- Comment retention defaults to 180 days and is configurable from 1 to 3,650 days. The scheduled retention sweep clears expired comment text, records the redaction timestamp and audit count, and preserves the rating.
+- Governance, comment access, survey enable/disable and timing updates are written to the per-guild CSAT audit history.
+
+### Manager interface and commands
+
+- The server Settings dashboard includes Customer Satisfaction controls for enable/disable, a privacy/timing configuration modal, and a 30-day report view.
+- /supportforge feedback report supports date windows, department/tag/priority filters, and group breakdowns.
+- /supportforge feedback export emits the privacy-safe aggregate CSV.
+- /supportforge feedback comments is restricted to administrators and the configured reviewer role.
+- /supportforge feedback survey-governance manages cohort threshold, comment retention and reviewer role.
+- Existing survey status/enable/disable/configure and manual rate commands remain available. Automatic surveys remain off by default.
+
+### Part 2 verification
+
+- Unit tests cover percentage denominators, zero-sample behavior, cohort suppression, trend deltas and CSV formula-injection handling.
+- Disposable PostgreSQL verification exercises migration 24, governance setting persistence, unique invitation handling, response linkage, manual-rating versus delivered-survey distinction, comment redaction with rating preservation, audit persistence and guild isolation in a transaction that is rolled back.
+- CI verification does not deploy the bot or apply migrations to the production Neon database. Discord DM acceptance and a separate isolated non-production Neon restore drill remain release gates.

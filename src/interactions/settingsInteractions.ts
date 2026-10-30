@@ -109,6 +109,9 @@ import {
   runRetentionSweepForGuild,
 } from '../services/ticketRetentionService';
 import { clearTicketInactivityWarningsForGuild } from '../services/ticketInactivityService';
+import { configureCsatSurveyTiming, getCsatSurveySettings, setCsatSurveysEnabled } from '../services/csatSurveyService';
+import { getCsatInsightsReport, updateCsatSurveyGovernance } from '../services/csatInsightsService';
+import { buildCsatInsightsEmbed } from './csatInsightsPresentation';
 import { parseAnalyticsPeriod } from '../services/analyticsService';
 import { getAdvancedAnalyticsReport, buildAdvancedAnalyticsCsv } from '../services/advancedAnalyticsService';
 import {
@@ -656,6 +659,7 @@ const SETTINGS_LAYOUT_LABELS: Record<SettingsDashboardButtonKey, string> = {
   reports: 'Safety & Reports',
   sla: 'SLA & Queue',
   analytics: 'Analytics',
+  csat: 'Customer Satisfaction',
   retention: 'Retention',
   appearance: 'Public Panel Appearance',
   storage: 'Storage',
@@ -678,7 +682,7 @@ const SETTINGS_LAYOUT_LABELS: Record<SettingsDashboardButtonKey, string> = {
 
 const SETTINGS_LAYOUT_DEFAULT_EMOJIS: Record<SettingsDashboardButtonKey, string> = {
   panel: '🎛️', defaults: '🎟️', tags: '🏷️', usecases: '🧩', reports: '🚩',
-  sla: '⏱️', analytics: '📊',
+  sla: '⏱️', analytics: '📊', csat: '⭐',
   retention: '🧹', appearance: '🎨', storage: '🗄️', rules: '🛡️', repair: '🛠️',
   team: '👥', manual: '📖', forms: '🧾', refresh: '🔄', reset: '🚨', theme: '🌈',
   premium: '💎', panels: '🧱', 'dashboard-builder': '🧰', 'support-hours': '🕒', 'ticket-workspace': '🧵',
@@ -2264,6 +2268,155 @@ export async function handleSettingsInteraction(
   }
 
   const guild = interaction.guild;
+
+  if (interaction.isModalSubmit() && interaction.customId === 'sf:settings:csat:modal') {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    let locale = 'en-US';
+    try {
+      locale = (await getAdvancedSettings(guild.id)).locale;
+      const readWholeNumber = (id: string, min: number, max: number): number => {
+        const raw = interaction.fields.getTextInputValue(id).trim();
+        if (!/^\d+$/.test(raw)) throw new Error('Enter a whole number from ' + min + ' to ' + max + '.');
+        const value = Number(raw);
+        if (!Number.isSafeInteger(value) || value < min || value > max) {
+          throw new Error('Enter a whole number from ' + min + ' to ' + max + '.');
+        }
+        return value;
+      };
+      const delayMinutes = readWholeNumber('delay-minutes', 0, 10080);
+      const expiryDays = readWholeNumber('expiry-days', 1, 30);
+      const minimumCohortSize = readWholeNumber('minimum-cohort-size', 1, 100);
+      const commentRetentionDays = readWholeNumber('comment-retention-days', 1, 3650);
+      const roleInput = interaction.fields.getTextInputValue('comment-review-role').trim();
+      let commentReviewRoleId: string | null = null;
+      if (roleInput && roleInput.toLowerCase() !== 'none') {
+        const role = await guild.roles.fetch(roleInput).catch(() => null);
+        if (!role || role.managed || role.id === guild.roles.everyone.id) {
+          throw new Error(translate(locale, 'csat.governance.invalidRole'));
+        }
+        commentReviewRoleId = role.id;
+      }
+      // Validate both patches before applying either one.
+      if (delayMinutes >= expiryDays * 24 * 60) {
+        throw new Error('Survey delay must be shorter than the survey expiry window.');
+      }
+      await configureCsatSurveyTiming(guild.id, interaction.user.id, delayMinutes, expiryDays);
+      await updateCsatSurveyGovernance(guild.id, interaction.user.id, {
+        minimumCohortSize,
+        commentRetentionDays,
+        commentReviewRoleId,
+      });
+      await interaction.editReply({ content: translate(locale, 'csat.governance.saved') });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      const safe = message.startsWith('Enter a whole number') ||
+        message.startsWith('Survey delay must') ||
+        message === translate(locale, 'csat.governance.invalidRole');
+      await interaction.editReply({
+        content: safe ? message : translate(locale, 'csat.survey.error.generic'),
+      });
+    }
+    return true;
+  }
+
+  if (interaction.isButton() && (
+    interaction.customId === 'sf:settings:csat' ||
+    interaction.customId.startsWith('sf:settings:csat:')
+  )) {
+    const customId = interaction.customId;
+    const initial = customId === 'sf:settings:csat';
+    let locale = 'en-US';
+    if (customId === 'sf:settings:csat:configure') {
+      locale = (await getAdvancedSettings(guild.id)).locale;
+      const settings = await getCsatSurveySettings(guild.id);
+      const modal = new ModalBuilder()
+        .setCustomId('sf:settings:csat:modal')
+        .setTitle(translate(locale, 'settings.csat.configure'))
+        .addComponents(
+          new ActionRowBuilder<TextInputBuilder>().addComponents(
+            new TextInputBuilder().setCustomId('delay-minutes').setLabel('Delay after closure (0–10080 minutes)')
+              .setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.delayMinutes)),
+          ),
+          new ActionRowBuilder<TextInputBuilder>().addComponents(
+            new TextInputBuilder().setCustomId('expiry-days').setLabel('Survey expiry (1–30 days)')
+              .setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.expiryDays)),
+          ),
+          new ActionRowBuilder<TextInputBuilder>().addComponents(
+            new TextInputBuilder().setCustomId('minimum-cohort-size').setLabel('Minimum ratings for group reports (1–100)')
+              .setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.minimumCohortSize)),
+          ),
+          new ActionRowBuilder<TextInputBuilder>().addComponents(
+            new TextInputBuilder().setCustomId('comment-retention-days').setLabel('Comment retention (1–3650 days)')
+              .setStyle(TextInputStyle.Short).setRequired(true).setValue(String(settings.commentRetentionDays)),
+          ),
+          new ActionRowBuilder<TextInputBuilder>().addComponents(
+            new TextInputBuilder().setCustomId('comment-review-role').setLabel('Reviewer role ID, or none to clear')
+              .setStyle(TextInputStyle.Short).setRequired(true).setValue(settings.commentReviewRoleId ?? 'none'),
+          ),
+        );
+      await interaction.showModal(modal);
+      return true;
+    }
+    if (initial) await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    else await interaction.deferUpdate();
+    try {
+      locale = (await getAdvancedSettings(guild.id)).locale;
+      const settings = await getCsatSurveySettings(guild.id);
+      if (customId === 'sf:settings:csat:toggle') {
+        await setCsatSurveysEnabled(guild.id, !settings.enabled, interaction.user.id);
+      }
+      const currentSettings = await getCsatSurveySettings(guild.id);
+      const report = await getCsatInsightsReport(guild.id, { days: 30 });
+      const config = await getGuildConfig(guild.id);
+      const panel = new EmbedBuilder()
+        .setColor(getThemeColor(config.theme))
+        .setTitle('⭐ ' + translate(locale, 'settings.csat.title'))
+        .setDescription(
+          translate(locale, currentSettings.enabled ? 'settings.csat.enabled' : 'settings.csat.disabled') + '\\n' +
+          'Delivery: private DM only • Delay: ' + currentSettings.delayMinutes + ' minutes • Expiry: ' +
+          currentSettings.expiryDays + ' days\\n' +
+          'Privacy threshold: ' + currentSettings.minimumCohortSize + ' ratings • Comment retention: ' +
+          currentSettings.commentRetentionDays + ' days • Reviewer role: ' +
+          (currentSettings.commentReviewRoleId ? '<@&' + currentSettings.commentReviewRoleId + '>' : 'Administrators only') + '\\n\\n' +
+          translate(locale, 'settings.csat.description') + '\\n' +
+          '30-day survey response rate: ' +
+          (report.current.counts.responseRatePercent === null ? 'N/A' : report.current.counts.responseRatePercent.toFixed(1) + '%') +
+          ' (' + report.current.counts.surveyResponses + '/' + report.current.counts.invitationsSent + ' delivered invitations).',
+        )
+        .setFooter({ text: 'QueryFixr • Automatic survey delivery remains off until an administrator enables it.' });
+      const rows = [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId('sf:settings:csat:toggle')
+            .setLabel(translate(locale, currentSettings.enabled ? 'settings.csat.disable' : 'settings.csat.enable'))
+            .setStyle(currentSettings.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+          new ButtonBuilder().setCustomId('sf:settings:csat:configure')
+            .setLabel(translate(locale, 'settings.csat.configure')).setStyle(ButtonStyle.Secondary),
+        ),
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId('sf:settings:csat:report')
+            .setLabel(translate(locale, 'settings.csat.report')).setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId('sf:settings:csat')
+            .setLabel(translate(locale, 'settings.csat.preview')).setStyle(ButtonStyle.Secondary),
+        ),
+      ];
+      if (customId === 'sf:settings:csat:report') {
+        await interaction.editReply({
+          embeds: [buildCsatInsightsEmbed(report, getThemeColor(config.theme), locale)],
+          components: rows,
+        });
+      } else {
+        await interaction.editReply({ embeds: [panel], components: rows });
+      }
+    } catch (error) {
+      await interaction.editReply({
+        content: translate(locale, 'csat.survey.error.generic'),
+        embeds: [],
+        components: [],
+      }).catch(() => undefined);
+      console.error('QueryFixr CSAT Settings view failed for guild ' + guild.id + ':', error);
+    }
+    return true;
+  }
 
   if (interaction.isStringSelectMenu() && interaction.customId === 'sf:settings:diagnostics:snapshot-select') {
     const snapshotId = interaction.values[0];

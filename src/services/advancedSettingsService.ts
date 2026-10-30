@@ -56,7 +56,7 @@ export const SETTINGS_DASHBOARD_BUTTON_KEYS = [
   'panel', 'panels', 'forms', 'defaults', 'tags',
   'usecases', 'support-hours', 'ticket-workspace', 'inactivity', 'reports',
   // Analytics and server-wide preferences sit together, before appearance and maintenance.
-  'sla', 'analytics', 'language', 'team', 'retention', 'appearance', 'theme', 'dashboard-builder',
+  'sla', 'analytics', 'csat', 'language', 'team', 'retention', 'appearance', 'theme', 'dashboard-builder',
   'storage', 'rules', 'repair', 'premium', 'manual',
   'refresh', 'reset',
 ] as const;

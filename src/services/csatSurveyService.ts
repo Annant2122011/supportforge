@@ -23,6 +23,7 @@ import { normalizeCsatResponse } from '../core/domain/csatPolicy';
 import { getAdvancedSettings } from './advancedSettingsService';
 import { translate } from '../i18n/translationService';
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
+import { redactExpiredCsatComments } from './csatInsightsService';
 
 const MAX_ENQUEUE_BATCH = 250;
 const MAX_DELIVERY_BATCH = 20;
@@ -34,6 +35,9 @@ export interface CsatSurveySettings {
   enabledAt: string | null;
   delayMinutes: number;
   expiryDays: number;
+  minimumCohortSize: number;
+  commentRetentionDays: number;
+  commentReviewRoleId: string | null;
   updatedBy: string | null;
   updatedAt: string | null;
 }
@@ -73,6 +77,9 @@ function settingsFromRow(row: QueryResultRow & {
   enabled_at: Date | string | null;
   delay_minutes: number;
   expiry_days: number;
+  minimum_cohort_size: number;
+  comment_retention_days: number;
+  comment_review_role_id: string | null;
   updated_by: string | null;
   updated_at: Date | string | null;
 }): CsatSurveySettings {
@@ -82,6 +89,9 @@ function settingsFromRow(row: QueryResultRow & {
     enabledAt: iso(row.enabled_at),
     delayMinutes: Number(row.delay_minutes),
     expiryDays: Number(row.expiry_days),
+    minimumCohortSize: Number(row.minimum_cohort_size ?? 5),
+    commentRetentionDays: Number(row.comment_retention_days ?? 180),
+    commentReviewRoleId: row.comment_review_role_id ?? null,
     updatedBy: row.updated_by,
     updatedAt: iso(row.updated_at),
   };
@@ -94,6 +104,9 @@ function defaultSettings(guildId: string): CsatSurveySettings {
     enabledAt: null,
     delayMinutes: 5,
     expiryDays: 7,
+    minimumCohortSize: 5,
+    commentRetentionDays: 180,
+    commentReviewRoleId: null,
     updatedBy: null,
     updatedAt: null,
   };
@@ -102,9 +115,11 @@ function defaultSettings(guildId: string): CsatSurveySettings {
 export async function getCsatSurveySettings(guildId: string): Promise<CsatSurveySettings> {
   const result = await getPostgresPool().query<QueryResultRow & {
     guild_id: string; enabled: boolean; enabled_at: Date | string | null;
-    delay_minutes: number; expiry_days: number; updated_by: string | null; updated_at: Date | string | null;
+    delay_minutes: number; expiry_days: number; minimum_cohort_size: number;
+    comment_retention_days: number; comment_review_role_id: string | null;
+    updated_by: string | null; updated_at: Date | string | null;
   }>(
-    'SELECT guild_id,enabled,enabled_at,delay_minutes,expiry_days,updated_by,updated_at ' +
+    'SELECT guild_id,enabled,enabled_at,delay_minutes,expiry_days,minimum_cohort_size,comment_retention_days,comment_review_role_id,updated_by,updated_at ' +
       'FROM support_csat_survey_settings WHERE guild_id=$1',
     [guildId],
   );
@@ -123,7 +138,9 @@ export async function setCsatSurveysEnabled(
     await connection.query('BEGIN');
     const result = await connection.query<QueryResultRow & {
       guild_id: string; enabled: boolean; enabled_at: Date | string | null;
-      delay_minutes: number; expiry_days: number; updated_by: string | null; updated_at: Date | string | null;
+      delay_minutes: number; expiry_days: number; minimum_cohort_size: number;
+      comment_retention_days: number; comment_review_role_id: string | null;
+      updated_by: string | null; updated_at: Date | string | null;
     }>(
       'INSERT INTO support_csat_survey_settings (guild_id,enabled,enabled_at,updated_by,updated_at) ' +
         'VALUES ($1,$2,CASE WHEN $2 THEN NOW() ELSE NULL END,$3,NOW()) ' +
@@ -133,8 +150,12 @@ export async function setCsatSurveysEnabled(
         'WHEN support_csat_survey_settings.enabled=FALSE THEN NOW() ' +
         'ELSE support_csat_survey_settings.enabled_at END, ' +
         'updated_by=EXCLUDED.updated_by,updated_at=NOW() ' +
-        'RETURNING guild_id,enabled,enabled_at,delay_minutes,expiry_days,updated_by,updated_at',
+        'RETURNING guild_id,enabled,enabled_at,delay_minutes,expiry_days,minimum_cohort_size,comment_retention_days,comment_review_role_id,updated_by,updated_at',
       [guildId, enabled, actorId],
+    );
+    await connection.query(
+      'INSERT INTO support_csat_audit_events (id,guild_id,actor_id,action,detail) VALUES ($1,$2,$3,$4,$5::jsonb)',
+      [randomUUID(), guildId, actorId, enabled ? 'surveys_enabled' : 'surveys_disabled', JSON.stringify({ enabled })],
     );
     if (!enabled) {
       await connection.query(
@@ -160,18 +181,35 @@ export async function configureCsatSurveyTiming(
   expiryDays: number,
 ): Promise<CsatSurveySettings> {
   validateCsatSurveyTiming(delayMinutes, expiryDays);
-  const result = await getPostgresPool().query<QueryResultRow & {
-    guild_id: string; enabled: boolean; enabled_at: Date | string | null;
-    delay_minutes: number; expiry_days: number; updated_by: string | null; updated_at: Date | string | null;
-  }>(
-    'INSERT INTO support_csat_survey_settings (guild_id,enabled,enabled_at,delay_minutes,expiry_days,updated_by,updated_at) ' +
-      'VALUES ($1,FALSE,NULL,$2,$3,$4,NOW()) ' +
-      'ON CONFLICT (guild_id) DO UPDATE SET delay_minutes=EXCLUDED.delay_minutes,expiry_days=EXCLUDED.expiry_days,' +
-      'updated_by=EXCLUDED.updated_by,updated_at=NOW() ' +
-      'RETURNING guild_id,enabled,enabled_at,delay_minutes,expiry_days,updated_by,updated_at',
-    [guildId, delayMinutes, expiryDays, actorId],
-  );
-  return settingsFromRow(result.rows[0]!);
+  const pool = getPostgresPool();
+  const connection = await pool.connect();
+  try {
+    await connection.query('BEGIN');
+    const result = await connection.query<QueryResultRow & {
+      guild_id: string; enabled: boolean; enabled_at: Date | string | null;
+      delay_minutes: number; expiry_days: number; minimum_cohort_size: number;
+      comment_retention_days: number; comment_review_role_id: string | null;
+      updated_by: string | null; updated_at: Date | string | null;
+    }>(
+      'INSERT INTO support_csat_survey_settings (guild_id,enabled,enabled_at,delay_minutes,expiry_days,updated_by,updated_at) ' +
+        'VALUES ($1,FALSE,NULL,$2,$3,$4,NOW()) ' +
+        'ON CONFLICT (guild_id) DO UPDATE SET delay_minutes=EXCLUDED.delay_minutes,expiry_days=EXCLUDED.expiry_days,' +
+        'updated_by=EXCLUDED.updated_by,updated_at=NOW() ' +
+        'RETURNING guild_id,enabled,enabled_at,delay_minutes,expiry_days,minimum_cohort_size,comment_retention_days,comment_review_role_id,updated_by,updated_at',
+      [guildId, delayMinutes, expiryDays, actorId],
+    );
+    await connection.query(
+      "INSERT INTO support_csat_audit_events (id,guild_id,actor_id,action,detail) VALUES ($1,$2,$3,'timing_updated',$4::jsonb)",
+      [randomUUID(), guildId, actorId, JSON.stringify({ delayMinutes, expiryDays })],
+    );
+    await connection.query('COMMIT');
+    return settingsFromRow(result.rows[0]!);
+  } catch (error) {
+    await connection.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 async function enqueueClosedTickets(): Promise<number> {
@@ -442,6 +480,9 @@ export async function sweepCsatSurveyQueue(client: Client): Promise<CsatSurveySw
   const enqueued = await enqueueClosedTickets();
   const reconciled = await reconcileExistingResponses();
   const lifecycle = await expireAndRecoverSurveys();
+  await redactExpiredCsatComments().catch((error) => {
+    console.error('QueryFixr CSAT comment retention sweep failed:', error);
+  });
   const claimed = await claimDueSurveys();
   let sent = 0;
   let failed = 0;

@@ -1204,9 +1204,44 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+  {
+    id: 24,
+    name: 'stage_m_csat_reporting_privacy_and_comment_governance',
+    up: async (db) => {
+      await db.query(`
+        ALTER TABLE support_csat_survey_settings
+          ADD COLUMN IF NOT EXISTS minimum_cohort_size INTEGER NOT NULL DEFAULT 5
+            CHECK (minimum_cohort_size BETWEEN 1 AND 100),
+          ADD COLUMN IF NOT EXISTS comment_retention_days INTEGER NOT NULL DEFAULT 180
+            CHECK (comment_retention_days BETWEEN 1 AND 3650),
+          ADD COLUMN IF NOT EXISTS comment_review_role_id TEXT;
+
+        ALTER TABLE support_csat_responses
+          ADD COLUMN IF NOT EXISTS comment_redacted_at TIMESTAMPTZ;
+
+        CREATE TABLE IF NOT EXISTS support_csat_audit_events (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          actor_id TEXT,
+          action TEXT NOT NULL CHECK (action IN (
+            'comments_viewed','comments_redacted','governance_updated',
+            'surveys_enabled','surveys_disabled','timing_updated'
+          )),
+          detail JSONB NOT NULL DEFAULT '{}'::JSONB,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_support_csat_audit_guild_created
+          ON support_csat_audit_events (guild_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_support_csat_comments_retention
+          ON support_csat_responses (guild_id, created_at)
+          WHERE comment <> '' AND comment_redacted_at IS NULL;
+      `);
+    },
+  },
 ];
 
-/** Latest migration identifier required by this application version. */
+ /** Latest migration identifier required by this application version. */
 export const CURRENT_POSTGRES_MIGRATION_ID = MIGRATIONS[MIGRATIONS.length - 1]!.id;
 
 export async function runPostgresMigrations(
