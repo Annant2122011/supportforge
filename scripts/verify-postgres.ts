@@ -22,6 +22,7 @@ async function main(): Promise<void> {
     'support_csat_responses',
     'support_csat_survey_settings',
     'support_csat_surveys',
+    'support_csat_audit_events',
     'support_sla_alerts',
     'support_sla_policy_versions',
     'support_sla_monitor_state',
@@ -82,6 +83,7 @@ async function main(): Promise<void> {
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM quick_reply_usage_events'),
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_csat_survey_settings'),
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_csat_surveys'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_csat_audit_events'),
   ]);
 
   // Exercise the database-maintained full-text index inside a transaction so
@@ -382,9 +384,10 @@ async function main(): Promise<void> {
       [stageMTicketId, stageMGuildId, stageMChannelId, stageMClosedAt],
     );
     await stageMClient.query(
-      'INSERT INTO support_csat_survey_settings (guild_id,enabled,enabled_at,delay_minutes,expiry_days,updated_by) ' +
-        'VALUES ($1,TRUE,$2::timestamptz,5,7,$3)',
-      [stageMGuildId, new Date(Date.parse(stageMClosedAt) - 30_000).toISOString(), stageMRunId],
+      'INSERT INTO support_csat_survey_settings ' +
+        '(guild_id,enabled,enabled_at,delay_minutes,expiry_days,minimum_cohort_size,comment_retention_days,comment_review_role_id,updated_by) ' +
+        'VALUES ($1,TRUE,$2::timestamptz,5,7,5,30,$3,$4)',
+      [stageMGuildId, new Date(Date.parse(stageMClosedAt) - 30_000).toISOString(), '12345678901234567', stageMRunId],
     );
     await stageMClient.query(
       'INSERT INTO ticket_events (id,ticket_id,guild_id,channel_id,event_type,actor_id,actor_attribution,actor_confidence,payload,created_at) ' +
@@ -412,7 +415,7 @@ async function main(): Promise<void> {
     }
     await stageMClient.query(
       'INSERT INTO support_csat_responses (id,guild_id,ticket_id,user_id,rating,comment) ' +
-        "VALUES ($1,$2,$3,'verify-customer',5,'')",
+        "VALUES ($1,$2,$3,'verify-customer',5,'reviewable customer feedback')",
       [stageMResponseId, stageMGuildId, stageMTicketId],
     );
     await stageMClient.query(
@@ -420,19 +423,53 @@ async function main(): Promise<void> {
       [stageMSurveyId, stageMResponseId],
     );
     const responseLink = await stageMClient.query(
-      "SELECT s.status,r.rating,s.response_id FROM support_csat_surveys s JOIN support_csat_responses r ON r.id=s.response_id " +
+      "SELECT s.status,r.rating,s.response_id,s.sent_at,r.comment,r.comment_redacted_at FROM support_csat_surveys s JOIN support_csat_responses r ON r.id=s.response_id " +
         'WHERE s.guild_id=$1 AND s.id=$2',
       [stageMGuildId, stageMSurveyId],
     );
     if (responseLink.rows[0]?.status !== 'responded' || Number(responseLink.rows[0]?.rating) !== 5 ||
-        responseLink.rows[0]?.response_id !== stageMResponseId) {
+        responseLink.rows[0]?.response_id !== stageMResponseId || responseLink.rows[0]?.sent_at !== null) {
       throw new Error('Stage M survey response link did not round-trip.');
     }
+    const redactedResponse = await stageMClient.query(
+      "UPDATE support_csat_responses SET comment='',comment_redacted_at=NOW(),updated_at=NOW() " +
+        'WHERE id=$1 RETURNING rating,comment,comment_redacted_at',
+      [stageMResponseId],
+    );
+    if (Number(redactedResponse.rows[0]?.rating) !== 5 || redactedResponse.rows[0]?.comment !== '' ||
+        !redactedResponse.rows[0]?.comment_redacted_at) {
+      throw new Error('Stage M comment redaction did not preserve the rating while clearing private text.');
+    }
+    await stageMClient.query(
+      'INSERT INTO support_csat_audit_events (id,guild_id,actor_id,action,detail) ' +
+        "VALUES ($1,$2,$3,'comments_redacted',$4::jsonb)",
+      ['audit:' + stageMRunId, stageMGuildId, null, JSON.stringify({ records: 1 })],
+    );
+    const auditCheck = await stageMClient.query(
+      'SELECT action,detail->>\'records\' AS records FROM support_csat_audit_events WHERE guild_id=$1 AND id=$2',
+      [stageMGuildId, 'audit:' + stageMRunId],
+    );
     const otherGuild = await stageMClient.query(
       'SELECT 1 FROM support_csat_surveys WHERE guild_id=$1',
       ['another-guild-' + stageMRunId],
     );
-    if (otherGuild.rowCount !== 0) throw new Error('Stage M survey data unexpectedly crossed guild boundaries.');
+    const otherGuildAudit = await stageMClient.query(
+      'SELECT 1 FROM support_csat_audit_events WHERE guild_id=$1',
+      ['another-guild-' + stageMRunId],
+    );
+    if (otherGuild.rowCount !== 0 || otherGuildAudit.rowCount !== 0 ||
+        auditCheck.rows[0]?.action !== 'comments_redacted' || auditCheck.rows[0]?.records !== '1') {
+      throw new Error('Stage M audit history or survey data crossed the guild boundary, or audit details failed.');
+    }
+    const settingsCheck = await stageMClient.query(
+      'SELECT minimum_cohort_size,comment_retention_days,comment_review_role_id FROM support_csat_survey_settings WHERE guild_id=$1',
+      [stageMGuildId],
+    );
+    if (Number(settingsCheck.rows[0]?.minimum_cohort_size) !== 5 ||
+        Number(settingsCheck.rows[0]?.comment_retention_days) !== 30 ||
+        settingsCheck.rows[0]?.comment_review_role_id !== '12345678901234567') {
+      throw new Error('Stage M privacy and retention governance settings did not round-trip.');
+    }
     await stageMClient.query('ROLLBACK');
   } catch (error) {
     await stageMClient.query('ROLLBACK').catch(() => undefined);
@@ -440,7 +477,7 @@ async function main(): Promise<void> {
   } finally {
     stageMClient.release();
   }
-  console.log('Stage M PostgreSQL smoke tests: opt-in settings, unique invitation, response linkage and guild isolation verified (rolled back).');
+  console.log('Stage M PostgreSQL smoke tests: opt-in settings, unique invitation, response linkage, survey-vs-manual denominator, comment redaction, audit history, governance settings and guild isolation verified (rolled back).');
 
 
 
