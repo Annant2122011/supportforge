@@ -2308,8 +2308,12 @@ export async function handleSettingsInteraction(
       });
       await interaction.editReply({ content: translate(locale, 'csat.governance.saved') });
     } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      const safe = message.startsWith('Enter a whole number') ||
+        message.startsWith('Survey delay must') ||
+        message === translate(locale, 'csat.governance.invalidRole');
       await interaction.editReply({
-        content: error instanceof Error ? error.message : translate(locale, 'csat.survey.error.generic'),
+        content: safe ? message : translate(locale, 'csat.survey.error.generic'),
       });
     }
     return true;
