@@ -176,6 +176,39 @@ const GROUP_EXPRESSIONS: Record<CsatInsightGroupBy, string> = {
   priority: "LOWER(COALESCE(NULLIF(t.priority,''),'normal'))",
 };
 
+interface RawCsatEligibleGroup extends QueryResultRow {
+  group_id: string;
+  eligible_tickets: string | number;
+}
+
+async function loadUnqueuedEligibleGroups(
+  guildId: string,
+  startAt: string,
+  endAt: string,
+  filters: CsatInsightFilters,
+  groupBy: CsatInsightGroupBy,
+): Promise<Map<string, number>> {
+  const expression = GROUP_EXPRESSIONS[groupBy];
+  const result = await getPostgresPool().query<RawCsatEligibleGroup>(
+    'SELECT ' + expression + ' AS group_id,COUNT(DISTINCT t.id)::int AS eligible_tickets ' +
+    'FROM tickets t ' +
+    'JOIN support_csat_survey_settings settings ON settings.guild_id=t.guild_id AND settings.enabled=TRUE AND settings.enabled_at IS NOT NULL ' +
+    'JOIN LATERAL (' +
+      'SELECT e.id,e.created_at FROM ticket_events e WHERE e.ticket_id=t.id AND e.guild_id=t.guild_id ' +
+        "AND e.event_type='ticket.status_changed' AND e.payload->>'to'='closed' AND e.created_at>=settings.enabled_at " +
+        'ORDER BY e.created_at DESC,e.id DESC LIMIT 1' +
+    ') closure ON TRUE ' +
+    "WHERE t.guild_id=$1 AND t.status IN ('closed','archived') AND t.deleted_at IS NULL AND t.owner_id IS NOT NULL " +
+      'AND closure.created_at >= $2::timestamptz AND closure.created_at < $3::timestamptz ' +
+      'AND ($4::text IS NULL OR t.department_id=$4) AND ($5::text IS NULL OR t.tag_id=$5) ' +
+      "AND ($6::text IS NULL OR LOWER(COALESCE(t.priority,'normal'))=$6) " +
+      'AND NOT EXISTS (SELECT 1 FROM support_csat_surveys existing WHERE existing.guild_id=t.guild_id AND existing.ticket_id=t.id) ' +
+    'GROUP BY ' + expression,
+    filterValues(guildId, startAt, endAt, filters),
+  );
+  return new Map(result.rows.map((row) => [row.group_id, number(row.eligible_tickets)]));
+}
+
 async function loadGroups(
   guildId: string,
   startAt: string,
@@ -209,7 +242,11 @@ async function loadGroups(
   );
   const visibleRows = result.rows.filter((row) => isCsatCohortVisible(number(row.ratings), minimumCohortSize));
   const suppressed = result.rows.length - visibleRows.length;
-  const [config, advanced] = await Promise.all([getGuildConfig(guildId), getAdvancedSettings(guildId)]);
+  const [config, advanced, unqueuedEligible] = await Promise.all([
+    getGuildConfig(guildId),
+    getAdvancedSettings(guildId),
+    loadUnqueuedEligibleGroups(guildId, startAt, endAt, filters, groupBy),
+  ]);
   const groups = visibleRows.map((row) => {
     const id = row.group_id;
     const label = groupBy === 'department'
@@ -220,7 +257,8 @@ async function loadGroups(
           Object.values(config.departments).map((dept) => dept.tags?.[id]?.name).find(Boolean) ??
           'Other tag')
         : id.charAt(0).toUpperCase() + id.slice(1);
-    const counts = mapCounts(row, number(row.survey_ledger_entries), minimumCohortSize);
+    const eligibleTickets = number(row.survey_ledger_entries) + (unqueuedEligible.get(id) ?? 0);
+    const counts = mapCounts(row, eligibleTickets, minimumCohortSize);
     return { ...counts, id, label };
   });
   return { groups, suppressed };
