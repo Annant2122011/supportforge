@@ -2544,7 +2544,7 @@ export async function execute(
             } else {
               for (const item of result.items) {
                 const date = '<t:' + Math.floor(Date.parse(item.createdAt) / 1000) + ':f>';
-                const comment = item.comment.replace(/[\\r\\n]+/g, ' ').slice(0, 1000);
+                const comment = item.comment.replace(/[\r\n]+/g, ' ').slice(0, 1000);
                 embed.addFields({
                   name: translate(locale, 'csat.comments.heading', { ticket: item.ticketLabel, rating: item.rating, date }),
                   value: comment || '—',
