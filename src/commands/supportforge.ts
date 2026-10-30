@@ -102,6 +102,13 @@ import {
   setCsatSurveysEnabled,
 } from '../services/csatSurveyService';
 import {
+  buildCsatInsightsCsv,
+  getCsatCommentPage,
+  getCsatInsightsReport,
+  updateCsatSurveyGovernance,
+} from '../services/csatInsightsService';
+import { buildCsatInsightsEmbed } from '../interactions/csatInsightsPresentation';
+import {
   applyTicketFormTemplate,
   buildQuickTicketFormFields,
   createTicketForm,
@@ -993,6 +1000,38 @@ export const data =
             .setName('summary')
             .setDescription('Show privacy-aware customer satisfaction results (admin only)')
             .addIntegerOption((option) => option.setName('days').setDescription('Reporting window in days').setRequired(false).setMinValue(1).setMaxValue(366)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('report').setDescription('Show coverage-aware CSAT trends and group breakdowns (admin only)')
+            .addIntegerOption((option) => option.setName('days').setDescription('Reporting window in days').setRequired(false).setMinValue(1).setMaxValue(366))
+            .addStringOption((option) => option.setName('group-by').setDescription('Optional breakdown').setRequired(false)
+              .addChoices({ name: 'None', value: 'none' }, { name: 'Department', value: 'department' }, { name: 'Tag', value: 'tag' }, { name: 'Priority', value: 'priority' }))
+            .addStringOption((option) => option.setName('department-id').setDescription('Filter by department ID').setRequired(false).setMaxLength(64))
+            .addStringOption((option) => option.setName('tag-id').setDescription('Filter by tag ID').setRequired(false).setMaxLength(64))
+            .addStringOption((option) => option.setName('priority').setDescription('Filter by ticket priority').setRequired(false)
+              .addChoices({ name: 'Low', value: 'low' }, { name: 'Normal', value: 'normal' }, { name: 'High', value: 'high' }, { name: 'Urgent', value: 'urgent' }, { name: 'Critical', value: 'critical' })),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('export').setDescription('Export privacy-safe aggregate CSAT data as CSV (admin only)')
+            .addIntegerOption((option) => option.setName('days').setDescription('Reporting window in days').setRequired(false).setMinValue(1).setMaxValue(366))
+            .addStringOption((option) => option.setName('group-by').setDescription('Optional breakdown').setRequired(false)
+              .addChoices({ name: 'None', value: 'none' }, { name: 'Department', value: 'department' }, { name: 'Tag', value: 'tag' }, { name: 'Priority', value: 'priority' }))
+            .addStringOption((option) => option.setName('department-id').setDescription('Filter by department ID').setRequired(false).setMaxLength(64))
+            .addStringOption((option) => option.setName('tag-id').setDescription('Filter by tag ID').setRequired(false).setMaxLength(64))
+            .addStringOption((option) => option.setName('priority').setDescription('Filter by ticket priority').setRequired(false)
+              .addChoices({ name: 'Low', value: 'low' }, { name: 'Normal', value: 'normal' }, { name: 'High', value: 'high' }, { name: 'Urgent', value: 'urgent' }, { name: 'Critical', value: 'critical' })),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('comments').setDescription('Review private comments if authorized by the server (restricted)')
+            .addIntegerOption((option) => option.setName('days').setDescription('Review window in days').setRequired(false).setMinValue(1).setMaxValue(3650))
+            .addIntegerOption((option) => option.setName('page').setDescription('Page of five comments').setRequired(false).setMinValue(1).setMaxValue(100)),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand.setName('survey-governance').setDescription('Configure CSAT cohort privacy and comment retention (admin only)')
+            .addIntegerOption((option) => option.setName('minimum-cohort-size').setDescription('Minimum ratings before displaying group metrics').setRequired(false).setMinValue(1).setMaxValue(100))
+            .addIntegerOption((option) => option.setName('comment-retention-days').setDescription('Automatically erase comments after this many days').setRequired(false).setMinValue(1).setMaxValue(3650))
+            .addStringOption((option) => option.setName('comment-review-role-id').setDescription('Reviewer role ID').setRequired(false).setMinLength(17).setMaxLength(20))
+            .addBooleanOption((option) => option.setName('clear-comment-review-role').setDescription('Remove the configured reviewer role').setRequired(false)),
         ),
     )
 
@@ -2341,7 +2380,7 @@ export async function execute(
     group === 'related' ||
     (group === 'quick-reply' && ['save', 'delete'].includes(subcommand)) ||
     (group === 'knowledge' && ['create', 'update', 'publish', 'archive', 'revisions', 'restore-revision', 'synonyms-set', 'synonyms-delete', 'metrics'].includes(subcommand)) ||
-    (group === 'feedback' && ['summary', 'survey-status', 'survey-enable', 'survey-disable', 'survey-configure'].includes(subcommand))
+    (group === 'feedback' && ['summary', 'report', 'export', 'survey-status', 'survey-enable', 'survey-disable', 'survey-configure', 'survey-governance'].includes(subcommand))
   ) {
     if (!isAdminLike(interaction)) {
       await interaction.reply({
