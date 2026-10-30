@@ -56,7 +56,7 @@ export interface CsatInsightsReport {
 
 export function calculateCsatPercentage(numerator: number, denominator: number): number | null {
   if (!Number.isSafeInteger(numerator) || numerator < 0 ||
-      !Number.isSafeInteger(denominator) || denominator < 0 || numerator > denominator && denominator > 0) {
+      !Number.isSafeInteger(denominator) || denominator < 0 || numerator > denominator) {
     throw new Error('CSAT percentages require non-negative whole counts and a valid denominator.');
   }
   if (denominator === 0) return null;
