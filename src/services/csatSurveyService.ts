@@ -181,24 +181,35 @@ export async function configureCsatSurveyTiming(
   expiryDays: number,
 ): Promise<CsatSurveySettings> {
   validateCsatSurveyTiming(delayMinutes, expiryDays);
-  const result = await getPostgresPool().query<QueryResultRow & {
-    guild_id: string; enabled: boolean; enabled_at: Date | string | null;
-    delay_minutes: number; expiry_days: number; minimum_cohort_size: number;
-    comment_retention_days: number; comment_review_role_id: string | null;
-    updated_by: string | null; updated_at: Date | string | null;
-  }>(
-    'INSERT INTO support_csat_survey_settings (guild_id,enabled,enabled_at,delay_minutes,expiry_days,updated_by,updated_at) ' +
-      'VALUES ($1,FALSE,NULL,$2,$3,$4,NOW()) ' +
-      'ON CONFLICT (guild_id) DO UPDATE SET delay_minutes=EXCLUDED.delay_minutes,expiry_days=EXCLUDED.expiry_days,' +
-      'updated_by=EXCLUDED.updated_by,updated_at=NOW() ' +
-      'RETURNING guild_id,enabled,enabled_at,delay_minutes,expiry_days,minimum_cohort_size,comment_retention_days,comment_review_role_id,updated_by,updated_at',
-    [guildId, delayMinutes, expiryDays, actorId],
-  );
-  await getPostgresPool().query(
-    "INSERT INTO support_csat_audit_events (id,guild_id,actor_id,action,detail) VALUES ($1,$2,$3,'timing_updated',$4::jsonb)",
-    [randomUUID(), guildId, actorId, JSON.stringify({ delayMinutes, expiryDays })],
-  );
-  return settingsFromRow(result.rows[0]!);
+  const pool = getPostgresPool();
+  const connection = await pool.connect();
+  try {
+    await connection.query('BEGIN');
+    const result = await connection.query<QueryResultRow & {
+      guild_id: string; enabled: boolean; enabled_at: Date | string | null;
+      delay_minutes: number; expiry_days: number; minimum_cohort_size: number;
+      comment_retention_days: number; comment_review_role_id: string | null;
+      updated_by: string | null; updated_at: Date | string | null;
+    }>(
+      'INSERT INTO support_csat_survey_settings (guild_id,enabled,enabled_at,delay_minutes,expiry_days,updated_by,updated_at) ' +
+        'VALUES ($1,FALSE,NULL,$2,$3,$4,NOW()) ' +
+        'ON CONFLICT (guild_id) DO UPDATE SET delay_minutes=EXCLUDED.delay_minutes,expiry_days=EXCLUDED.expiry_days,' +
+        'updated_by=EXCLUDED.updated_by,updated_at=NOW() ' +
+        'RETURNING guild_id,enabled,enabled_at,delay_minutes,expiry_days,minimum_cohort_size,comment_retention_days,comment_review_role_id,updated_by,updated_at',
+      [guildId, delayMinutes, expiryDays, actorId],
+    );
+    await connection.query(
+      "INSERT INTO support_csat_audit_events (id,guild_id,actor_id,action,detail) VALUES ($1,$2,$3,'timing_updated',$4::jsonb)",
+      [randomUUID(), guildId, actorId, JSON.stringify({ delayMinutes, expiryDays })],
+    );
+    await connection.query('COMMIT');
+    return settingsFromRow(result.rows[0]!);
+  } catch (error) {
+    await connection.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 async function enqueueClosedTickets(): Promise<number> {
