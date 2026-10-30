@@ -97,6 +97,11 @@ import { LOCALE_OPTIONS } from '../i18n/localeRegistry';
 import { translate } from '../i18n/translationService';
 import { handleSettingsSlashCommand } from '../interactions/settingsCommandTools';
 import {
+  configureCsatSurveyTiming,
+  getCsatSurveySettings,
+  setCsatSurveysEnabled,
+} from '../services/csatSurveyService';
+import {
   applyTicketFormTemplate,
   buildQuickTicketFormFields,
   createTicketForm,
@@ -953,6 +958,28 @@ export const data =
       group
         .setName('feedback')
         .setDescription('Submit ticket feedback and review customer satisfaction')
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('survey-status')
+            .setDescription('Show automatic private CSAT survey settings (admin only)'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('survey-enable')
+            .setDescription('Enable private feedback DMs for future ticket closures (admin only)'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('survey-disable')
+            .setDescription('Disable automatic CSAT survey DMs and cancel queued surveys (admin only)'),
+        )
+        .addSubcommand((subcommand) =>
+          subcommand
+            .setName('survey-configure')
+            .setDescription('Configure private CSAT survey delay and expiry (admin only)')
+            .addIntegerOption((option) => option.setName('delay-minutes').setDescription('Wait after closure before sending a survey').setRequired(true).setMinValue(0).setMaxValue(10080))
+            .addIntegerOption((option) => option.setName('expiry-days').setDescription('Expire unanswered surveys after this many days').setRequired(true).setMinValue(1).setMaxValue(30)),
+        )
         .addSubcommand((subcommand) =>
           subcommand
             .setName('rate')
@@ -2314,7 +2341,7 @@ export async function execute(
     group === 'related' ||
     (group === 'quick-reply' && ['save', 'delete'].includes(subcommand)) ||
     (group === 'knowledge' && ['create', 'update', 'publish', 'archive', 'revisions', 'restore-revision', 'synonyms-set', 'synonyms-delete', 'metrics'].includes(subcommand)) ||
-    (group === 'feedback' && subcommand === 'summary')
+    (group === 'feedback' && ['summary', 'survey-status', 'survey-enable', 'survey-disable', 'survey-configure'].includes(subcommand))
   ) {
     if (!isAdminLike(interaction)) {
       await interaction.reply({
@@ -2361,6 +2388,55 @@ export async function execute(
     if (group === 'feedback') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
+        if (subcommand === 'survey-status') {
+          const settings = await getCsatSurveySettings(guild.id);
+          await interaction.editReply(
+            '**Automatic CSAT surveys**\\n' +
+            'Enabled: **' + (settings.enabled ? 'Yes' : 'No') + '**\\n' +
+            'Delivery: private direct message only\\n' +
+            'Delay after closure: **' + settings.delayMinutes + ' minute(s)**\\n' +
+            'Expiry: **' + settings.expiryDays + ' day(s)**\\n' +
+            'Eligibility watermark: ' + (settings.enabledAt ? '<t:' + Math.floor(Date.parse(settings.enabledAt) / 1000) + ':F>' : 'not enabled') + '\\n\\n' +
+            'Automatic surveys default to off. Enabling does not backfill previously closed tickets.',
+          );
+          return;
+        }
+
+        if (subcommand === 'survey-enable') {
+          const settings = await setCsatSurveysEnabled(guild.id, true, interaction.user.id);
+          await interaction.editReply(
+            '✅ Private CSAT survey DMs are enabled for ticket closures from <t:' +
+            Math.floor(Date.parse(settings.enabledAt ?? new Date().toISOString()) / 1000) +
+            ':F> onward. Previously closed tickets will not be surveyed. Delay: ' +
+            settings.delayMinutes + ' minute(s); expiry: ' + settings.expiryDays + ' day(s).',
+          );
+          return;
+        }
+
+        if (subcommand === 'survey-disable') {
+          const settings = await setCsatSurveysEnabled(guild.id, false, interaction.user.id);
+          await interaction.editReply(
+            '✅ Automatic CSAT survey DMs are disabled. Queued surveys were cancelled; an already in-flight DM may still complete, and delivered surveys remain answerable until expiry. Existing ratings and comments were not deleted. Delay: ' +
+            settings.delayMinutes + ' minute(s); expiry: ' + settings.expiryDays + ' day(s).',
+          );
+          return;
+        }
+
+        if (subcommand === 'survey-configure') {
+          const settings = await configureCsatSurveyTiming(
+            guild.id,
+            interaction.user.id,
+            interaction.options.getInteger('delay-minutes', true),
+            interaction.options.getInteger('expiry-days', true),
+          );
+          await interaction.editReply(
+            '✅ CSAT survey timing saved. Delay: ' + settings.delayMinutes +
+            ' minute(s); expiry: ' + settings.expiryDays + ' day(s). Surveys remain ' +
+            (settings.enabled ? 'enabled' : 'disabled') + '. The delay must be shorter than the expiry window.',
+          );
+          return;
+        }
+
         if (subcommand === 'rate') {
           const response = await recordCsatResponse(
             guild.id,

@@ -40,6 +40,8 @@ import { ensureDefaultChannelPurpose, invalidateChannelPurposeCache } from './se
 import { startTicketRetentionScheduler } from './services/ticketRetentionService';
 import { startTicketInactivityScheduler } from './services/ticketInactivityService';
 import { startSupportSlaMonitor } from './services/supportOperationsService';
+import { startCsatSurveyMonitor } from './services/csatSurveyService';
+import { handleCsatSurveyInteraction } from './interactions/csatSurveyInteractions';
 import { clearTicketRenameState } from './services/ticketPanelService';
 import { clearVoiceTopicRetryState } from './services/voiceModeService';
 import { removeLegacyCustomCommands } from './services/advancedSettingsService';
@@ -168,6 +170,7 @@ client.once('clientReady', (readyClient) => {
   startTicketRetentionScheduler(client);
   startTicketInactivityScheduler(client);
   startSupportSlaMonitor(client);
+  startCsatSurveyMonitor(client);
   startTicketFormCacheRefresh();
   startTicketFormSubmissionRecovery(client);
   startAuditDailySummaryScheduler(client);
@@ -1021,7 +1024,7 @@ client.on(
       }
 
       /*
-       * Ticket buttons and modals
+       * Ticket buttons, CSAT DMs and modals
        */
       if (
         interaction.isButton() ||
@@ -1030,6 +1033,14 @@ client.on(
         interaction.isRoleSelectMenu() ||
         interaction.isModalSubmit()
       ) {
+        if (
+          interaction.customId.startsWith('qf:csat:') &&
+          (interaction.isButton() || interaction.isModalSubmit())
+        ) {
+          await handleCsatSurveyInteraction(interaction);
+          return;
+        }
+
         if (interaction.customId.startsWith('sf:audit:') && interaction.isButton()) {
           await handleAuditInteraction(interaction);
           return;

@@ -1144,6 +1144,66 @@ const MIGRATIONS: readonly PostgresMigration[] = [
       `);
     },
   },
+  {
+    id: 23,
+    name: 'stage_m_csat_durable_survey_lifecycle',
+    up: async (db) => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS support_csat_survey_settings (
+          guild_id TEXT PRIMARY KEY,
+          enabled BOOLEAN NOT NULL DEFAULT FALSE,
+          enabled_at TIMESTAMPTZ,
+          delay_minutes INTEGER NOT NULL DEFAULT 5 CHECK (delay_minutes BETWEEN 0 AND 10080),
+          expiry_days INTEGER NOT NULL DEFAULT 7 CHECK (expiry_days BETWEEN 1 AND 30),
+          updated_by TEXT NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          CHECK ((enabled = FALSE) OR (enabled_at IS NOT NULL))
+        );
+
+        CREATE TABLE IF NOT EXISTS support_csat_surveys (
+          id TEXT PRIMARY KEY,
+          guild_id TEXT NOT NULL,
+          ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+          owner_id TEXT NOT NULL,
+          ticket_channel_id TEXT NOT NULL,
+          closure_event_id TEXT NOT NULL,
+          closed_at TIMESTAMPTZ NOT NULL,
+          due_at TIMESTAMPTZ NOT NULL,
+          expires_at TIMESTAMPTZ NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending','sending','sent','responded','expired','cancelled','failed')),
+          delivery_attempts INTEGER NOT NULL DEFAULT 0 CHECK (delivery_attempts >= 0),
+          delivery_next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          processing_until TIMESTAMPTZ,
+          delivery_last_error TEXT,
+          delivery_channel_id TEXT,
+          delivery_message_id TEXT,
+          sent_at TIMESTAMPTZ,
+          responded_at TIMESTAMPTZ,
+          response_id TEXT REFERENCES support_csat_responses(id) ON DELETE SET NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (guild_id, ticket_id),
+          CHECK (expires_at > closed_at),
+          CHECK (due_at <= expires_at)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_support_csat_surveys_due
+          ON support_csat_surveys (status, delivery_next_attempt_at, due_at)
+          WHERE status IN ('pending','failed','sending');
+        CREATE INDEX IF NOT EXISTS idx_support_csat_surveys_guild_status
+          ON support_csat_surveys (guild_id, status, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_support_csat_surveys_ticket
+          ON support_csat_surveys (guild_id, ticket_id);
+        CREATE INDEX IF NOT EXISTS idx_support_csat_surveys_expiry
+          ON support_csat_surveys (expires_at)
+          WHERE status IN ('pending','sent','failed');
+
+        -- Existing ratings are not converted into invitations. The new settings
+        -- table has no rows by default, which intentionally keeps automatic DMs off.
+      `);
+    },
+  },
 ];
 
 /** Latest migration identifier required by this application version. */

@@ -20,6 +20,8 @@ async function main(): Promise<void> {
     'app_documents',
     'support_sla_policies',
     'support_csat_responses',
+    'support_csat_survey_settings',
+    'support_csat_surveys',
     'support_sla_alerts',
     'support_sla_policy_versions',
     'support_sla_monitor_state',
@@ -78,6 +80,8 @@ async function main(): Promise<void> {
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM ticket_recovery_replay_segments'),
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM quick_reply_send_intents'),
     pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM quick_reply_usage_events'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_csat_survey_settings'),
+    pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM support_csat_surveys'),
   ]);
 
   // Exercise the database-maintained full-text index inside a transaction so
@@ -190,6 +194,7 @@ async function main(): Promise<void> {
   console.log(`Stale processing records: ${invalidProcessing.rows[0]?.count ?? '0'}`);
   console.log(`Recovery replay segments: ${counts[22].rows[0]?.count ?? '0'}`);
   console.log(`Quick Reply send intents / usage events: ${counts[23].rows[0]?.count ?? '0'} / ${counts[24].rows[0]?.count ?? '0'}`);
+  console.log(`CSAT survey settings / invitations: ${counts[25].rows[0]?.count ?? '0'} / ${counts[26].rows[0]?.count ?? '0'}`);
   const claimSlaSchema = await pool.query<{ claim_column: boolean; claim_target: boolean }>(`
     SELECT
       EXISTS (
@@ -360,6 +365,83 @@ async function main(): Promise<void> {
     throw new Error('Stage L SLA report leaked policy or alert records across guild boundaries.');
   }
   console.log('Stage L SLA operations report query: verified zero-record guild isolation.');
+
+  const stageMClient = await pool.connect();
+  const stageMRunId = randomUUID();
+  const stageMGuildId = 'queryfixr-stage-m-verification-' + stageMRunId;
+  const stageMTicketId = 'queryfixr-stage-m-ticket-' + stageMRunId;
+  const stageMChannelId = 'queryfixr-stage-m-channel-' + stageMRunId;
+  const stageMSurveyId = 'queryfixr-stage-m-survey-' + stageMRunId;
+  const stageMResponseId = 'queryfixr-stage-m-response-' + stageMRunId;
+  const stageMClosedAt = new Date(Date.now() - 60_000).toISOString();
+  try {
+    await stageMClient.query('BEGIN');
+    await stageMClient.query(
+      'INSERT INTO tickets (id,guild_id,channel_id,ticket_number,status,department_id,owner_id,priority,created_at,updated_at) ' +
+        "VALUES ($1,$2,$3,'verify-M','closed','verify-department','verify-customer','normal',$4::timestamptz,$4::timestamptz)",
+      [stageMTicketId, stageMGuildId, stageMChannelId, stageMClosedAt],
+    );
+    await stageMClient.query(
+      'INSERT INTO support_csat_survey_settings (guild_id,enabled,enabled_at,delay_minutes,expiry_days,updated_by) ' +
+        'VALUES ($1,TRUE,$2::timestamptz,5,7,$3)',
+      [stageMGuildId, new Date(Date.parse(stageMClosedAt) - 30_000).toISOString(), stageMRunId],
+    );
+    await stageMClient.query(
+      'INSERT INTO ticket_events (id,ticket_id,guild_id,channel_id,event_type,actor_id,actor_attribution,actor_confidence,payload,created_at) ' +
+        "VALUES ($1,$2,$3,$4,'ticket.status_changed',$5,'actorKnown','high',$6::jsonb,$7::timestamptz)",
+      [stageMRunId, stageMTicketId, stageMGuildId, stageMChannelId, stageMRunId,
+        JSON.stringify({ from: 'open', to: 'closed' }), stageMClosedAt],
+    );
+    await stageMClient.query(
+      'INSERT INTO support_csat_surveys ' +
+        '(id,guild_id,ticket_id,owner_id,ticket_channel_id,closure_event_id,closed_at,due_at,expires_at,status,delivery_next_attempt_at) ' +
+        "VALUES ($1,$2,$3,'verify-customer',$4,$5,$6::timestamptz,$6::timestamptz,$7::timestamptz,'pending',NOW())",
+      [stageMSurveyId, stageMGuildId, stageMTicketId, stageMChannelId, stageMRunId,
+        stageMClosedAt, new Date(Date.parse(stageMClosedAt) + 7 * 24 * 60 * 60_000).toISOString()],
+    );
+    const duplicateSurvey = await stageMClient.query(
+      'INSERT INTO support_csat_surveys ' +
+        '(id,guild_id,ticket_id,owner_id,ticket_channel_id,closure_event_id,closed_at,due_at,expires_at,status,delivery_next_attempt_at) ' +
+        "VALUES ($1,$2,$3,'verify-customer',$4,$5,$6::timestamptz,$6::timestamptz,$7::timestamptz,'pending',NOW()) " +
+        'ON CONFLICT (guild_id,ticket_id) DO NOTHING RETURNING id',
+      ['duplicate:' + stageMSurveyId, stageMGuildId, stageMTicketId, stageMChannelId, stageMRunId,
+        stageMClosedAt, new Date(Date.parse(stageMClosedAt) + 7 * 24 * 60 * 60_000).toISOString()],
+    );
+    if (duplicateSurvey.rowCount !== 0) {
+      throw new Error('Stage M unique survey-per-ticket rule did not suppress a duplicate invitation.');
+    }
+    await stageMClient.query(
+      'INSERT INTO support_csat_responses (id,guild_id,ticket_id,user_id,rating,comment) ' +
+        "VALUES ($1,$2,$3,'verify-customer',5,'')",
+      [stageMResponseId, stageMGuildId, stageMTicketId],
+    );
+    await stageMClient.query(
+      "UPDATE support_csat_surveys SET status='responded',response_id=$2,responded_at=NOW(),updated_at=NOW() WHERE id=$1",
+      [stageMSurveyId, stageMResponseId],
+    );
+    const responseLink = await stageMClient.query(
+      "SELECT s.status,r.rating,s.response_id FROM support_csat_surveys s JOIN support_csat_responses r ON r.id=s.response_id " +
+        'WHERE s.guild_id=$1 AND s.id=$2',
+      [stageMGuildId, stageMSurveyId],
+    );
+    if (responseLink.rows[0]?.status !== 'responded' || Number(responseLink.rows[0]?.rating) !== 5 ||
+        responseLink.rows[0]?.response_id !== stageMResponseId) {
+      throw new Error('Stage M survey response link did not round-trip.');
+    }
+    const otherGuild = await stageMClient.query(
+      'SELECT 1 FROM support_csat_surveys WHERE guild_id=$1',
+      ['another-guild-' + stageMRunId],
+    );
+    if (otherGuild.rowCount !== 0) throw new Error('Stage M survey data unexpectedly crossed guild boundaries.');
+    await stageMClient.query('ROLLBACK');
+  } catch (error) {
+    await stageMClient.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    stageMClient.release();
+  }
+  console.log('Stage M PostgreSQL smoke tests: opt-in settings, unique invitation, response linkage and guild isolation verified (rolled back).');
+
 
 
 
