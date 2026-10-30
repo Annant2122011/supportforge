@@ -179,7 +179,8 @@ async function enqueueClosedTickets(): Promise<number> {
   const result = await pool.query<QueryResultRow & {
     ticket_id: string; guild_id: string; ticket_channel_id: string; ticket_number: string | null;
     owner_id: string; closure_event_id: string; closed_at: Date | string;
-    delay_minutes: number; expiry_days: number;
+    delay_minutes: number; expiry_days: number; existing_response_id: string | null;
+    existing_response_at: Date | string | null;
   }>(
     'SELECT t.id AS ticket_id,t.guild_id,t.channel_id AS ticket_channel_id,t.ticket_number,t.owner_id,' +
       'closure.id AS closure_event_id,closure.created_at AS closed_at,s.delay_minutes,s.expiry_days ' +
@@ -190,9 +191,13 @@ async function enqueueClosedTickets(): Promise<number> {
           "AND e.event_type='ticket.status_changed' AND e.payload->>'to'='closed' AND e.created_at>=s.enabled_at " +
           'ORDER BY e.created_at DESC LIMIT 1' +
       ') closure ON TRUE ' +
+      'LEFT JOIN LATERAL (' +
+        'SELECT r.id,r.created_at FROM support_csat_responses r ' +
+        'WHERE r.guild_id=t.guild_id AND r.ticket_id=t.id AND r.user_id=t.owner_id ' +
+        'ORDER BY r.created_at ASC LIMIT 1' +
+      ') existing_response ON TRUE ' +
       "WHERE t.status IN ('closed','archived') AND t.deleted_at IS NULL AND t.owner_id IS NOT NULL " +
       'AND NOT EXISTS (SELECT 1 FROM support_csat_surveys sv WHERE sv.guild_id=t.guild_id AND sv.ticket_id=t.id) ' +
-      'AND NOT EXISTS (SELECT 1 FROM support_csat_responses r WHERE r.guild_id=t.guild_id AND r.ticket_id=t.id) ' +
       'ORDER BY closure.created_at ASC LIMIT $1',
     [MAX_ENQUEUE_BATCH],
   );
@@ -209,11 +214,12 @@ async function enqueueClosedTickets(): Promise<number> {
       if (dueAt.getTime() >= expiresAt.getTime()) continue;
       const inserted = await pool.query(
         'INSERT INTO support_csat_surveys ' +
-          '(id,guild_id,ticket_id,owner_id,ticket_channel_id,closure_event_id,closed_at,due_at,expires_at,status,delivery_next_attempt_at) ' +
-          "VALUES ($1,$2,$3,$4,$5,$6,$7::timestamptz,$8::timestamptz,$9::timestamptz,'pending',NOW()) " +
+          '(id,guild_id,ticket_id,owner_id,ticket_channel_id,closure_event_id,closed_at,due_at,expires_at,status,delivery_next_attempt_at,response_id,responded_at) ' +
+          "VALUES ($1,$2,$3,$4,$5,$6,$7::timestamptz,$8::timestamptz,$9::timestamptz,CASE WHEN $10::text IS NULL THEN 'pending' ELSE 'responded' END,NOW(),$10,$11::timestamptz) " +
           'ON CONFLICT (guild_id,ticket_id) DO NOTHING RETURNING id',
         [randomUUID(), row.guild_id, row.ticket_id, row.owner_id, row.ticket_channel_id, row.closure_event_id,
-          closedAt.toISOString(), dueAt.toISOString(), expiresAt.toISOString()],
+          closedAt.toISOString(), dueAt.toISOString(), expiresAt.toISOString(), row.existing_response_id,
+          iso(row.existing_response_at)],
       );
       if (inserted.rowCount) created += 1;
     } catch (error) {
