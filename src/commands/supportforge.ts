@@ -77,7 +77,6 @@ import {
   disableSupportSlaNotificationRoute,
   evaluateTicketSla,
   executeSupportSlaEscalationPreview,
-  getCsatSummary,
   getSupportMetrics,
   getSupportSlaNotificationRoute,
   getSupportSlaOperationalSummary,
@@ -108,6 +107,7 @@ import {
   updateCsatSurveyGovernance,
 } from '../services/csatInsightsService';
 import { buildCsatInsightsEmbed } from '../interactions/csatInsightsPresentation';
+import type { CsatInsightFilters, CsatInsightGroupBy } from '../core/domain/csatReporting';
 import {
   applyTicketFormTemplate,
   buildQuickTicketFormFields,
@@ -2435,6 +2435,9 @@ export async function execute(
             'Delivery: private direct message only\\n' +
             'Delay after closure: **' + settings.delayMinutes + ' minute(s)**\\n' +
             'Expiry: **' + settings.expiryDays + ' day(s)**\\n' +
+            'Minimum cohort: **' + settings.minimumCohortSize + '**\\n' +
+            'Comment retention: **' + settings.commentRetentionDays + ' day(s)**\\n' +
+            'Comment reviewer role: ' + (settings.commentReviewRoleId ? '<@&' + settings.commentReviewRoleId + '>' : 'Administrators only') + '\\n' +
             'Eligibility watermark: ' + (settings.enabledAt ? '<t:' + Math.floor(Date.parse(settings.enabledAt) / 1000) + ':F>' : 'not enabled') + '\\n\\n' +
             'Automatic surveys default to off. Enabling does not backfill previously closed tickets.',
           );
@@ -2491,30 +2494,105 @@ export async function execute(
           return;
         }
 
-        if (subcommand === 'summary') {
+        if (subcommand === 'summary' || subcommand === 'report' || subcommand === 'export') {
           const days = interaction.options.getInteger('days') ?? 30;
-          const now = Date.now();
-          const from = new Date(now - days * 24 * 60 * 60 * 1000).toISOString();
-          const to = new Date(now + 1000).toISOString();
-          const summary = await getCsatSummary(guild.id, from, to);
+          const groupByValue = interaction.options.getString('group-by') ?? (subcommand === 'summary' ? 'department' : 'none');
+          const groupBy: CsatInsightGroupBy | null = groupByValue === 'none' ? null : groupByValue as CsatInsightGroupBy;
+          const priority = interaction.options.getString('priority');
+          const filters: CsatInsightFilters = {
+            departmentId: interaction.options.getString('department-id') ?? undefined,
+            tagId: interaction.options.getString('tag-id') ?? undefined,
+            priority: (priority ?? undefined) as CsatInsightFilters['priority'],
+          };
+          const report = await getCsatInsightsReport(guild.id, { days, filters, groupBy });
           const config = await getGuildConfig(guild.id);
-          await interaction.editReply({
-            embeds: [new EmbedBuilder()
-              .setColor(getThemeColor(config.theme))
-              .setTitle('📬 Customer Satisfaction')
-              .setDescription(
-                '**Window:** ' + days + ' days\n' +
-                '**Responses:** ' + summary.responses + '\n' +
-                '**Average rating:** ' + (summary.averageRating === null ? 'No ratings yet' : summary.averageRating.toFixed(2) + '/5') + '\n\n' +
-                'Positive (4–5): **' + summary.positiveCount + '**\n' +
-                'Neutral (3): **' + summary.neutralCount + '**\n' +
-                'Negative (1–2): **' + summary.negativeCount + '**\n\n' +
-                'Only aggregate counts are shown. Comments and individual customers are not exposed in this report.',
-              )
-              .setFooter({ text: 'QueryFixr • CSAT definitions: positive >=4, neutral 3, negative <=2' })],
-          });
+          const locale = (await getAdvancedSettings(guild.id)).locale;
+          if (subcommand === 'export') {
+            const csv = buildCsatInsightsCsv(report);
+            await interaction.editReply({
+              content: '✅ Privacy-safe aggregate CSAT export ready. No comments, ticket IDs or customer IDs are included.',
+              files: [new AttachmentBuilder(Buffer.from(csv, 'utf8'), { name: 'queryfixr-csat-' + days + 'd.csv' })],
+            });
+          } else {
+            await interaction.editReply({
+              embeds: [buildCsatInsightsEmbed(report, getThemeColor(config.theme), locale)],
+            });
+          }
           return;
         }
+
+        if (subcommand === 'comments') {
+          const days = interaction.options.getInteger('days') ?? 30;
+          const page = interaction.options.getInteger('page') ?? 1;
+          const locale = (await getAdvancedSettings(guild.id)).locale;
+          try {
+            const result = await getCsatCommentPage(
+              guild.id,
+              interaction.user.id,
+              isAdminLike(interaction),
+              roleIdsFromInteraction(interaction),
+              page,
+              days,
+            );
+            const config = await getGuildConfig(guild.id);
+            const embed = new EmbedBuilder()
+              .setColor(getThemeColor(config.theme))
+              .setTitle('🔒 ' + translate(locale, 'csat.comments.title'))
+              .setFooter({ text: 'Page ' + result.page + ' / ' + result.pageCount + ' • ' + result.total + ' comments • access logged' });
+            if (!result.items.length) {
+              embed.setDescription(translate(locale, 'csat.comments.none'));
+            } else {
+              for (const item of result.items) {
+                const date = '<t:' + Math.floor(Date.parse(item.createdAt) / 1000) + ':f>';
+                const comment = item.comment.replace(/[\\r\\n]+/g, ' ').slice(0, 1000);
+                embed.addFields({
+                  name: translate(locale, 'csat.comments.heading', { ticket: item.ticketLabel, rating: item.rating, date }),
+                  value: comment || '—',
+                });
+              }
+            }
+            await interaction.editReply({ embeds: [embed] });
+          } catch (error) {
+            if (error instanceof Error && error.message === 'You are not authorized to review private customer comments.') {
+              await interaction.editReply(translate(locale, 'csat.comments.denied'));
+            } else {
+              throw error;
+            }
+          }
+          return;
+        }
+
+        if (subcommand === 'survey-governance') {
+          const minimumCohortSize = interaction.options.getInteger('minimum-cohort-size');
+          const commentRetentionDays = interaction.options.getInteger('comment-retention-days');
+          const roleInput = interaction.options.getString('comment-review-role-id')?.trim() ?? null;
+          const clearRole = interaction.options.getBoolean('clear-comment-review-role') ?? false;
+          if (clearRole && roleInput) throw new Error('Choose a reviewer role ID or clear the role, not both.');
+          if (minimumCohortSize === null && commentRetentionDays === null && !roleInput && !clearRole) {
+            throw new Error('Supply at least one CSAT governance setting to update.');
+          }
+          const updates: {
+            minimumCohortSize?: number;
+            commentRetentionDays?: number;
+            commentReviewRoleId?: string | null;
+          } = {};
+          if (minimumCohortSize !== null) updates.minimumCohortSize = minimumCohortSize;
+          if (commentRetentionDays !== null) updates.commentRetentionDays = commentRetentionDays;
+          if (clearRole) updates.commentReviewRoleId = null;
+          if (roleInput) {
+            const role = await guild.roles.fetch(roleInput).catch(() => null);
+            if (!role || role.managed || role.id === guild.roles.everyone.id) {
+              const locale = (await getAdvancedSettings(guild.id)).locale;
+              throw new Error(translate(locale, 'csat.governance.invalidRole'));
+            }
+            updates.commentReviewRoleId = role.id;
+          }
+          await updateCsatSurveyGovernance(guild.id, interaction.user.id, updates);
+          const locale = (await getAdvancedSettings(guild.id)).locale;
+          await interaction.editReply(translate(locale, 'csat.governance.saved'));
+          return;
+        }
+
       } catch (error) {
         await interaction.editReply(
           error instanceof Error ? error.message : 'The feedback operation failed safely. Please retry later.',
