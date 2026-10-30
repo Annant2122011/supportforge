@@ -18,8 +18,9 @@ import {
 import { getAdvancedSettings } from './advancedSettingsService';
 import { getGuildConfig } from './configService';
 import { getPostgresPool } from '../core/persistence/postgresDatabase';
+import { CSAT_SURVEY_MAX_DELIVERY_ATTEMPTS } from '../core/domain/csatSurvey';
 
-const MAX_RETRIES = 8;
+const MAX_RETRIES = CSAT_SURVEY_MAX_DELIVERY_ATTEMPTS;
 const COMMENT_PAGE_SIZE = 5;
 
 interface RawCsatCounts extends QueryResultRow {
@@ -166,7 +167,9 @@ async function loadSurveyCounts(
       [...values, MAX_RETRIES],
     ),
   ]);
-  return mapCounts(aggregate.rows[0], eligibleTickets, minimumCohortSize);
+  const row = aggregate.rows[0];
+  if (!row) throw new Error('CSAT report aggregate query returned no result row.');
+  return mapCounts(row, eligibleTickets, minimumCohortSize);
 }
 
 const GROUP_EXPRESSIONS: Record<CsatInsightGroupBy, string> = {
